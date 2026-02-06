@@ -1,0 +1,136 @@
+<Window x:Class="SirThaddeus.DesktopRuntime.PermissionPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Permission Required"
+        Width="450"
+        Height="320"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="NoResize"
+        Background="#1E1E2E"
+        Foreground="#CDD6F4"
+        ShowInTaskbar="False">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="BackgroundBrush" Color="#1E1E2E"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#313244"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#CDD6F4"/>
+        <SolidColorBrush x:Key="SubtextBrush" Color="#A6ADC8"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#89B4FA"/>
+        <SolidColorBrush x:Key="WarnBrush" Color="#FAB387"/>
+        <SolidColorBrush x:Key="DenyBrush" Color="#F38BA8"/>
+        <SolidColorBrush x:Key="AllowBrush" Color="#A6E3A1"/>
+
+        <Style x:Key="AllowButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource AllowBrush}"/>
+            <Setter Property="Foreground" Value="#1E1E2E"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="24,10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <Style x:Key="DenyButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource DenyBrush}"/>
+            <Setter Property="Foreground" Value="#1E1E2E"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="24,10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+            <TextBlock Text="🔐" FontSize="24" Margin="0,0,12,0"/>
+            <TextBlock Text="Permission Required" 
+                       FontSize="20" 
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Request Summary -->
+        <Border Grid.Row="1" 
+                Background="{StaticResource SurfaceBrush}"
+                CornerRadius="4"
+                Padding="16"
+                Margin="0,0,0,16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Capability:" 
+                           Foreground="{StaticResource SubtextBrush}"
+                           FontWeight="SemiBold" Margin="0,0,12,8"/>
+                <TextBlock Grid.Row="0" Grid.Column="1" 
+                           x:Name="CapabilityText"
+                           Foreground="{StaticResource WarnBrush}"
+                           FontWeight="Bold"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Purpose:" 
+                           Foreground="{StaticResource SubtextBrush}"
+                           FontWeight="SemiBold" Margin="0,0,12,8"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" 
+                           x:Name="PurposeText"
+                           TextWrapping="Wrap"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Scope:" 
+                           Foreground="{StaticResource SubtextBrush}"
+                           FontWeight="SemiBold" Margin="0,0,12,8"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" 
+                           x:Name="ScopeText"
+                           TextWrapping="Wrap"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Duration:" 
+                           Foreground="{StaticResource SubtextBrush}"
+                           FontWeight="SemiBold" Margin="0,0,12,0"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" 
+                           x:Name="DurationText"/>
+            </Grid>
+        </Border>
+
+        <!-- Warning -->
+        <Border Grid.Row="2" 
+                Background="#2D2A3E"
+                CornerRadius="4"
+                Padding="12"
+                Margin="0,0,0,16">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0"/>
+                <TextBlock Text="This action will grant the specified capability. Review carefully."
+                           Foreground="{StaticResource WarnBrush}"
+                           TextWrapping="Wrap"
+                           FontSize="12"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Action Buttons -->
+        <StackPanel Grid.Row="3" 
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Deny" 
+                    Style="{StaticResource DenyButtonStyle}"
+                    Click="DenyButton_Click"
+                    Margin="0,0,12,0"/>
+            <Button Content="Allow" 
+                    Style="{StaticResource AllowButtonStyle}"
+                    Click="AllowButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

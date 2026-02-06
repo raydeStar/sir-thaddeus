@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.2.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\packages\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
+    <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\packages\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
+    <ProjectReference Include="..\..\packages\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
+    <ProjectReference Include="..\..\packages\invocation\SirThaddeus.Invocation\SirThaddeus.Invocation.csproj" />
+    <ProjectReference Include="..\..\packages\observation-spec\SirThaddeus.ObservationSpec\SirThaddeus.ObservationSpec.csproj" />
+    <ProjectReference Include="..\..\packages\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
+    <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
+    <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,301 @@
+---
+alwaysApply: true
+---
+
+# Cursor Rules — Sir Thaddeus (Local‑First Copilot Guardrails)
+
+> **Purpose:** Keep the project from drifting into “something else” as velocity increases.
+>
+> **How Cursor should behave:** When a change request violates (or risks violating) these guardrails, **do not refuse**. Instead, **pause and push back** with a short check-in:
+>
+> **Pushback template:**
+> *“Are you sure? You asked me to push back when we drift. This change touches: [Invariant(s)]. If we proceed, we should do it by: [safe alternative].”*
+
+---
+
+## 0) North Star
+
+Sir Thaddeus is a **local‑first, explicit‑permission copilot runtime**.
+
+* **Runs on the user’s machine** (Windows).
+* **Desktop UI is optional** (tray/headless is first‑class).
+* **LLM is local** (LM Studio / OpenAI‑compatible server).
+* **Tools execute through a strict boundary** (MCP stdio tool server).
+* **Audit log is always on**.
+
+**If a feature makes it feel like a cloud agent, a spyware assistant, or an auto‑executing bot — it’s drift.**
+
+---
+
+## 1) Design Invariants (Non‑Negotiables)
+
+### I1 — Agent has *no authority*
+
+The agent may **request**, **route**, and **summarize**, but it does not decide policy.
+
+* No “confidence-based” auto-approval.
+* No hidden escalations.
+* No silent capability expansion.
+
+**Cursor pushback when:** agent logic becomes a policy engine (permissions, trust scores, “smart” auto behavior).
+
+### I2 — Tools are behind a trust boundary (MCP)
+
+All side effects occur through **MCP tools** in a **separate process**.
+
+* No “direct calls” to system APIs from the agent loop for convenience.
+* No bypassing MCP just because it’s local.
+
+**Cursor pushback when:** code adds new side effects outside MCP.
+
+### I3 — Explicit permission for side effects
+
+Any action that changes the system, files, network state, or reveals sensitive data must be **explicitly permitted**.
+
+* Default stance: **deny** until approved.
+* Denial must be explicit and logged.
+
+**Cursor pushback when:** someone suggests “just do it” or “auto-run” behaviors.
+
+### I4 — Auditability is first-class
+
+Everything meaningful is written to an **append-only audit log**.
+
+* Include: timestamp, session/run id, tool name, inputs (redacted as needed), outputs (redacted), decision/permission outcome.
+
+**Cursor pushback when:** features introduce invisible actions or unlogged tool execution.
+
+### I5 — UI is not the identity
+
+UI is a shell. Runtime is the product.
+
+* Removing WPF should not collapse the architecture.
+
+**Cursor pushback when:** logic migrates into UI code-behind or UI becomes required for core flows.
+
+### I6 — Local-first means no surprise networking
+
+Networking is explicit and bounded.
+
+* No telemetry by default.
+* No background “helpful” uploads.
+* Any outbound request must be via a tool with policy + audit.
+
+**Cursor pushback when:** libraries/services introduce network calls implicitly.
+
+---
+
+## 2) Architecture Rules (Keep the separation clean)
+
+### A1 — Frontend (apps/desktop-runtime)
+
+Allowed:
+
+* Tray, overlay, hotkeys, PTT trigger, TTS output
+* UI rendering of agent events
+
+Not allowed:
+
+* Tool execution
+* Permission decisions
+* Policy logic
+
+### A2 — Agent (packages/agent)
+
+Allowed:
+
+* Conversation loop
+* Tool routing (MCP client)
+* State machine transitions
+* Prompt construction
+
+Not allowed:
+
+* Direct system modifications
+* Direct filesystem/shell calls (except launching MCP server process)
+
+### A3 — LLM client (packages/llm-client)
+
+Allowed:
+
+* Transport only (OpenAI-compatible calls)
+
+Not allowed:
+
+* Tool logic
+* State logic
+
+### A4 — MCP server (apps/mcp-server)
+
+Allowed:
+
+* Implement tools
+* Enforce allowlists / guardrails per tool
+* Be stateless per tool call where possible
+
+Not allowed:
+
+* Agent logic
+* UI coupling
+
+---
+
+## 3) Tooling Rules (Prevent “agent cleverness creep”)
+
+### T1 — Tools must be **declarative + bounded**
+
+Every tool must declare:
+
+* inputs schema
+* output schema
+* max size/limits (time, bytes, entries)
+* safety constraints
+
+### T2 — Tools must be **idempotent** or carry an idempotency key
+
+MCP calls may be retried.
+
+* Tools should not double-apply side effects.
+* If side effects exist, require an **idempotency key** and store a short-lived dedupe record.
+
+**Cursor pushback when:** adding side-effecting tools without retry safety.
+
+### T3 — Strict allowlists for execution
+
+`SystemExecute`:
+
+* Use an allowlist of commands and argument patterns.
+* No raw shell execution.
+* Prefer structured tools over “execute arbitrary command.”
+
+### T4 — “Observation” tools are safer than “Action” tools
+
+Prioritize:
+
+* FileList, FileRead (bounded)
+* BrowserNavigate (bounded)
+* ScreenCapture (explicit permission + redaction)
+
+Over:
+
+* arbitrary write/delete
+* arbitrary system calls
+
+---
+
+## 4) Permission Model Rules (Before you expand tools)
+
+### P1 — One universal enforcement point
+
+Pick a single mechanism to enforce permissions and apply it to **all MCP tool calls**.
+
+* No “legacy path” half-enforced.
+
+### P2 — Permission tokens must be time-boxed + scope-boxed
+
+* token: {tool, scope, expiresAt, reason}
+* short TTL
+* minimum scope
+
+### P3 — Permissions are user-visible and auditable
+
+* prompts are clear
+* outcomes logged
+
+**Cursor pushback when:** permission becomes implicit, inferred, or hidden.
+
+---
+
+## 5) Data & Memory Rules
+
+### D1 — Default: ephemeral session memory
+
+* Conversation history exists for the session/run.
+* No long-term memory unless user explicitly enables it.
+
+### D2 — Redaction by default
+
+Audit log should avoid leaking secrets.
+
+* redact tokens, passwords, keys
+* store hashes or placeholders when needed
+
+### D3 — No training / telemetry
+
+* No collection for training.
+* If diagnostics exist, they’re opt-in.
+
+---
+
+## 6) “Are we drifting?” Checklist (Cursor must ask this)
+
+When adding a feature, Cursor must quickly check:
+
+1. **Does this give the agent more authority?** (policy decisions, auto approvals)
+2. **Does this bypass MCP or blur the trust boundary?**
+3. **Does this add side effects without explicit permission?**
+4. **Does this reduce auditability or add hidden state?**
+5. **Does this introduce surprise networking/telemetry?**
+6. **Does this make UI required for core runtime?**
+
+If any answer is “yes” or “maybe,” Cursor must push back using the template.
+
+---
+
+## 7) Safe Growth Path (preferred order)
+
+When unsure, prioritize in this order:
+
+1. **Permission enforcement for MCP calls** (universal)
+2. **Tool idempotency / retry safety**
+3. **ScreenCapture implemented with explicit consent + redaction**
+4. **Playwright wired through MCP** (bounded, auditable)
+5. **Transcription (Whisper) integrated locally**
+6. **More tools** (only after the above)
+
+**Cursor pushback when:** expanding tool surface area before permissions + idempotency are solved.
+
+---
+
+## 8) PR / Change Rules (How Cursor should propose changes)
+
+When Cursor proposes code changes, it should include:
+
+* what invariant(s) the change touches
+* how permission is enforced
+* how it’s audited
+* bounds (timeouts, max bytes, allowlists)
+* retry/idempotency approach for tool calls
+
+---
+
+## 9) Standard Pushback Messages
+
+Use one of these when needed:
+
+* **Drift warning (general):**
+  *“Are you sure? You told me to push back when we drift. This change risks violating [I#]. Safer approach: [X].”*
+
+* **Permission warning:**
+  *“Are you sure? This introduces side effects without explicit user permission. You wanted local-first + explicit permission. Add [token/confirm] first?”*
+
+* **Boundary warning:**
+  *“Are you sure? This bypasses MCP and weakens the trust boundary. You asked me to keep tools isolated. Keep it behind MCP?”*
+
+* **Audit warning:**
+  *“Are you sure? This action wouldn’t be auditable. You insisted audit is always-on. Add audit event [name] with redaction?”*
+
+* **Networking warning:**
+  *“Are you sure? This adds network calls implicitly. Local-first means no surprise networking. Make it an explicit tool call?”*
+
+---
+
+## 10) Tiny Constitution (Pin this)
+
+1. **Local-first.**
+2. **Explicit permission for side effects.**
+3. **MCP is the boundary.**
+4. **Audit is always-on.**
+5. **UI is optional.**
+
+If a feature breaks these, we redesign it.
