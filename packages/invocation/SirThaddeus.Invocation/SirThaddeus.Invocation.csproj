@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
+    <ProjectReference Include="..\..\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
+    <ProjectReference Include="..\..\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
+    <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\observation-spec\SirThaddeus.ObservationSpec\SirThaddeus.ObservationSpec.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

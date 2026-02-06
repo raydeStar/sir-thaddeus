@@ -47,14 +47,19 @@ public class IntentClassificationTests
         Assert.True(result.Success);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
 
+        // MemoryRetrieve is always present as a pre-fetch; exclude
+        // it when asserting on "real" tool calls from the agent loop.
+        var agentTools = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+
         if (expectsToolCall && llmReply == "search")
         {
-            Assert.Contains(result.ToolCallsMade, t => t.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase)
-                                                     || t.ToolName.Contains("WebSearch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(agentTools, t => t.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase)
+                                          || t.ToolName.Contains("WebSearch", StringComparison.OrdinalIgnoreCase));
         }
         else if (!expectsToolCall)
         {
-            Assert.Empty(result.ToolCallsMade);
+            Assert.Empty(agentTools);
         }
     }
 
@@ -113,7 +118,9 @@ public class IntentClassificationTests
 
         // Should succeed — classification failure falls back to casual
         Assert.True(result.Success);
-        Assert.Empty(result.ToolCallsMade);
+        var agentTools1 = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Empty(agentTools1);
     }
 
     [Fact]
@@ -134,7 +141,9 @@ public class IntentClassificationTests
         var result = await agent.ProcessAsync("hey thadds!");
 
         Assert.True(result.Success);
-        Assert.Empty(result.ToolCallsMade);  // Casual = no tools
+        var agentTools2 = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Empty(agentTools2);  // Casual = no tools
     }
 }
 
@@ -285,9 +294,11 @@ public class AgentFlowTests
         Assert.Equal("extract",  llmCalls[1]);
         Assert.Equal("summarize", llmCalls[2]);
 
-        // Tool was called
-        Assert.Single(result.ToolCallsMade);
-        Assert.True(result.ToolCallsMade[0].Success);
+        // Tool was called (excluding the always-present memory pre-fetch)
+        var searchTools = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Single(searchTools);
+        Assert.True(searchTools[0].Success);
 
         // Final response is the summary, not raw tool output
         Assert.Contains("news", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -310,7 +321,9 @@ public class AgentFlowTests
         var result = await agent.ProcessAsync("hey there, how are you?");
 
         Assert.True(result.Success);
-        Assert.Empty(result.ToolCallsMade);
+        var casualTools = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Empty(casualTools);
         Assert.Contains("Hey", result.Text);
     }
 
@@ -328,6 +341,85 @@ public class AgentFlowTests
         Assert.False(result.Success);
         Assert.Empty(result.ToolCallsMade);
         Assert.Contains("Empty", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+#endregion
+
+#region ── Memory Retrieval Audit ──────────────────────────────────────────
+
+public class MemoryRetrievalAuditTests
+{
+    [Fact]
+    public async Task MemoryRetrieval_WritesAuditEvent_WhenPackReturned()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlmClient(messages =>
+        {
+            callIndex++;
+            if (callIndex == 1) return "chat";   // Intent classification
+            return "I know you like coffee!";     // Response with context
+        });
+
+        // A realistic MemoryRetrieve response with packText
+        const string memoryPackJson = """
+            {
+                "facts": 1, "events": 0, "chunks": 2,
+                "notes": "", "citations": ["conv-42"],
+                "packText": "\n[MEMORY CONTEXT]\nFACTS:\n  - likes=coffee\n[/MEMORY CONTEXT]\n",
+                "hasContent": true
+            }
+            """;
+
+        var mcp   = new FakeMcpClient(memoryPackJson);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what do I like?");
+
+        Assert.True(result.Success);
+
+        // Verify MemoryRetrieve was called via MCP
+        Assert.Contains(mcp.Calls, c => c.Tool == "MemoryRetrieve");
+
+        // Verify MEMORY_RETRIEVED audit event was logged
+        var memoryEvents = audit.GetByAction("MEMORY_RETRIEVED");
+        Assert.NotEmpty(memoryEvents);
+    }
+
+    [Fact]
+    public async Task MemoryRetrieval_NoAuditEvent_WhenPackEmpty()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlmClient(messages =>
+        {
+            callIndex++;
+            if (callIndex == 1) return "chat";
+            return "Just chatting.";
+        });
+
+        // Empty pack — no content retrieved
+        const string emptyPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0,
+                "notes": "No relevant memory found.",
+                "citations": [],
+                "packText": "",
+                "hasContent": false
+            }
+            """;
+
+        var mcp   = new FakeMcpClient(emptyPackJson);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("hello");
+
+        Assert.True(result.Success);
+
+        // No MEMORY_RETRIEVED event when pack has no content
+        var memoryEvents = audit.GetByAction("MEMORY_RETRIEVED");
+        Assert.Empty(memoryEvents);
     }
 }
 

@@ -11,6 +11,7 @@ using SirThaddeus.Invocation;
 using SirThaddeus.LlmClient;
 using SirThaddeus.LocalTools.Playwright;
 using SirThaddeus.PermissionBroker;
+using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.ToolRunner;
 using SirThaddeus.ToolRunner.Tools;
 
@@ -107,7 +108,8 @@ public partial class App : System.Windows.Application
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
         var mcpServerPath = ResolveMcpServerPath(_settings.Mcp.ServerPath);
-        _mcpClient = new McpProcessClient(mcpServerPath, _auditLogger);
+        var mcpEnvVars    = BuildMcpEnvironmentVariables(_settings);
+        _mcpClient = new McpProcessClient(mcpServerPath, _auditLogger, mcpEnvVars);
 
         _auditLogger.Append(new AuditEvent
         {
@@ -334,6 +336,45 @@ public partial class App : System.Windows.Application
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Memory / MCP Environment Variables
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the environment variable dictionary that the MCP server child
+    /// process needs for memory retrieval and optional embeddings.
+    /// </summary>
+    private static Dictionary<string, string> BuildMcpEnvironmentVariables(AppSettings settings)
+    {
+        var env = new Dictionary<string, string>();
+
+        if (!settings.Memory.Enabled)
+            return env;
+
+        // Resolve memory DB path ("auto" → %LOCALAPPDATA%\SirThaddeus\memory.db)
+        var dbPath = settings.Memory.DbPath;
+        if (string.Equals(dbPath, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            dbPath = Path.Combine(localAppData, "SirThaddeus", "memory.db");
+        }
+
+        env["ST_MEMORY_DB_PATH"] = dbPath;
+        env["ST_LLM_BASEURL"]    = settings.Llm.BaseUrl;
+
+        // Embeddings model: use explicit setting, fall back to the chat model
+        if (settings.Memory.UseEmbeddings)
+        {
+            var embModel = string.IsNullOrWhiteSpace(settings.Memory.EmbeddingsModel)
+                ? settings.Llm.Model
+                : settings.Memory.EmbeddingsModel;
+            env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
+        }
+
+        return env;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Tool Registration (for the legacy tool runner, kept for permission demos)
     // ─────────────────────────────────────────────────────────────────────
 
@@ -464,7 +505,55 @@ public partial class App : System.Windows.Application
             closeWindow: () => window.Hide());
 
         window.SetViewModel(viewModel);
+
+        // ── Memory Browser ───────────────────────────────────────────
+        // Opens a direct connection to the SQLite memory DB for the
+        // user's browsing panel. This is user-initiated data management,
+        // not agent-driven, so it bypasses MCP intentionally.
+        if (_settings!.Memory.Enabled)
+        {
+            try
+            {
+                var dbPath = ResolveMemoryDbPath(_settings);
+                var store  = new SqliteMemoryStore(dbPath);
+                var memVm  = new MemoryBrowserViewModel(store, _auditLogger!);
+                window.SetMemoryBrowserViewModel(memVm);
+            }
+            catch (Exception ex)
+            {
+                _auditLogger?.Append(new AuditEvent
+                {
+                    Actor  = "system",
+                    Action = "MEMORY_BROWSER_INIT_FAILED",
+                    Result = ex.Message
+                });
+            }
+        }
+
         return window;
+    }
+
+    /// <summary>
+    /// Resolves the memory DB path from settings. "auto" maps to
+    /// %LOCALAPPDATA%\SirThaddeus\memory.db. Ensures the parent
+    /// directory exists.
+    /// </summary>
+    private static string ResolveMemoryDbPath(AppSettings settings)
+    {
+        var dbPath = settings.Memory.DbPath;
+        if (string.Equals(dbPath, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            dbPath = Path.Combine(localAppData, "SirThaddeus", "memory.db");
+        }
+
+        // Ensure the directory exists
+        var dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        return dbPath;
     }
 
     // ─────────────────────────────────────────────────────────────────────

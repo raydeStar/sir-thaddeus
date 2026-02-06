@@ -23,6 +23,9 @@
     <ProjectReference Include="..\..\..\packages\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
     <ProjectReference Include="..\..\..\packages\local-tools\SirThaddeus.LocalTools.Playwright\SirThaddeus.LocalTools.Playwright.csproj" />
     <ProjectReference Include="..\..\..\packages\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
+    <ProjectReference Include="..\..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
+    <ProjectReference Include="..\..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
+    <ProjectReference Include="..\..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+
+using RadioButton = System.Windows.Controls.RadioButton;
 using SirThaddeus.DesktopRuntime.ViewModels;
 
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
@@ -8,12 +11,15 @@ using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 namespace SirThaddeus.DesktopRuntime;
 
 /// <summary>
-/// Chat window for direct LLM conversation.
-/// Opened via global hotkey (Ctrl+Space).
+/// Chat window for direct LLM conversation + memory browser.
+/// Opened via global hotkey (Ctrl+Space). The header has two
+/// view tabs: Chat (default) and Memory.
 /// </summary>
 public partial class CommandPaletteWindow : Window
 {
     private CommandPaletteViewModel? _viewModel;
+    private MemoryBrowserViewModel? _memoryBrowserVm;
+    private bool _memoryLoaded;
 
     public CommandPaletteWindow()
     {
@@ -21,15 +27,18 @@ public partial class CommandPaletteWindow : Window
         Loaded += OnLoaded;
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // ViewModel Binding
+    // ─────────────────────────────────────────────────────────────────
+
     /// <summary>
-    /// Binds the ViewModel and wires auto-scroll on new messages/log entries.
+    /// Binds the Chat ViewModel and wires auto-scroll on new messages/log entries.
     /// </summary>
     public void SetViewModel(CommandPaletteViewModel viewModel)
     {
         _viewModel = viewModel;
         DataContext = viewModel;
 
-        // Scroll to the latest message whenever one is appended
         viewModel.MessageAdded += () =>
         {
             Dispatcher.BeginInvoke(() =>
@@ -38,7 +47,6 @@ public partial class CommandPaletteWindow : Window
             }, System.Windows.Threading.DispatcherPriority.Background);
         };
 
-        // Scroll the activity log to the latest entry
         viewModel.LogEntryAdded += () =>
         {
             Dispatcher.BeginInvoke(() =>
@@ -47,6 +55,109 @@ public partial class CommandPaletteWindow : Window
             }, System.Windows.Threading.DispatcherPriority.Background);
         };
     }
+
+    /// <summary>
+    /// Binds the Memory Browser ViewModel. The memory panel uses its
+    /// own DataContext so it doesn't collide with the chat bindings.
+    /// </summary>
+    public void SetMemoryBrowserViewModel(MemoryBrowserViewModel vm)
+    {
+        _memoryBrowserVm = vm;
+        MemoryView.DataContext = vm;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // View Tab Switching (Chat ↔ Memory)
+    // ─────────────────────────────────────────────────────────────────
+
+    private void ChatTab_Click(object sender, RoutedEventArgs e)
+    {
+        ChatTabButton.IsChecked  = true;
+        MemoryTabButton.IsChecked = false;
+        ShowChatView();
+    }
+
+    private void MemoryTab_Click(object sender, RoutedEventArgs e)
+    {
+        ChatTabButton.IsChecked  = false;
+        MemoryTabButton.IsChecked = true;
+        ShowMemoryView();
+    }
+
+    private void ShowChatView()
+    {
+        ChatView.Visibility   = Visibility.Visible;
+        MemoryView.Visibility = Visibility.Collapsed;
+        InputArea.Visibility  = Visibility.Visible;
+        NewChatButton.Visibility = Visibility.Visible;
+        ChatInput?.Focus();
+    }
+
+    private async void ShowMemoryView()
+    {
+        ChatView.Visibility   = Visibility.Collapsed;
+        MemoryView.Visibility = Visibility.Visible;
+        InputArea.Visibility  = Visibility.Collapsed;
+        NewChatButton.Visibility = Visibility.Collapsed;
+
+        // Lazy-load the memory data on first show
+        if (!_memoryLoaded && _memoryBrowserVm is not null)
+        {
+            _memoryLoaded = true;
+            await _memoryBrowserVm.LoadAsync();
+        }
+
+        MemorySearchBox?.Focus();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Memory Sub-tab Switching (Facts | Events | Chunks)
+    // ─────────────────────────────────────────────────────────────────
+
+    private void MemorySubTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tab) return;
+
+        // Show the correct DataGrid
+        FactsGrid.Visibility  = tab == "Facts"  ? Visibility.Visible : Visibility.Collapsed;
+        EventsGrid.Visibility = tab == "Events" ? Visibility.Visible : Visibility.Collapsed;
+        ChunksGrid.Visibility = tab == "Chunks" ? Visibility.Visible : Visibility.Collapsed;
+
+        // Notify the ViewModel to switch tabs (triggers data refresh)
+        if (tab == "Facts")       _memoryBrowserVm?.ShowFactsCommand.Execute(null);
+        else if (tab == "Events") _memoryBrowserVm?.ShowEventsCommand.Execute(null);
+        else if (tab == "Chunks") _memoryBrowserVm?.ShowChunksCommand.Execute(null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // DataGrid Edit Commit
+    // ─────────────────────────────────────────────────────────────────
+
+    private void DataGrid_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit) return;
+
+        // Defer the save until the binding has updated the row model
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            switch (e.Row.Item)
+            {
+                case MemoryFactRow:
+                    _memoryBrowserVm?.SaveFactCommand.Execute(null);
+                    break;
+                case MemoryEventRow:
+                    _memoryBrowserVm?.SaveEventCommand.Execute(null);
+                    break;
+                case MemoryChunkRow:
+                    _memoryBrowserVm?.SaveChunkCommand.Execute(null);
+                    break;
+            }
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Lifecycle
+    // ─────────────────────────────────────────────────────────────────
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -63,7 +174,9 @@ public partial class CommandPaletteWindow : Window
                 break;
 
             case Key.Enter when !e.IsRepeat:
-                if (_viewModel?.SendCommand.CanExecute(null) == true)
+                // Only send in chat mode, not when editing a DataGrid cell
+                if (ChatView.Visibility == Visibility.Visible &&
+                    _viewModel?.SendCommand.CanExecute(null) == true)
                 {
                     _viewModel.SendCommand.Execute(null);
                 }
@@ -77,7 +190,10 @@ public partial class CommandPaletteWindow : Window
     /// </summary>
     public void Reset()
     {
-        ChatInput?.Focus();
+        if (ChatView.Visibility == Visibility.Visible)
+            ChatInput?.Focus();
+        else
+            MemorySearchBox?.Focus();
     }
 
     /// <summary>
@@ -99,5 +215,4 @@ public partial class CommandPaletteWindow : Window
             }
         }
     }
-
 }

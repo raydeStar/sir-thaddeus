@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\packages\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
     <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
   </ItemGroup>
 
 </Project>

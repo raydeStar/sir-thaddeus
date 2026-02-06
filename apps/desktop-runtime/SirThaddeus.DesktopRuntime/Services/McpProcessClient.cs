@@ -20,6 +20,7 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
 {
     private readonly string _serverPath;
     private readonly IAuditLogger _audit;
+    private readonly IReadOnlyDictionary<string, string>? _envVars;
 
     private Process? _serverProcess;
     private StreamWriter? _stdin;
@@ -35,10 +36,20 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
         PropertyNameCaseInsensitive = true
     };
 
-    public McpProcessClient(string serverPath, IAuditLogger audit)
+    /// <param name="serverPath">Path to the MCP server executable.</param>
+    /// <param name="audit">Audit logger for lifecycle events.</param>
+    /// <param name="environmentVariables">
+    /// Optional environment variables to inject into the child process
+    /// (e.g. ST_MEMORY_DB_PATH, ST_LLM_BASEURL).
+    /// </param>
+    public McpProcessClient(
+        string serverPath,
+        IAuditLogger audit,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
     {
         _serverPath = serverPath ?? throw new ArgumentNullException(nameof(serverPath));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _envVars = environmentVariables;
     }
 
     /// <summary>
@@ -49,19 +60,24 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
         if (_serverProcess != null)
             return;
 
-        _serverProcess = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = _serverPath,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
+            FileName = _serverPath,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
         };
 
+        // Inject environment variables (memory DB path, LLM base URL, etc.)
+        if (_envVars is not null)
+        {
+            foreach (var (key, value) in _envVars)
+                startInfo.Environment[key] = value;
+        }
+
+        _serverProcess = new Process { StartInfo = startInfo };
         _serverProcess.Start();
         _stdin = _serverProcess.StandardInput;
         _stdout = _serverProcess.StandardOutput;

@@ -26,8 +26,6 @@ bld/
 # NuGet
 *.nupkg
 *.snupkg
-**/[Pp]ackages/*
-!**/[Pp]ackages/build/
 
 # Test Results
 [Tt]est[Rr]esult*/

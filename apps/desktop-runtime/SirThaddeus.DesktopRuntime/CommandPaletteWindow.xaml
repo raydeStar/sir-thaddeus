@@ -122,6 +122,181 @@
             </Setter>
         </Style>
 
+        <!-- ── View Tab Toggle (Chat / Memory) ───────────────────────── -->
+        <Style x:Key="ViewTabStyle" TargetType="ToggleButton">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="Foreground"      Value="{StaticResource Overlay0Brush}"/>
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Padding"         Value="12,5"/>
+            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+            <Setter Property="BorderBrush"     Value="Transparent"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{StaticResource BlueBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface0Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── Memory DataGrid Styles ────────────────────────────────── -->
+        <Style x:Key="MemoryDataGridStyle" TargetType="DataGrid">
+            <Setter Property="Background"              Value="{StaticResource BaseBrush}"/>
+            <Setter Property="Foreground"              Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness"         Value="0"/>
+            <Setter Property="RowBackground"           Value="{StaticResource BaseBrush}"/>
+            <Setter Property="AlternatingRowBackground" Value="{StaticResource MantleBrush}"/>
+            <Setter Property="GridLinesVisibility"     Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Surface0Brush}"/>
+            <Setter Property="HeadersVisibility"       Value="Column"/>
+            <Setter Property="AutoGenerateColumns"     Value="False"/>
+            <Setter Property="CanUserAddRows"          Value="False"/>
+            <Setter Property="CanUserDeleteRows"       Value="False"/>
+            <Setter Property="CanUserResizeRows"       Value="False"/>
+            <Setter Property="CanUserSortColumns"      Value="True"/>
+            <Setter Property="SelectionMode"           Value="Single"/>
+            <Setter Property="FontSize"                Value="12"/>
+            <Setter Property="FontFamily"              Value="Segoe UI, sans-serif"/>
+            <Setter Property="RowHeight"               Value="32"/>
+        </Style>
+
+        <Style x:Key="MemoryColumnHeaderStyle" TargetType="DataGridColumnHeader">
+            <Setter Property="Background"      Value="{StaticResource CrustBrush}"/>
+            <Setter Property="Foreground"      Value="{StaticResource Subtext0Brush}"/>
+            <Setter Property="FontSize"        Value="11"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Padding"         Value="8,6"/>
+            <Setter Property="BorderBrush"     Value="{StaticResource Surface0Brush}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        </Style>
+
+        <Style x:Key="MemoryDataGridCellStyle" TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Padding"    Value="6,4"/>
+            <Setter Property="BorderBrush"     Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="MemoryDataGridRowStyle" TargetType="DataGridRow">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ── Memory Sub-tab Button ─────────────────────────────────── -->
+        <Style x:Key="MemorySubTabStyle" TargetType="RadioButton">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="Foreground"      Value="{StaticResource Overlay0Brush}"/>
+            <Setter Property="FontSize"        Value="11"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Padding"         Value="10,5"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface0Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface0Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── Memory Action Button ──────────────────────────────────── -->
+        <Style x:Key="MemoryActionButtonStyle" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource Surface0Brush}"/>
+            <Setter Property="Foreground"      Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize"        Value="11"/>
+            <Setter Property="Padding"         Value="10,5"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface1Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource Overlay0Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MemoryDeleteButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource MemoryActionButtonStyle}">
+            <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+        </Style>
+
         <!-- ── Header Button (New Chat) ────────────────────────────── -->
         <Style x:Key="HeaderButtonStyle" TargetType="Button">
             <Setter Property="Background"     Value="Transparent"/>
@@ -169,6 +344,8 @@
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
@@ -176,7 +353,8 @@
                 <!-- Connection indicator -->
                 <StackPanel Grid.Column="0"
                             Orientation="Horizontal"
-                            VerticalAlignment="Center">
+                            VerticalAlignment="Center"
+                            Margin="0,0,16,0">
                     <Ellipse Width="8" Height="8"
                              Margin="0,0,8,0"
                              VerticalAlignment="Center">
@@ -197,8 +375,25 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- New Chat -->
-                <Button Grid.Column="1"
+                <!-- View toggle tabs -->
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <ToggleButton x:Name="ChatTabButton"
+                                  Content="Chat"
+                                  IsChecked="True"
+                                  Click="ChatTab_Click"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="MemoryTabButton"
+                                  Content="Memory"
+                                  IsChecked="False"
+                                  Click="MemoryTab_Click"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                </StackPanel>
+
+                <!-- New Chat (only visible in Chat mode) -->
+                <Button Grid.Column="3"
+                        x:Name="NewChatButton"
                         Content="New Chat"
                         Command="{Binding ClearCommand}"
                         Style="{StaticResource HeaderButtonStyle}"/>
@@ -208,7 +403,7 @@
         <!-- ═══════════════════════════════════════════════════════════
              CONTENT — SPLIT PANE (Chat | Activity Log)
              ═══════════════════════════════════════════════════════ -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" x:Name="ChatView">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3*"  MinWidth="260"/>
                 <ColumnDefinition Width="Auto"/>
@@ -726,9 +921,197 @@
         </Grid>
 
         <!-- ═══════════════════════════════════════════════════════════
+             MEMORY BROWSER
+             User-initiated data management panel. DataContext is set
+             to MemoryBrowserViewModel in code-behind.
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="MemoryView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- Sub-tabs + search -->
+                <RowDefinition Height="*"/>     <!-- DataGrid area -->
+                <RowDefinition Height="Auto"/>  <!-- Footer: pagination + actions -->
+            </Grid.RowDefinitions>
+
+            <!-- ── Sub-tabs + Search Bar ─────────────────────────────── -->
+            <Border Grid.Row="0"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Sub-tabs -->
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <RadioButton Content="Facts"
+                                     IsChecked="True"
+                                     GroupName="MemoryTabs"
+                                     Click="MemorySubTab_Click"
+                                     Tag="Facts"
+                                     Style="{StaticResource MemorySubTabStyle}"/>
+                        <RadioButton Content="Events"
+                                     GroupName="MemoryTabs"
+                                     Click="MemorySubTab_Click"
+                                     Tag="Events"
+                                     Style="{StaticResource MemorySubTabStyle}"
+                                     Margin="4,0,0,0"/>
+                        <RadioButton Content="Chunks"
+                                     GroupName="MemoryTabs"
+                                     Click="MemorySubTab_Click"
+                                     Tag="Chunks"
+                                     Style="{StaticResource MemorySubTabStyle}"
+                                     Margin="4,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- Search box -->
+                    <TextBox Grid.Column="1"
+                             x:Name="MemorySearchBox"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ChatInputStyle}"
+                             FontSize="12"
+                             Padding="8,5"
+                             Margin="16,0,0,0"
+                             Tag="Search memories..."/>
+                </Grid>
+            </Border>
+
+            <!-- ── DataGrid Area ─────────────────────────────────────── -->
+            <Grid Grid.Row="1" Background="{StaticResource BaseBrush}">
+
+                <!-- Facts Grid -->
+                <DataGrid x:Name="FactsGrid"
+                          ItemsSource="{Binding Facts}"
+                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                          Style="{StaticResource MemoryDataGridStyle}"
+                          CellStyle="{StaticResource MemoryDataGridCellStyle}"
+                          ColumnHeaderStyle="{StaticResource MemoryColumnHeaderStyle}"
+                          RowStyle="{StaticResource MemoryDataGridRowStyle}"
+                          CellEditEnding="DataGrid_CellEditEnding">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Subject"    Binding="{Binding Subject}"   Width="*" />
+                        <DataGridTextColumn Header="Predicate"  Binding="{Binding Predicate}" Width="*" />
+                        <DataGridTextColumn Header="Object"     Binding="{Binding Object}"    Width="1.5*" />
+                        <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence, StringFormat=F2}" Width="80" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Updated"    Binding="{Binding UpdatedAt, StringFormat=yyyy-MM-dd HH:mm}" Width="130" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Source"     Binding="{Binding SourceRef}"  Width="100" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Events Grid -->
+                <DataGrid x:Name="EventsGrid"
+                          ItemsSource="{Binding Events}"
+                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                          Visibility="Collapsed"
+                          Style="{StaticResource MemoryDataGridStyle}"
+                          CellStyle="{StaticResource MemoryDataGridCellStyle}"
+                          ColumnHeaderStyle="{StaticResource MemoryColumnHeaderStyle}"
+                          RowStyle="{StaticResource MemoryDataGridRowStyle}"
+                          CellEditEnding="DataGrid_CellEditEnding">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Type"    Binding="{Binding Type}"    Width="100" />
+                        <DataGridTextColumn Header="Title"   Binding="{Binding Title}"   Width="*" />
+                        <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="1.5*" />
+                        <DataGridTextColumn Header="When"    Binding="{Binding WhenIso, StringFormat=yyyy-MM-dd HH:mm}" Width="130" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Source"  Binding="{Binding SourceRef}" Width="100" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Chunks Grid -->
+                <DataGrid x:Name="ChunksGrid"
+                          ItemsSource="{Binding Chunks}"
+                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                          Visibility="Collapsed"
+                          Style="{StaticResource MemoryDataGridStyle}"
+                          CellStyle="{StaticResource MemoryDataGridCellStyle}"
+                          ColumnHeaderStyle="{StaticResource MemoryColumnHeaderStyle}"
+                          RowStyle="{StaticResource MemoryDataGridRowStyle}"
+                          CellEditEnding="DataGrid_CellEditEnding">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Source Type" Binding="{Binding SourceType}" Width="100" />
+                        <DataGridTextColumn Header="Text"        Binding="{Binding Text}"       Width="*" />
+                        <DataGridTextColumn Header="When"        Binding="{Binding WhenIso, StringFormat=yyyy-MM-dd HH:mm}" Width="130" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Source"      Binding="{Binding SourceRef}"   Width="100" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Empty state -->
+                <TextBlock x:Name="MemoryEmptyState"
+                           Text="No memories found."
+                           FontSize="14"
+                           Foreground="{StaticResource Overlay0Brush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Visibility="Collapsed"/>
+            </Grid>
+
+            <!-- ── Footer: Pagination + Actions ──────────────────────── -->
+            <Border Grid.Row="2"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Pagination -->
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <Button Content="&#x25C0; Prev"
+                                Command="{Binding PrevPageCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding PageDisplay}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,6,0"/>
+                        <Button Content="Next &#x25B6;"
+                                Command="{Binding NextPageCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </StackPanel>
+
+                    <!-- Status -->
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding StatusText}"
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"/>
+
+                    <!-- Actions -->
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <Button Content="+ Add New"
+                                Command="{Binding AddNewCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <Button Content="Delete Selected"
+                                Command="{Binding DeleteCommand}"
+                                Style="{StaticResource MemoryDeleteButtonStyle}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
              INPUT AREA
              ═══════════════════════════════════════════════════════ -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="2" x:Name="InputArea"
                 Background="{StaticResource MantleBrush}"
                 Padding="12"
                 BorderBrush="{StaticResource Surface0Brush}"
