@@ -442,6 +442,73 @@ public class AgentFlowTests
         Assert.Contains("\"recency\":\"any\"", webSearch.Args, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The extraction LLM receives full conversation context so it can
+    /// resolve the actual topic even when the user message is full of
+    /// filler. With proper context the model produces a real query —
+    /// no deterministic filler-stripping needed on the primary path.
+    /// </summary>
+    [Fact]
+    public async Task WebLookup_FullContext_ProducesGoodQuery()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            // Extraction call: with full context, the model correctly
+            // identifies "stock market news" as the topic, not "Well".
+            if (tools is { Count: > 0 })
+            {
+                return new LlmResponse
+                {
+                    IsComplete   = false,
+                    ToolCalls    = new List<ToolCallRequest>
+                    {
+                        new()
+                        {
+                            Id       = "call_1",
+                            Function = new FunctionCallDetails
+                            {
+                                Name      = "web_search",
+                                Arguments = "{\"query\":\"stock market news\",\"recency\":\"day\"}"
+                            }
+                        }
+                    },
+                    FinishReason = "tool_calls"
+                };
+            }
+
+            // Summary call
+            return new LlmResponse
+            {
+                IsComplete   = true,
+                Content      = "The stock market saw gains today...",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "Source 1: Markets rally...\nSource 2: Dow up...");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "Well.  I wanted to check the stock market today.  can you check on the news there?");
+
+        Assert.True(result.Success);
+
+        // The MCP web_search call should contain the model's query
+        var webSearch = mcp.Calls.FirstOrDefault(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
+
+        // Query comes straight from the model — should be the topic
+        Assert.Contains("stock market", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"Well\"", webSearch.Args, StringComparison.Ordinal);
+
+        // Recency: model set "day" and user said "today" — should be "day"
+        Assert.Contains("\"recency\":\"day\"", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task CasualChat_NoToolCalls()
     {

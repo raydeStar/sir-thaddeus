@@ -17,6 +17,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly string _systemPrompt;
 
     private readonly List<ChatMessage> _history = [];
+
+    /// <summary>
+    /// URLs from the most recent web search, keyed by title. Used by
+    /// follow-up enrichment to fetch full article content when the
+    /// user asks to go deeper on a topic from a previous search.
+    /// </summary>
+    private List<(string Url, string Title)> _lastSearchSources = [];
+
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
 
@@ -29,13 +37,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
         "\n\nSearch results are in the next message. " +
-        "Summarize them. No URLs. Be brief.";
+        "Synthesize across all sources. Cross-reference where " +
+        "they agree or differ. Be thorough. No URLs. " +
+        "ONLY use facts from the provided sources. " +
+        "Do NOT invent or guess details not in the results.";
 
     // ── Token budget per intent ──────────────────────────────────────
     // Small models fill available space with filler. Tight caps force
     // them to be concise and reduce self-dialogue / instruction echoing.
     private const int MaxTokensCasual    = 256;
-    private const int MaxTokensWebSummary = 512;
+    private const int MaxTokensWebSummary = 768;
     private const int MaxTokensTooling   = 1024;
 
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
@@ -515,6 +526,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         });
         LogEvent("AGENT_TOOL_RESULT", $"{toolName} -> {(toolOk ? "ok" : "error")}");
 
+        // ── 2.5. Cache source URLs + enrich from prior searches ──────
+        // Store the source URLs so follow-up turns can fetch full
+        // articles via BrowserNavigate without re-searching.
+        _lastSearchSources = ParseSourceUrls(toolResult);
+
+        // If prior search sources exist, enrich the current results
+        // with full article content from the most relevant URLs.
+        var enrichmentContent = await TryEnrichFromPreviousSearchAsync(
+            toolCallsMade, cancellationToken);
+
         // ── 3. Summarize results ─────────────────────────────────────
         // Feed tool output as a User message (not a ToolResult).
         // Mistral's Jinja template requires tool_call_ids to be exactly
@@ -523,35 +544,58 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // message sidesteps the whole template minefield.
         roundTrips++;
 
+        var summaryInput = "[Search results — reference only, do not display to user]\n" +
+                           toolResult;
+
+        // Append enriched full-article content if available.
+        if (!string.IsNullOrWhiteSpace(enrichmentContent))
+            summaryInput += "\n\n[Full article content from prior sources — use for depth]\n" +
+                            enrichmentContent;
+
         var messagesForSummary = InjectModeIntoSystemPrompt(
             _history, memoryPackText + WebSummaryInstruction);
-        messagesForSummary.Add(ChatMessage.User(
-            "[Search results — reference only, do not display to user]\n" + toolResult));
+        messagesForSummary.Add(ChatMessage.User(summaryInput));
 
         var response = await CallLlmWithRetrySafe(
             messagesForSummary, roundTrips, MaxTokensWebSummary, cancellationToken);
 
-        var text = TruncateSelfDialogue(response.Content ?? "[No response]");
+        string text;
 
-        // ── 4. Raw dump → rewrite ────────────────────────────────────
-        if (LooksLikeRawDump(text))
+        if (response.FinishReason == "error")
         {
-            LogEvent("AGENT_REWRITE", "Response looked like a raw dump — rewriting");
-            var rewriteMessages = new List<ChatMessage>
-            {
-                ChatMessage.System(
-                    _systemPrompt + " " +
-                    "Rewrite the draft into the final answer. " +
-                    "Casual tone. Bottom line first. 2-3 short paragraphs. " +
-                    "No URLs. No lists of sources. No copied excerpts."),
-                ChatMessage.User(text)
-            };
+            // The LLM couldn't summarize (e.g., LM Studio regex engine
+            // choked on the search result payload). Don't throw away the
+            // results — build a brief extractive response instead.
+            LogEvent("AGENT_SUMMARY_FALLBACK",
+                "LLM summary failed — building extractive fallback");
+            text = BuildExtractiveSummary(toolResult, searchQuery);
+        }
+        else
+        {
+            text = TruncateSelfDialogue(response.Content ?? "[No response]");
 
-            roundTrips++;
-            var rewritten = await CallLlmWithRetrySafe(
-                rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(rewritten.Content))
-                text = rewritten.Content!;
+            // ── 4. Raw dump → rewrite ────────────────────────────────
+            if (LooksLikeRawDump(text))
+            {
+                LogEvent("AGENT_REWRITE", "Response looked like a raw dump — rewriting");
+                var rewriteMessages = new List<ChatMessage>
+                {
+                    ChatMessage.System(
+                        _systemPrompt + " " +
+                        "Rewrite the draft into the final answer. " +
+                        "Casual tone. Bottom line first. 2-3 short paragraphs. " +
+                        "No URLs. No lists of sources. No copied excerpts. " +
+                        "Do NOT add facts not present in the draft."),
+                    ChatMessage.User(text)
+                };
+
+                roundTrips++;
+                var rewritten = await CallLlmWithRetrySafe(
+                    rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(rewritten.Content) &&
+                    rewritten.FinishReason != "error")
+                    text = rewritten.Content!;
+            }
         }
 
         // ── 5. Strip template garbage ────────────────────────────────
@@ -620,6 +664,326 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 LlmRoundTrips = roundTrips
             };
         }
+    }
+
+    /// <summary>
+    /// Builds a readable extractive summary from raw search results
+    /// when the LLM can't summarize (regex engine failure, timeout,
+    /// etc.). Includes both the source title and the article excerpt
+    /// so the user gets actual content, not just homepage headlines.
+    ///
+    /// Tool output format:
+    ///   1. "Title" — source.com
+    ///      Excerpt text up to ~1000 chars...
+    ///
+    /// The excerpts are the real value — article content already
+    /// fetched by ContentExtractor. Truncated to ~300 chars each
+    /// here to keep the fallback response a reasonable length.
+    /// </summary>
+    private static string BuildExtractiveSummary(string toolResult, string query)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return $"I found some results for \"{query}\" but couldn't generate a summary. " +
+                   "The source links should be visible below.";
+
+        // Strip the SOURCES_JSON section (UI-only metadata).
+        var jsonIdx = toolResult.IndexOf(
+            "<!-- SOURCES_JSON -->", StringComparison.Ordinal);
+        var contentPart = jsonIdx > 0 ? toolResult[..jsonIdx] : toolResult;
+
+        // Parse numbered entries with their indented excerpts.
+        // Format:
+        //   1. "Title" — source
+        //      Excerpt paragraph...
+        var lines = contentPart.Split('\n');
+        var entries = new List<(string Title, string Source, string Excerpt)>();
+        string? currentTitle = null;
+        string? currentSource = null;
+        var excerptBuilder = new StringBuilder();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
+            // Skip instruction lines baked into the tool output.
+            if (IsInstructionLine(trimmed)) continue;
+
+            // Numbered entry: "1. "Title" — source"
+            if (trimmed.Length > 3 && char.IsDigit(trimmed[0]) &&
+                (trimmed[1] == '.' || (char.IsDigit(trimmed[1]) && trimmed[2] == '.')))
+            {
+                // Save previous entry
+                if (currentTitle != null)
+                    entries.Add((currentTitle, currentSource ?? "", excerptBuilder.ToString().Trim()));
+
+                excerptBuilder.Clear();
+
+                // Parse: remove number prefix, extract title and source
+                var dotIdx = trimmed.IndexOf('.');
+                var body = trimmed[(dotIdx + 1)..].Trim();
+
+                var dashIdx = body.IndexOf(" — ", StringComparison.Ordinal);
+                if (dashIdx > 0)
+                {
+                    currentTitle  = body[..dashIdx].Trim().Trim('"');
+                    currentSource = body[(dashIdx + 3)..].Trim();
+                }
+                else
+                {
+                    currentTitle  = body.Trim('"');
+                    currentSource = "";
+                }
+            }
+            else if (currentTitle != null && line.StartsWith("   "))
+            {
+                // Indented excerpt line — append to current entry
+                if (excerptBuilder.Length < 300)
+                {
+                    if (excerptBuilder.Length > 0) excerptBuilder.Append(' ');
+                    excerptBuilder.Append(trimmed);
+                }
+            }
+        }
+
+        // Don't forget the last entry
+        if (currentTitle != null)
+            entries.Add((currentTitle, currentSource ?? "", excerptBuilder.ToString().Trim()));
+
+        if (entries.Count == 0)
+            return $"I found some results for \"{query}\" but couldn't generate a summary. " +
+                   "The source links should be visible below.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Here's what I found for \"{query}\":");
+        sb.AppendLine();
+
+        foreach (var (title, source, excerpt) in entries.Take(5))
+        {
+            var attribution = string.IsNullOrWhiteSpace(source) ? "" : $" ({source})";
+            sb.AppendLine($"**{title}**{attribution}");
+
+            if (!string.IsNullOrWhiteSpace(excerpt))
+            {
+                // Trim to a clean sentence boundary if possible
+                var trimmedExcerpt = TrimToSentence(excerpt, 280);
+                sb.AppendLine(trimmedExcerpt);
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Returns true if the line is a prompt instruction baked into
+    /// the search tool output (not actual search content).
+    /// </summary>
+    private static bool IsInstructionLine(string trimmed) =>
+        trimmed.StartsWith("Synthesize", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("Summarize", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("Cross-reference", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("Lead with", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("No URLs", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("ONLY state", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("If a detail", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Trims text to approximately <paramref name="maxChars"/> at a
+    /// sentence boundary (period, question mark, exclamation mark).
+    /// Falls back to a word boundary if no sentence end is found.
+    /// </summary>
+    private static string TrimToSentence(string text, int maxChars)
+    {
+        if (text.Length <= maxChars) return text;
+
+        // Look for the last sentence-ending punctuation before maxChars
+        var window = text[..maxChars];
+        var lastEnd = Math.Max(
+            Math.Max(window.LastIndexOf(". "), window.LastIndexOf("? ")),
+            window.LastIndexOf("! "));
+
+        if (lastEnd > maxChars / 2)
+            return text[..(lastEnd + 1)];
+
+        // No good sentence boundary — break at a word boundary
+        var lastSpace = window.LastIndexOf(' ');
+        return lastSpace > maxChars / 2
+            ? text[..lastSpace] + "..."
+            : text[..maxChars] + "...";
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Follow-Up Enrichment
+    //
+    // When the user asks to go deeper on a topic from a previous search,
+    // fetch full article content from the URLs we already know about.
+    // This avoids the shallow-search-again pattern and lets the LLM
+    // cross-reference sources with actual article text, not snippets.
+    // ─────────────────────────────────────────────────────────────────
+
+    private const string SourcesJsonDelimiter  = "<!-- SOURCES_JSON -->";
+    private const string BrowseToolName        = "browser_navigate";
+    private const string BrowseToolNameAlt     = "BrowserNavigate";
+    private const int    MaxEnrichmentUrls     = 3;
+    private const int    MaxArticleChars       = 3000;
+
+    /// <summary>
+    /// Extracts source URLs and titles from a web search tool result
+    /// that contains a <c>&lt;!-- SOURCES_JSON --&gt;</c> section.
+    /// Returns an empty list if the delimiter is missing or the JSON
+    /// is malformed.
+    /// </summary>
+    private static List<(string Url, string Title)> ParseSourceUrls(string toolResult)
+    {
+        var sources = new List<(string Url, string Title)>();
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return sources;
+
+        var delimIdx = toolResult.IndexOf(
+            SourcesJsonDelimiter, StringComparison.Ordinal);
+        if (delimIdx < 0)
+            return sources;
+
+        var jsonPart = toolResult[(delimIdx + SourcesJsonDelimiter.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(jsonPart))
+            return sources;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonPart);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return sources;
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                var url   = item.TryGetProperty("url", out var u) ? u.GetString() : null;
+                var title = item.TryGetProperty("title", out var t) ? t.GetString() : "";
+                if (!string.IsNullOrWhiteSpace(url))
+                    sources.Add((url!, title ?? ""));
+            }
+        }
+        catch
+        {
+            // Malformed JSON — not worth crashing over. Return what we have.
+        }
+
+        return sources;
+    }
+
+    /// <summary>
+    /// Checks whether prior search sources exist and fetches full article
+    /// content from the top URLs via the BrowserNavigate MCP tool. Each
+    /// call is recorded for audit. Returns the combined article text,
+    /// or null if no enrichment is available or needed.
+    /// </summary>
+    private async Task<string?> TryEnrichFromPreviousSearchAsync(
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        if (_lastSearchSources.Count == 0)
+            return null;
+
+        // Only enrich if there are prior sources from a PREVIOUS turn.
+        // On the first search of a topic, _lastSearchSources was just
+        // set from the current search — skip enrichment to avoid
+        // re-fetching what we just searched.
+        // We detect this by checking if there are prior assistant
+        // messages in history (i.e., this isn't the first turn).
+        var hasPriorContext = _history.Any(m => m.Role == "assistant");
+        if (!hasPriorContext)
+            return null;
+
+        var urlsToFetch = _lastSearchSources
+            .Take(MaxEnrichmentUrls)
+            .ToList();
+
+        if (urlsToFetch.Count == 0)
+            return null;
+
+        LogEvent("AGENT_ENRICHMENT_START",
+            $"Fetching full content from {urlsToFetch.Count} prior source(s)");
+
+        // Fetch articles in parallel via MCP browser_navigate / BrowserNavigate.
+        // Try snake_case first (MCP SDK default), fall back to PascalCase.
+        var fetchTasks = urlsToFetch.Select(async source =>
+        {
+            var args = JsonSerializer.Serialize(new { url = source.Url });
+            string? content = null;
+            var resolvedToolName = BrowseToolName;
+
+            try
+            {
+                LogEvent("AGENT_TOOL_CALL", $"{BrowseToolName}({args})");
+                content = await _mcp.CallToolAsync(BrowseToolName, args, cancellationToken);
+            }
+            catch
+            {
+                // snake_case not found — try PascalCase variant
+                try
+                {
+                    resolvedToolName = BrowseToolNameAlt;
+                    LogEvent("AGENT_TOOL_CALL", $"{BrowseToolNameAlt}({args})");
+                    content = await _mcp.CallToolAsync(BrowseToolNameAlt, args, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    LogEvent("AGENT_ENRICHMENT_FAIL",
+                        $"browser_navigate failed for {source.Url}: {ex.Message}");
+
+                    toolCallsMade.Add(new ToolCallRecord
+                    {
+                        ToolName  = resolvedToolName,
+                        Arguments = args,
+                        Result    = $"Error: {ex.Message}",
+                        Success   = false
+                    });
+
+                    return (source.Title, Content: (string?)null, Ok: false);
+                }
+            }
+
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName  = resolvedToolName,
+                Arguments = args,
+                Result    = content!.Length > 200
+                    ? content[..200] + "…"
+                    : content,
+                Success   = true
+            });
+
+            // Truncate each article to keep the total context bounded.
+            if (content!.Length > MaxArticleChars)
+                content = content[..MaxArticleChars] + "\n[…truncated]";
+
+            return (source.Title, Content: content, Ok: true);
+        });
+
+        var results = await Task.WhenAll(fetchTasks);
+
+        // Build combined content from successful fetches.
+        var sb = new StringBuilder();
+        foreach (var (title, content, ok) in results)
+        {
+            if (!ok || string.IsNullOrWhiteSpace(content))
+                continue;
+
+            sb.AppendLine($"=== {title} ===");
+            sb.AppendLine(content);
+            sb.AppendLine();
+        }
+
+        var enriched = sb.ToString().TrimEnd();
+        if (string.IsNullOrWhiteSpace(enriched))
+            return null;
+
+        LogEvent("AGENT_ENRICHMENT_DONE",
+            $"Enriched with {results.Count(r => r.Ok)} article(s), " +
+            $"{enriched.Length} chars total");
+
+        return enriched;
     }
 
     /// <summary>
@@ -1270,17 +1634,46 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         if (tokenLower == "thaddeus" || tokenLower.StartsWith("thadd"))
             return true;
 
-        // Greetings and casual filler.
+        // Greetings, casual filler, discourse markers, pronouns, and
+        // request-framing verbs. Anything that isn't a real search topic.
         return tokenLower is
-            "sir" or "hey" or "hi" or "hello" or "yo" or "sup" or "homie" or
-            "buddy" or "pal" or
-            "heck" or "hell" or
+            // ── Greetings / salutations ───────────────────────────
+            "sir" or "hey" or "hi" or "hello" or "yo" or "sup" or
+            "homie" or "buddy" or "pal" or
             "good" or "morning" or "afternoon" or "evening" or
-            "can" or "could" or "would" or "will" or "you" or "me" or "my" or
-            "please" or "plz" or "thanks" or "thank" or "danke" or "dank" or
-            "look" or "up" or "search" or "find" or "pull" or "show" or "get" or
-            "bring" or "grab" or "fetch" or "tell" or "give" or
-            "for" or "to" or "on" or "about" or "into" or "in" or "the" or "a" or "an";
+            // ── Discourse markers / interjections ─────────────────
+            "well" or "ok" or "okay" or "alright" or "so" or
+            "anyway" or "actually" or "basically" or "like" or
+            "heck" or "hell" or "gosh" or "gee" or
+            // ── Speech fillers ────────────────────────────────────
+            "um" or "uh" or "hmm" or "huh" or "er" or "ah" or
+            // ── Pronouns / contractions ───────────────────────────
+            "i" or "im" or "i'm" or "we" or "our" or "us" or
+            "you" or "me" or "my" or "he" or "she" or "it" or
+            "its" or "it's" or "they" or "them" or "their" or
+            // ── Modals / auxiliaries ──────────────────────────────
+            "can" or "could" or "would" or "will" or "shall" or
+            "should" or "might" or "may" or "do" or "does" or
+            "did" or "is" or "are" or "was" or "were" or "been" or
+            "being" or "have" or "has" or "had" or
+            // ── Request framing verbs ─────────────────────────────
+            "want" or "wanted" or "need" or "needed" or "check" or
+            "look" or "up" or "search" or "find" or "pull" or
+            "show" or "get" or "bring" or "grab" or "fetch" or
+            "tell" or "give" or
+            // ── Polite filler ─────────────────────────────────────
+            "please" or "plz" or "thanks" or "thank" or
+            "danke" or "dank" or
+            // ── Prepositions / articles / connectors ──────────────
+            "for" or "to" or "on" or "about" or "into" or "in" or
+            "at" or "of" or "with" or "from" or "by" or "or" or
+            "and" or "but" or "if" or "then" or "than" or
+            "the" or "a" or "an" or "this" or "that" or
+            "there" or "here" or "some" or "any" or
+            // ── Other low-signal words ────────────────────────────
+            "just" or "really" or "very" or "also" or "too" or
+            "what" or "how" or "when" or "where" or "know" or
+            "think" or "see" or "go" or "going" or "went";
     }
 
     private static bool LooksLikeIdentityLookup(string lower)
@@ -1429,14 +1822,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     }
 
     /// <summary>
-    /// Extracts a search query and recency by asking the LLM to fill in
-    /// a <c>web_search</c> tool call. The schema constrains the output,
-    /// making this far more reliable than freeform text extraction —
-    /// especially with smaller local models that struggle with custom
-    /// prompt formats.
+    /// Extracts a search query and recency by asking the LLM to produce
+    /// a <c>web_search</c> tool call. The LLM receives the full
+    /// conversation history so it can determine the actual topic from
+    /// context rather than relying on brittle keyword filtering.
     ///
-    /// Falls back to deterministic filler stripping if the tool call
-    /// fails or the model doesn't cooperate.
+    /// Post-processing is minimal: strip assistant name references,
+    /// apply identity/headline defaults, and validate bounds. Everything
+    /// else is the model's job — it has the context to get it right.
+    ///
+    /// Falls back to deterministic cleanup only if the LLM fails to
+    /// produce a tool call at all (e.g., model error, text-only response).
     /// </summary>
     private async Task<(string Query, string Recency)> ExtractSearchViaToolCallAsync(
         string userMessage, string memoryPackText, CancellationToken cancellationToken)
@@ -1449,39 +1845,50 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         try
         {
-            // Focused instruction: system + search directive + user msg.
-            // Memory context is included so the LLM knows who's talking
-            // (e.g., "Mark wants news") but we don't need full history.
+            // ── Build messages with full conversation context ─────────
+            // The model needs history to understand follow-ups like
+            // "what about their earnings?" after a prior search. Without
+            // it, short or vague messages produce garbage queries.
             var systemContent =
-                "You are a search assistant. The user wants to look something up.\n" +
-                "Call the web_search tool with an appropriate query and recency.\n\n" +
+                "You are a search query extractor. Read the conversation and " +
+                "determine what the user wants to search for.\n" +
+                "Call the web_search tool with the appropriate query and recency.\n\n" +
                 "Rules:\n" +
-                "- The query must be the TOPIC — 2 to 6 keywords.\n" +
-                "- Strip ALL greetings (hey, hi, hello, good morning),\n" +
-                "  assistant names (thaddeus, thadds, sir thaddeus),\n" +
-                "  and filler (can you, please, pull up, for me, danke, thanks).\n" +
-                "- If the user asks for 'news', 'headlines', or 'latest',\n" +
-                "  set recency to 'day'.\n" +
-                "- If the user requests generic headlines/news with no specific topic,\n" +
-                "  use query: \"top headlines\" (or \"U.S. top headlines\" when they mention the US).\n" +
+                "- Extract the TOPIC the user wants to look up — 2 to 6 keywords.\n" +
+                "- Ignore greetings, filler, discourse markers (well, ok, so...), " +
+                "and the assistant's name. These are NEVER search terms.\n" +
+                "- If the user asks for 'news', 'headlines', or 'latest', " +
+                "set recency to 'day'.\n" +
+                "- For generic news requests with no specific topic, " +
+                "use query: \"top headlines\".\n" +
                 "- ALWAYS call the tool. Never reply with text.";
 
             if (!string.IsNullOrWhiteSpace(memoryPackText))
                 systemContent += "\n\n" + memoryPackText;
 
-            var cleanedHint = StripConversationalFiller(userMessage ?? "");
-            var messages = new List<ChatMessage>
+            // Start with system prompt, then replay conversation history
+            // so the model has full context for follow-up questions.
+            var messages = new List<ChatMessage> { ChatMessage.System(systemContent) };
+
+            foreach (var msg in _history)
             {
-                ChatMessage.System(systemContent),
-                ChatMessage.User(
-                    "User message:\n" + userMessage + "\n\n" +
-                    "Cleaned request (greetings removed):\n" + cleanedHint)
-            };
+                if (msg.Role is "system") continue; // already have ours
+                messages.Add(msg);
+            }
+
+            // If the latest user message isn't already in history
+            // (it shouldn't be — it's added after processing), add it.
+            if (_history.Count == 0 ||
+                _history[^1].Role != "user" ||
+                _history[^1].Content != userMessage)
+            {
+                messages.Add(ChatMessage.User(userMessage ?? ""));
+            }
 
             var response = await _llm.ChatAsync(
                 messages, SearchExtractionTools, maxTokensOverride: 80, cancellationToken);
 
-            // ── Parse the tool call arguments ─────────────────────────
+            // ── Parse the tool call response ──────────────────────────
             if (response.ToolCalls is { Count: > 0 })
             {
                 var args = response.ToolCalls[0].Function.Arguments;
@@ -1495,22 +1902,23 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     ? NormalizeRecency(r.GetString() ?? "")
                     : defaultRecency;
 
-                // Clean + sanitize — remove assistant names, greetings, filler.
-                // This also normalizes punctuation so "thadds!" is filtered.
-                var cleanedQuery = CleanSearchQuery(query);
-                var lowerCleanedQuery = cleanedQuery.ToLowerInvariant();
+                // ── Minimal safety net: strip assistant name only ─────
+                // The LLM has full context and should produce a clean
+                // query. We only strip references to the assistant's
+                // name (the one thing the model might echo back).
+                var cleanedQuery = StripAssistantName(query);
 
-                // Prefer explicit recency hints from the user message.
+                // Prefer explicit recency hints from the user message
+                // (deterministic override — the LLM sometimes misses these).
                 var recencyFromUser = DetectRecencyFallback(userMessage ?? "");
                 if (recencyFromUser != "any" && recencyFromUser != recency)
                     recency = recencyFromUser;
 
-                // If the query is generic "headlines"/"news", use a stable default.
-                if (IsGenericHeadlineQuery(lowerCleanedQuery))
+                // Generic "headlines"/"news" → stable default.
+                if (IsGenericHeadlineQuery(cleanedQuery.ToLowerInvariant()))
                     cleanedQuery = wantsUs ? "U.S. top headlines" : "top headlines";
 
-                // Identity/definition queries: bias the query toward "who is X"
-                // and do not apply a recency window.
+                // Identity queries: prepend "who is"/"what is" if needed.
                 if (isIdentity && !string.IsNullOrWhiteSpace(cleanedQuery))
                 {
                     var ql = cleanedQuery.ToLowerInvariant();
@@ -1524,7 +1932,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     recency = "any";
                 }
 
-                // Still empty? Fall through to deterministic cleanup below.
+                // Accept if non-empty and within bounds.
                 if (!string.IsNullOrWhiteSpace(cleanedQuery) &&
                     cleanedQuery.Length >= 2 && cleanedQuery.Length <= 120)
                 {
@@ -1534,14 +1942,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
 
                 LogEvent("AGENT_QUERY_EXTRACT",
-                    $"Tool call returned junk query \"{query}\" — using deterministic cleanup");
+                    $"Tool call returned empty/invalid query \"{query}\" " +
+                    "— falling through to deterministic cleanup");
             }
             else
             {
-                // Model responded with text instead of a tool call.
-                // Some small models do this even when told to call a tool.
                 LogEvent("AGENT_QUERY_EXTRACT",
-                    "LLM did not produce a tool call — using filler strip");
+                    "LLM did not produce a tool call — using deterministic fallback");
             }
         }
         catch (Exception ex)
@@ -1550,12 +1957,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 $"Tool-call extraction failed: {ex.Message}");
         }
 
-        // ── Deterministic fallback: strip greetings + filler ──────────
+        // ── Deterministic fallback ────────────────────────────────────
+        // Only reached when the LLM fails to produce a usable tool call
+        // (model error, text-only response, empty output). This is the
+        // safety net, not the primary path.
         var fallbackQuery = CleanSearchQuery(StripConversationalFiller(userMessage ?? ""));
         var fallbackRecency = DetectRecencyFallback(userMessage ?? "");
 
-        // Identity/definition fallback: build "who is X" / "what is X"
-        // even if the model refused to call the tool.
         if (isIdentity)
         {
             if (TryExtractIdentitySubject(userMessage ?? "", out var subject))
@@ -1574,8 +1982,6 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         if (string.IsNullOrWhiteSpace(fallbackQuery))
         {
-            // If the user asked for headlines/news but gave no topic,
-            // pick a stable, useful default.
             if (lowerMsg.Contains("headline") || lowerMsg.Contains("headlines") ||
                 lowerMsg.Contains("news") || lowerMsg.Contains("latest") || lowerMsg.Contains("breaking"))
             {
@@ -1583,11 +1989,38 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
         }
 
-        // If the fallback query is generic, normalize it as well.
         if (IsGenericHeadlineQuery(fallbackQuery.ToLowerInvariant()))
             fallbackQuery = wantsUs ? "U.S. top headlines" : "top headlines";
 
         return (fallbackQuery, fallbackRecency);
+    }
+
+    /// <summary>
+    /// Strips only assistant name references from a query string.
+    /// This is the only deterministic post-processing applied to the
+    /// LLM's tool call output — everything else is the model's job.
+    /// </summary>
+    private static string StripAssistantName(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return "";
+
+        var normalized = NormalizeQueryText(query);
+        var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var kept = new List<string>(tokens.Length);
+
+        foreach (var token in tokens)
+        {
+            var lower = token.ToLowerInvariant();
+
+            // Only filter assistant name variants — nothing else.
+            if (lower == "thaddeus" || lower.StartsWith("thadd") || lower == "sir")
+                continue;
+
+            kept.Add(token);
+        }
+
+        return string.Join(' ', kept).Trim();
     }
 
     /// <summary>
@@ -1644,6 +2077,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             "hi there",           "hello there",
             "hey",                "hi",
             "hello",              "yo",
+            // ── Discourse markers / hedges ────────────────────────
+            // Users often open with these before their real request.
+            // "Well. I wanted to check..." → "I wanted to check..."
+            "well",               "ok so",
+            "okay so",            "alright so",
+            "so",                 "ok",
+            "okay",               "alright",
+            "anyway",             "actually",
+            "basically",
         ];
 
         foreach (var greet in greetingPrefixes)
@@ -1794,11 +2236,18 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             // Words that are pure emotional/conversational filler —
             // they tell us nothing about what to search for.
             string[] fillerWords = ["i", "you", "can", "could", "want",
+                "wanted", "need", "needed",
                 "to", "the", "a", "an", "do", "does", "is", "are",
+                "was", "were", "been", "have", "has", "had",
                 "please", "check", "look", "find", "search", "up",
                 "me", "my", "on", "about", "information", "info",
                 "it", "its", "it's", "been", "what", "how", "so",
-                "just", "really", "actually", "basically", "totally"];
+                "just", "really", "actually", "basically", "totally",
+                // Discourse markers / hedges — must be penalized so
+                // single-word sentences like "Well" never win.
+                "well", "ok", "okay", "alright", "anyway", "right",
+                "sure", "yes", "no", "yeah", "yep", "nope",
+                "there", "here", "this", "that"];
 
             // Words that signal "this sentence has a real topic."
             // Sentences with uppercase words (proper nouns) or domain

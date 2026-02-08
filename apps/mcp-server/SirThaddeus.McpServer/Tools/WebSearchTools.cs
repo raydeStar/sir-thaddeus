@@ -32,7 +32,7 @@ namespace SirThaddeus.McpServer.Tools;
 public static class WebSearchTools
 {
     private const int AutoReadCount     = 5;
-    private const int ExcerptMaxChars   = 250;
+    private const int ExcerptMaxChars   = 1000;
     private const int CardExcerptChars  = 250;
     private const int PageTimeoutSecs   = 10;
     internal const string SourcesDelimiter = "<!-- SOURCES_JSON -->";
@@ -190,8 +190,11 @@ public static class WebSearchTools
             extractionMap[e.Url] = e;
 
         // ── INSTRUCTIONS (kept short — small models parrot verbose rules) ─
-        sb.AppendLine("Summarize these results in 2-3 short paragraphs. " +
-                      "Lead with the bottom line. Keep it simple. No URLs.");
+        sb.AppendLine("Synthesize these sources into a comprehensive answer. " +
+                      "Cross-reference where sources agree or differ. " +
+                      "Lead with the bottom line, then provide detail. No URLs. " +
+                      "ONLY state facts found in the sources below. " +
+                      "If a detail is not in the sources, do NOT guess or make it up.");
         sb.AppendLine();
 
         for (var i = 0; i < results.Count; i++)
