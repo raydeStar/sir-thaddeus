@@ -29,7 +29,15 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
 
     private bool? _searxngAvailable;
     private bool? _ddgAvailable;
+    private DateTime _lastProbeTime = DateTime.MinValue;
     private readonly SemaphoreSlim _probeLock = new(1, 1);
+
+    /// <summary>
+    /// How long a probe result is considered valid before re-checking.
+    /// SearxNG may start up after the router — 5 minutes keeps latency
+    /// low while allowing recovery within a reasonable window.
+    /// </summary>
+    private static readonly TimeSpan ProbeTtl = TimeSpan.FromMinutes(5);
 
     public WebSearchRouter(
         string mode = "auto",
@@ -86,6 +94,11 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             var result = await _searxng.SearchAsync(query, options, ct);
             if (result.Results.Count > 0)
                 return result;
+
+            // SearxNG was "available" but failed to deliver — invalidate
+            // the cache so the next request re-probes instead of assuming
+            // it's still up.
+            InvalidateProbeCache();
         }
 
         // 2. DuckDuckGo (if not known to be blocked)
@@ -95,7 +108,9 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             if (result.Results.Count > 0)
                 return result;
 
-            // DDG returned nothing — mark as unavailable for future calls
+            // DDG returned nothing — mark as temporarily unavailable.
+            // The probe cache TTL will allow re-evaluation later instead
+            // of permanently blacklisting.
             _ddgAvailable = false;
         }
 
@@ -104,24 +119,50 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
     }
 
     /// <summary>
-    /// One-time probe to check which providers are available.
-    /// Results are cached for the lifetime of this router instance.
+    /// Probes provider availability with a time-based cache. Results are
+    /// valid for <see cref="ProbeTtl"/> — after that, we re-probe so
+    /// providers that came up late (e.g. SearxNG container) can be
+    /// discovered without restarting the process.
     /// </summary>
     private async Task ProbeProvidersAsync(CancellationToken ct)
     {
-        if (_searxngAvailable is not null)
-            return; // Already probed
+        if (_searxngAvailable is not null &&
+            DateTime.UtcNow - _lastProbeTime < ProbeTtl)
+        {
+            return; // Cache is still fresh
+        }
 
         await _probeLock.WaitAsync(ct);
         try
         {
-            if (_searxngAvailable is null)
-                _searxngAvailable = await _searxng.IsAvailableAsync(ct);
+            // Double-check inside the lock (another thread may have probed)
+            if (_searxngAvailable is not null &&
+                DateTime.UtcNow - _lastProbeTime < ProbeTtl)
+            {
+                return;
+            }
+
+            _searxngAvailable = await _searxng.IsAvailableAsync(ct);
+
+            // DDG gets a fresh chance on every re-probe cycle
+            _ddgAvailable = null;
+
+            _lastProbeTime = DateTime.UtcNow;
         }
         finally
         {
             _probeLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Forces the next <see cref="SearchAutoAsync"/> call to re-probe
+    /// all providers. Called when a "known available" provider fails
+    /// to deliver results.
+    /// </summary>
+    private void InvalidateProbeCache()
+    {
+        _lastProbeTime = DateTime.MinValue;
     }
 
     // ─────────────────────────────────────────────────────────────────

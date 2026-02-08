@@ -22,6 +22,14 @@ public enum RelevanceDecision { Allow, AllowSilent, Block }
 public sealed record MemoryFact
 {
     public required string MemoryId   { get; init; }
+
+    /// <summary>
+    /// Optional link to the profile_cards row that owns this fact.
+    /// Null for legacy/unscoped facts. When set, retrieval and
+    /// conflict detection are scoped to this profile.
+    /// </summary>
+    public string?         ProfileId   { get; init; }
+
     public required string Subject    { get; init; }
     public required string Predicate  { get; init; }
 
@@ -41,6 +49,13 @@ public sealed record MemoryFact
 public sealed record MemoryEvent
 {
     public required string  EventId     { get; init; }
+
+    /// <summary>
+    /// Optional link to the profile_cards row that owns this event.
+    /// Null for legacy/unscoped events.
+    /// </summary>
+    public string?          ProfileId   { get; init; }
+
     public required string  Type        { get; init; }
     public required string  Title       { get; init; }
     public string?          Summary     { get; init; }
@@ -63,6 +78,64 @@ public sealed record MemoryChunk
     public DateTimeOffset?  WhenIso     { get; init; }
     public Sensitivity      Sensitivity { get; init; } = Sensitivity.Public;
     public float[]?         Embedding   { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Profile Cards
+// ─────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// A lightweight identity card for the user or someone they mention.
+/// <c>Kind</c> is "user" for the primary user, "person" for others.
+/// <c>ProfileJson</c> holds structured fields (preferred name, pronouns,
+/// timezone, style prefs, privacy lists) as a JSON blob so the schema
+/// doesn't migrate for every new field.
+/// </summary>
+public sealed record ProfileCard
+{
+    public required string  ProfileId    { get; init; }
+    public string           Kind         { get; init; } = "user";
+    public required string  DisplayName  { get; init; }
+    public string?          Relationship { get; init; }
+    public string?          Aliases      { get; init; }   // semicolon-delimited
+    public string           ProfileJson  { get; init; } = "{}";
+    public DateTimeOffset   UpdatedAt    { get; init; } = DateTimeOffset.UtcNow;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Memory Nuggets
+// ─────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// A short, atomic, composable personal fact that can be injected into
+/// the LLM context. Not a full memory — more like a sticky note.
+///
+/// Scoring: <c>pin_level</c> (user-pinned), <c>weight</c> (global
+/// importance), <c>use_count</c> + <c>last_used_at</c> (reinforcement
+/// and recency). Tags are semicolon-delimited for cheap LIKE filtering
+/// (e.g. <c>;identity;preference;</c>).
+/// </summary>
+public sealed record MemoryNugget
+{
+    public required string  NuggetId    { get; init; }
+    public required string  Text        { get; init; }
+    public string?          Tags        { get; init; }     // ;identity;preference;
+    public double           Weight      { get; init; } = 0.65;
+    public int              PinLevel    { get; init; }     // 0=normal, 1=pinned, 2=system
+    public string           Sensitivity { get; init; } = "low";  // low|med|high
+    public int              UseCount    { get; init; }
+    public DateTimeOffset?  LastUsedAt  { get; init; }
+    public DateTimeOffset   CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Nugget sensitivity levels. Kept as strings in the DB for readability.
+/// </summary>
+public static class NuggetSensitivity
+{
+    public const string Low    = "low";
+    public const string Medium = "med";
+    public const string High   = "high";
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -134,3 +207,27 @@ public sealed record RetrievalContext
 /// The retrieval engine computes the final composite score from this.
 /// </summary>
 public sealed record StoreCandidate<T>(T Item, double LexicalScore);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Shared Parsing Utilities
+// ─────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Parsing helpers shared across storage and tool layers.
+/// Avoids duplicating enum resolution logic in multiple assemblies.
+/// </summary>
+public static class MemoryParsing
+{
+    /// <summary>
+    /// Resolves a sensitivity string ("public", "personal", "secret")
+    /// to its <see cref="Sensitivity"/> enum value. Defaults to
+    /// <see cref="Sensitivity.Public"/> for unknown/null inputs.
+    /// </summary>
+    public static Sensitivity ParseSensitivity(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            "personal" => Sensitivity.Personal,
+            "secret"   => Sensitivity.Secret,
+            _          => Sensitivity.Public
+        };
+}

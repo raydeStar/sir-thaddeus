@@ -35,13 +35,19 @@ public static class ScreenTools
     // ═══════════════════════════════════════════════════════════════════
 
     [McpServerTool, Description(
-        "Captures a screenshot and extracts all visible text using OCR. " +
-        "Returns the active window info, screen resolution, and readable " +
-        "text from the display. Use when the user asks about what's on " +
-        "their screen, needs help with something visible, or wants you " +
-        "to analyze the current display.")]
+        "Captures the user's entire display and extracts all visible text " +
+        "using OCR. Returns the active window info, screen resolution, " +
+        "and readable text from the display. IMPORTANT: Almost always use " +
+        "target='full_screen' (the default). Only use 'active_window' " +
+        "when the user explicitly says 'this window' or 'the active " +
+        "window'. If in doubt, use 'full_screen' — the user wants you " +
+        "to see everything on their monitor, not just our own app.")]
     public static async Task<string> ScreenCapture(
-        [Description("'full_screen' or 'active_window'")] string target = "full_screen",
+        [Description(
+            "'full_screen' (default — captures the entire monitor, use this " +
+            "almost always) or 'active_window' (only when user explicitly " +
+            "asks about 'this window' or 'the active window')"
+        )] string target = "full_screen",
         CancellationToken cancellationToken = default)
     {
         var sb = new StringBuilder();

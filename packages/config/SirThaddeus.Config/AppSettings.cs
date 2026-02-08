@@ -25,6 +25,15 @@ public sealed record AppSettings
 
     [JsonPropertyName("memory")]
     public MemorySettings Memory { get; init; } = new();
+
+    /// <summary>
+    /// The profile_id of the currently active user profile.
+    /// When set, the agent injects this profile's card into every
+    /// memory retrieval call so the LLM knows who it's talking to
+    /// without needing to ask.
+    /// </summary>
+    [JsonPropertyName("activeProfileId")]
+    public string? ActiveProfileId { get; init; }
 }
 
 /// <summary>
@@ -100,6 +109,20 @@ public sealed record LlmSettings
         "fully in character. Your personality, tone, and wit must not " +
         "change just because you are recalling something. Show warmth, " +
         "not a data dump. Never fabricate memories you were not given. " +
+        "If a memory conflict is reported (you already know something " +
+        "different), present both the old and new versions to the user " +
+        "and ask which one is correct before updating. " +
+
+        // ── Proactive memory storage ─────────────────────────────────
+        "When the user shares personal details, preferences, habits, " +
+        "or any fact about themselves — even casually — use " +
+        "memory_store_facts to store it. You do NOT need to be asked " +
+        "to remember. If the user says 'I'm a software engineer' or " +
+        "'my dog is named Max', store it. Prefer structured triples " +
+        "(subject/predicate/object). Do NOT announce that you are " +
+        "storing the fact; just do it silently alongside your reply. " +
+        "You may call memory_store_facts AND other tools in the same " +
+        "turn if both are needed. " +
 
         // ── Honesty & audit friendliness ─────────────────────────────────
         "Never claim you changed files, executed commands, or observed the " +

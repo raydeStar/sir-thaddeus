@@ -46,7 +46,10 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
     public GoogleNewsRssProvider(HttpClient? httpClient = null)
     {
         _http = httpClient ?? new HttpClient();
-        _http.Timeout = TimeSpan.FromSeconds(15);
+
+        // Generous ceiling — per-request timeouts are enforced via
+        // CancellationTokenSource from WebSearchOptions.TimeoutMs.
+        _http.Timeout = TimeSpan.FromSeconds(30);
 
         if (_http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
@@ -77,8 +80,11 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
                 ? $"{HeadlinesUrl}?hl=en-US&gl=US&ceid=US:en"
                 : $"{SearchUrl}?q={Uri.EscapeDataString(query)}&hl=en-US&gl=US&ceid=US:en";
 
-            var xml = await _http.GetStringAsync(url, cts.Token);
-            var results = ParseRssResults(xml, options.MaxResults);
+            var results = await RetryHelper.ExecuteAsync(async () =>
+            {
+                var xml = await _http.GetStringAsync(url, cts.Token);
+                return ParseRssResults(xml, options.MaxResults);
+            }, cancellationToken);
 
             return new SearchResults
             {

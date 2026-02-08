@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
+using SirThaddeus.WebSearch;
 using SmartReader;
 
 namespace SirThaddeus.McpServer.Tools;
@@ -79,14 +80,17 @@ public static class ContentExtractor
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSecs));
 
             // Use GetAsync (not GetStringAsync) so we can capture the final
-            // URL after redirects — critical for Google News redirect links
-            using var response = await http.GetAsync(uri, cts.Token);
-            response.EnsureSuccessStatusCode();
+            // URL after redirects — critical for Google News redirect links.
+            // Wrapped in retry for transient failures (DNS hiccups, 502s, etc.)
+            var (finalUri, html) = await RetryHelper.ExecuteAsync(async () =>
+            {
+                using var resp = await http.GetAsync(uri, cts.Token);
+                resp.EnsureSuccessStatusCode();
+                var body     = await resp.Content.ReadAsStringAsync(cts.Token);
+                var resolved = resp.RequestMessage?.RequestUri ?? uri;
+                return (resolved, body);
+            }, cancellationToken);
 
-            var html = await response.Content.ReadAsStringAsync(cts.Token);
-
-            // Resolve the final URL (after any 301/302 redirects)
-            var finalUri = response.RequestMessage?.RequestUri ?? uri;
             url    = finalUri.ToString();
             domain = finalUri.Host.Replace("www.", "");
 

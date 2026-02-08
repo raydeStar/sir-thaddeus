@@ -33,6 +33,24 @@ public interface IMemoryStore
     Task<IReadOnlyList<StoreCandidate<MemoryChunk>>> SearchChunksAsync(
         string query, int maxResults, CancellationToken ct = default);
 
+    // ── Lookup operations ────────────────────────────────────────────
+    // Point queries for conflict/duplicate detection at storage time.
+
+    /// <summary>
+    /// Finds existing non-deleted facts matching a (subject, predicate)
+    /// pair (case-insensitive). Used by the MCP tool layer to detect
+    /// duplicates and conflicts before writing a new fact.
+    /// </summary>
+    Task<IReadOnlyList<MemoryFact>> FindMatchingFactsAsync(
+        string subject, string predicate, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves a single non-deleted fact by its memory_id.
+    /// Returns null if not found or deleted.
+    /// </summary>
+    Task<MemoryFact?> FindFactByIdAsync(
+        string memoryId, CancellationToken ct = default);
+
     // ── Write operations ───────────────────────────────────────────
     // All writes use upsert semantics (INSERT OR REPLACE) keyed on
     // the item's primary ID, making them idempotent and retry-safe.
@@ -91,6 +109,69 @@ public interface IMemoryStore
 
     /// <summary>Soft-deletes a chunk by chunk_id.</summary>
     Task DeleteChunkAsync(string chunkId, CancellationToken ct = default);
+
+    // ── Profile Card operations ─────────────────────────────────────
+
+    /// <summary>
+    /// Returns the user's own profile card (kind="user"), or null
+    /// if none exists. There should be at most one.
+    /// </summary>
+    Task<ProfileCard?> GetUserProfileAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns all non-deleted profile cards (user + people).
+    /// </summary>
+    Task<IReadOnlyList<ProfileCard>> ListProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Searches non-deleted person cards (kind != "user") for
+    /// display_name, relationship, or aliases matching the query.
+    /// Returns at most <paramref name="maxResults"/> matches.
+    /// </summary>
+    Task<IReadOnlyList<ProfileCard>> SearchPersonProfilesAsync(
+        string query, int maxResults, CancellationToken ct = default);
+
+    /// <summary>Upserts a profile card. Idempotent (INSERT OR REPLACE).</summary>
+    Task StoreProfileAsync(ProfileCard profile, CancellationToken ct = default);
+
+    /// <summary>Soft-deletes a profile card by profile_id.</summary>
+    Task DeleteProfileAsync(string profileId, CancellationToken ct = default);
+
+    // ── Memory Nugget operations ────────────────────────────────────
+
+    /// <summary>
+    /// Returns the top nuggets for a greeting context: filters by
+    /// allowed tags and low sensitivity, then scores by pin_level,
+    /// weight, recency, and use_count.
+    /// </summary>
+    Task<IReadOnlyList<MemoryNugget>> GetGreetingNuggetsAsync(
+        int maxResults = 2, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns nuggets matching a keyword query for in-conversation use.
+    /// Ordered by a composite score (lexical + boosts).
+    /// </summary>
+    Task<IReadOnlyList<MemoryNugget>> SearchNuggetsAsync(
+        string query, int maxResults = 5, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists all non-deleted nuggets with optional keyword filter.
+    /// For the UI browser.
+    /// </summary>
+    Task<(IReadOnlyList<MemoryNugget> Items, int TotalCount)> ListNuggetsAsync(
+        string? filter, int skip, int take, CancellationToken ct = default);
+
+    /// <summary>Upserts a nugget. Idempotent (INSERT OR REPLACE).</summary>
+    Task StoreNuggetAsync(MemoryNugget nugget, CancellationToken ct = default);
+
+    /// <summary>
+    /// Increments use_count and sets last_used_at for a nugget.
+    /// Called after a nugget is injected into the LLM context.
+    /// </summary>
+    Task TouchNuggetAsync(string nuggetId, CancellationToken ct = default);
+
+    /// <summary>Soft-deletes a nugget by nugget_id.</summary>
+    Task DeleteNuggetAsync(string nuggetId, CancellationToken ct = default);
 
     /// <summary>
     /// Ensures the backing store's schema exists. Idempotent —

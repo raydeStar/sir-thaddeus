@@ -459,6 +459,19 @@ internal sealed class FakeMemoryStore : IMemoryStore
     public Task StoreChunkAsync(MemoryChunk chunk, CancellationToken ct = default)
     { StoredChunks.Add(chunk); return Task.CompletedTask; }
 
+    // ── Lookup stubs (not exercised by retrieval tests) ────────────
+    public Task<IReadOnlyList<MemoryFact>> FindMatchingFactsAsync(
+        string subject, string predicate, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MemoryFact>>(
+            StoredFacts.Where(f =>
+                string.Equals(f.Subject, subject, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(f.Predicate, predicate, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+    public Task<MemoryFact?> FindFactByIdAsync(
+        string memoryId, CancellationToken ct = default) =>
+        Task.FromResult(StoredFacts.FirstOrDefault(f => f.MemoryId == memoryId));
+
     // ── Browse stubs (not exercised by retrieval tests) ────────────
     public Task<(IReadOnlyList<MemoryFact> Items, int TotalCount)> ListFactsAsync(
         string? filter, int skip, int take, CancellationToken ct = default) =>
@@ -485,6 +498,63 @@ internal sealed class FakeMemoryStore : IMemoryStore
 
     public Task DeleteChunkAsync(string chunkId, CancellationToken ct = default)
     { DeletedChunkIds.Add(chunkId); return Task.CompletedTask; }
+
+    // ── Profile Card stubs ──────────────────────────────────────────
+    public ProfileCard? UserProfile { get; set; }
+    public List<ProfileCard> PersonProfiles { get; } = [];
+
+    public Task<ProfileCard?> GetUserProfileAsync(CancellationToken ct = default) =>
+        Task.FromResult(UserProfile);
+
+    public Task<IReadOnlyList<ProfileCard>> ListProfilesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ProfileCard>>(
+            PersonProfiles.Concat(UserProfile is not null ? [UserProfile] : []).ToList());
+
+    public Task<IReadOnlyList<ProfileCard>> SearchPersonProfilesAsync(
+        string query, int maxResults, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ProfileCard>>(
+            PersonProfiles.Where(p =>
+                (p.DisplayName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (p.Relationship?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (p.Aliases?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Take(maxResults).ToList());
+
+    public Task StoreProfileAsync(ProfileCard profile, CancellationToken ct = default)
+    {
+        if (profile.Kind == "user") UserProfile = profile;
+        else PersonProfiles.Add(profile);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteProfileAsync(string profileId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    // ── Nugget stubs ────────────────────────────────────────────────
+    public List<MemoryNugget> Nuggets { get; } = [];
+
+    public Task<IReadOnlyList<MemoryNugget>> GetGreetingNuggetsAsync(
+        int maxResults = 2, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MemoryNugget>>(
+            Nuggets.Where(n => n.Sensitivity == "low").Take(maxResults).ToList());
+
+    public Task<IReadOnlyList<MemoryNugget>> SearchNuggetsAsync(
+        string query, int maxResults = 5, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MemoryNugget>>(
+            Nuggets.Where(n => n.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Take(maxResults).ToList());
+
+    public Task<(IReadOnlyList<MemoryNugget> Items, int TotalCount)> ListNuggetsAsync(
+        string? filter, int skip, int take, CancellationToken ct = default) =>
+        Task.FromResult<(IReadOnlyList<MemoryNugget>, int)>(([], 0));
+
+    public Task StoreNuggetAsync(MemoryNugget nugget, CancellationToken ct = default)
+    { Nuggets.Add(nugget); return Task.CompletedTask; }
+
+    public Task TouchNuggetAsync(string nuggetId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task DeleteNuggetAsync(string nuggetId, CancellationToken ct = default) =>
+        Task.CompletedTask;
 
     public Task EnsureSchemaAsync(CancellationToken ct = default) =>
         Task.CompletedTask;

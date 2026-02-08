@@ -419,6 +419,7 @@ public sealed class MemoryBrowserViewModel : ViewModelBase
         var updated = new MemoryFact
         {
             MemoryId    = row.MemoryId,
+            ProfileId   = row.ProfileId,
             Subject     = row.Subject,
             Predicate   = row.Predicate,
             Object      = row.Object,
@@ -449,6 +450,7 @@ public sealed class MemoryBrowserViewModel : ViewModelBase
         var updated = new MemoryEvent
         {
             EventId     = row.EventId,
+            ProfileId   = row.ProfileId,
             Type        = row.Type,
             Title       = row.Title,
             Summary     = row.Summary,
@@ -511,6 +513,7 @@ public sealed class MemoryFactRow : ViewModelBase
     public MemoryFactRow(MemoryFact fact)
     {
         MemoryId    = fact.MemoryId;
+        ProfileId   = fact.ProfileId;
         Subject     = fact.Subject;
         Predicate   = fact.Predicate;
         Object      = fact.Object;
@@ -522,6 +525,7 @@ public sealed class MemoryFactRow : ViewModelBase
     }
 
     public string         MemoryId    { get; }
+    public string?        ProfileId   { get; set; }
     public string         Subject     { get; set; }
     public string         Predicate   { get; set; }
     public string         Object      { get; set; }
@@ -537,6 +541,7 @@ public sealed class MemoryEventRow : ViewModelBase
     public MemoryEventRow(MemoryEvent evt)
     {
         EventId     = evt.EventId;
+        ProfileId   = evt.ProfileId;
         Type        = evt.Type;
         Title       = evt.Title;
         Summary     = evt.Summary;
@@ -547,6 +552,7 @@ public sealed class MemoryEventRow : ViewModelBase
     }
 
     public string          EventId     { get; }
+    public string?         ProfileId   { get; set; }
     public string          Type        { get; set; }
     public string          Title       { get; set; }
     public string?         Summary     { get; set; }

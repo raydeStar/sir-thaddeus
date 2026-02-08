@@ -19,7 +19,11 @@ public partial class CommandPaletteWindow : Window
 {
     private CommandPaletteViewModel? _viewModel;
     private MemoryBrowserViewModel? _memoryBrowserVm;
+    private ProfileBrowserViewModel? _profileBrowserVm;
+    private SettingsViewModel? _settingsVm;
     private bool _memoryLoaded;
+    private bool _profileLoaded;
+    private bool _settingsLoaded;
 
     public CommandPaletteWindow()
     {
@@ -66,48 +70,94 @@ public partial class CommandPaletteWindow : Window
         MemoryView.DataContext = vm;
     }
 
+    /// <summary>
+    /// Binds the Profile Browser ViewModel. Like the memory panel,
+    /// it has its own DataContext.
+    /// </summary>
+    public void SetProfileBrowserViewModel(ProfileBrowserViewModel vm)
+    {
+        _profileBrowserVm = vm;
+        ProfileView.DataContext = vm;
+    }
+
+    /// <summary>
+    /// Binds the Settings ViewModel. Own DataContext, own panel.
+    /// </summary>
+    public void SetSettingsViewModel(SettingsViewModel vm)
+    {
+        _settingsVm = vm;
+        SettingsView.DataContext = vm;
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // View Tab Switching (Chat ↔ Memory)
     // ─────────────────────────────────────────────────────────────────
 
-    private void ChatTab_Click(object sender, RoutedEventArgs e)
+    private void ChatTab_Click(object sender, RoutedEventArgs e)     => ActivateTab("Chat");
+    private void MemoryTab_Click(object sender, RoutedEventArgs e)   => ActivateTab("Memory");
+    private void ProfileTab_Click(object sender, RoutedEventArgs e)  => ActivateTab("Profile");
+    private void SettingsTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Settings");
+
+    private void ActivateTab(string tab)
     {
-        ChatTabButton.IsChecked  = true;
-        MemoryTabButton.IsChecked = false;
-        ShowChatView();
+        ChatTabButton.IsChecked     = tab == "Chat";
+        MemoryTabButton.IsChecked   = tab == "Memory";
+        ProfileTabButton.IsChecked  = tab == "Profile";
+        SettingsTabButton.IsChecked = tab == "Settings";
+
+        ChatView.Visibility     = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
+        MemoryView.Visibility   = tab == "Memory"   ? Visibility.Visible : Visibility.Collapsed;
+        ProfileView.Visibility  = tab == "Profile"  ? Visibility.Visible : Visibility.Collapsed;
+        SettingsView.Visibility = tab == "Settings"  ? Visibility.Visible : Visibility.Collapsed;
+        InputArea.Visibility    = tab == "Chat"      ? Visibility.Visible : Visibility.Collapsed;
+        NewChatButton.Visibility = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
+
+        switch (tab)
+        {
+            case "Chat":
+                ChatInput?.Focus();
+                break;
+
+            case "Memory":
+                LazyLoadMemory();
+                MemorySearchBox?.Focus();
+                break;
+
+            case "Profile":
+                LazyLoadProfile();
+                break;
+
+            case "Settings":
+                LazyLoadSettings();
+                break;
+        }
     }
 
-    private void MemoryTab_Click(object sender, RoutedEventArgs e)
+    private async void LazyLoadMemory()
     {
-        ChatTabButton.IsChecked  = false;
-        MemoryTabButton.IsChecked = true;
-        ShowMemoryView();
-    }
-
-    private void ShowChatView()
-    {
-        ChatView.Visibility   = Visibility.Visible;
-        MemoryView.Visibility = Visibility.Collapsed;
-        InputArea.Visibility  = Visibility.Visible;
-        NewChatButton.Visibility = Visibility.Visible;
-        ChatInput?.Focus();
-    }
-
-    private async void ShowMemoryView()
-    {
-        ChatView.Visibility   = Visibility.Collapsed;
-        MemoryView.Visibility = Visibility.Visible;
-        InputArea.Visibility  = Visibility.Collapsed;
-        NewChatButton.Visibility = Visibility.Collapsed;
-
-        // Lazy-load the memory data on first show
         if (!_memoryLoaded && _memoryBrowserVm is not null)
         {
             _memoryLoaded = true;
             await _memoryBrowserVm.LoadAsync();
         }
+    }
 
-        MemorySearchBox?.Focus();
+    private async void LazyLoadProfile()
+    {
+        if (!_profileLoaded && _profileBrowserVm is not null)
+        {
+            _profileLoaded = true;
+            await _profileBrowserVm.LoadAsync();
+        }
+    }
+
+    private async void LazyLoadSettings()
+    {
+        if (!_settingsLoaded && _settingsVm is not null)
+        {
+            _settingsLoaded = true;
+            await _settingsVm.LoadAsync();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -130,6 +180,28 @@ public partial class CommandPaletteWindow : Window
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // Profile Sub-tab Switching (Profiles | Nuggets)
+    // ─────────────────────────────────────────────────────────────────
+
+    private void ProfileSubTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tab) return;
+
+        ProfilesGrid.Visibility     = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetsGrid.Visibility      = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+
+        // Toggle footer buttons
+        ProfileAddButton.Visibility      = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetAddButton.Visibility       = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+        ProfileDeleteButton.Visibility   = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetDeleteButton.Visibility    = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+        NuggetPaginationPanel.Visibility = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+
+        if (tab == "Profiles")     _profileBrowserVm?.ShowProfilesCommand.Execute(null);
+        else if (tab == "Nuggets") _profileBrowserVm?.ShowNuggetsCommand.Execute(null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // DataGrid Edit Commit
     // ─────────────────────────────────────────────────────────────────
 
@@ -137,7 +209,6 @@ public partial class CommandPaletteWindow : Window
     {
         if (e.EditAction != DataGridEditAction.Commit) return;
 
-        // Defer the save until the binding has updated the row model
         Dispatcher.BeginInvoke(new Action(() =>
         {
             switch (e.Row.Item)
@@ -152,6 +223,26 @@ public partial class CommandPaletteWindow : Window
                     _memoryBrowserVm?.SaveChunkCommand.Execute(null);
                     break;
             }
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private void ProfileGrid_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (e.Row.Item is ProfileCardRow)
+                _profileBrowserVm?.SaveProfileCommand.Execute(null);
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private void NuggetGrid_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (e.Row.Item is NuggetRow)
+                _profileBrowserVm?.SaveNuggetCommand.Execute(null);
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -192,8 +283,11 @@ public partial class CommandPaletteWindow : Window
     {
         if (ChatView.Visibility == Visibility.Visible)
             ChatInput?.Focus();
-        else
+        else if (MemoryView.Visibility == Visibility.Visible)
             MemorySearchBox?.Focus();
+        else if (ProfileView.Visibility == Visibility.Visible)
+            NuggetSearchBox?.Focus();
+        // Settings tab: no specific element to focus
     }
 
     /// <summary>

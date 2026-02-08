@@ -26,7 +26,11 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _http = httpClient ?? new HttpClient();
-        _http.Timeout = TimeSpan.FromSeconds(15);
+
+        // Generous ceiling — per-request timeouts are enforced via
+        // CancellationTokenSource from WebSearchOptions.TimeoutMs.
+        // This just prevents leaked HttpClient instances from hanging.
+        _http.Timeout = TimeSpan.FromSeconds(30);
     }
 
     public string Name => "SearxNG";
@@ -52,11 +56,14 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
             if (timeRange is not null)
                 url += $"&time_range={timeRange}";
 
-            var response = await _http.GetAsync(url, cts.Token);
-            response.EnsureSuccessStatusCode();
+            var parsed = await RetryHelper.ExecuteAsync(async () =>
+            {
+                var response = await _http.GetAsync(url, cts.Token);
+                response.EnsureSuccessStatusCode();
 
-            var json = await response.Content.ReadAsStringAsync(cts.Token);
-            var parsed = JsonSerializer.Deserialize<SearxngResponse>(json, JsonOpts);
+                var json = await response.Content.ReadAsStringAsync(cts.Token);
+                return JsonSerializer.Deserialize<SearxngResponse>(json, JsonOpts);
+            }, cancellationToken);
 
             if (parsed?.Results is null)
                 return new SearchResults { Provider = Name, Errors = ["No results in response"] };

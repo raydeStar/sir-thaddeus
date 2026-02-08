@@ -42,7 +42,9 @@ public class IntentClassificationTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
 
-        var result = await agent.ProcessAsync("what happened in the stock market today?");
+        // Message deliberately avoids triggering LooksLikeWebSearchRequest
+        // heuristic, so we actually test the LLM classifier path.
+        var result = await agent.ProcessAsync("tell me about your favorite historical figure");
 
         Assert.True(result.Success);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
@@ -269,30 +271,56 @@ public class AgentFlowTests
     public async Task WebLookup_CallsToolThenSummarizes()
     {
         var llmCalls = new List<string>();
-        var llm = new FakeLlmClient(messages =>
+        var llm = new FakeLlmClient((messages, tools) =>
         {
-            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
-            llmCalls.Add(sysMsg.Contains("Classify") ? "classify"
-                       : sysMsg.Contains("QUERY")    ? "extract"
-                       :                                "summarize");
+            // When tools are provided, this is the search extraction call —
+            // the LLM is expected to return a web_search tool call with
+            // structured query + recency args.
+            if (tools is { Count: > 0 })
+            {
+                llmCalls.Add("extract");
+                return new LlmResponse
+                {
+                    IsComplete   = false,
+                    ToolCalls    = new List<ToolCallRequest>
+                    {
+                        new()
+                        {
+                            Id       = "call_1",
+                            Function = new FunctionCallDetails
+                            {
+                                Name      = "web_search",
+                                Arguments = "{\"query\":\"latest news today\",\"recency\":\"day\"}"
+                            }
+                        }
+                    },
+                    FinishReason = "tool_calls"
+                };
+            }
 
-            if (sysMsg.Contains("Classify")) return "search";
-            if (sysMsg.Contains("QUERY")) return "latest news | day";
-            return "Here's what's happening in the news today.";
+            // No tools → summary call
+            llmCalls.Add("summarize");
+            return new LlmResponse
+            {
+                IsComplete   = true,
+                Content      = "Here's what's happening in the news today.",
+                FinishReason = "stop"
+            };
         });
 
         var mcp = new FakeMcpClient(returnValue: "Source 1: Big headline...\nSource 2: Another story...");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
+        // This message triggers LooksLikeWebSearchRequest ("news" + "today"),
+        // so the classifier step is skipped — goes straight to extract → summarize.
         var result = await agent.ProcessAsync("hey thadds! whats going on in the news today?");
 
         Assert.True(result.Success);
 
-        // Verify the 3-step flow: classify → extract → summarize
-        Assert.Equal("classify", llmCalls[0]);
-        Assert.Equal("extract",  llmCalls[1]);
-        Assert.Equal("summarize", llmCalls[2]);
+        // Verify the 2-step flow: extract (tool call) → summarize
+        Assert.Equal("extract",   llmCalls[0]);
+        Assert.Equal("summarize", llmCalls[1]);
 
         // Tool was called (excluding the always-present memory pre-fetch)
         var searchTools = result.ToolCallsMade
@@ -302,6 +330,116 @@ public class AgentFlowTests
 
         // Final response is the summary, not raw tool output
         Assert.Contains("news", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WebLookup_SearchExtraction_StripsAssistantNameAndDefaultsToHeadlines()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            // Extraction call provides tools. Return a bad query that
+            // includes the assistant nickname so the orchestrator must
+            // sanitize/fallback before calling web_search.
+            if (tools is { Count: > 0 })
+            {
+                return new LlmResponse
+                {
+                    IsComplete   = false,
+                    ToolCalls    = new List<ToolCallRequest>
+                    {
+                        new()
+                        {
+                            Id       = "call_1",
+                            Function = new FunctionCallDetails
+                            {
+                                Name      = "web_search",
+                                Arguments = "{\"query\":\"thadds!\",\"recency\":\"any\"}"
+                            }
+                        }
+                    },
+                    FinishReason = "tool_calls"
+                };
+            }
+
+            // Summary call (no tools)
+            return new LlmResponse
+            {
+                IsComplete   = true,
+                Content      = "Here are today's top headlines.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "Source 1: Headline...\nSource 2: Another...");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("hey thadds! can you look up headlines for me?");
+
+        Assert.True(result.Success);
+
+        // Verify the actual web_search call does NOT use "thadds"
+        var webSearch = mcp.Calls.FirstOrDefault(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
+        Assert.DoesNotContain("thadds", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("headlines", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"recency\":\"day\"", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WebLookup_IdentityQuestion_PrependsWhoIs_AndRecencyAny()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            // Extraction call provides tools. Return just the entity
+            // name so the orchestrator has to shape it into "who is X".
+            if (tools is { Count: > 0 })
+            {
+                return new LlmResponse
+                {
+                    IsComplete   = false,
+                    ToolCalls    = new List<ToolCallRequest>
+                    {
+                        new()
+                        {
+                            Id       = "call_1",
+                            Function = new FunctionCallDetails
+                            {
+                                Name      = "web_search",
+                                Arguments = "{\"query\":\"Takaichi??\",\"recency\":\"day\"}"
+                            }
+                        }
+                    },
+                    FinishReason = "tool_calls"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete   = true,
+                Content      = "Takaichi is a Japanese politician...",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "Source 1: Bio...\nSource 2: Wiki...");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("who the heck is Takaichi??");
+        Assert.True(result.Success);
+
+        var webSearch = mcp.Calls.FirstOrDefault(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
+        Assert.Contains("who is", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Takaichi", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"recency\":\"any\"", webSearch.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -425,34 +563,567 @@ public class MemoryRetrievalAuditTests
 
 #endregion
 
+#region ── Tool Loop Tests ────────────────────────────────────────────────
+
+/// <summary>
+/// Exercises the actual tool-calling code path: LLM returns tool calls,
+/// the orchestrator calls MCP, feeds results back, and the LLM
+/// produces a final text response.
+/// </summary>
+public class ToolLoopTests
+{
+    [Fact]
+    public async Task ToolLoop_ProcessesSingleToolCall()
+    {
+        // LLM flow: classify → tool_call → final text
+        var toolRequested = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            // Older path: router asks the LLM to classify first.
+            // New path: obvious screen requests are routed deterministically and
+            // the classify call is skipped. Handle both.
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            // First executor call: request a tool call (has tools available)
+            if (!toolRequested && tools is { Count: > 0 })
+            {
+                toolRequested = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{\"monitor\":0}"
+                            }
+                        }
+                    ]
+                };
+            }
+
+            // Call 3+: final text after seeing tool result
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I can see your desktop with a code editor open.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => """{"base64":"fakeScreenData","width":1920,"height":1080}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What can you see on the screen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains("desktop", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        // Verify screen_capture was actually called
+        var toolCalls = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Contains(toolCalls, t => t.ToolName == "screen_capture");
+        Assert.True(toolCalls.First(t => t.ToolName == "screen_capture").Success);
+    }
+
+    [Fact]
+    public async Task ToolLoop_ProcessesMultipleToolCallsInOneResponse()
+    {
+        // The LLM requests two tools at once: memory_store_facts AND screen_capture
+        var toolsRequested = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (!toolsRequested && tools is { Count: > 0 })
+            {
+                toolsRequested = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{}"
+                            }
+                        },
+                        new ToolCallRequest
+                        {
+                            Id = "call_002",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "memory_store_facts",
+                                Arguments = """{"factsJson":"[{\"subject\":\"user\",\"predicate\":\"asked_about\",\"object\":\"screen\"}]"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Here's what I see, and I noted that you asked about your screen.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve"     => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture"     => """{"base64":"data","width":1920,"height":1080}""",
+                "memory_store_facts" => """{"stored":1,"replaced":0,"skipped":0,"conflicts":[],"message":"Stored 1 fact(s)."}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What's on my screen right now?");
+
+        Assert.True(result.Success);
+
+        // Both tools should have been called
+        var toolCalls = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Equal(2, toolCalls.Count);
+        Assert.Contains(toolCalls, t => t.ToolName == "screen_capture");
+        Assert.Contains(toolCalls, t => t.ToolName == "memory_store_facts");
+    }
+
+    [Fact]
+    public async Task ToolLoop_HandlesToolError_GraceFully()
+    {
+        var toolRequested = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (!toolRequested && tools is { Count: > 0 })
+            {
+                toolRequested = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                };
+            }
+
+            // After seeing the error, the LLM should explain the failure
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I wasn't able to capture the screen — it seems the tool hit an error.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => throw new InvalidOperationException("Monitor not available"),
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Take a screenshot please");
+
+        // The overall flow should succeed (error is caught per-tool)
+        Assert.True(result.Success);
+
+        // The failed tool call should be recorded with Success = false
+        var failedCall = result.ToolCallsMade
+            .FirstOrDefault(t => t.ToolName == "screen_capture");
+        Assert.NotNull(failedCall);
+        Assert.False(failedCall.Success);
+        Assert.Contains("Monitor not available", failedCall.Result);
+    }
+
+    [Fact]
+    public async Task ToolLoop_RespectsMaxRoundTrips()
+    {
+        // LLM keeps requesting tools indefinitely — should bail at the safety cap
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            // Always request another tool call — never finish
+            return new LlmResponse
+            {
+                IsComplete = false,
+                FinishReason = "tool_calls",
+                ToolCalls =
+                [
+                    new ToolCallRequest
+                    {
+                        Id = $"call_{Guid.NewGuid():N}",
+                        Function = new FunctionCallDetails
+                        {
+                            Name = "file_read",
+                            Arguments = """{"path":"C:\\test.txt"}"""
+                        }
+                    }
+                ]
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "file contents here"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("keep reading files");
+
+        // Should bail with a safety message
+        Assert.Contains("maximum", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+#endregion
+
+#region ── Policy-Driven Tool Filtering Tests ─────────────────────────────
+
+/// <summary>
+/// Verifies that the policy gate correctly controls which tools the
+/// LLM sees based on classified intent. These tests exercise the
+/// full pipeline: classify → route → policy → filter → execute.
+/// </summary>
+public class PolicyFilteringTests
+{
+    [Fact]
+    public async Task CasualChat_SkipsToolLoop_NoToolsExposed()
+    {
+        // Chat-only intent: UseToolLoop = false, no tools at all.
+        // The LLM should receive NO tools — not even memory tools.
+        IReadOnlyList<ToolDefinition>? toolsSeen = null;
+
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            toolsSeen = tools;
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Hey there! How can I help?",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("hey there, how's it going?");
+
+        Assert.True(result.Success);
+
+        // toolsSeen should be null (no tools passed to LLM at all)
+        Assert.Null(toolsSeen);
+
+        // No tool calls other than MemoryRetrieve pre-fetch
+        var agentTools = result.ToolCallsMade
+            .Where(t => t.ToolName != "MemoryRetrieve").ToList();
+        Assert.Empty(agentTools);
+    }
+
+    [Fact]
+    public async Task MemoryWriteIntent_OnlyExposesMemoryTools()
+    {
+        // "Remember that..." → LooksLikeMemoryWriteRequest heuristic
+        // → bypasses LLM classifier → routes to memory_write intent
+        // → only memory tools exposed
+        IReadOnlyList<ToolDefinition>? toolsSeen = null;
+        var toolCallMade = false;
+
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            // Classifier won't be called (heuristic short-circuits), but
+            // handle it just in case
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            // Capture tools on the first non-classify call
+            if (toolsSeen == null)
+                toolsSeen = tools;
+
+            // First tool-loop call: request memory_store_facts
+            if (!toolCallMade && tools is { Count: > 0 })
+            {
+                toolCallMade = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_mem_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "memory_store_facts",
+                                Arguments = """{"factsJson":"[{\"subject\":\"user\",\"predicate\":\"occupation_is\",\"object\":\"software engineer\"}]","sourceRef":"conversation"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Got it — I'll remember that.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve"     => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_store_facts" => """{"stored":1,"replaced":0,"skipped":0,"conflicts":[],"message":"Stored 1 fact(s)."}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Remember that I'm a software engineer.");
+
+        Assert.True(result.Success);
+        Assert.NotNull(toolsSeen);
+
+        // Should only have memory tools — NOT screen_capture etc.
+        var toolNames = toolsSeen!.Select(t => t.Function.Name).ToHashSet();
+        Assert.Contains("memory_store_facts", toolNames);
+        Assert.DoesNotContain("screen_capture", toolNames);
+        Assert.DoesNotContain("web_search", toolNames);
+        Assert.DoesNotContain("system_execute", toolNames);
+
+        // Verify memory_store_facts was actually called
+        var memStore = result.ToolCallsMade
+            .FirstOrDefault(t => t.ToolName == "memory_store_facts");
+        Assert.NotNull(memStore);
+        Assert.True(memStore.Success);
+    }
+
+    [Fact]
+    public async Task ScreenRequest_OnlyExposesScreenTools()
+    {
+        // "What can you see on my screen?" → screen_observe intent
+        // → only screen tools exposed
+        IReadOnlyList<ToolDefinition>? toolsSeen = null;
+        var toolRequested = false;
+
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            // Older path: router asks the LLM to classify first.
+            // New path: obvious screen requests are routed deterministically and
+            // the classify call is skipped. Handle both.
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (tools is not null)
+                toolsSeen = tools;
+
+            // First executor call: request a screen capture.
+            if (!toolRequested && tools is { Count: > 0 })
+            {
+                toolRequested = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_scr_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I can see a code editor on your screen.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => """{"base64":"fakeData","width":1920,"height":1080}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What can you see on the screen right now?");
+
+        Assert.True(result.Success);
+        Assert.NotNull(toolsSeen);
+
+        // Should only have screen tools
+        var toolNames = toolsSeen!.Select(t => t.Function.Name).ToHashSet();
+        Assert.Contains("screen_capture", toolNames);
+        Assert.DoesNotContain("web_search", toolNames);
+        Assert.DoesNotContain("system_execute", toolNames);
+        Assert.DoesNotContain("memory_store_facts", toolNames);
+    }
+
+    [Fact]
+    public async Task PolicyDecision_IsAudited()
+    {
+        // Verify that the ROUTER_OUTPUT and POLICY_DECISION audit events fire
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "Hello!", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        await agent.ProcessAsync("hello!");
+
+        // Verify both new audit events exist
+        Assert.NotEmpty(audit.GetByAction("ROUTER_OUTPUT"));
+        Assert.NotEmpty(audit.GetByAction("POLICY_DECISION"));
+    }
+}
+
+#endregion
+
 #region ── Test Doubles ──────────────────────────────────────────────────
 
 /// <summary>
-/// Fake LLM client that returns canned responses based on the input
-/// messages. The response function receives the full message list and
-/// returns the assistant's content string.
+/// Fake LLM client that supports both text and tool-call responses.
+/// <para>
+/// <b>Text mode:</b> Pass a <c>Func&lt;messages, string&gt;</c> and
+/// every <see cref="ChatAsync"/> call returns a complete text response.
+/// </para>
+/// <para>
+/// <b>Full mode:</b> Pass a <c>Func&lt;messages, tools, LlmResponse&gt;</c>
+/// and the caller has full control over the returned response, including
+/// <see cref="LlmResponse.ToolCalls"/>.
+/// </para>
 /// </summary>
 internal sealed class FakeLlmClient : ILlmClient
 {
-    private readonly Func<IReadOnlyList<ChatMessage>, string> _respond;
+    private readonly Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> _respond;
+
+    // ── Text-only constructors (backwards compatible) ──────────────
 
     public FakeLlmClient(Func<IReadOnlyList<ChatMessage>, string> respond)
-        => _respond = respond;
+        : this((msgs, _) => new LlmResponse
+        {
+            IsComplete   = true,
+            Content      = respond(msgs),
+            FinishReason = "stop"
+        }) { }
 
     public FakeLlmClient(string fixedResponse)
         : this(_ => fixedResponse) { }
+
+    // ── Full-control constructor (can return tool calls) ──────────
+
+    public FakeLlmClient(
+        Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> respond)
+        => _respond = respond;
 
     public Task<LlmResponse> ChatAsync(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools = null,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(new LlmResponse
-        {
-            IsComplete   = true,
-            Content      = _respond(messages),
-            FinishReason = "stop"
-        });
+        return Task.FromResult(_respond(messages, tools));
     }
 
     public Task<LlmResponse> ChatAsync(
@@ -461,7 +1132,6 @@ internal sealed class FakeLlmClient : ILlmClient
         int maxTokensOverride,
         CancellationToken cancellationToken = default)
     {
-        // Delegate to the same handler — max_tokens isn't relevant for fakes
         return ChatAsync(messages, tools, cancellationToken);
     }
 
@@ -470,27 +1140,71 @@ internal sealed class FakeLlmClient : ILlmClient
 }
 
 /// <summary>
-/// Fake MCP tool client that returns a fixed result for any tool call.
-/// Tracks calls for assertion.
+/// Fake MCP tool client with per-tool response routing and realistic
+/// tool discovery. Tracks all calls for assertion.
 /// </summary>
 internal sealed class FakeMcpClient : IMcpToolClient
 {
-    private readonly string _returnValue;
+    private readonly Func<string, string, string> _toolHandler;
+    private readonly IReadOnlyList<McpToolInfo> _availableTools;
+
     public List<(string Tool, string Args)> Calls { get; } = [];
 
-    public FakeMcpClient(string returnValue) => _returnValue = returnValue;
+    // ── Simple constructor: fixed return for all tools ─────────────
+
+    public FakeMcpClient(string returnValue)
+        : this((_, _) => returnValue, []) { }
+
+    // ── Routing constructor: per-tool response logic ──────────────
+
+    public FakeMcpClient(
+        Func<string, string, string> toolHandler,
+        IReadOnlyList<McpToolInfo>? availableTools = null)
+    {
+        _toolHandler   = toolHandler;
+        _availableTools = availableTools ?? [];
+    }
 
     public Task<string> CallToolAsync(
         string toolName, string argumentsJson, CancellationToken cancellationToken = default)
     {
         Calls.Add((toolName, argumentsJson));
-        return Task.FromResult(_returnValue);
+        return Task.FromResult(_toolHandler(toolName, argumentsJson));
     }
 
     public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
+        return Task.FromResult(_availableTools);
+    }
+
+    // ── Helpers for building realistic tool lists ──────────────────
+
+    /// <summary>
+    /// A representative set of MCP tools matching what the real server
+    /// exposes. Used by tests that need to verify tool filtering, the
+    /// tool loop, or multi-tool scenarios.
+    /// </summary>
+    public static IReadOnlyList<McpToolInfo> StandardToolSet =>
+    [
+        MakeTool("screen_capture",     "Captures the user's screen",
+                 """{"type":"object","properties":{"monitor":{"type":"integer","description":"Monitor index"}},"required":[]}"""),
+        MakeTool("memory_store_facts", "Stores structured facts about the user",
+                 """{"type":"object","properties":{"factsJson":{"type":"string","description":"JSON array of fact objects"},"sourceRef":{"type":"string","description":"Source reference"}},"required":["factsJson"]}"""),
+        MakeTool("memory_update_fact", "Updates an existing memory fact",
+                 """{"type":"object","properties":{"memoryId":{"type":"string"},"newObject":{"type":"string"}},"required":["memoryId","newObject"]}"""),
+        MakeTool("web_search",         "Searches the web for information",
+                 """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("MemoryRetrieve",     "Retrieves relevant memories",
+                 """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("file_read",          "Reads a file from disk",
+                 """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
+    ];
+
+    private static McpToolInfo MakeTool(string name, string desc, string schemaJson)
+    {
+        var schema = System.Text.Json.JsonSerializer.Deserialize<object>(schemaJson)!;
+        return new McpToolInfo { Name = name, Description = desc, InputSchema = schema };
     }
 }
 

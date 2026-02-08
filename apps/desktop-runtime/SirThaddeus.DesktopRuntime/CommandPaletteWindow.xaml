@@ -297,6 +297,126 @@
             <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
         </Style>
 
+        <!-- ── ComboBox Toggle Button (internal) ───────────────────── -->
+        <ControlTemplate x:Key="ComboBoxToggleTemplate" TargetType="ToggleButton">
+            <Border x:Name="Bd"
+                    Background="{StaticResource Surface0Brush}"
+                    BorderBrush="{StaticResource Surface1Brush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    SnapsToDevicePixels="True">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="32"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="1" Background="Transparent">
+                        <Path Data="M0,0 L4,4 L8,0"
+                              Stroke="{StaticResource Subtext0Brush}"
+                              StrokeThickness="1.5"
+                              Fill="Transparent"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"/>
+                    </Border>
+                </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="BorderBrush"
+                            Value="{StaticResource BlueBrush}"/>
+                </Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="Bd" Property="BorderBrush"
+                            Value="{StaticResource BlueBrush}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- ── ComboBox (Catppuccin Dark) ────────────────────────────── -->
+        <Style x:Key="DarkComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Foreground"          Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize"            Value="13"/>
+            <Setter Property="FontFamily"          Value="Segoe UI, sans-serif"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton"
+                                          Template="{StaticResource ComboBoxToggleTemplate}"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
+                                                      RelativeSource={RelativeSource TemplatedParent}}"
+                                          Focusable="False"
+                                          ClickMode="Press"/>
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              Margin="12,8,32,8"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"/>
+                            <Popup x:Name="Popup"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True"
+                                   PopupAnimation="Slide"
+                                   Focusable="False">
+                                <Grid x:Name="DropDown"
+                                      MinWidth="{TemplateBinding ActualWidth}"
+                                      MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                      SnapsToDevicePixels="True">
+                                    <Border Background="{StaticResource MantleBrush}"
+                                            BorderBrush="{StaticResource Surface1Brush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Margin="0,2,0,0"
+                                            Padding="0,4">
+                                        <ScrollViewer SnapsToDevicePixels="True">
+                                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── ComboBox Item (Catppuccin Dark) ───────────────────────── -->
+        <Style x:Key="DarkComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Background"  Value="Transparent"/>
+            <Setter Property="Foreground"  Value="{StaticResource TextBrush}"/>
+            <Setter Property="Padding"     Value="12,8"/>
+            <Setter Property="Cursor"      Value="Hand"/>
+            <Setter Property="FontSize"    Value="13"/>
+            <Setter Property="FontFamily"  Value="Segoe UI, sans-serif"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface0Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface1Brush}"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource BlueBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ── Header Button (New Chat) ────────────────────────────── -->
         <Style x:Key="HeaderButtonStyle" TargetType="Button">
             <Setter Property="Background"     Value="Transparent"/>
@@ -388,6 +508,16 @@
                                   Content="Memory"
                                   IsChecked="False"
                                   Click="MemoryTab_Click"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="ProfileTabButton"
+                                  Content="Profile"
+                                  IsChecked="False"
+                                  Click="ProfileTab_Click"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="SettingsTabButton"
+                                  Content="⚙ Settings"
+                                  IsChecked="False"
+                                  Click="SettingsTab_Click"
                                   Style="{StaticResource ViewTabStyle}"/>
                 </StackPanel>
 
@@ -993,6 +1123,7 @@
                           RowStyle="{StaticResource MemoryDataGridRowStyle}"
                           CellEditEnding="DataGrid_CellEditEnding">
                     <DataGrid.Columns>
+                        <DataGridTextColumn Header="Profile"    Binding="{Binding ProfileId}"  Width="90" IsReadOnly="True"/>
                         <DataGridTextColumn Header="Subject"    Binding="{Binding Subject}"   Width="*" />
                         <DataGridTextColumn Header="Predicate"  Binding="{Binding Predicate}" Width="*" />
                         <DataGridTextColumn Header="Object"     Binding="{Binding Object}"    Width="1.5*" />
@@ -1106,6 +1237,358 @@
                     </StackPanel>
                 </Grid>
             </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             PROFILE / NUGGETS BROWSER
+             User-initiated identity + personal facts management.
+             DataContext is set to ProfileBrowserViewModel in code-behind.
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="ProfileView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- Sub-tabs + search -->
+                <RowDefinition Height="*"/>     <!-- Grid area -->
+                <RowDefinition Height="Auto"/>  <!-- Footer -->
+            </Grid.RowDefinitions>
+
+            <!-- ── Sub-tabs + Nugget Search ──────────────────────────────── -->
+            <Border Grid.Row="0"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <RadioButton Content="Profiles"
+                                     IsChecked="True"
+                                     GroupName="ProfileTabs"
+                                     Click="ProfileSubTab_Click"
+                                     Tag="Profiles"
+                                     Style="{StaticResource MemorySubTabStyle}"/>
+                        <RadioButton Content="Nuggets"
+                                     GroupName="ProfileTabs"
+                                     Click="ProfileSubTab_Click"
+                                     Tag="Nuggets"
+                                     Style="{StaticResource MemorySubTabStyle}"
+                                     Margin="4,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- Search box (nuggets only) -->
+                    <TextBox Grid.Column="1"
+                             x:Name="NuggetSearchBox"
+                             Text="{Binding NuggetSearchText, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ChatInputStyle}"
+                             FontSize="12"
+                             Padding="8,5"
+                             Margin="16,0,0,0"
+                             Tag="Search nuggets..."/>
+                </Grid>
+            </Border>
+
+            <!-- ── Grid Area ─────────────────────────────────────────────── -->
+            <Grid Grid.Row="1" Background="{StaticResource BaseBrush}">
+
+                <!-- Profile Cards DataGrid -->
+                <DataGrid x:Name="ProfilesGrid"
+                          ItemsSource="{Binding Profiles}"
+                          SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"
+                          Style="{StaticResource MemoryDataGridStyle}"
+                          CellStyle="{StaticResource MemoryDataGridCellStyle}"
+                          ColumnHeaderStyle="{StaticResource MemoryColumnHeaderStyle}"
+                          RowStyle="{StaticResource MemoryDataGridRowStyle}"
+                          CellEditEnding="ProfileGrid_CellEditEnding">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind"         Binding="{Binding Kind}"         Width="80" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Display Name" Binding="{Binding DisplayName}"  Width="*"/>
+                        <DataGridTextColumn Header="Relationship" Binding="{Binding Relationship}" Width="120"/>
+                        <DataGridTextColumn Header="Aliases"      Binding="{Binding Aliases}"      Width="*"/>
+                        <DataGridTextColumn Header="Profile JSON" Binding="{Binding ProfileJson}"  Width="1.5*"/>
+                        <DataGridTextColumn Header="Updated"      Binding="{Binding UpdatedAt, StringFormat=yyyy-MM-dd HH:mm}" Width="130" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Nuggets DataGrid -->
+                <DataGrid x:Name="NuggetsGrid"
+                          ItemsSource="{Binding Nuggets}"
+                          SelectedItem="{Binding SelectedNugget, Mode=TwoWay}"
+                          Visibility="Collapsed"
+                          Style="{StaticResource MemoryDataGridStyle}"
+                          CellStyle="{StaticResource MemoryDataGridCellStyle}"
+                          ColumnHeaderStyle="{StaticResource MemoryColumnHeaderStyle}"
+                          RowStyle="{StaticResource MemoryDataGridRowStyle}"
+                          CellEditEnding="NuggetGrid_CellEditEnding">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Text"         Binding="{Binding Text}"        Width="*"/>
+                        <DataGridTextColumn Header="Tags"         Binding="{Binding Tags}"        Width="140"/>
+                        <DataGridTextColumn Header="Weight"       Binding="{Binding Weight, StringFormat=F2}" Width="70"/>
+                        <DataGridTextColumn Header="Pin"          Binding="{Binding PinLevel}"    Width="50"/>
+                        <DataGridTextColumn Header="Sensitivity"  Binding="{Binding Sensitivity}" Width="90"/>
+                        <DataGridTextColumn Header="Uses"         Binding="{Binding UseCount}"    Width="50" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Last Used"    Binding="{Binding LastUsedAt, StringFormat=yyyy-MM-dd}" Width="100" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Created"      Binding="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Width="100" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+
+            <!-- ── Footer: Actions ───────────────────────────────────────── -->
+            <Border Grid.Row="2"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Pagination (nuggets only) -->
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                x:Name="NuggetPaginationPanel"
+                                Visibility="Collapsed">
+                        <Button Content="◀ Prev"
+                                Command="{Binding NuggetPrevPageCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding NuggetPageDisplay}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,6,0"/>
+                        <Button Content="Next ▶"
+                                Command="{Binding NuggetNextPageCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </StackPanel>
+
+                    <!-- Status -->
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding StatusText}"
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"/>
+
+                    <!-- Actions -->
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <Button x:Name="ProfileAddButton"
+                                Content="+ Add Profile"
+                                Command="{Binding AddProfileCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <Button x:Name="NuggetAddButton"
+                                Content="+ Add Nugget"
+                                Command="{Binding AddNuggetCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Visibility="Collapsed"
+                                Margin="0,0,6,0"/>
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,6,0"/>
+                        <Button x:Name="ProfileDeleteButton"
+                                Content="Delete Selected"
+                                Command="{Binding DeleteProfileCommand}"
+                                Style="{StaticResource MemoryDeleteButtonStyle}"/>
+                        <Button x:Name="NuggetDeleteButton"
+                                Content="Delete Selected"
+                                Command="{Binding DeleteNuggetCommand}"
+                                Style="{StaticResource MemoryDeleteButtonStyle}"
+                                Visibility="Collapsed"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             SETTINGS
+             Common configuration surfaced in-app. Changes are
+             persisted to settings.json on save.
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="SettingsView" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <!-- ── Active Profile ──────────────────────────────── -->
+                    <TextBlock Text="ACTIVE PROFILE"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource MauveBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Who is using the assistant right now? The selected profile is automatically injected so the assistant knows your name, preferences, and context."
+                               FontSize="11.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"/>
+                    <ComboBox x:Name="ProfileCombo"
+                              ItemsSource="{Binding AvailableProfiles}"
+                              SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayLabel"
+                              Style="{StaticResource DarkComboBoxStyle}"
+                              ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                              Margin="0,0,0,20"/>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── LLM ─────────────────────────────────────────── -->
+                    <TextBlock Text="LLM CONNECTION"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource BlueBrush}"
+                               Margin="0,0,0,8"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Base URL"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmBaseUrl, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Model"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmModel, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Max Tokens"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmMaxTokens, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Temperature"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmTemperature, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── Memory ──────────────────────────────────────── -->
+                    <TextBlock Text="MEMORY"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource GreenBrush}"
+                               Margin="0,0,0,8"/>
+
+                    <CheckBox Content="Enable memory retrieval"
+                              IsChecked="{Binding MemoryEnabled}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,6"/>
+                    <CheckBox Content="Use embeddings for semantic search"
+                              IsChecked="{Binding EmbeddingsEnabled}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,20"/>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── Audio ───────────────────────────────────────── -->
+                    <TextBlock Text="AUDIO"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource PeachBrush}"
+                               Margin="0,0,0,8"/>
+
+                    <CheckBox Content="Enable text-to-speech"
+                              IsChecked="{Binding TtsEnabled}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,6"/>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="PTT Key"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding PttKey, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── Actions ─────────────────────────────────────── -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding StatusText}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0"/>
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Save Settings"
+                                Command="{Binding SaveCommand}"
+                                Style="{StaticResource SendButtonStyle}"
+                                Padding="14,8"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
 
         <!-- ═══════════════════════════════════════════════════════════

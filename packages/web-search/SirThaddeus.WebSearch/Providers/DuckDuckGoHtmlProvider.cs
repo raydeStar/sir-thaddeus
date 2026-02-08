@@ -27,7 +27,10 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
     public DuckDuckGoHtmlProvider(HttpClient? httpClient = null)
     {
         _http = httpClient ?? new HttpClient();
-        _http.Timeout = TimeSpan.FromSeconds(15);
+
+        // Generous ceiling — per-request timeouts are enforced via
+        // CancellationTokenSource from WebSearchOptions.TimeoutMs.
+        _http.Timeout = TimeSpan.FromSeconds(30);
 
         if (_http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
@@ -64,11 +67,14 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(options.TimeoutMs);
 
-            var response = await _http.PostAsync(SearchUrl, content, cts.Token);
-            response.EnsureSuccessStatusCode();
+            var results = await RetryHelper.ExecuteAsync(async () =>
+            {
+                var response = await _http.PostAsync(SearchUrl, content, cts.Token);
+                response.EnsureSuccessStatusCode();
 
-            var html = await response.Content.ReadAsStringAsync(cts.Token);
-            var results = ParseResults(html, options.MaxResults);
+                var html = await response.Content.ReadAsStringAsync(cts.Token);
+                return ParseResults(html, options.MaxResults);
+            }, cancellationToken);
 
             return new SearchResults
             {

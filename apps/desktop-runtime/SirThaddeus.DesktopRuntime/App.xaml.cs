@@ -152,6 +152,10 @@ public partial class App : System.Windows.Application
             _auditLogger,
             _settings.Llm.SystemPrompt);
 
+        // Seed the orchestrator with the active profile from settings
+        // so it can pass it through to MCP tool calls at runtime.
+        _orchestrator.ActiveProfileId = _settings.ActiveProfileId;
+
         _auditLogger.Append(new AuditEvent
         {
             Actor = "runtime",
@@ -350,16 +354,7 @@ public partial class App : System.Windows.Application
         if (!settings.Memory.Enabled)
             return env;
 
-        // Resolve memory DB path ("auto" → %LOCALAPPDATA%\SirThaddeus\memory.db)
-        var dbPath = settings.Memory.DbPath;
-        if (string.Equals(dbPath, "auto", StringComparison.OrdinalIgnoreCase))
-        {
-            var localAppData = Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData);
-            dbPath = Path.Combine(localAppData, "SirThaddeus", "memory.db");
-        }
-
-        env["ST_MEMORY_DB_PATH"] = dbPath;
+        env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings);
         env["ST_LLM_BASEURL"]    = settings.Llm.BaseUrl;
 
         // Embeddings model: use explicit setting, fall back to the chat model
@@ -370,6 +365,11 @@ public partial class App : System.Windows.Application
                 : settings.Memory.EmbeddingsModel;
             env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
         }
+
+        // Active profile: always set so the MCP server can distinguish
+        // "not configured" (env var absent) from "no profile selected"
+        // (env var present but empty). Empty = don't load any profile.
+        env["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "";
 
         return env;
     }
@@ -506,9 +506,9 @@ public partial class App : System.Windows.Application
 
         window.SetViewModel(viewModel);
 
-        // ── Memory Browser ───────────────────────────────────────────
-        // Opens a direct connection to the SQLite memory DB for the
-        // user's browsing panel. This is user-initiated data management,
+        // ── Memory + Profile Browsers ────────────────────────────────
+        // Open a direct connection to the SQLite memory DB for the
+        // user's browsing panels. This is user-initiated data management,
         // not agent-driven, so it bypasses MCP intentionally.
         if (_settings!.Memory.Enabled)
         {
@@ -518,6 +518,26 @@ public partial class App : System.Windows.Application
                 var store  = new SqliteMemoryStore(dbPath);
                 var memVm  = new MemoryBrowserViewModel(store, _auditLogger!);
                 window.SetMemoryBrowserViewModel(memVm);
+
+                // Profile Browser shares the same DB connection
+                var profVm = new ProfileBrowserViewModel(store, _auditLogger!);
+                window.SetProfileBrowserViewModel(profVm);
+
+                // Settings panel — surfaces config values + profile dropdown
+                var settingsVm = new SettingsViewModel(_settings, store, _auditLogger!);
+                settingsVm.ActiveProfileChanged += profileId =>
+                {
+                    // Propagate to orchestrator for runtime tool calls
+                    // (env vars can't cross process boundaries at runtime,
+                    // so we pass the profile ID in the tool call args instead)
+                    if (_orchestrator is not null)
+                        _orchestrator.ActiveProfileId = profileId;
+
+                    // Also set env var for future MCP restarts
+                    Environment.SetEnvironmentVariable(
+                        "ST_ACTIVE_PROFILE_ID", profileId ?? "");
+                };
+                window.SetSettingsViewModel(settingsVm);
             }
             catch (Exception ex)
             {

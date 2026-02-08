@@ -1,60 +1,75 @@
 # Sir Thaddeus
 
-Local-first Windows agent runtime: **desktop UI is optional**, the runtime is designed to run **tray-only/headless**, talk to a **local LLM (LM Studio)**, and execute actions through an **MCP tool server**.
+Local-first Windows agent runtime: **desktop UI is optional**, the runtime is designed to run **tray-only/headless**, talk to a **local LLM (LM Studio / any OpenAI-compatible server)**, and execute actions through an **MCP tool server**.
 
-## What exists right now (high signal)
+## What exists right now
 
-- **Layered architecture is in place**: Frontend (WPF/tray/hotkeys) → Agent orchestrator → LLM client (LM Studio) → MCP server (stdio JSON-RPC).
-- **Command Palette is agent-driven**: typed requests go to the LLM; tool calls flow through MCP.
-- **Headless mode works**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
-- **PTT → agent → TTS pipeline is wired**: transcription is still a placeholder, but the end-to-end pipeline is testable.
+- **Layered architecture**: Frontend (WPF/tray/hotkeys) → Agent orchestrator → LLM client → MCP server (stdio JSON-RPC).
+- **Command Palette** with three tabs: **Chat**, **Memory Browser**, and **Profile/Nuggets**.
+- **Memory system**: facts, events, and text chunks stored in SQLite with hybrid BM25 + optional embeddings retrieval.
+- **Shallow memory personalization**: Profile Cards for the user and people they mention, plus Memory Nuggets (atomic personal facts) injected into context at greeting and in-conversation.
+- **Tool routing pipeline**: Intent Router → Policy Gate → Executor → Post-hooks. Prevents tool hallucination and enforces strict allowlists.
+- **Web search**: DuckDuckGo HTML, Google News RSS, and SearXNG providers with smart query extraction.
+- **Conflict detection**: Memory storage checks for duplicates, single-vs-multi-valued predicates, and antonym contradictions before writing.
+- **Headless mode**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
+- **PTT → agent → TTS pipeline**: transcription is still a placeholder, but the end-to-end pipeline is testable.
 - **Audit log is always-on**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
 
 ## Architecture (4 layers)
 
 ```mermaid
 flowchart LR
-  subgraph frontend [Layer 1: Frontend (apps/desktop-runtime)]
+  subgraph frontend [Layer 1: Frontend — apps/desktop-runtime]
     Tray[System Tray]
-    Overlay[WPF Overlay (optional)]
+    Overlay[WPF Overlay — optional]
     PTT[Push-to-Talk]
     TTS[Text-to-Speech]
     Palette[Command Palette]
   end
 
-  subgraph agent [Layer 2: Agent Orchestrator (packages/agent)]
+  subgraph agent [Layer 2: Agent Orchestrator — packages/agent]
     Loop[Agent Loop]
     Context[Conversation History]
+    Router[Intent Router]
+    Gate[Policy Gate]
   end
 
-  subgraph llm [Layer 3: LLM Client (packages/llm-client)]
-    LmStudio[LM Studio (OpenAI-compatible)]
+  subgraph llm [Layer 3: LLM Client — packages/llm-client]
+    LmStudio[LM Studio / OpenAI-compatible]
   end
 
-  subgraph mcp [Layer 4: MCP Tool Server (apps/mcp-server)]
-    Server[MCP Server (stdio)]
-    Tools[Tools: BrowserNavigate / FileRead / FileList / SystemExecute / ScreenCapture]
+  subgraph memory [Memory — packages/memory + memory-sqlite]
+    Store[SQLite Store]
+    Retriever[Retriever — BM25 + embeddings]
   end
 
-  PTT -->|audio file (placeholder today)| Loop
+  subgraph mcp [Layer 4: MCP Tool Server — apps/mcp-server]
+    Server[MCP Server — stdio]
+    Tools[Memory / Browser / File / System / Screen / WebSearch]
+  end
+
+  PTT -->|audio file| Loop
   Palette -->|typed request| Loop
-  Loop -->|chat + tools| LmStudio
+  Loop --> Router -->|RouterOutput| Gate
+  Gate -->|allowed tools| LmStudio
   LmStudio -->|tool_calls| Loop
   Loop -->|tools/call| Server
   Server -->|tool result| Loop
+  Loop --> Retriever --> Store
   Loop -->|final text| TTS
   Loop -->|events| Overlay
   Tray --> Overlay
 ```
 
-### Layer responsibilities (sanity check)
+### Layer responsibilities
 
 | Layer | Project(s) | Responsibility | Talks to |
 |---|---|---|---|
-| **Frontend** | `apps/desktop-runtime` | Hotkeys, tray, overlay, PTT capture trigger, TTS output | Agent orchestrator (in-process) |
-| **Agent** | `packages/agent` | Conversation loop + tool execution orchestration | LLM client + MCP client |
-| **LLM client** | `packages/llm-client` | OpenAI-style `/v1/chat/completions` calls | LM Studio HTTP server |
-| **MCP server** | `apps/mcp-server` | Exposes tools over MCP stdio | Desktop runtime (child process) |
+| **Frontend** | `apps/desktop-runtime` | Hotkeys, tray, overlay, PTT capture trigger, TTS output, Chat/Memory/Profile UI | Agent orchestrator (in-process) |
+| **Agent** | `packages/agent` | Conversation loop, intent routing, policy gate, tool execution orchestration | LLM client + MCP client |
+| **LLM client** | `packages/llm-client` | OpenAI-style `/v1/chat/completions` + `/v1/embeddings` calls | LM Studio HTTP server |
+| **Memory** | `packages/memory`, `packages/memory-sqlite` | Retrieval engine (BM25 + embeddings), scoring, gating, SQLite store | — |
+| **MCP server** | `apps/mcp-server` | Exposes tools over MCP stdio: memory, browser, file, system, screen, web search | Desktop runtime (child process) |
 
 ## Project structure
 
@@ -62,35 +77,45 @@ flowchart LR
 sir-thaddeus/
 ├── apps/
 │   ├── desktop-runtime/              # WPF overlay + tray + hotkeys + PTT + TTS
+│   │   ├── Converters/               # XAML value converters (Markdown, Base64, etc.)
+│   │   ├── Services/                 # Hotkey, MCP process, PTT, TTS, tray icon
+│   │   └── ViewModels/               # MVVM view models (Chat, Memory, Profile browsers)
 │   └── mcp-server/                   # MCP tool server (stdio)
+│       └── Tools/                    # Memory, Browser, File, System, Screen, WebSearch
 ├── packages/
-│   ├── agent/                        # Agent orchestration loop
-│   ├── llm-client/                   # LM Studio / OpenAI-compatible client
+│   ├── agent/                        # Agent orchestration loop + policy gate + router
+│   ├── llm-client/                   # LM Studio / OpenAI-compatible client + embeddings
+│   ├── memory/                       # Memory retrieval engine, scoring, intent classification
+│   ├── memory-sqlite/                # SQLite-backed IMemoryStore (WAL mode, FTS5)
+│   ├── web-search/                   # Web search providers (DuckDuckGo, Google News, SearXNG)
 │   ├── config/                       # %LOCALAPPDATA% settings.json management
 │   ├── core/                         # State machine, runtime controller
 │   ├── audit-log/                    # JSONL audit logging
-│   ├── permission-broker/            # Time-boxed permission token management (legacy path)
-│   ├── tool-runner/                  # Tool execution w/ permission enforcement (legacy path)
-│   ├── invocation/                   # Legacy regex command planning/execution
+│   ├── permission-broker/            # Time-boxed permission token management
+│   ├── tool-runner/                  # Tool execution with permission enforcement
+│   ├── invocation/                   # Command planning/execution
 │   ├── observation-spec/             # Observation spec schema + validation
 │   └── local-tools/
 │       └── Playwright/               # Playwright browser tool (not MCP-wired yet)
-└── tests/                            # Unit tests
+├── tests/                            # Unit + integration tests
+├── tools/                            # Dev utilities (PopulateTestMemory, etc.)
+└── project-notes/                    # Design docs and notes
 ```
 
 ## Prerequisites
 
 - **Windows 10/11**
 - **.NET 8 SDK**
-- **LM Studio** running a local server (OpenAI-compatible)
+- **LM Studio** (or any OpenAI-compatible local server)
   - Default expected base URL: `http://localhost:1234`
-  - Endpoint used: `/v1/chat/completions`
+  - Endpoints used: `/v1/chat/completions`, `/v1/embeddings` (optional)
 
 ## Configuration
 
 On first run, the desktop runtime creates:
 
 - **Settings**: `%LOCALAPPDATA%\SirThaddeus\settings.json`
+- **Memory DB**: `%LOCALAPPDATA%\SirThaddeus\memory.db`
 - **Audit log**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`
 - **PTT audio folder**: `%LOCALAPPDATA%\SirThaddeus\audio\`
 
@@ -103,7 +128,7 @@ Example settings file:
     "model": "local-model",
     "maxTokens": 2048,
     "temperature": 0.7,
-    "systemPrompt": "You are a helpful assistant with access to local tools. Use tools when needed. Be concise."
+    "systemPrompt": "You are a helpful assistant with access to local tools."
   },
   "audio": {
     "pttKey": "F13",
@@ -115,6 +140,12 @@ Example settings file:
   },
   "mcp": {
     "serverPath": "auto"
+  },
+  "memory": {
+    "enabled": true,
+    "dbPath": "auto",
+    "useEmbeddings": true,
+    "embeddingsModel": ""
   }
 }
 ```
@@ -122,6 +153,8 @@ Example settings file:
 Notes:
 - `audio.pttKey` supports `F1`..`F24` or hex virtual keys like `0x7C`.
 - `mcp.serverPath = "auto"` resolves to the built `SirThaddeus.McpServer.exe` in the repo output folders.
+- `memory.dbPath = "auto"` resolves to `%LOCALAPPDATA%\SirThaddeus\memory.db`.
+- `memory.embeddingsModel` defaults to the chat model if left empty.
 
 ## Building & tests
 
@@ -159,37 +192,34 @@ dotnet run --project apps/mcp-server/SirThaddeus.McpServer
 | `Ctrl+Space` | Open Command Palette |
 | `F13` (default; configurable via settings) | Push-to-Talk trigger (keyboard hook) |
 
-## Sanity check: does the architecture behave like we expect?
+## Command Palette tabs
 
-1. **Start LM Studio** and ensure the local server is running.
-2. Run the desktop runtime (normal or headless).
-3. Open `%LOCALAPPDATA%\SirThaddeus\audit.jsonl` and confirm startup events:
-   - `APP_STARTUP`
-   - `LLM_CLIENT_CREATED`
-   - `MCP_SERVER_STARTED` and `MCP_SERVER_INITIALIZED` (if MCP server path resolved correctly)
-4. Press `Ctrl+Space` → in the command palette, try a tool-forcing prompt:
-   - `Use SystemExecute to run 'whoami' and paste the output.`
-5. Headless-only quick check:
-   - Run with `--headless` and confirm **no overlay window** appears at startup.
-   - Tray icon exists; `Ctrl+Space` still opens the palette.
-   - Hold/release the PTT key once and confirm you get a spoken response (TTS).
+| Tab | Purpose |
+|---|---|
+| **Chat** | Conversational interface to the agent. Tool calls, web search, and screen capture trigger from here. |
+| **Memory** | Browse, filter, and CRUD facts, events, and chunks stored in SQLite. |
+| **Profile** | Manage Profile Cards (user + people) and Memory Nuggets (atomic personal facts). Sub-panes: Profiles, Nuggets. |
 
 ## MCP tools exposed today
 
-The MCP server currently exposes:
-
-- `BrowserNavigate(url)` — HTTP fetch + excerpt (Playwright is available in the repo but not wired through MCP yet)
-- `FileRead(path)` — reads up to 1MB
-- `FileList(path)` — lists up to 100 entries
-- `SystemExecute(command)` — **allowlisted commands only**
-- `ScreenCapture(target)` — stub (returns acknowledgement)
+| Tool | Description |
+|---|---|
+| `MemoryRetrieve` | Retrieves relevant memory (profile card, nuggets, facts, events, chunks). Supports `mode=greet` for cold start. |
+| `MemoryStoreFacts` | Stores subject-predicate-object facts with conflict/duplicate detection. |
+| `MemoryUpdateFact` | Updates an existing fact's object value (for conflict resolution). |
+| `WebSearch` | Searches the web via DuckDuckGo, Google News RSS, or SearXNG. |
+| `BrowserNavigate` | HTTP fetch + content extraction (Playwright available but not MCP-wired yet). |
+| `FileRead` | Reads up to 1 MB from a local file. |
+| `FileList` | Lists up to 100 entries in a directory. |
+| `SystemExecute` | Runs allowlisted commands only. No raw shell execution. |
+| `ScreenCapture` | Captures full screen or active window (explicit permission required). |
 
 ## Known gaps (intentionally called out)
 
-- **Transcription**: PTT currently creates a minimal WAV placeholder; Whisper transcription is not integrated yet.
-- **Permission enforcement**: the legacy ToolRunner path has explicit tokens/prompts, but MCP tool calls are not yet gated by those tokens.
-- **Screen capture**: stub only.
+- **Transcription**: PTT creates a minimal WAV placeholder; Whisper transcription is not integrated yet.
+- **Permission enforcement**: MCP tool calls are not yet gated by permission tokens (legacy ToolRunner path has them).
 - **Playwright via MCP**: Playwright tool exists, but MCP uses a simpler HTTP navigation tool for now.
+- **Nugget auto-suggest**: V1 nuggets are manual-only. Two-sighting auto-suggest (V1.1+) is designed but deferred.
 
 ## More docs
 
