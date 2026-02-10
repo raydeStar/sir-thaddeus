@@ -24,7 +24,7 @@ public static class UtilityRouter
     /// </summary>
     public sealed record UtilityResult
     {
-        public required string Category { get; init; }  // "weather", "time", "calculator", "conversion"
+        public required string Category { get; init; }  // "weather", "time", "calculator", "conversion", "fact"
         public required string Answer   { get; init; }  // Inline answer text
         public string? McpToolName      { get; init; }  // If non-null, route to this MCP tool instead
         public string? McpToolArgs      { get; init; }  // JSON args for the MCP tool
@@ -33,7 +33,13 @@ public static class UtilityRouter
     // ── Weather patterns ─────────────────────────────────────────────
     // Must include a location component to avoid false positives.
     private static readonly Regex WeatherPattern = new(
-        @"(?:what(?:'s| is)\s+the\s+)?(?:weather|forecast|temperature|temp)(?:\s+like)?\s+(?:in|for|at|near)\s+(.+)",
+        @"(?:what(?:'s| is)\s+the\s+)?(?:weather|forecast|temperature|temp)(?:\s+(?:is|like))?\s+(?:in|for|at|near)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Handles chatty forms like:
+    // "can you tell me what the weather is in rexburg, id?"
+    private static readonly Regex WeatherLoosePattern = new(
+        @"\b(?:weather|forecast|temperature|temp)\b.*?\b(?:in|for|at|near)\b\s+(.+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex WillItRainPattern = new(
@@ -52,7 +58,7 @@ public static class UtilityRouter
     // ── Calculator patterns ──────────────────────────────────────────
     // Matches "what is 15% of 230", "calculate 5 * 12", basic arithmetic.
     private static readonly Regex CalcPattern = new(
-        @"^(?:what(?:'s| is)\s+)?(\d[\d\s\.\+\-\*\/\%\(\)]+\d)$",
+        @"^(?:what(?:'s| is)\s+|calculate\s+)?(\d[\d\s\.\+\-\*\/\%\(\)]+\d)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex PercentOfPattern = new(
@@ -71,6 +77,22 @@ public static class UtilityRouter
     private static readonly Regex LetterCountPattern = new(
         @"(?:how many|count)\s+([a-zA-Z])(?:['’]s|s)?\s+(?:are\s+)?in\s+(?:the\s+word\s+)?[""']?([a-zA-Z]+)[""']?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex MoonDistancePattern = new(
+        @"(?:how\s+far\s+(?:is|to)\s+(?:the\s+)?moon|distance\s+(?:to|from)\s+(?:the\s+)?moon|how\s+many\s+\w+\s+(?:is|are)\s+(?:it\s+)?(?:to\s+)?(?:the\s+)?moon|earth\s+to\s+moon)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Strip tail temporal markers that should influence forecast day,
+    // not geocoder place matching (e.g. "Rexburg today" -> "Rexburg").
+    private static readonly Regex LocationTemporalTailPattern = new(
+        @"\s+(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|next\s+week)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TemporalOnlyLocationPattern = new(
+        @"^(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|next\s+week)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private const double AvgEarthMoonDistanceKm = 384_400;
 
     // ── Anti-patterns (things that look like utility but aren't) ─────
     private static readonly string[] WeatherFalsePositives =
@@ -94,6 +116,7 @@ public static class UtilityRouter
         return TryWeather(trimmed)
             ?? TryTime(trimmed)
             ?? TryLetterCount(trimmed)
+            ?? TryMoonDistanceFact(trimmed)
             ?? TryCalculator(trimmed)
             ?? TryConversion(trimmed);
     }
@@ -117,25 +140,26 @@ public static class UtilityRouter
         if (!match.Success)
             match = WillItRainPattern.Match(message);
         if (!match.Success)
+            match = WeatherLoosePattern.Match(message);
+        if (!match.Success)
             return null;
 
         var location = NormalizeLocation(match.Groups[1].Value);
         if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
             return null;
 
-        // Route to a web search with a constrained weather query.
-        // If a dedicated weather MCP tool exists in the future, use
-        // McpToolName/McpToolArgs instead.
+        // Route to coordinate-first weather tools:
+        //   weather_geocode(place) -> weather_forecast(lat,lon)
+        // The orchestrator executes the second step using geocode output.
         return new UtilityResult
         {
             Category    = "weather",
             Answer      = $"[weather lookup for: {location}]",
-            McpToolName = "web_search",
+            McpToolName = "weather_geocode",
             McpToolArgs = System.Text.Json.JsonSerializer.Serialize(new
             {
-                query      = $"{location} weather forecast today",
-                maxResults = 3,
-                recency    = "day"
+                place      = location,
+                maxResults = 3
             })
         };
     }
@@ -214,8 +238,10 @@ public static class UtilityRouter
 
     private static UtilityResult? TryCalculator(string message)
     {
+        var normalized = message.Trim().TrimEnd('?', '!', '.');
+
         // Percentage: "what's 15% of 230"
-        var pctMatch = PercentOfPattern.Match(message);
+        var pctMatch = PercentOfPattern.Match(normalized);
         if (pctMatch.Success &&
             double.TryParse(pctMatch.Groups[1].Value, out var pct) &&
             double.TryParse(pctMatch.Groups[2].Value, out var baseVal))
@@ -229,7 +255,7 @@ public static class UtilityRouter
         }
 
         // Basic arithmetic: "5 * 12", "100 + 50 - 20"
-        var calcMatch = CalcPattern.Match(message.Trim());
+        var calcMatch = CalcPattern.Match(normalized);
         if (!calcMatch.Success)
             return null;
 
@@ -252,6 +278,22 @@ public static class UtilityRouter
         {
             return null; // Fall through to search pipeline
         }
+    }
+
+    private static UtilityResult? TryMoonDistanceFact(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        if (!MoonDistancePattern.IsMatch(lower))
+            return null;
+
+        var (value, unitLabel) = ResolveMoonDistanceUnit(lower);
+        var formatted = FormatMoonDistance(value, unitLabel);
+
+        return new UtilityResult
+        {
+            Category = "fact",
+            Answer = $"The average Earth-Moon distance is about **{formatted}**."
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -383,6 +425,23 @@ public static class UtilityRouter
         return count;
     }
 
+    private static (double Value, string UnitLabel) ResolveMoonDistanceUnit(string lowerMessage)
+    {
+        if (lowerMessage.Contains("meter", StringComparison.Ordinal))
+            return (AvgEarthMoonDistanceKm * 1_000.0, "meters");
+        if (lowerMessage.Contains("mile", StringComparison.Ordinal))
+            return (AvgEarthMoonDistanceKm * 0.621371, "miles");
+
+        // Default to kilometers when no explicit unit is requested.
+        return (AvgEarthMoonDistanceKm, "kilometers");
+    }
+
+    private static string FormatMoonDistance(double value, string unitLabel)
+    {
+        var decimals = unitLabel == "kilometers" ? 0 : 0;
+        return $"{Math.Round(value, decimals):N0} {unitLabel}";
+    }
+
     private static string NormalizeLocation(string value)
     {
         var location = (value ?? "").Trim();
@@ -394,6 +453,10 @@ public static class UtilityRouter
             @"\s+(?:for me|please|pls|thanks|thank you)\s*$",
             "",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        location = LocationTemporalTailPattern.Replace(location, "");
+        if (TemporalOnlyLocationPattern.IsMatch(location.Trim()))
+            return "";
 
         return location.Trim().TrimEnd('?', '.', '!', ',');
     }

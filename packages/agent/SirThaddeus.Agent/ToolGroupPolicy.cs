@@ -54,6 +54,8 @@ public static class ToolGroupPolicy
         // Web
         ["web_search"]           = "web",
         ["browser_navigate"]     = "web",
+        ["weather_geocode"]      = "web",
+        ["weather_forecast"]     = "web",
 
         // Memory Read
         ["memory_retrieve"]      = "memoryRead",
@@ -189,6 +191,10 @@ public static class ToolGroupPolicy
             TryExtractSafe(root, "url",     parts);
             TryExtractSafe(root, "command", parts);
             TryExtractSafe(root, "query",   parts);
+            TryExtractSafe(root, "place",   parts);
+            TryExtractSafe(root, "latitude", parts);
+            TryExtractSafe(root, "longitude", parts);
+            TryExtractSafe(root, "countryCode", parts);
             TryExtractSafe(root, "fact_id", parts);
             TryExtractSafe(root, "tag",     parts);
 
@@ -213,7 +219,14 @@ public static class ToolGroupPolicy
         if (!root.TryGetProperty(fieldName, out var prop))
             return;
 
-        var value = prop.GetString();
+        var value = prop.ValueKind switch
+        {
+            JsonValueKind.String => prop.GetString(),
+            JsonValueKind.Number => prop.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
         if (string.IsNullOrWhiteSpace(value))
             return;
 

@@ -270,7 +270,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 };
 
                 // ── Parse source cards from web search results ───
-                TryAttachSourceCards(assistantMsg, result.ToolCallsMade);
+                // Some deterministic utility/fact responses intentionally
+                // suppress source cards in the chat pane while keeping
+                // full internal logs for diagnostics.
+                if (!result.SuppressSourceCardsUi)
+                    TryAttachSourceCards(assistantMsg, result.ToolCallsMade);
 
                 Messages.Add(assistantMsg);
                 MessageAdded?.Invoke();
@@ -278,12 +282,15 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 // ── Log tool calls to activity pane ──────────────
                 if (result.ToolCallsMade.Count > 0)
                 {
-                    var toolNames = string.Join(", ",
-                        result.ToolCallsMade.Select(t => t.ToolName));
+                    if (!result.SuppressToolActivityUi)
+                    {
+                        var toolNames = string.Join(", ",
+                            result.ToolCallsMade.Select(t => t.ToolName));
 
-                    AddMessage(ChatMessageRole.ToolActivity,
-                        $"\u26A1 {result.ToolCallsMade.Count} tool call(s): {toolNames} " +
-                        $"\u2022 {result.LlmRoundTrips} LLM round-trip(s)");
+                        AddMessage(ChatMessageRole.ToolActivity,
+                            $"\u26A1 {result.ToolCallsMade.Count} tool call(s): {toolNames} " +
+                            $"\u2022 {result.LlmRoundTrips} LLM round-trip(s)");
+                    }
 
                     foreach (var tc in result.ToolCallsMade)
                     {

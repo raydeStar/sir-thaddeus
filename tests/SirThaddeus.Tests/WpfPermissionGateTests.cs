@@ -25,6 +25,10 @@ public class ToolGroupResolutionTests
     [InlineData("web_search",       "web")]
     [InlineData("BrowserNavigate",  "web")]
     [InlineData("browser_navigate", "web")]
+    [InlineData("WeatherGeocode",   "web")]
+    [InlineData("weather_geocode",  "web")]
+    [InlineData("WeatherForecast",  "web")]
+    [InlineData("weather_forecast", "web")]
     public void KnownWebTools_MapToWebGroup(string toolName, string expected)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);

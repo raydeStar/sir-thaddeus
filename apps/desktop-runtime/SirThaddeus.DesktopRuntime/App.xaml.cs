@@ -366,31 +366,47 @@ public partial class App : System.Windows.Application
 
     /// <summary>
     /// Builds the environment variable dictionary that the MCP server child
-    /// process needs for memory retrieval and optional embeddings.
+    /// process needs for memory, profile, and weather tools.
     /// </summary>
     private static Dictionary<string, string> BuildMcpEnvironmentVariables(AppSettings settings)
     {
         var env = new Dictionary<string, string>();
 
-        if (!settings.Memory.Enabled)
-            return env;
-
-        env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings);
-        env["ST_LLM_BASEURL"]    = settings.Llm.BaseUrl;
-
-        // Embeddings model: use explicit setting, fall back to the chat model
-        if (settings.Memory.UseEmbeddings)
-        {
-            var embModel = string.IsNullOrWhiteSpace(settings.Memory.EmbeddingsModel)
-                ? settings.Llm.Model
-                : settings.Memory.EmbeddingsModel;
-            env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
-        }
-
         // Active profile: always set so the MCP server can distinguish
         // "not configured" (env var absent) from "no profile selected"
         // (env var present but empty). Empty = don't load any profile.
         env["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "";
+
+        // Memory env vars are only needed when memory is enabled.
+        if (settings.Memory.Enabled)
+        {
+            env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings);
+            env["ST_LLM_BASEURL"]    = settings.Llm.BaseUrl;
+
+            // Embeddings model: use explicit setting, fall back to the chat model
+            if (settings.Memory.UseEmbeddings)
+            {
+                var embModel = string.IsNullOrWhiteSpace(settings.Memory.EmbeddingsModel)
+                    ? settings.Llm.Model
+                    : settings.Memory.EmbeddingsModel;
+                env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
+            }
+        }
+
+        // Weather stack settings
+        env["ST_WEATHER_PROVIDER_MODE"] = settings.Weather.ProviderMode;
+        env["ST_WEATHER_FORECAST_CACHE_MINUTES"] =
+            Math.Clamp(settings.Weather.ForecastCacheMinutes, 10, 30).ToString();
+        env["ST_WEATHER_GEOCODE_CACHE_MINUTES"] =
+            Math.Max(60, settings.Weather.GeocodeCacheMinutes).ToString();
+        env["ST_WEATHER_PLACE_MEMORY_ENABLED"] =
+            settings.Weather.PlaceMemoryEnabled ? "true" : "false";
+        env["ST_WEATHER_PLACE_MEMORY_PATH"] =
+            ResolveWeatherPlaceMemoryPath(settings);
+        env["ST_WEATHER_USER_AGENT"] =
+            string.IsNullOrWhiteSpace(settings.Weather.UserAgent)
+                ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
+                : settings.Weather.UserAgent.Trim();
 
         return env;
     }
@@ -655,6 +671,28 @@ public partial class App : System.Windows.Application
             Directory.CreateDirectory(dir);
 
         return dbPath;
+    }
+
+    /// <summary>
+    /// Resolves weather place-memory path from settings. "auto" maps to
+    /// %LOCALAPPDATA%\SirThaddeus\weather-places.json and ensures parent
+    /// directory exists.
+    /// </summary>
+    private static string ResolveWeatherPlaceMemoryPath(AppSettings settings)
+    {
+        var path = settings.Weather.PlaceMemoryPath;
+        if (string.Equals(path, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            path = Path.Combine(localAppData, "SirThaddeus", "weather-places.json");
+        }
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        return path;
     }
 
     // ─────────────────────────────────────────────────────────────────────

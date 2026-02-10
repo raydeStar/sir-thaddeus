@@ -26,6 +26,19 @@ public sealed record AgentResponse
     public int LlmRoundTrips { get; init; }
 
     /// <summary>
+    /// When true, the desktop chat UI should skip source-card rendering
+    /// for this response, even if tool output contains source metadata.
+    /// Activity logs are still written.
+    /// </summary>
+    public bool SuppressSourceCardsUi { get; init; }
+
+    /// <summary>
+    /// When true, the desktop chat UI should not append the "tool activity"
+    /// chat bubble for this response. Tool input/output remains in logs.
+    /// </summary>
+    public bool SuppressToolActivityUi { get; init; }
+
+    /// <summary>
     /// Error message if the request failed.
     /// </summary>
     public string? Error { get; init; }

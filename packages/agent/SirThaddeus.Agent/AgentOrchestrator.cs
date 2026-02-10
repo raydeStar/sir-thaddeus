@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -10,7 +11,7 @@ namespace SirThaddeus.Agent;
 /// Implements the agent loop: user message -> LLM -> tool calls -> LLM -> ... -> final text.
 /// Holds in-memory conversation history and delegates tool execution to the MCP client.
 /// </summary>
-public sealed class AgentOrchestrator : IAgentOrchestrator
+public sealed partial class AgentOrchestrator : IAgentOrchestrator
 {
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;
@@ -26,14 +27,26 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     private readonly SearchOrchestrator _searchOrchestrator;
 
+    // Last resolved place from weather flow. Used to anchor short
+    // follow-up weather/news prompts like "forecast for today?"
+    // without forcing the user to repeat the city every turn.
+    private string? _lastPlaceContextName;
+    private string? _lastPlaceContextCountryCode;
+    private DateTimeOffset _lastPlaceContextAt;
+
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
+    private static readonly TimeSpan PlaceContextTtl = TimeSpan.FromMinutes(30);
 
     // ── Web search tool names ────────────────────────────────────────
     // MCP stacks may register tools in snake_case or PascalCase.
     // Try the canonical name first, fall back to the alternate.
     private const string WebSearchToolName    = "web_search";
     private const string WebSearchToolNameAlt = "WebSearch";
+    private const string WeatherGeocodeToolName    = "weather_geocode";
+    private const string WeatherGeocodeToolNameAlt = "WeatherGeocode";
+    private const string WeatherForecastToolName    = "weather_forecast";
+    private const string WeatherForecastToolNameAlt = "WeatherForecast";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
@@ -66,6 +79,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensCasual    = 256;
     private const int MaxTokensWebSummary = 768;
     private const int MaxTokensTooling   = 1024;
+    private const int MaxTokensUtilityRouting = 120;
 
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
     // optional embeddings don't finish in this window, we skip memory
@@ -281,14 +295,35 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             : "Follow-up — passively capturing info.");
         }
 
+        var contextualUserMessage = ApplyPlaceContextIfHelpful(userMessage);
+        if (!string.Equals(contextualUserMessage, userMessage, StringComparison.Ordinal))
+        {
+            LogEvent("PLACE_CONTEXT_INFERRED",
+                $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
+        }
+
         try
         {
             // ── Utility bypass: weather, time, calc, conversion ────────
             // Intercepted BEFORE the search pipeline to avoid overhead.
-            var utilityResult = UtilityRouter.TryHandle(userMessage);
+            var utilityResult = UtilityRouter.TryHandle(contextualUserMessage);
+            if (utilityResult is null)
+            {
+                utilityResult = await TryInferUtilityRouteWithLlmAsync(
+                    contextualUserMessage, cancellationToken);
+            }
             if (utilityResult is not null)
             {
                 LogEvent("UTILITY_BYPASS", $"category={utilityResult.Category}");
+
+                // Weather uses a dedicated two-step MCP flow:
+                //   weather_geocode -> weather_forecast
+                // This keeps routing deterministic and avoids brittle string search.
+                if (string.Equals(utilityResult.Category, "weather", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteWeatherUtilityAsync(
+                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                }
 
                 // If the utility wants an MCP tool call, do it
                 if (utilityResult.McpToolName is not null && utilityResult.McpToolArgs is not null)
@@ -304,15 +339,6 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             Result    = toolResult,
                             Success   = true
                         });
-
-                        // For weather, summarize this tool result directly
-                        // (do not re-run search pipeline/query building).
-                        if (utilityResult.Category == "weather")
-                        {
-                            return await SummarizeUtilitySearchResultAsync(
-                                userMessage, memoryPackText, toolResult,
-                                toolCallsMade, roundTrips, cancellationToken);
-                        }
                     }
                     catch
                     {
@@ -321,8 +347,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    // Inline utility answer (time, calc, conversion)
-                    var text = utilityResult.Answer;
+                    // Inline utility answer (time, calc, conversion, fact)
+                    var text = BuildInlineUtilityResponse(utilityResult);
+                    var suppressUiArtifacts = ShouldSuppressUtilityUiArtifacts(utilityResult.Category);
                     _history.Add(ChatMessage.Assistant(text));
                     LogEvent("AGENT_RESPONSE", text);
                     return new AgentResponse
@@ -330,7 +357,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         Text          = text,
                         Success       = true,
                         ToolCallsMade = toolCallsMade,
-                        LlmRoundTrips = 0
+                        LlmRoundTrips = 0,
+                        SuppressSourceCardsUi = suppressUiArtifacts,
+                        SuppressToolActivityUi = suppressUiArtifacts
                     };
                 }
             }
@@ -345,7 +374,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
 
                 var searchResponse = await _searchOrchestrator.ExecuteAsync(
-                    userMessage, memoryPackText, _history, toolCallsMade, cancellationToken);
+                    contextualUserMessage, memoryPackText, _history, toolCallsMade, cancellationToken);
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
@@ -386,7 +415,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         "falling back to web search.");
 
                     return await FallbackToWebSearchAsync(
-                        userMessage, memoryPackText,
+                        contextualUserMessage, memoryPackText,
                         toolCallsMade, roundTrips, cancellationToken);
                 }
 
@@ -718,57 +747,442 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     }
 
     /// <summary>
-    /// Summarizes utility-triggered web search results (e.g., weather)
-    /// without re-running query construction/search orchestration.
-    /// This keeps utility routing deterministic and avoids duplicate
-    /// web_search calls that can drift to unrelated results.
+    /// Executes the weather utility flow using dedicated MCP tools:
+    /// weather_geocode -> weather_forecast. Returns a short deterministic
+    /// weather summary without re-entering the web search pipeline.
     /// </summary>
-    private async Task<AgentResponse> SummarizeUtilitySearchResultAsync(
+    private async Task<AgentResponse> ExecuteWeatherUtilityAsync(
         string userMessage,
-        string memoryPackText,
-        string toolResult,
+        UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
         CancellationToken cancellationToken)
     {
-        var summaryInput = "[Search results — reference only, do not display to user]\n" +
-                           StripSourcesJsonSection(toolResult);
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Weather utility is missing required geocode args.");
 
-        var messagesForSummary = InjectModeIntoSystemPrompt(
-            _history, memoryPackText + WebSummaryInstruction);
-        messagesForSummary.Add(ChatMessage.User(summaryInput));
+        var geocodeCall = await CallToolWithAliasAsync(
+            WeatherGeocodeToolName, WeatherGeocodeToolNameAlt,
+            utilityResult.McpToolArgs, cancellationToken);
 
-        roundTrips++;
-        string text;
-        try
+        toolCallsMade.Add(new ToolCallRecord
         {
-            var response = await CallLlmWithRetrySafe(
-                messagesForSummary, roundTrips, MaxTokensWebSummary, cancellationToken);
+            ToolName = geocodeCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = geocodeCall.Result,
+            Success = geocodeCall.Success
+        });
 
-            text = response.FinishReason == "error"
-                ? BuildExtractiveSummary(toolResult, userMessage)
-                : TruncateSelfDialogue(response.Content ?? "");
-        }
-        catch
+        if (!geocodeCall.Success)
         {
-            text = BuildExtractiveSummary(toolResult, userMessage);
+            var errorText = "I couldn't resolve that location for weather lookup. " +
+                            "Try a city and region like \"Rexburg, ID\".";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
         }
 
-        text = StripRawTemplateTokens(text);
-        if (string.IsNullOrWhiteSpace(text))
-            text = BuildExtractiveSummary(toolResult, userMessage);
+        if (!TryParseBestGeocodeCandidate(geocodeCall.Result, out var geo))
+        {
+            var noLocationText = "I couldn't find coordinates for that location. " +
+                                 "Try a more specific place name.";
+            _history.Add(ChatMessage.Assistant(noLocationText));
+            return new AgentResponse
+            {
+                Text = noLocationText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
 
-        _history.Add(ChatMessage.Assistant(text));
-        LogEvent("AGENT_RESPONSE", text);
+        RememberPlaceContext(geo.Name, geo.CountryCode);
+
+        var forecastArgs = JsonSerializer.Serialize(new
+        {
+            latitude = geo.Latitude,
+            longitude = geo.Longitude,
+            placeHint = geo.Name,
+            countryCode = geo.CountryCode,
+            days = 7
+        });
+
+        var forecastCall = await CallToolWithAliasAsync(
+            WeatherForecastToolName, WeatherForecastToolNameAlt,
+            forecastArgs, cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = forecastCall.ToolName,
+            Arguments = forecastArgs,
+            Result = forecastCall.Result,
+            Success = forecastCall.Success
+        });
+
+        if (!forecastCall.Success)
+        {
+            var errorText = "I couldn't fetch the weather details right now. " +
+                            "Please try again in a moment.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var weatherBrief = TryBuildWeatherBriefFromForecastJson(
+            forecastCall.Result, userMessage, geo.Name);
+
+        if (string.IsNullOrWhiteSpace(weatherBrief))
+        {
+            weatherBrief = "I found weather data, but couldn't extract a clean snapshot yet. " +
+                           "Try asking again and I'll refresh it.";
+        }
+
+        _history.Add(ChatMessage.Assistant(weatherBrief));
+        LogEvent("AGENT_RESPONSE", weatherBrief);
 
         return new AgentResponse
         {
-            Text          = text,
-            Success       = true,
+            Text = weatherBrief,
+            Success = true,
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = roundTrips
         };
     }
+
+    private async Task<(string ToolName, string Result, bool Success)> CallToolWithAliasAsync(
+        string primaryToolName,
+        string alternateToolName,
+        string argsJson,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _mcp.CallToolAsync(primaryToolName, argsJson, cancellationToken);
+            return (primaryToolName, result, true);
+        }
+        catch (Exception primaryError)
+        {
+            try
+            {
+                var result = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
+                return (alternateToolName, result, true);
+            }
+            catch (Exception alternateError)
+            {
+                var errorText = $"Error: {primaryError.Message}; fallback failed: {alternateError.Message}";
+                return (primaryToolName, errorText, false);
+            }
+        }
+    }
+
+    private static bool TryParseBestGeocodeCandidate(
+        string geocodeJson,
+        out (string Name, string CountryCode, double Latitude, double Longitude) candidate)
+    {
+        candidate = default;
+        if (string.IsNullOrWhiteSpace(geocodeJson))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(geocodeJson);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("results", out var results) ||
+                results.ValueKind != JsonValueKind.Array)
+                return false;
+
+            JsonElement? best = null;
+            double bestConfidence = double.NegativeInfinity;
+            foreach (var item in results.EnumerateArray())
+            {
+                if (!item.TryGetProperty("latitude", out var latProbeEl) || !latProbeEl.TryGetDouble(out _))
+                    continue;
+                if (!item.TryGetProperty("longitude", out var lonProbeEl) || !lonProbeEl.TryGetDouble(out _))
+                    continue;
+
+                var confidence = item.TryGetProperty("confidence", out var confEl) &&
+                                 confEl.ValueKind == JsonValueKind.Number &&
+                                 confEl.TryGetDouble(out var conf)
+                    ? conf
+                    : 0.0;
+
+                if (best is null || confidence > bestConfidence)
+                {
+                    best = item;
+                    bestConfidence = confidence;
+                }
+            }
+
+            if (best is null)
+                return false;
+
+            var r = best.Value;
+            if (!r.TryGetProperty("latitude", out var latEl) || !latEl.TryGetDouble(out var lat))
+                return false;
+            if (!r.TryGetProperty("longitude", out var lonEl) || !lonEl.TryGetDouble(out var lon))
+                return false;
+
+            var name = r.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "") : "";
+            var countryCode = r.TryGetProperty("countryCode", out var ccEl) ? (ccEl.GetString() ?? "") : "";
+
+            candidate = (name, countryCode, lat, lon);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Builds a short deterministic weather response from the normalized
+    /// weather_forecast MCP JSON output.
+    /// </summary>
+    private static string? TryBuildWeatherBriefFromForecastJson(
+        string forecastJson,
+        string userMessage,
+        string fallbackLocation)
+    {
+        if (string.IsNullOrWhiteSpace(forecastJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(forecastJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return null;
+            }
+
+            var location = fallbackLocation;
+            if (root.TryGetProperty("location", out var loc) &&
+                loc.ValueKind == JsonValueKind.Object &&
+                loc.TryGetProperty("name", out var ln) &&
+                !string.IsNullOrWhiteSpace(ln.GetString()))
+            {
+                location = ln.GetString()!;
+            }
+            else
+            {
+                var fromMessage = ExtractLocationFromWeatherMessage(userMessage);
+                if (!string.IsNullOrWhiteSpace(fromMessage))
+                    location = fromMessage!;
+            }
+
+            int? currentTemp = null;
+            string unit = "";
+            string condition = "";
+
+            if (root.TryGetProperty("current", out var current) &&
+                current.ValueKind == JsonValueKind.Object)
+            {
+                if (current.TryGetProperty("temperature", out var t) && t.TryGetInt32(out var ti))
+                    currentTemp = ti;
+                if (current.TryGetProperty("unit", out var u) && u.ValueKind == JsonValueKind.String)
+                    unit = u.GetString() ?? "";
+                if (current.TryGetProperty("condition", out var c) && c.ValueKind == JsonValueKind.String)
+                    condition = c.GetString() ?? "";
+            }
+
+            int? avgTemp = null;
+            if (root.TryGetProperty("daily", out var daily) &&
+                daily.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var day in daily.EnumerateArray())
+                {
+                    if (day.TryGetProperty("avgTemp", out var avg) && avg.TryGetInt32(out var av))
+                    {
+                        avgTemp = av;
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(location))
+                location = "there";
+
+            var unitSuffix = string.IsNullOrWhiteSpace(unit) ? "" : unit.ToUpperInvariant();
+            var avgSuffix = string.IsNullOrWhiteSpace(unitSuffix) ? "" : unitSuffix;
+
+            if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
+            {
+                var line = $"In {location}, it's about **{currentTemp}{unitSuffix}** and **{condition}** right now.";
+                return avgTemp.HasValue
+                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
+                    : line;
+            }
+
+            if (currentTemp.HasValue)
+            {
+                var line = $"In {location}, it's about **{currentTemp}{unitSuffix}** right now.";
+                return avgTemp.HasValue
+                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
+                    : line;
+            }
+
+            if (!string.IsNullOrWhiteSpace(condition))
+            {
+                var line = $"In {location}, conditions are **{condition}** right now.";
+                return avgTemp.HasValue
+                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
+                    : line;
+            }
+
+            if (avgTemp.HasValue)
+                return $"In {location}, avg temp is **{avgTemp}{avgSuffix}**.";
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ExtractLocationFromWeatherMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        var match = WeatherLocationRegex().Match(message);
+        if (!match.Success)
+            return null;
+
+        var location = match.Groups["location"].Value
+            .Trim()
+            .TrimEnd('?', '.', '!', ',');
+
+        return string.IsNullOrWhiteSpace(location) ? null : location;
+    }
+
+    private void RememberPlaceContext(string placeName, string countryCode)
+    {
+        if (string.IsNullOrWhiteSpace(placeName))
+            return;
+
+        var normalizedName = placeName.Trim();
+        var normalizedCountryCode = string.IsNullOrWhiteSpace(countryCode)
+            ? ""
+            : countryCode.Trim().ToUpperInvariant();
+
+        var now = _timeProvider.GetUtcNow();
+        _lastPlaceContextName = normalizedName;
+        _lastPlaceContextCountryCode = normalizedCountryCode;
+        _lastPlaceContextAt = now;
+
+        // Also mirror into the search session so entity-aware query building
+        // can reuse place context on short follow-up turns.
+        _searchOrchestrator.Session.LastEntityCanonical = normalizedName;
+        _searchOrchestrator.Session.LastEntityType = "Place";
+        _searchOrchestrator.Session.LastEntityDisambiguation =
+            string.IsNullOrWhiteSpace(normalizedCountryCode) ? "Place" : normalizedCountryCode;
+        _searchOrchestrator.Session.UpdatedAt = now;
+    }
+
+    private bool TryGetActivePlaceContext(out string placeName)
+    {
+        placeName = "";
+        if (string.IsNullOrWhiteSpace(_lastPlaceContextName))
+            return false;
+
+        var now = _timeProvider.GetUtcNow();
+        if ((now - _lastPlaceContextAt) > PlaceContextTtl)
+            return false;
+
+        placeName = _lastPlaceContextName!;
+        return true;
+    }
+
+    private string ApplyPlaceContextIfHelpful(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return userMessage;
+
+        if (!TryGetActivePlaceContext(out var place))
+            return userMessage;
+
+        var trimmed = userMessage.Trim();
+        var lower = trimmed.ToLowerInvariant();
+
+        // Do not inject when the user already scoped to a topic/location.
+        if (HasExplicitNonTemporalScope(lower))
+            return userMessage;
+
+        var weatherFollowUp = LooksLikeWeatherFollowUp(lower);
+        var genericNewsFollowUp = SearchModeRouter.LooksLikeNewsIntent(lower);
+        if (!weatherFollowUp && !genericNewsFollowUp)
+            return userMessage;
+
+        if (weatherFollowUp)
+            return $"weather in {place}";
+
+        return $"{trimmed.TrimEnd('?', '.', '!')} in {place}";
+    }
+
+    private static bool LooksLikeWeatherFollowUp(string lowerMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lowerMessage))
+            return false;
+
+        // "forecast" alone can be non-weather ("stock forecast"), so guard.
+        if (lowerMessage.Contains("stock forecast", StringComparison.Ordinal) ||
+            lowerMessage.Contains("earnings forecast", StringComparison.Ordinal))
+            return false;
+
+        return lowerMessage.Contains("weather", StringComparison.Ordinal) ||
+               lowerMessage.Contains("forecast", StringComparison.Ordinal) ||
+               lowerMessage.Contains("temperature", StringComparison.Ordinal) ||
+               lowerMessage.Contains("temp", StringComparison.Ordinal) ||
+               lowerMessage.Contains("humidity", StringComparison.Ordinal) ||
+               lowerMessage.Contains("rain", StringComparison.Ordinal) ||
+               lowerMessage.Contains("snow", StringComparison.Ordinal);
+    }
+
+    private static bool HasExplicitNonTemporalScope(string lowerMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lowerMessage))
+            return false;
+
+        var match = ContextScopeRegex().Match(lowerMessage);
+        if (!match.Success)
+            return false;
+
+        var scope = match.Groups["scope"].Value
+            .Trim()
+            .TrimEnd('?', '.', '!', ',');
+
+        if (string.IsNullOrWhiteSpace(scope))
+            return false;
+
+        return !TemporalScopeRegex().IsMatch(scope);
+    }
+
+    [GeneratedRegex(@"\b(?:in|for|at|near)\s+(?<location>.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex WeatherLocationRegex();
+
+    [GeneratedRegex(
+        @"\b(?:in|for|at|near|about|on|regarding)\s+(?<scope>.+)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex ContextScopeRegex();
+
+    [GeneratedRegex(
+        @"^(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|last\s+(?:week|month)|next\s+week|yesterday)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex TemporalScopeRegex();
 
     // ─────────────────────────────────────────────────────────────────
     // Web Search Fallback
@@ -1628,6 +2042,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _history.Clear();
         _history.Add(ChatMessage.System(_systemPrompt));
         _searchOrchestrator.Session.Clear();
+        _lastPlaceContextName = null;
+        _lastPlaceContextCountryCode = null;
+        _lastPlaceContextAt = default;
         LogEvent("AGENT_RESET", "Conversation history and search session cleared.");
     }
 
@@ -1648,6 +2065,32 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     // ─────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────
+
+    private static string BuildInlineUtilityResponse(UtilityRouter.UtilityResult utilityResult)
+    {
+        var primary = (utilityResult.Answer ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(primary))
+            primary = "Done.";
+
+        var personalityLine = utilityResult.Category.ToLowerInvariant() switch
+        {
+            "calculator" =>
+                "Need another quick one? I can chain the next math step too.",
+            "fact" =>
+                "If you want, I can compare that against another benchmark.",
+            _ => ""
+        };
+
+        return string.IsNullOrWhiteSpace(personalityLine)
+            ? primary
+            : $"{primary}\n\n{personalityLine}";
+    }
+
+    private static bool ShouldSuppressUtilityUiArtifacts(string category) =>
+        category.Equals("calculator", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("conversion", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("fact", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("text", StringComparison.OrdinalIgnoreCase);
 
     private async Task<IReadOnlyList<ToolDefinition>> BuildToolDefinitionsAsync(
         CancellationToken ct)
@@ -3864,6 +4307,148 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             return true;
 
         return false;
+    }
+
+    /// <summary>
+    /// LLM-assisted utility routing fallback for flexible phrasing.
+    /// Deterministic regex routing remains primary; this path only runs
+    /// when direct utility matching fails.
+    /// </summary>
+    private async Task<UtilityRouter.UtilityResult?> TryInferUtilityRouteWithLlmAsync(
+        string userMessage,
+        CancellationToken cancellationToken)
+    {
+        if (!MightBeUtilityIntent(userMessage))
+            return null;
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You are a utility-intent extractor.\n" +
+                "Classify whether the user wants one of: weather, time, calculator, conversion, letter_count, or none.\n" +
+                "Return ONLY JSON with this schema:\n" +
+                "{ \"category\": \"weather|time|calculator|conversion|letter_count|none\", \"canonicalMessage\": \"...\", \"confidence\": 0.0 }\n" +
+                "Rules:\n" +
+                "- canonicalMessage must be a short plain-English request usable by a deterministic parser\n" +
+                "- Do not invent locations, numbers, or units\n" +
+                "- If uncertain, return category=none and confidence <= 0.5\n" +
+                "- Return JSON only."),
+            ChatMessage.User(userMessage)
+        };
+
+        try
+        {
+            var response = await _llm.ChatAsync(
+                messages, tools: null, MaxTokensUtilityRouting, cancellationToken);
+
+            var raw = StripCodeFenceWrapper((response.Content ?? "").Trim());
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+
+            var category = root.TryGetProperty("category", out var c)
+                ? (c.GetString() ?? "").Trim().ToLowerInvariant()
+                : "";
+            var canonical = root.TryGetProperty("canonicalMessage", out var m)
+                ? (m.GetString() ?? "").Trim()
+                : "";
+            var confidence = root.TryGetProperty("confidence", out var conf) &&
+                             conf.TryGetDouble(out var parsedConfidence)
+                ? parsedConfidence
+                : 0.0;
+
+            if (category == "none" || confidence < 0.65)
+                return null;
+
+            if (string.IsNullOrWhiteSpace(canonical))
+                return null;
+
+            if (!SharesMeaningfulToken(userMessage, canonical))
+                return null;
+
+            var routed = UtilityRouter.TryHandle(canonical);
+            if (routed is null)
+                return null;
+
+            LogEvent("UTILITY_LLM_ROUTE",
+                $"category={category}, confidence={confidence:F2}, canonical=\"{canonical}\"");
+            return routed;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool MightBeUtilityIntent(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("weather") || lower.Contains("forecast") ||
+               lower.Contains("temperature") || lower.Contains("temp") ||
+               lower.Contains("rain") || lower.Contains("snow") ||
+               lower.Contains("wind") || lower.Contains("humidity") ||
+               lower.Contains("umbrella") || lower.Contains("trip") ||
+               lower.Contains("time in") || lower.Contains("timezone") || lower.Contains("time zone") ||
+               lower.Contains("convert") || lower.Contains("conversion") ||
+               lower.Contains("calculate") || lower.Contains("percent") ||
+               lower.Contains("how many") || lower.Contains("count");
+    }
+
+    private static bool SharesMeaningfulToken(string original, string canonical)
+    {
+        var originalTokens = TokenizeForUtilityRouting(original);
+        var canonicalTokens = TokenizeForUtilityRouting(canonical);
+
+        if (originalTokens.Count == 0 || canonicalTokens.Count == 0)
+            return false;
+
+        foreach (var token in canonicalTokens)
+        {
+            if (originalTokens.Contains(token))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static HashSet<string> TokenizeForUtilityRouting(string text)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+            return tokens;
+
+        var parts = text.Split(
+            [' ', '\t', '\n', '\r', ',', '.', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '/'],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var part in parts)
+        {
+            var token = part.Trim().ToLowerInvariant();
+            if (token.Length >= 3)
+                tokens.Add(token);
+        }
+
+        return tokens;
+    }
+
+    private static string StripCodeFenceWrapper(string content)
+    {
+        if (!content.StartsWith("```", StringComparison.Ordinal))
+            return content;
+
+        var firstNewLine = content.IndexOf('\n');
+        if (firstNewLine >= 0)
+            content = content[(firstNewLine + 1)..];
+
+        if (content.EndsWith("```", StringComparison.Ordinal))
+            content = content[..^3];
+
+        return content.Trim();
     }
 
     private static bool LooksLikeRawDump(string text)

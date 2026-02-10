@@ -352,16 +352,20 @@ public sealed partial class QueryBuilder
         if (string.IsNullOrWhiteSpace(message))
             return null;
 
-        var cleaned = CollapseWhitespace(message);
-        cleaned = StripPrefaceBeforeRequest(cleaned);
-        cleaned = StripLeadPhrasesRegex().Replace(cleaned, "").Trim();
-        cleaned = cleaned.TrimEnd('?', '.', '!', ',');
-        cleaned = TailPoliteRegex().Replace(cleaned, "").Trim();
+        var normalized = CollapseWhitespace(message);
+        var prefixTopic = ExtractTopicBeforeRequest(normalized);
+
+        var cleaned = StripPrefaceBeforeRequest(normalized);
+        cleaned = CleanTopicCandidate(cleaned);
+
+        // If the tail-side topic is generic ("check on the news there"),
+        // prefer a stronger topic that appeared before the request marker.
+        if (LooksLikeGenericTopic(cleaned) && !string.IsNullOrWhiteSpace(prefixTopic))
+            cleaned = prefixTopic!;
+
         if (cleaned.Length < 3)
             return null;
 
-        // Remove trailing punctuation and filler
-        cleaned = cleaned.TrimEnd('?', '.', '!', ',');
         return cleaned.Length >= 3 ? cleaned : null;
     }
 
@@ -589,8 +593,72 @@ public sealed partial class QueryBuilder
         return string.Join(' ', s.Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
+    private static string CleanTopicCandidate(string text)
+    {
+        var cleaned = text ?? "";
+        cleaned = LeadingFillerRegex().Replace(cleaned, "").Trim();
+        cleaned = LeadingRequestVerbRegex().Replace(cleaned, "").Trim();
+        cleaned = StripLeadPhrasesRegex().Replace(cleaned, "").Trim();
+        cleaned = cleaned.TrimEnd('?', '.', '!', ',');
+        cleaned = TailPoliteRegex().Replace(cleaned, "").Trim();
+        cleaned = cleaned.TrimEnd('?', '.', '!', ',');
+        return cleaned;
+    }
+
+    private static string? ExtractTopicBeforeRequest(string message)
+    {
+        var lowered = message.ToLowerInvariant();
+        var markers = new[]
+        {
+            " can you ", " could you ", " would you ", " will you ",
+            " please ", " show me ", " get me ", " pull up ", " bring up ",
+            " look up ", " search for ", " find "
+        };
+
+        var idx = -1;
+        foreach (var marker in markers)
+        {
+            var markerIdx = lowered.IndexOf(marker, StringComparison.Ordinal);
+            if (markerIdx < 0)
+                continue;
+
+            if (idx < 0 || markerIdx < idx)
+                idx = markerIdx;
+        }
+
+        if (idx <= 0)
+            return null;
+
+        var prefix = message[..idx].Trim();
+        var cleaned = CleanTopicCandidate(prefix);
+        return cleaned.Length >= 3 ? cleaned : null;
+    }
+
+    private static bool LooksLikeGenericTopic(string cleaned)
+    {
+        var tokens = Tokenize(cleaned);
+        if (tokens.Count == 0)
+            return true;
+
+        var genericTokens = 0;
+        foreach (var token in tokens)
+        {
+            if (GenericTopicTokens.Contains(token))
+                genericTokens++;
+        }
+
+        // Mostly generic words -> weak topic.
+        return genericTokens >= tokens.Count - 1;
+    }
+
     private static readonly char[] SplitChars =
         [' ', '-', '–', '—', ',', '.', ':', ';', '!', '?', '\'', '"', '(', ')', '[', ']', '/'];
+
+    private static readonly HashSet<string> GenericTopicTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "check", "on", "the", "news", "there", "that", "this", "it",
+        "about", "latest", "recent", "update", "updates", "please", "me"
+    };
 
     [GeneratedRegex(
         @"^(?:can you |could you |please |hey |hi |yo |search for |look up |find |get me |show me |pull up |bring up |what(?:'s| is| are) )+",
@@ -601,6 +669,16 @@ public sealed partial class QueryBuilder
         @"^\s*(?:not much|i'?m good|im good|thanks|thank you|ok|okay|well|alright)[\s,\-:!]*",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ConversationPrefixRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:well[,.!?]?\s*)?(?:i\s+(?:wanted|want|need|was hoping|would like)\s+to\s+)+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex LeadingFillerRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:check|look|find|get|show|pull up|bring up)\s+(?:on\s+)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex LeadingRequestVerbRegex();
 
     [GeneratedRegex(
         @"(?:\s+for me)?(?:\s+please|\s+pls|\s+thanks|\s+thank you)+\s*$",

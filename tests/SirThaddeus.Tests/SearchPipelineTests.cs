@@ -104,6 +104,7 @@ public class UtilityRouterTests
 {
     [Theory]
     [InlineData("what's 15% of 230",  "calculator", "15% of 230 = **34.50**")]
+    [InlineData("what's 10*45?",      "calculator", "10*45 = **450**")]
     [InlineData("100 + 50",           "calculator", "100 + 50 = **150**")]
     public void Calculator_ReturnsInlineAnswer(string input, string category, string expected)
     {
@@ -141,22 +142,42 @@ public class UtilityRouterTests
     [InlineData("weather in Seattle")]
     [InlineData("forecast for New York")]
     [InlineData("what is the weather like in Rexburg, ID?")]
-    public void Weather_RoutesToWebSearch(string input)
+    [InlineData("can you tell me what the weather is in rexburg,id?")]
+    public void Weather_RoutesToGeocodeTool(string input)
     {
         var result = UtilityRouter.TryHandle(input);
         Assert.NotNull(result);
         Assert.Equal("weather", result!.Category);
-        Assert.Equal("web_search", result.McpToolName);
+        Assert.Equal("weather_geocode", result.McpToolName);
     }
 
     [Fact]
-    public void Weather_Query_IsConstrainedForLocation()
+    public void Weather_GeocodeArgs_ContainLocation()
     {
         var result = UtilityRouter.TryHandle("what is the weather like in Rexburg, ID? please");
         Assert.NotNull(result);
-        Assert.Equal("web_search", result!.McpToolName);
+        Assert.Equal("weather_geocode", result!.McpToolName);
         Assert.NotNull(result.McpToolArgs);
-        Assert.Contains("\"query\":\"Rexburg, ID weather forecast today\"", result.McpToolArgs);
+        Assert.Contains("\"place\":\"Rexburg, ID\"", result.McpToolArgs);
+        Assert.Contains("\"maxResults\":3", result.McpToolArgs);
+    }
+
+    [Fact]
+    public void Weather_GeocodeArgs_StripsTemporalTailFromPlace()
+    {
+        var result = UtilityRouter.TryHandle("What's the forecast for Rexburg today?");
+        Assert.NotNull(result);
+        Assert.Equal("weather_geocode", result!.McpToolName);
+        Assert.NotNull(result.McpToolArgs);
+        Assert.Contains("\"place\":\"Rexburg\"", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("today", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Weather_TemporalOnlyLocation_ReturnsNull()
+    {
+        var result = UtilityRouter.TryHandle("can you get the forecast for today?");
+        Assert.Null(result);
     }
 
     [Fact]
@@ -166,6 +187,16 @@ public class UtilityRouterTests
         Assert.NotNull(result);
         Assert.Equal("text", result!.Category);
         Assert.Equal("The word \"strawberry\" contains **3** 'r' characters.", result.Answer);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
+    public void MoonDistance_ReturnsDeterministicFactAnswer()
+    {
+        var result = UtilityRouter.TryHandle("how many meters is it to the moon?");
+        Assert.NotNull(result);
+        Assert.Equal("fact", result!.Category);
+        Assert.Contains("384,400,000 meters", result.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.Null(result.McpToolName);
     }
 
@@ -429,6 +460,8 @@ public class QueryBuilderFallbackTests
             QueryBuilder.ExtractTopicFromMessage("hey please find latest stock market data."));
         Assert.Equal("breaking headlines this last week",
             QueryBuilder.ExtractTopicFromMessage("wassup home diggy? can you bring up breaking headlines this last week for me please?"));
+        Assert.Equal("the stock market today",
+            QueryBuilder.ExtractTopicFromMessage("Well. I wanted to check the stock market today. can you check on the news there?"));
     }
 }
 
@@ -522,6 +555,9 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("100", result.Text);
+        Assert.Contains("Need another quick one", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
 
         // No web_search calls
         var searchCalls = mcp.Calls.Where(c =>
@@ -541,6 +577,8 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("16", result.Text); // 10 miles ≈ 16.09 km
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
 
         var searchCalls = mcp.Calls.Where(c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -548,16 +586,46 @@ public class SearchPipelineGoldenTests
     }
 
     [Fact]
-    public async Task UtilityBypass_Weather_UsesSingleSearchCall()
+    public async Task UtilityBypass_MoonDistance_NoWebSearch()
     {
-        var llm = new FakeLlmClient("Rexburg is currently cool with light winds.");
-        var searchResult =
-            "1. \"Rexburg weather\" — weather.example\n" +
-            "   Current conditions are 39F with light winds.\n" +
-            "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://weather.example/rexburg\",\"title\":\"Rexburg weather\"}]";
+        var llm = new FakeLlmClient("Should not be called for moon fact");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var result = await agent.ProcessAsync("how many meters is it to the moon?");
+
+        Assert.True(result.Success);
+        Assert.Contains("384,400,000 meters", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("compare that against another benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
+        var searchCalls = mcp.Calls.Where(c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Weather_UsesGeocodeThenForecast()
+    {
+        var llmCalls = 0;
+        var llm = new FakeLlmClient((_, _) =>
+        {
+            llmCalls++;
+            return new LlmResponse { IsComplete = true, Content = "LLM should not be needed here.", FinishReason = "stop" };
+        });
+        var geocodeResult =
+            """{"query":"Rexburg, ID","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+        var forecastResult =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"windy","wind":"12 mph","humidityPercent":71},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":36,"unit":"F","condition":"windy"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => geocodeResult,
+            "weather_forecast" => forecastResult,
+            _ => "unexpected tool call"
+        });
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
@@ -565,12 +633,222 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("Rexburg", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("39F", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wind", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Avg temp", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\n1.", result.Text, StringComparison.Ordinal);
+        Assert.Equal(0, result.LlmRoundTrips); // weather brief is deterministic
+        Assert.Equal(0, llmCalls);
 
-        var webSearchCalls = mcp.Calls.Where(c =>
-            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
-            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
 
-        Assert.Single(webSearchCalls);
+    [Fact]
+    public async Task UtilityBypass_Weather_LlmRoute_HandlesFlexiblePhrasing()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify the user message", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+            }
+
+            if (sysMsg.Contains("utility-intent extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"category":"weather","canonicalMessage":"weather in Rexburg, ID","confidence":0.92}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Rexburg will be cool tomorrow with a chance of wind.",
+                FinishReason = "stop"
+            };
+        });
+
+        var geocodeResult =
+            """{"query":"Rexburg, ID","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+        var forecastResult =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"partly cloudy","wind":"7 mph","humidityPercent":54},"daily":[{"date":"2026-02-10","tempHigh":44,"tempLow":31,"avgTemp":38,"unit":"F","condition":"partly cloudy"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => geocodeResult,
+            "weather_forecast" => forecastResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "I'm going on a trip to Rexburg tomorrow and want to check conditions there.");
+
+        Assert.True(result.Success);
+        Assert.Contains("39F", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Avg temp", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\n1.", result.Text, StringComparison.Ordinal);
+
+        var geocodeCalls = mcp.Calls.Where(c =>
+            c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase)).ToList();
+        var forecastCalls = mcp.Calls.Where(c =>
+            c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Assert.Single(geocodeCalls);
+        Assert.Single(forecastCalls);
+        Assert.Contains("rexburg", geocodeCalls[0].Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Weather_IgnoresTemporalTail_AndUsesBestGeocodeCandidate()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var geocodeResult =
+            """{"query":"Rexburg","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Day-Today, Scotland, GB","countryCode":"GB","isUs":false,"latitude":55.9551009,"longitude":-2.9878669,"confidence":0.10},{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+        var forecastResult =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":25,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":31,"tempLow":19,"avgTemp":25,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => geocodeResult,
+            "weather_forecast" => forecastResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What's the forecast for Rexburg today?");
+
+        Assert.True(result.Success);
+        Assert.Contains("Rexburg", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Scotland", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        var geocodeCall = mcp.Calls.First(c =>
+            c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
+        var forecastCall = mcp.Calls.First(c =>
+            c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Contains("\"place\":\"Rexburg\"", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("today", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"latitude\":43.826", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"longitude\":-111.789", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Weather_FollowUp_ReusesPreviousPlaceContext()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var boiseGeocode =
+            """{"query":"Boise, ID","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886,"confidence":0.95}]}""";
+        var todayMuseumGeocode =
+            """{"query":"today","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Today Art Museum, CN","countryCode":"CN","isUs":false,"latitude":39.896836,"longitude":116.461529,"confidence":0.70}]}""";
+        var boiseForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "weather_geocode" => args.Contains("boise", StringComparison.OrdinalIgnoreCase)
+                ? boiseGeocode
+                : todayMuseumGeocode,
+            "weather_forecast" => boiseForecast,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var first = await agent.ProcessAsync("Whats the weather like in Boise, ID?");
+        Assert.True(first.Success);
+        Assert.Contains("Boise", first.Text, StringComparison.OrdinalIgnoreCase);
+
+        var second = await agent.ProcessAsync("Thats great! can you get the forecast for today?");
+        Assert.True(second.Success);
+        Assert.Contains("Boise", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Today Art Museum", second.Text, StringComparison.OrdinalIgnoreCase);
+
+        var geocodeCalls = mcp.Calls.Where(c =>
+            c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.True(geocodeCalls.Count >= 2);
+        Assert.Contains("\"place\":\"Boise", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"place\":\"today", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_FollowUp_ReusesPreviousWeatherPlaceContext()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify the user message", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"","type":"none","hint":""}""",
+                    FinishReason = "stop"
+                };
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                var userInput = messages.LastOrDefault(m => m.Role == "user")?.Content ?? "";
+                var query = userInput.Contains("boise", StringComparison.OrdinalIgnoreCase)
+                    ? """{"query":"boise latest news","recency":"day"}"""
+                    : """{"query":"top headlines","recency":"day"}""";
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = query,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Here is a Boise-focused news summary.",
+                FinishReason = "stop"
+            };
+        });
+
+        var boiseGeocode =
+            """{"query":"Boise, ID","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886,"confidence":0.95}]}""";
+        var boiseForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+        var newsSearchResult =
+            "1. Boise city update — example.com\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/boise-news\",\"title\":\"Boise city update\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => boiseGeocode,
+            "weather_forecast" => boiseForecast,
+            "web_search" => newsSearchResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var weather = await agent.ProcessAsync("Whats the weather like in Boise, ID?");
+        Assert.True(weather.Success);
+
+        var news = await agent.ProcessAsync("oh cool! can i get the news?");
+        Assert.True(news.Success);
+
+        var webSearchCall = mcp.Calls.Last(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("boise", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -23,6 +23,9 @@ public sealed record AppSettings
     [JsonPropertyName("webSearch")]
     public WebSearchSettings WebSearch { get; init; } = new();
 
+    [JsonPropertyName("weather")]
+    public WeatherSettings Weather { get; init; } = new();
+
     [JsonPropertyName("memory")]
     public MemorySettings Memory { get; init; } = new();
 
@@ -311,4 +314,54 @@ public sealed record WebSearchSettings
     /// </summary>
     [JsonPropertyName("maxResults")]
     public int MaxResults { get; init; } = 5;
+}
+
+/// <summary>
+/// Weather configuration. Controls provider routing, cache TTLs,
+/// and optional local place memory for geocode results.
+/// </summary>
+public sealed record WeatherSettings
+{
+    /// <summary>
+    /// Provider strategy:
+    ///   "nws_us_openmeteo_fallback" (default)
+    ///   "openmeteo_only"
+    ///   "nws_only_us"
+    /// </summary>
+    [JsonPropertyName("providerMode")]
+    public string ProviderMode { get; init; } = "nws_us_openmeteo_fallback";
+
+    /// <summary>
+    /// Forecast cache TTL in minutes. Runtime clamps this to 10..30.
+    /// </summary>
+    [JsonPropertyName("forecastCacheMinutes")]
+    public int ForecastCacheMinutes { get; init; } = 15;
+
+    /// <summary>
+    /// Geocode cache TTL in minutes (default 24h).
+    /// </summary>
+    [JsonPropertyName("geocodeCacheMinutes")]
+    public int GeocodeCacheMinutes { get; init; } = 1_440;
+
+    /// <summary>
+    /// Optional local place memory. When true, successful place->coordinate
+    /// mappings are persisted locally for faster future lookups.
+    /// </summary>
+    [JsonPropertyName("placeMemoryEnabled")]
+    public bool PlaceMemoryEnabled { get; init; } = false;
+
+    /// <summary>
+    /// Path for local place memory JSON. "auto" resolves to
+    /// %LOCALAPPDATA%\SirThaddeus\weather-places.json.
+    /// </summary>
+    [JsonPropertyName("placeMemoryPath")]
+    public string PlaceMemoryPath { get; init; } = "auto";
+
+    /// <summary>
+    /// User-Agent header sent to weather/geocode providers.
+    /// NWS requires this to be non-empty.
+    /// </summary>
+    [JsonPropertyName("userAgent")]
+    public string UserAgent { get; init; } =
+        "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
 }

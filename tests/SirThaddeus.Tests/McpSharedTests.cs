@@ -34,6 +34,8 @@ public class ToolManifestTests
         Assert.Contains(all, t => t.Name == "time_now");
         Assert.Contains(all, t => t.Name == "memory_list_facts");
         Assert.Contains(all, t => t.Name == "memory_delete_fact");
+        Assert.Contains(all, t => t.Name == "weather_geocode");
+        Assert.Contains(all, t => t.Name == "weather_forecast");
     }
 
     [Fact]

@@ -48,6 +48,10 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _mcpPermMemoryRead        = "always";
     private string _mcpPermMemoryWrite       = "ask";
 
+    // Weather
+    private string _weatherUserAgent =
+        "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
+
     // Profile
     private ProfileOption? _selectedProfile;
     private string         _statusText = "";
@@ -89,6 +93,9 @@ public sealed class SettingsViewModel : ViewModelBase
     public string McpPermWeb               { get => _mcpPermWeb;               set { if (SetProperty(ref _mcpPermWeb, value))               MarkDirty(); } }
     public string McpPermMemoryRead        { get => _mcpPermMemoryRead;        set { if (SetProperty(ref _mcpPermMemoryRead, value))        MarkDirty(); } }
     public string McpPermMemoryWrite       { get => _mcpPermMemoryWrite;       set { if (SetProperty(ref _mcpPermMemoryWrite, value))       MarkDirty(); } }
+
+    // Weather
+    public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
@@ -176,6 +183,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _mcpPermWeb               = s.Mcp.Permissions.Web;
         _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
         _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
+        _weatherUserAgent         = s.Weather.UserAgent;
 
         // Notify all bindings
         OnPropertyChanged(nameof(LlmBaseUrl));
@@ -193,6 +201,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(McpPermWeb));
         OnPropertyChanged(nameof(McpPermMemoryRead));
         OnPropertyChanged(nameof(McpPermMemoryWrite));
+        OnPropertyChanged(nameof(WeatherUserAgent));
     }
 
     private async Task LoadProfilesAsync()
@@ -275,6 +284,12 @@ public sealed class SettingsViewModel : ViewModelBase
                     MemoryRead        = _mcpPermMemoryRead,
                     MemoryWrite       = _mcpPermMemoryWrite
                 }
+            },
+            Weather = _settings.Weather with
+            {
+                UserAgent = string.IsNullOrWhiteSpace(_weatherUserAgent)
+                    ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
+                    : _weatherUserAgent.Trim()
             },
             ActiveProfileId = _selectedProfile?.ProfileId
         };

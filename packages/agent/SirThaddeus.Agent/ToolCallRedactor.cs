@@ -60,6 +60,12 @@ internal static class ToolCallRedactor
             "browsernavigate" or "browser_navigate"
                 => Truncate(argumentsJson, 300),
 
+            // Weather tools: safe, structured args (place / coords)
+            "weathergeocode" or "weather_geocode"
+                => Truncate(argumentsJson, 200),
+            "weatherforecast" or "weather_forecast"
+                => Truncate(argumentsJson, 220),
+
             // Memory tools: safe to log (subject/predicate only)
             _ when lower.StartsWith("memory")
                 => Truncate(argumentsJson, 200),
@@ -96,6 +102,14 @@ internal static class ToolCallRedactor
             // Web search: log result count + titles, not full excerpts
             "websearch" or "web_search"
                 => SummarizeSearchOutput(output),
+
+            // Weather geocode: log candidate count
+            "weathergeocode" or "weather_geocode"
+                => SummarizeWeatherGeocodeOutput(output),
+
+            // Weather forecast: log provider + short current snapshot
+            "weatherforecast" or "weather_forecast"
+                => SummarizeWeatherForecastOutput(output),
 
             // Memory tools: safe to log (structured JSON, no secrets)
             _ when lower.StartsWith("memory")
@@ -136,6 +150,58 @@ internal static class ToolCallRedactor
             });
 
         return $"[Search: {resultCount} results, {output.Length} chars total]";
+    }
+
+    private static string SummarizeWeatherGeocodeOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            var count = root.TryGetProperty("results", out var r) &&
+                        r.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? r.GetArrayLength()
+                : 0;
+            var source = root.TryGetProperty("source", out var s) ? (s.GetString() ?? "unknown") : "unknown";
+            return $"[Weather geocode: {count} result(s), source={source}]";
+        }
+        catch
+        {
+            return $"[Weather geocode: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeWeatherForecastOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return $"[Weather forecast error: {Truncate(err.GetString() ?? "", 120)}]";
+            }
+
+            var provider = root.TryGetProperty("provider", out var p) ? (p.GetString() ?? "unknown") : "unknown";
+
+            string current = "n/a";
+            if (root.TryGetProperty("current", out var c) &&
+                c.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                var temp = c.TryGetProperty("temperature", out var t) ? t.ToString() : "?";
+                var unit = c.TryGetProperty("unit", out var u) ? (u.GetString() ?? "") : "";
+                var cond = c.TryGetProperty("condition", out var condEl) ? (condEl.GetString() ?? "") : "";
+                current = $"{temp}{unit} {cond}".Trim();
+            }
+
+            return $"[Weather forecast: provider={provider}, current={Truncate(current, 80)}]";
+        }
+        catch
+        {
+            return $"[Weather forecast: {output.Length} chars]";
+        }
     }
 
     private static string Truncate(string value, int maxLength)

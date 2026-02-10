@@ -1543,6 +1543,32 @@
                             Background="{StaticResource Surface0Brush}"
                             Margin="0,0,0,20"/>
 
+                    <!-- ── Weather ─────────────────────────────────────── -->
+                    <TextBlock Text="WEATHER"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource BlueBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="User-Agent is sent to weather providers. NWS requires a non-empty identifier."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="User-Agent"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding WeatherUserAgent, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
                     <!-- ── MCP Permissions ─────────────────────────────── -->
                     <TextBlock Text="MCP PERMISSIONS"
                                FontSize="11" FontWeight="Bold"

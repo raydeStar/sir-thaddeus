@@ -115,6 +115,26 @@ public static class ToolManifest
             Description = "Fetches and extracts content from a specific URL.",
             Limits      = "20s timeout. Single page. Content <= 4000 chars."
         },
+        new()
+        {
+            Name        = "weather_geocode",
+            Aliases     = ["WeatherGeocode"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Geocodes a place string to coordinates for weather lookup.",
+            Limits      = "Max 5 candidates. Geocode cache enabled."
+        },
+        new()
+        {
+            Name        = "weather_forecast",
+            Aliases     = ["WeatherForecast"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Returns normalized weather forecast from coordinates (NWS US, Open-Meteo fallback).",
+            Limits      = "Max 7 days. Forecast cache 10-30 min."
+        },
 
         // ── File Tools ───────────────────────────────────────────────
         new()
