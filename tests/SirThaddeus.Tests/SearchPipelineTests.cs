@@ -130,12 +130,54 @@ public class UtilityRouterTests
     [Theory]
     [InlineData("time in Tokyo",           "time")]
     [InlineData("what's the time in London", "time")]
-    public void TimeZone_ReturnsInlineAnswer(string input, string category)
+    public void TimeZone_RoutesToGeocodeTool(string input, string category)
     {
         var result = UtilityRouter.TryHandle(input);
         Assert.NotNull(result);
         Assert.Equal(category, result!.Category);
-        Assert.Null(result.McpToolName); // Known cities resolve inline
+        Assert.Equal("weather_geocode", result.McpToolName);
+        Assert.NotNull(result.McpToolArgs);
+        Assert.Contains("\"maxResults\":3", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("is today a holiday in Canada?", "holidays_is_today", "\"countryCode\":\"CA\"")]
+    [InlineData("next holiday in US", "holidays_next", "\"countryCode\":\"US\"")]
+    [InlineData("holidays in japan this year", "holidays_get", "\"countryCode\":\"JP\"")]
+    public void Holiday_RoutesToHolidayTools(string input, string toolName, string expectedArgSnippet)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("holiday", result!.Category);
+        Assert.Equal(toolName, result.McpToolName);
+        Assert.NotNull(result.McpToolArgs);
+        Assert.Contains(expectedArgSnippet, result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("is github.com up?")]
+    [InlineData("check if https://api.github.com is online")]
+    public void Status_RoutesToStatusTool(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("status", result!.Category);
+        Assert.Equal("status_check_url", result.McpToolName);
+        Assert.NotNull(result.McpToolArgs);
+        Assert.Contains("\"url\":\"https://", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("read this feed https://example.com/rss.xml")]
+    [InlineData("fetch rss from docs.github.com/feed.xml")]
+    public void Feed_RoutesToFeedTool(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("feed", result!.Category);
+        Assert.Equal("feed_fetch", result.McpToolName);
+        Assert.NotNull(result.McpToolArgs);
+        Assert.Contains("\"url\":\"https://", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -201,6 +243,20 @@ public class UtilityRouterTests
     }
 
     [Theory]
+    [InlineData("what is the speed of light?", "299,792,458 meters per second")]
+    [InlineData("what is the boiling point of water?", "100C")]
+    [InlineData("what is the freezing point of water?", "0C")]
+    [InlineData("how many days are in a year?", "365 days")]
+    public void SimpleFacts_ReturnDeterministicAnswer(string input, string expectedSnippet)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("fact", result!.Category);
+        Assert.Contains(expectedSnippet, result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Theory]
     [InlineData("political climate in Washington")]
     [InlineData("how to weather the storm")]
     public void WeatherFalsePositives_ReturnNull(string input)
@@ -213,6 +269,7 @@ public class UtilityRouterTests
     [InlineData("what is quantum computing")]
     [InlineData("tell me about spacex")]
     [InlineData("hey there, how are you")]
+    [InlineData("how many days are in a year on mars?")]
     public void NonUtilityQueries_ReturnNull(string input)
     {
         var result = UtilityRouter.TryHandle(input);
@@ -604,6 +661,127 @@ public class SearchPipelineGoldenTests
         var searchCalls = mcp.Calls.Where(c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_SpeedOfLight_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("Should not be called for speed-of-light fact");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what is the speed of light?");
+
+        Assert.True(result.Success);
+        Assert.Contains("299,792,458", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("compare that against another benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
+        var searchCalls = mcp.Calls.Where(c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Time_UsesGeocodeThenTimezone()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var geocodeResult =
+            """{"query":"Tokyo","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Tokyo, JP","countryCode":"JP","isUs":false,"latitude":35.6762,"longitude":139.6503,"confidence":0.95}]}""";
+        var timezoneResult =
+            """{"latitude":35.6762,"longitude":139.6503,"timezone":"Asia/Tokyo","source":"open-meteo","cache":{"hit":false,"ageSeconds":0}}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => geocodeResult,
+            "resolve_timezone" => timezoneResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what time is it in Tokyo?");
+
+        Assert.True(result.Success);
+        Assert.Contains("Tokyo", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Asia/Tokyo", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("resolve_timezone", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_HolidaysIsToday_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var holidayResult =
+            """{"countryCode":"CA","regionCode":null,"date":"2026-02-10","isPublicHoliday":true,"source":"nager-date","cache":{"hit":false,"ageSeconds":0},"holidaysToday":[{"date":"2026-02-10","localName":"Family Day","name":"Family Day","countryCode":"CA","global":false,"launchYear":1990,"counties":[],"types":["Public"]}],"nextHoliday":{"date":"2026-04-10","localName":"Good Friday","name":"Good Friday","countryCode":"CA","global":true,"launchYear":null,"counties":[],"types":["Public"]}}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "holidays_is_today" => holidayResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("is today a holiday in Canada?");
+
+        Assert.True(result.Success);
+        Assert.Contains("public holiday", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CA", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("holidays_is_today", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Status_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var statusResult =
+            """{"url":"https://github.com/","reachable":true,"httpStatus":200,"method":"HEAD","latencyMs":83,"error":null,"checkedAt":"2026-02-10T18:00:00Z","source":"direct","cache":{"hit":false,"ageSeconds":0}}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "status_check_url" => statusResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("is github.com up?");
+
+        Assert.True(result.Success);
+        Assert.Contains("github.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reachable", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("status_check_url", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Feed_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var feedResult =
+            """{"url":"https://example.com/rss.xml","feedTitle":"Engineering Blog","description":"Latest posts","sourceHost":"example.com","source":"rss","truncated":false,"cache":{"hit":false,"ageSeconds":0},"items":[{"title":"Post One","link":"https://example.com/1","summary":"Summary 1","author":"Team","publishedAt":"2026-02-10T10:00:00Z"},{"title":"Post Two","link":"https://example.com/2","summary":"Summary 2","author":"Team","publishedAt":"2026-02-10T09:00:00Z"}]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "feed_fetch" => feedResult,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("read this feed https://example.com/rss.xml");
+
+        Assert.True(result.Success);
+        Assert.Contains("Engineering Blog", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("feed item", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("feed_fetch", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

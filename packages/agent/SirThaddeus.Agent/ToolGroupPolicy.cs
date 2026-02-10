@@ -56,6 +56,12 @@ public static class ToolGroupPolicy
         ["browser_navigate"]     = "web",
         ["weather_geocode"]      = "web",
         ["weather_forecast"]     = "web",
+        ["resolve_timezone"]     = "web",
+        ["holidays_get"]         = "web",
+        ["holidays_next"]        = "web",
+        ["holidays_is_today"]    = "web",
+        ["feed_fetch"]           = "web",
+        ["status_check_url"]     = "web",
 
         // Memory Read
         ["memory_retrieve"]      = "memoryRead",
@@ -195,6 +201,9 @@ public static class ToolGroupPolicy
             TryExtractSafe(root, "latitude", parts);
             TryExtractSafe(root, "longitude", parts);
             TryExtractSafe(root, "countryCode", parts);
+            TryExtractSafe(root, "regionCode", parts);
+            TryExtractSafe(root, "year", parts);
+            TryExtractSafe(root, "maxItems", parts);
             TryExtractSafe(root, "fact_id", parts);
             TryExtractSafe(root, "tag",     parts);
 

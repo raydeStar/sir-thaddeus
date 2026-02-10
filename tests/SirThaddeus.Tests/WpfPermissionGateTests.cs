@@ -29,6 +29,18 @@ public class ToolGroupResolutionTests
     [InlineData("weather_geocode",  "web")]
     [InlineData("WeatherForecast",  "web")]
     [InlineData("weather_forecast", "web")]
+    [InlineData("ResolveTimezone",  "web")]
+    [InlineData("resolve_timezone", "web")]
+    [InlineData("HolidaysGet",      "web")]
+    [InlineData("holidays_get",     "web")]
+    [InlineData("HolidaysNext",     "web")]
+    [InlineData("holidays_next",    "web")]
+    [InlineData("HolidaysIsToday",  "web")]
+    [InlineData("holidays_is_today","web")]
+    [InlineData("FeedFetch",        "web")]
+    [InlineData("feed_fetch",       "web")]
+    [InlineData("StatusCheckUrl",   "web")]
+    [InlineData("status_check_url", "web")]
     public void KnownWebTools_MapToWebGroup(string toolName, string expected)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);

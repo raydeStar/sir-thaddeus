@@ -65,6 +65,18 @@ internal static class ToolCallRedactor
                 => Truncate(argumentsJson, 200),
             "weatherforecast" or "weather_forecast"
                 => Truncate(argumentsJson, 220),
+            "resolvetimezone" or "resolve_timezone"
+                => Truncate(argumentsJson, 180),
+            "holidaysget" or "holidays_get"
+                => Truncate(argumentsJson, 220),
+            "holidaysnext" or "holidays_next"
+                => Truncate(argumentsJson, 180),
+            "holidaysistoday" or "holidays_is_today"
+                => Truncate(argumentsJson, 180),
+            "feedfetch" or "feed_fetch"
+                => Truncate(argumentsJson, 260),
+            "statuscheckurl" or "status_check_url"
+                => Truncate(argumentsJson, 220),
 
             // Memory tools: safe to log (subject/predicate only)
             _ when lower.StartsWith("memory")
@@ -110,6 +122,18 @@ internal static class ToolCallRedactor
             // Weather forecast: log provider + short current snapshot
             "weatherforecast" or "weather_forecast"
                 => SummarizeWeatherForecastOutput(output),
+            "resolvetimezone" or "resolve_timezone"
+                => SummarizeTimezoneOutput(output),
+            "holidaysget" or "holidays_get"
+                => SummarizeHolidaysOutput(output),
+            "holidaysnext" or "holidays_next"
+                => SummarizeHolidaysOutput(output),
+            "holidaysistoday" or "holidays_is_today"
+                => SummarizeHolidayTodayOutput(output),
+            "feedfetch" or "feed_fetch"
+                => SummarizeFeedOutput(output),
+            "statuscheckurl" or "status_check_url"
+                => SummarizeStatusOutput(output),
 
             // Memory tools: safe to log (structured JSON, no secrets)
             _ when lower.StartsWith("memory")
@@ -201,6 +225,115 @@ internal static class ToolCallRedactor
         catch
         {
             return $"[Weather forecast: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeTimezoneOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return $"[Timezone lookup error: {Truncate(err.ToString(), 120)}]";
+
+            var tz = root.TryGetProperty("timezone", out var tzEl) ? (tzEl.GetString() ?? "") : "";
+            var source = root.TryGetProperty("source", out var srcEl) ? (srcEl.GetString() ?? "unknown") : "unknown";
+            return $"[Timezone lookup: timezone={Truncate(tz, 48)}, source={source}]";
+        }
+        catch
+        {
+            return $"[Timezone lookup: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeHolidaysOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return $"[Holiday lookup error: {Truncate(err.ToString(), 120)}]";
+
+            var country = root.TryGetProperty("countryCode", out var ccEl) ? (ccEl.GetString() ?? "") : "";
+            var count = root.TryGetProperty("holidays", out var arr) &&
+                        arr.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? arr.GetArrayLength()
+                : 0;
+            return $"[Holiday lookup: country={country}, holidays={count}]";
+        }
+        catch
+        {
+            return $"[Holiday lookup: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeHolidayTodayOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return $"[Holiday-today lookup error: {Truncate(err.ToString(), 120)}]";
+
+            var country = root.TryGetProperty("countryCode", out var ccEl) ? (ccEl.GetString() ?? "") : "";
+            var isHoliday = root.TryGetProperty("isPublicHoliday", out var hEl) &&
+                            hEl.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                ? hEl.GetBoolean()
+                : false;
+            return $"[Holiday today: country={country}, isHoliday={isHoliday}]";
+        }
+        catch
+        {
+            return $"[Holiday today: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeFeedOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return $"[Feed fetch error: {Truncate(err.ToString(), 120)}]";
+
+            var title = root.TryGetProperty("feedTitle", out var tEl) ? (tEl.GetString() ?? "") : "";
+            var host = root.TryGetProperty("sourceHost", out var hEl) ? (hEl.GetString() ?? "") : "";
+            var count = root.TryGetProperty("items", out var items) &&
+                        items.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? items.GetArrayLength()
+                : 0;
+            return $"[Feed fetch: host={host}, title={Truncate(title, 60)}, items={count}]";
+        }
+        catch
+        {
+            return $"[Feed fetch: {output.Length} chars]";
+        }
+    }
+
+    private static string SummarizeStatusOutput(string output)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return $"[Status check error: {Truncate(err.ToString(), 120)}]";
+
+            var reachable = root.TryGetProperty("reachable", out var rEl) &&
+                            rEl.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                ? rEl.GetBoolean()
+                : false;
+            var code = root.TryGetProperty("httpStatus", out var sEl) ? sEl.ToString() : "?";
+            var latency = root.TryGetProperty("latencyMs", out var lEl) ? lEl.ToString() : "?";
+            return $"[Status check: reachable={reachable}, status={code}, latencyMs={latency}]";
+        }
+        catch
+        {
+            return $"[Status check: {output.Length} chars]";
         }
     }
 

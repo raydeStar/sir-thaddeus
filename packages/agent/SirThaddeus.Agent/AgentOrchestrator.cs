@@ -47,6 +47,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string WeatherGeocodeToolNameAlt = "WeatherGeocode";
     private const string WeatherForecastToolName    = "weather_forecast";
     private const string WeatherForecastToolNameAlt = "WeatherForecast";
+    private const string ResolveTimezoneToolName    = "resolve_timezone";
+    private const string ResolveTimezoneToolNameAlt = "ResolveTimezone";
+    private const string HolidaysGetToolName        = "holidays_get";
+    private const string HolidaysGetToolNameAlt     = "HolidaysGet";
+    private const string HolidaysNextToolName       = "holidays_next";
+    private const string HolidaysNextToolNameAlt    = "HolidaysNext";
+    private const string HolidaysIsTodayToolName    = "holidays_is_today";
+    private const string HolidaysIsTodayToolNameAlt = "HolidaysIsToday";
+    private const string FeedFetchToolName          = "feed_fetch";
+    private const string FeedFetchToolNameAlt       = "FeedFetch";
+    private const string StatusCheckToolName        = "status_check_url";
+    private const string StatusCheckToolNameAlt     = "StatusCheckUrl";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
@@ -323,6 +335,30 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 {
                     return await ExecuteWeatherUtilityAsync(
                         contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                }
+
+                if (string.Equals(utilityResult.Category, "time", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteTimeUtilityAsync(
+                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                }
+
+                if (string.Equals(utilityResult.Category, "holiday", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteHolidayUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                }
+
+                if (string.Equals(utilityResult.Category, "feed", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteFeedUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                }
+
+                if (string.Equals(utilityResult.Category, "status", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteStatusUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
                 }
 
                 // If the utility wants an MCP tool call, do it
@@ -859,6 +895,297 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         };
     }
 
+    private async Task<AgentResponse> ExecuteTimeUtilityAsync(
+        string userMessage,
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Time utility is missing required geocode args.");
+
+        var geocodeCall = await CallToolWithAliasAsync(
+            WeatherGeocodeToolName, WeatherGeocodeToolNameAlt,
+            utilityResult.McpToolArgs, cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = geocodeCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = geocodeCall.Result,
+            Success = geocodeCall.Success
+        });
+
+        if (!geocodeCall.Success)
+        {
+            var errorText = "I couldn't resolve that location for a timezone lookup.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        if (!TryParseBestGeocodeCandidate(geocodeCall.Result, out var geo))
+        {
+            var noLocationText = "I couldn't find coordinates for that location. Try a more specific city/country.";
+            _history.Add(ChatMessage.Assistant(noLocationText));
+            return new AgentResponse
+            {
+                Text = noLocationText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        RememberPlaceContext(geo.Name, geo.CountryCode);
+
+        var timezoneArgs = JsonSerializer.Serialize(new
+        {
+            latitude = geo.Latitude,
+            longitude = geo.Longitude,
+            countryCode = geo.CountryCode
+        });
+
+        var timezoneCall = await CallToolWithAliasAsync(
+            ResolveTimezoneToolName, ResolveTimezoneToolNameAlt,
+            timezoneArgs, cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = timezoneCall.ToolName,
+            Arguments = timezoneArgs,
+            Result = timezoneCall.Result,
+            Success = timezoneCall.Success
+        });
+
+        if (!timezoneCall.Success)
+        {
+            var errorText = "I couldn't resolve the timezone for that location right now.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var timeBrief = TryBuildTimeBriefFromTimezoneJson(
+            timezoneCall.Result, geo.Name, userMessage);
+
+        if (string.IsNullOrWhiteSpace(timeBrief))
+        {
+            timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
+        }
+
+        _history.Add(ChatMessage.Assistant(timeBrief));
+        LogEvent("AGENT_RESPONSE", timeBrief);
+
+        return new AgentResponse
+        {
+            Text = timeBrief,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteHolidayUtilityAsync(
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Holiday utility is missing tool args.");
+
+        var holidayCall = await CallUtilityToolWithAliasAsync(
+            utilityResult.McpToolName,
+            utilityResult.McpToolArgs,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = holidayCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = holidayCall.Result,
+            Success = holidayCall.Success
+        });
+
+        if (!holidayCall.Success)
+        {
+            var errorText = "I couldn't fetch holiday data right now. Please try again in a moment.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var holidayText = BuildHolidayUtilityResponse(
+            utilityResult.McpToolName, holidayCall.Result);
+
+        _history.Add(ChatMessage.Assistant(holidayText));
+        LogEvent("AGENT_RESPONSE", holidayText);
+
+        return new AgentResponse
+        {
+            Text = holidayText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteFeedUtilityAsync(
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Feed utility is missing tool args.");
+
+        var feedCall = await CallUtilityToolWithAliasAsync(
+            utilityResult.McpToolName,
+            utilityResult.McpToolArgs,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = feedCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = feedCall.Result,
+            Success = feedCall.Success
+        });
+
+        if (!feedCall.Success)
+        {
+            var errorText = "I couldn't fetch that feed right now.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var feedText = BuildFeedUtilityResponse(feedCall.Result);
+        _history.Add(ChatMessage.Assistant(feedText));
+        LogEvent("AGENT_RESPONSE", feedText);
+
+        return new AgentResponse
+        {
+            Text = feedText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteStatusUtilityAsync(
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Status utility is missing tool args.");
+
+        var statusCall = await CallUtilityToolWithAliasAsync(
+            utilityResult.McpToolName,
+            utilityResult.McpToolArgs,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = statusCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = statusCall.Result,
+            Success = statusCall.Success
+        });
+
+        if (!statusCall.Success)
+        {
+            var errorText = "I couldn't complete that reachability check right now.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            return new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var statusText = BuildStatusUtilityResponse(statusCall.Result);
+        _history.Add(ChatMessage.Assistant(statusText));
+        LogEvent("AGENT_RESPONSE", statusText);
+
+        return new AgentResponse
+        {
+            Text = statusText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<(string ToolName, string Result, bool Success)> CallUtilityToolWithAliasAsync(
+        string toolName,
+        string argsJson,
+        CancellationToken cancellationToken)
+    {
+        return toolName.ToLowerInvariant() switch
+        {
+            HolidaysGetToolName => await CallToolWithAliasAsync(
+                HolidaysGetToolName, HolidaysGetToolNameAlt, argsJson, cancellationToken),
+            HolidaysNextToolName => await CallToolWithAliasAsync(
+                HolidaysNextToolName, HolidaysNextToolNameAlt, argsJson, cancellationToken),
+            HolidaysIsTodayToolName => await CallToolWithAliasAsync(
+                HolidaysIsTodayToolName, HolidaysIsTodayToolNameAlt, argsJson, cancellationToken),
+            FeedFetchToolName => await CallToolWithAliasAsync(
+                FeedFetchToolName, FeedFetchToolNameAlt, argsJson, cancellationToken),
+            StatusCheckToolName => await CallToolWithAliasAsync(
+                StatusCheckToolName, StatusCheckToolNameAlt, argsJson, cancellationToken),
+            ResolveTimezoneToolName => await CallToolWithAliasAsync(
+                ResolveTimezoneToolName, ResolveTimezoneToolNameAlt, argsJson, cancellationToken),
+            _ => await CallToolWithAliasAsync(
+                toolName, ToPascalCaseToolAlias(toolName), argsJson, cancellationToken)
+        };
+    }
+
+    private static string ToPascalCaseToolAlias(string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return toolName;
+
+        var parts = toolName.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        var sb = new StringBuilder();
+        foreach (var part in parts)
+        {
+            if (part.Length == 0)
+                continue;
+            sb.Append(char.ToUpperInvariant(part[0]));
+            if (part.Length > 1)
+                sb.Append(part[1..]);
+        }
+
+        return sb.Length == 0 ? toolName : sb.ToString();
+    }
+
     private async Task<(string ToolName, string Result, bool Success)> CallToolWithAliasAsync(
         string primaryToolName,
         string alternateToolName,
@@ -1050,6 +1377,304 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         catch
         {
             return null;
+        }
+    }
+
+    private string? TryBuildTimeBriefFromTimezoneJson(
+        string timezoneJson,
+        string fallbackLocation,
+        string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(timezoneJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(timezoneJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return null;
+            }
+
+            var timezone = root.TryGetProperty("timezone", out var tzEl)
+                ? (tzEl.GetString() ?? "")
+                : "";
+            if (string.IsNullOrWhiteSpace(timezone))
+                return null;
+
+            var location = fallbackLocation;
+            var fromMessage = ExtractLocationFromWeatherMessage(userMessage);
+            if (!string.IsNullOrWhiteSpace(fromMessage))
+                location = fromMessage!;
+
+            if (TryResolveTimeZoneInfo(timezone, out var tzInfo))
+            {
+                var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                var local = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, tzInfo);
+                var formatted = local.ToString("h:mm tt on dddd, MMM d");
+                return $"It's currently **{formatted}** in {location} ({timezone}).\n\nIf you want, I can check another city too.";
+            }
+
+            return $"The timezone for {location} is **{timezone}**.\n\nIf you want, I can also estimate local time there.";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryResolveTimeZoneInfo(string timezoneId, out TimeZoneInfo tzInfo)
+    {
+        try
+        {
+            tzInfo = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
+            return true;
+        }
+        catch
+        {
+            // Windows often needs a Windows timezone ID; convert if IANA provided.
+            if (TimeZoneInfo.TryConvertIanaIdToWindowsId(timezoneId, out var windowsId))
+            {
+                try
+                {
+                    tzInfo = TimeZoneInfo.FindSystemTimeZoneById(windowsId);
+                    return true;
+                }
+                catch
+                {
+                    // Fall through.
+                }
+            }
+        }
+
+        tzInfo = TimeZoneInfo.Utc;
+        return false;
+    }
+
+    private static string BuildHolidayUtilityResponse(string toolName, string toolJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolJson))
+            return "I couldn't get holiday data from that tool call.";
+
+        try
+        {
+            using var doc = JsonDocument.Parse(toolJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return $"Holiday lookup failed: {err.GetString()}";
+            }
+
+            var country = root.TryGetProperty("countryCode", out var ccEl)
+                ? (ccEl.GetString() ?? "that country")
+                : "that country";
+            var region = root.TryGetProperty("regionCode", out var rcEl)
+                ? (rcEl.GetString() ?? "")
+                : "";
+            var scope = string.IsNullOrWhiteSpace(region) ? country : region;
+
+            if (toolName.Equals(HolidaysIsTodayToolName, StringComparison.OrdinalIgnoreCase))
+            {
+                var isTodayHoliday = root.TryGetProperty("isPublicHoliday", out var isEl) &&
+                                     isEl.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                                     isEl.GetBoolean();
+
+                var todayNames = new List<string>();
+                if (root.TryGetProperty("holidaysToday", out var todayArr) &&
+                    todayArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in todayArr.EnumerateArray())
+                    {
+                        if (item.TryGetProperty("name", out var nameEl) &&
+                            nameEl.ValueKind == JsonValueKind.String)
+                        {
+                            var name = (nameEl.GetString() ?? "").Trim();
+                            if (!string.IsNullOrWhiteSpace(name))
+                                todayNames.Add(name);
+                        }
+                    }
+                }
+
+                string firstLine;
+                if (isTodayHoliday)
+                {
+                    var names = todayNames.Count > 0
+                        ? string.Join(", ", todayNames.Distinct(StringComparer.OrdinalIgnoreCase))
+                        : "a listed public holiday";
+                    firstLine = $"Yes — today is a public holiday in **{scope}**: **{names}**.";
+                }
+                else
+                {
+                    firstLine = $"No — today is not a public holiday in **{scope}**.";
+                }
+
+                if (root.TryGetProperty("nextHoliday", out var nextHoliday) &&
+                    nextHoliday.ValueKind == JsonValueKind.Object)
+                {
+                    var nextName = nextHoliday.TryGetProperty("name", out var nn) ? (nn.GetString() ?? "") : "";
+                    var nextDate = nextHoliday.TryGetProperty("date", out var nd) ? (nd.GetString() ?? "") : "";
+                    if (!string.IsNullOrWhiteSpace(nextName) && !string.IsNullOrWhiteSpace(nextDate))
+                    {
+                        firstLine += $" Next up: **{nextName}** on **{nextDate}**.";
+                    }
+                }
+
+                return $"{firstLine}\n\nIf you want, I can list the full holiday calendar for the year.";
+            }
+
+            if (toolName.Equals(HolidaysNextToolName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (root.TryGetProperty("holidays", out var holidays) &&
+                    holidays.ValueKind == JsonValueKind.Array &&
+                    holidays.GetArrayLength() > 0)
+                {
+                    var first = holidays.EnumerateArray().First();
+                    var name = first.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "the next holiday") : "the next holiday";
+                    var date = first.TryGetProperty("date", out var dateEl) ? (dateEl.GetString() ?? "an upcoming date") : "an upcoming date";
+                    return $"The next public holiday in **{scope}** is **{name}** on **{date}**.\n\nIf you want, I can list the next few after that.";
+                }
+
+                return $"I couldn't find upcoming public holidays for **{scope}**.";
+            }
+
+            // holidays_get
+            var year = root.TryGetProperty("year", out var yEl) && yEl.TryGetInt32(out var y)
+                ? y
+                : DateTime.UtcNow.Year;
+            var entries = new List<string>();
+            var count = 0;
+            if (root.TryGetProperty("holidays", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                count = arr.GetArrayLength();
+                foreach (var item in arr.EnumerateArray().Take(4))
+                {
+                    var name = item.TryGetProperty("name", out var nEl) ? (nEl.GetString() ?? "") : "";
+                    var date = item.TryGetProperty("date", out var dEl) ? (dEl.GetString() ?? "") : "";
+                    if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(date))
+                        entries.Add($"{name} ({date})");
+                }
+            }
+
+            if (count == 0)
+                return $"I couldn't find public holidays for **{scope}** in **{year}**.";
+
+            var preview = entries.Count > 0 ? string.Join(", ", entries) : "no preview available";
+            return $"I found **{count}** public holidays in **{scope}** for **{year}**. First entries: {preview}.\n\nIf you'd like, I can narrow it to a specific region.";
+        }
+        catch
+        {
+            return "I fetched holiday data, but couldn't parse a clean answer.";
+        }
+    }
+
+    private static string BuildFeedUtilityResponse(string toolJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolJson))
+            return "I couldn't read any feed data from that request.";
+
+        try
+        {
+            using var doc = JsonDocument.Parse(toolJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return $"Feed fetch failed: {err.GetString()}";
+            }
+
+            var title = root.TryGetProperty("feedTitle", out var titleEl) ? (titleEl.GetString() ?? "") : "";
+            var host = root.TryGetProperty("sourceHost", out var hostEl) ? (hostEl.GetString() ?? "") : "";
+            var label = !string.IsNullOrWhiteSpace(title) ? title : host;
+
+            var items = new List<string>();
+            var count = 0;
+            if (root.TryGetProperty("items", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                count = arr.GetArrayLength();
+                foreach (var item in arr.EnumerateArray().Take(3))
+                {
+                    if (item.TryGetProperty("title", out var itemTitleEl) &&
+                        itemTitleEl.ValueKind == JsonValueKind.String)
+                    {
+                        var itemTitle = (itemTitleEl.GetString() ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(itemTitle))
+                            items.Add(itemTitle);
+                    }
+                }
+            }
+
+            if (count == 0)
+            {
+                return $"I reached **{label}**, but there were no recent feed items to show.\n\nIf you want, I can retry or check a different feed URL.";
+            }
+
+            var headlineList = items.Count > 0
+                ? string.Join("; ", items.Select((t, i) => $"{i + 1}) {t}"))
+                : "recent items were returned";
+
+            return $"I fetched **{count}** recent feed item(s) from **{label}**. Latest: {headlineList}\n\nIf you want, I can summarize any one of those in detail.";
+        }
+        catch
+        {
+            return "I fetched feed data, but couldn't parse it into a clean summary.";
+        }
+    }
+
+    private static string BuildStatusUtilityResponse(string toolJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolJson))
+            return "I couldn't get a status payload from that check.";
+
+        try
+        {
+            using var doc = JsonDocument.Parse(toolJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return $"Status check failed: {err.GetString()}";
+            }
+
+            var url = root.TryGetProperty("url", out var urlEl) ? (urlEl.GetString() ?? "") : "";
+            var reachable = root.TryGetProperty("reachable", out var reachEl) &&
+                            reachEl.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                            reachEl.GetBoolean();
+            var code = root.TryGetProperty("httpStatus", out var codeEl) && codeEl.TryGetInt32(out var status)
+                ? status
+                : (int?)null;
+            var method = root.TryGetProperty("method", out var methodEl) ? (methodEl.GetString() ?? "probe") : "probe";
+            var latency = root.TryGetProperty("latencyMs", out var latencyEl) && latencyEl.TryGetInt32(out var ms)
+                ? ms
+                : 0;
+            var error = root.TryGetProperty("error", out var errEl) ? (errEl.GetString() ?? "") : "";
+
+            var hostLabel = url;
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                hostLabel = uri.Host;
+
+            if (reachable)
+            {
+                var statusText = code.HasValue ? $"HTTP {code.Value}" : "a network response";
+                return $"**{hostLabel}** is reachable ({statusText} via {method} in {latency} ms).\n\nIf you want, I can re-check in a few seconds.";
+            }
+
+            var reason = string.IsNullOrWhiteSpace(error) ? "no response" : error;
+            return $"I couldn't reach **{hostLabel}** ({reason}).\n\nIf you want, I can retry or test a different URL variant.";
+        }
+        catch
+        {
+            return "I ran the status check, but couldn't parse the response cleanly.";
         }
     }
 
@@ -4325,9 +4950,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         {
             ChatMessage.System(
                 "You are a utility-intent extractor.\n" +
-                "Classify whether the user wants one of: weather, time, calculator, conversion, letter_count, or none.\n" +
+                "Classify whether the user wants one of: weather, time, holiday, feed, status, calculator, conversion, letter_count, or none.\n" +
                 "Return ONLY JSON with this schema:\n" +
-                "{ \"category\": \"weather|time|calculator|conversion|letter_count|none\", \"canonicalMessage\": \"...\", \"confidence\": 0.0 }\n" +
+                "{ \"category\": \"weather|time|holiday|feed|status|calculator|conversion|letter_count|none\", \"canonicalMessage\": \"...\", \"confidence\": 0.0 }\n" +
                 "Rules:\n" +
                 "- canonicalMessage must be a short plain-English request usable by a deterministic parser\n" +
                 "- Do not invent locations, numbers, or units\n" +
@@ -4394,6 +5019,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lower.Contains("wind") || lower.Contains("humidity") ||
                lower.Contains("umbrella") || lower.Contains("trip") ||
                lower.Contains("time in") || lower.Contains("timezone") || lower.Contains("time zone") ||
+               lower.Contains("holiday") || lower.Contains("holidays") ||
+               lower.Contains("rss") || lower.Contains("atom feed") || lower.Contains("feed url") ||
+               lower.Contains("status") || lower.Contains("uptime") || lower.Contains("reachable") || lower.Contains("online") ||
                lower.Contains("convert") || lower.Contains("conversion") ||
                lower.Contains("calculate") || lower.Contains("percent") ||
                lower.Contains("how many") || lower.Contains("count");

@@ -135,6 +135,66 @@ public static class ToolManifest
             Description = "Returns normalized weather forecast from coordinates (NWS US, Open-Meteo fallback).",
             Limits      = "Max 7 days. Forecast cache 10-30 min."
         },
+        new()
+        {
+            Name        = "resolve_timezone",
+            Aliases     = ["ResolveTimezone"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Resolves timezone from coordinates (NWS US, Open-Meteo fallback).",
+            Limits      = "Coordinate input only. Timezone cache enabled."
+        },
+        new()
+        {
+            Name        = "holidays_get",
+            Aliases     = ["HolidaysGet"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Returns public holidays for a country/year using Nager.Date.",
+            Limits      = "Year clamped 1900-2100. Max 100 items."
+        },
+        new()
+        {
+            Name        = "holidays_next",
+            Aliases     = ["HolidaysNext"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Returns upcoming public holidays for a country using Nager.Date.",
+            Limits      = "Max 25 items."
+        },
+        new()
+        {
+            Name        = "holidays_is_today",
+            Aliases     = ["HolidaysIsToday"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Checks if today is a public holiday for a country/region.",
+            Limits      = "Bounded single-day response."
+        },
+        new()
+        {
+            Name        = "feed_fetch",
+            Aliases     = ["FeedFetch"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Fetches and parses RSS/Atom feeds directly from URL.",
+            Limits      = "Max 20 items. Feed payload size bounded."
+        },
+        new()
+        {
+            Name        = "status_check_url",
+            Aliases     = ["StatusCheckUrl"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Checks URL reachability with latency/status metadata.",
+            Limits      = "HEAD first, GET fallback. Short cache TTL."
+        },
 
         // ── File Tools ───────────────────────────────────────────────
         new()

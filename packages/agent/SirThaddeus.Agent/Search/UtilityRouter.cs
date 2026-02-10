@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Agent.Search;
@@ -24,7 +25,7 @@ public static class UtilityRouter
     /// </summary>
     public sealed record UtilityResult
     {
-        public required string Category { get; init; }  // "weather", "time", "calculator", "conversion", "fact"
+        public required string Category { get; init; }  // "weather", "time", "holiday", "feed", "status", "calculator", "conversion", "fact"
         public required string Answer   { get; init; }  // Inline answer text
         public string? McpToolName      { get; init; }  // If non-null, route to this MCP tool instead
         public string? McpToolArgs      { get; init; }  // JSON args for the MCP tool
@@ -48,11 +49,41 @@ public static class UtilityRouter
 
     // ── Time zone patterns ───────────────────────────────────────────
     private static readonly Regex TimeInPattern = new(
-        @"(?:what(?:'s| is) the )?time\s+(?:in|at|for)\s+(.+)",
+        @"(?:what(?:'s| is)\s+(?:the\s+)?time(?:\s+is\s+it)?|what\s+time\s+is\s+it|time)\s+(?:in|at|for)\s+(.+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TimeZonePattern = new(
         @"time\s*zone\s+(?:for|of|in)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // ── Holiday patterns ─────────────────────────────────────────────
+    private static readonly Regex HolidayTodayPattern = new(
+        @"(?:is\s+today\s+(?:a\s+)?(?:public\s+)?holiday)\s+(?:in|for)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex HolidayNextPattern = new(
+        @"(?:next|upcoming)\s+(?:public\s+)?holiday\s+(?:in|for)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex HolidayListPattern = new(
+        @"(?:public\s+holidays?|holidays?)\s+(?:in|for)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex YearPattern = new(
+        @"\b(19\d{2}|20\d{2})\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // ── Feed / status patterns ───────────────────────────────────────
+    private static readonly Regex FeedIntentPattern = new(
+        @"\b(?:rss|atom|feed)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex StatusIntentPattern = new(
+        @"\b(?:is|check|status|uptime)\b.+\b(?:up|online|reachable|down)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex UrlLikePattern = new(
+        @"((?:https?://)?(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s\]\[\(\)""']*)?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // ── Calculator patterns ──────────────────────────────────────────
@@ -82,6 +113,22 @@ public static class UtilityRouter
         @"(?:how\s+far\s+(?:is|to)\s+(?:the\s+)?moon|distance\s+(?:to|from)\s+(?:the\s+)?moon|how\s+many\s+\w+\s+(?:is|are)\s+(?:it\s+)?(?:to\s+)?(?:the\s+)?moon|earth\s+to\s+moon)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex SpeedOfLightPattern = new(
+        @"(?:what(?:'s| is)\s+)?(?:the\s+)?speed of light(?:\s+in\s+(?:vacuum|space))?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex BoilingPointWaterPattern = new(
+        @"(?:what(?:'s| is)\s+)?(?:the\s+)?boiling point of water(?:\s+(?:at|in)\s+sea\s+level)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex FreezingPointWaterPattern = new(
+        @"(?:what(?:'s| is)\s+)?(?:the\s+)?freezing point of water(?:\s+(?:at|in)\s+sea\s+level)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex DaysInYearPattern = new(
+        @"(?:how many|number of)\s+days\s+(?:are\s+)?(?:in|per)\s+(?:a|one)\s+year|how many\s+days\s+in\s+(?:a|one)\s+year",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // Strip tail temporal markers that should influence forecast day,
     // not geocoder place matching (e.g. "Rexburg today" -> "Rexburg").
     private static readonly Regex LocationTemporalTailPattern = new(
@@ -102,6 +149,44 @@ public static class UtilityRouter
         "social climate", "weather the storm", "weather this"
     ];
 
+    private static readonly Dictionary<string, string> CountryCodeMap =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["us"] = "US",
+        ["usa"] = "US",
+        ["united states"] = "US",
+        ["united states of america"] = "US",
+        ["america"] = "US",
+        ["canada"] = "CA",
+        ["ca"] = "CA",
+        ["uk"] = "GB",
+        ["great britain"] = "GB",
+        ["united kingdom"] = "GB",
+        ["england"] = "GB",
+        ["japan"] = "JP",
+        ["jp"] = "JP",
+        ["france"] = "FR",
+        ["fr"] = "FR",
+        ["germany"] = "DE",
+        ["de"] = "DE",
+        ["spain"] = "ES",
+        ["es"] = "ES",
+        ["italy"] = "IT",
+        ["it"] = "IT",
+        ["mexico"] = "MX",
+        ["mx"] = "MX",
+        ["australia"] = "AU",
+        ["au"] = "AU",
+        ["new zealand"] = "NZ",
+        ["nz"] = "NZ",
+        ["india"] = "IN",
+        ["in"] = "IN",
+        ["china"] = "CN",
+        ["cn"] = "CN",
+        ["brazil"] = "BR",
+        ["br"] = "BR"
+    };
+
     /// <summary>
     /// Attempts to handle the message as a utility query. Returns null
     /// if the message is not a utility intent.
@@ -115,8 +200,11 @@ public static class UtilityRouter
 
         return TryWeather(trimmed)
             ?? TryTime(trimmed)
+            ?? TryHoliday(trimmed)
+            ?? TryStatus(trimmed)
+            ?? TryFeed(trimmed)
             ?? TryLetterCount(trimmed)
-            ?? TryMoonDistanceFact(trimmed)
+            ?? TrySimpleFact(trimmed)
             ?? TryCalculator(trimmed)
             ?? TryConversion(trimmed);
     }
@@ -198,37 +286,152 @@ public static class UtilityRouter
         if (!match.Success)
             return null;
 
-        var location = match.Groups[1].Value.Trim().TrimEnd('?', '.', '!');
+        var location = NormalizeLocationCandidate(match.Groups[1].Value);
         if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
             return null;
-
-        // Try to resolve the timezone from well-known city mappings.
-        var tz = TryResolveTimeZone(location);
-        if (tz is null)
-        {
-            return new UtilityResult
-            {
-                Category = "time",
-                Answer   = $"I don't have a timezone mapping for \"{location}\" — " +
-                           "let me look that up.",
-                McpToolName = "web_search",
-                McpToolArgs = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    query      = $"current time in {location}",
-                    maxResults = 2,
-                    recency    = "any"
-                })
-            };
-        }
-
-        var now = TimeZoneInfo.ConvertTimeFromUtc(
-            DateTime.UtcNow, tz);
-        var formatted = now.ToString("h:mm tt on dddd, MMMM d");
 
         return new UtilityResult
         {
             Category = "time",
-            Answer   = $"It's currently **{formatted}** in {location} ({tz.StandardName})."
+            Answer = $"[time lookup for: {location}]",
+            McpToolName = "weather_geocode",
+            McpToolArgs = JsonSerializer.Serialize(new
+            {
+                place = location,
+                maxResults = 3
+            })
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Holidays
+    // ─────────────────────────────────────────────────────────────────
+
+    private static UtilityResult? TryHoliday(string message)
+    {
+        var todayMatch = HolidayTodayPattern.Match(message);
+        if (todayMatch.Success)
+        {
+            var scope = NormalizeHolidayScope(todayMatch.Groups[1].Value);
+            if (!TryParseCountryAndRegion(scope, out var countryCode, out var regionCode))
+                return null;
+
+            return new UtilityResult
+            {
+                Category = "holiday",
+                Answer = $"[holiday lookup for: {countryCode}]",
+                McpToolName = "holidays_is_today",
+                McpToolArgs = JsonSerializer.Serialize(new
+                {
+                    countryCode,
+                    regionCode
+                })
+            };
+        }
+
+        var nextMatch = HolidayNextPattern.Match(message);
+        if (nextMatch.Success)
+        {
+            var scope = NormalizeHolidayScope(nextMatch.Groups[1].Value);
+            if (!TryParseCountryAndRegion(scope, out var countryCode, out var regionCode))
+                return null;
+
+            return new UtilityResult
+            {
+                Category = "holiday",
+                Answer = $"[next holiday lookup for: {countryCode}]",
+                McpToolName = "holidays_next",
+                McpToolArgs = JsonSerializer.Serialize(new
+                {
+                    countryCode,
+                    regionCode,
+                    maxItems = 5
+                })
+            };
+        }
+
+        var listMatch = HolidayListPattern.Match(message);
+        if (!listMatch.Success)
+            return null;
+
+        var rawScope = listMatch.Groups[1].Value;
+        var year = ResolveHolidayYear(rawScope);
+        var scopeWithoutYear = StripHolidayYearHints(rawScope);
+        if (!TryParseCountryAndRegion(scopeWithoutYear, out var listCountryCode, out var listRegionCode))
+            return null;
+
+        return new UtilityResult
+        {
+            Category = "holiday",
+            Answer = $"[holiday list lookup for: {listCountryCode}]",
+            McpToolName = "holidays_get",
+            McpToolArgs = JsonSerializer.Serialize(new
+            {
+                countryCode = listCountryCode,
+                regionCode = listRegionCode,
+                year,
+                maxItems = 25
+            })
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Status / Reachability
+    // ─────────────────────────────────────────────────────────────────
+
+    private static UtilityResult? TryStatus(string message)
+    {
+        if (!StatusIntentPattern.IsMatch(message) &&
+            !message.Contains(" is ", StringComparison.OrdinalIgnoreCase) &&
+            !message.Contains(" up", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!TryExtractUrlLike(message, out var url))
+            return null;
+
+        return new UtilityResult
+        {
+            Category = "status",
+            Answer = $"[status check for: {url}]",
+            McpToolName = "status_check_url",
+            McpToolArgs = JsonSerializer.Serialize(new
+            {
+                url
+            })
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RSS / Atom
+    // ─────────────────────────────────────────────────────────────────
+
+    private static UtilityResult? TryFeed(string message)
+    {
+        if (!TryExtractUrlLike(message, out var url))
+            return null;
+
+        var lower = message.ToLowerInvariant();
+        var urlLooksFeedy =
+            url.Contains("/feed", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("rss", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("atom", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+        if (!FeedIntentPattern.IsMatch(message) && !urlLooksFeedy)
+            return null;
+
+        return new UtilityResult
+        {
+            Category = "feed",
+            Answer = $"[feed fetch for: {url}]",
+            McpToolName = "feed_fetch",
+            McpToolArgs = JsonSerializer.Serialize(new
+            {
+                url,
+                maxItems = 5
+            })
         };
     }
 
@@ -280,20 +483,65 @@ public static class UtilityRouter
         }
     }
 
-    private static UtilityResult? TryMoonDistanceFact(string message)
+    private static UtilityResult? TrySimpleFact(string message)
     {
         var lower = message.ToLowerInvariant();
-        if (!MoonDistancePattern.IsMatch(lower))
-            return null;
 
-        var (value, unitLabel) = ResolveMoonDistanceUnit(lower);
-        var formatted = FormatMoonDistance(value, unitLabel);
-
-        return new UtilityResult
+        if (MoonDistancePattern.IsMatch(lower))
         {
-            Category = "fact",
-            Answer = $"The average Earth-Moon distance is about **{formatted}**."
-        };
+            var (value, unitLabel) = ResolveMoonDistanceUnit(lower);
+            var formatted = FormatMoonDistance(value, unitLabel);
+
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = $"The average Earth-Moon distance is about **{formatted}**."
+            };
+        }
+
+        if (SpeedOfLightPattern.IsMatch(lower))
+        {
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = "The speed of light in vacuum is **299,792,458 meters per second** (about **299,792 km/s**)."
+            };
+        }
+
+        if (BoilingPointWaterPattern.IsMatch(lower))
+        {
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = "At sea level, water boils at **100C** (**212F**)."
+            };
+        }
+
+        if (FreezingPointWaterPattern.IsMatch(lower))
+        {
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = "At sea level, water freezes at **0C** (**32F**)."
+            };
+        }
+
+        if (DaysInYearPattern.IsMatch(lower))
+        {
+            if (lower.Contains("mars", StringComparison.Ordinal) ||
+                lower.Contains("martian", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = "A standard year has **365 days**; leap years have **366**."
+            };
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -461,85 +709,152 @@ public static class UtilityRouter
         return location.Trim().TrimEnd('?', '.', '!', ',');
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    // Time Zone Mapping (common cities/regions)
-    //
-    // Not exhaustive — if the city isn't here, we fall back to a web
-    // search. This avoids importing a full geo-lookup library.
-    // ─────────────────────────────────────────────────────────────────
-
-    private static TimeZoneInfo? TryResolveTimeZone(string location)
+    private static string NormalizeLocationCandidate(string value)
     {
-        var lower = location.ToLowerInvariant();
+        var location = (value ?? "").Trim().TrimEnd('?', '.', '!', ',');
+        location = Regex.Replace(
+            location,
+            @"\s+(?:right now|currently|please|pls|thanks|thank you)\s*$",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        return location.Trim().TrimEnd('?', '.', '!', ',');
+    }
 
-        var id = lower switch
+    private static string NormalizeHolidayScope(string value)
+    {
+        return (value ?? "")
+            .Trim()
+            .TrimEnd('?', '.', '!', ',')
+            .Replace("the ", "", StringComparison.OrdinalIgnoreCase)
+            .Trim();
+    }
+
+    private static string StripHolidayYearHints(string value)
+    {
+        var stripped = YearPattern.Replace(value ?? "", "");
+        stripped = Regex.Replace(
+            stripped,
+            @"\b(?:this|next)\s+year\b",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        return NormalizeHolidayScope(stripped);
+    }
+
+    private static int ResolveHolidayYear(string value)
+    {
+        var nowYear = DateTime.UtcNow.Year;
+        if (value.Contains("next year", StringComparison.OrdinalIgnoreCase))
+            return nowYear + 1;
+
+        var yearMatch = YearPattern.Match(value ?? "");
+        if (yearMatch.Success && int.TryParse(yearMatch.Groups[1].Value, out var parsedYear))
+            return Math.Clamp(parsedYear, 1900, 2100);
+
+        return nowYear;
+    }
+
+    private static bool TryParseCountryAndRegion(
+        string scope,
+        out string countryCode,
+        out string? regionCode)
+    {
+        countryCode = "";
+        regionCode = null;
+
+        var cleaned = NormalizeHolidayScope(scope);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return false;
+
+        // Explicit region token, e.g. US-ID
+        var explicitRegion = cleaned.ToUpperInvariant();
+        if (Regex.IsMatch(explicitRegion, @"^[A-Z]{2}-[A-Z0-9]{2,3}$"))
         {
-            "new york" or "nyc" or "boston" or "miami" or "atlanta"
-                or "washington dc" or "dc" or "philadelphia"
-                => "Eastern Standard Time",
-
-            "chicago" or "dallas" or "houston" or "austin"
-                or "minneapolis" or "nashville" or "st louis"
-                => "Central Standard Time",
-
-            "denver" or "phoenix" or "salt lake city"
-                or "boise" or "albuquerque"
-                => "Mountain Standard Time",
-
-            "los angeles" or "la" or "san francisco" or "seattle"
-                or "portland" or "san diego" or "las vegas"
-                => "Pacific Standard Time",
-
-            "anchorage" or "alaska"
-                => "Alaskan Standard Time",
-
-            "honolulu" or "hawaii"
-                => "Hawaiian Standard Time",
-
-            "london" or "uk" or "united kingdom"
-                => "GMT Standard Time",
-
-            "paris" or "berlin" or "rome" or "madrid"
-                or "amsterdam" or "brussels" or "vienna"
-                => "W. Europe Standard Time",
-
-            "moscow" or "russia"
-                => "Russian Standard Time",
-
-            "tokyo" or "japan"
-                => "Tokyo Standard Time",
-
-            "sydney" or "melbourne" or "australia"
-                => "AUS Eastern Standard Time",
-
-            "auckland" or "new zealand"
-                => "New Zealand Standard Time",
-
-            "beijing" or "shanghai" or "china"
-                => "China Standard Time",
-
-            "mumbai" or "delhi" or "india"
-                => "India Standard Time",
-
-            "dubai" or "abu dhabi" or "uae"
-                => "Arabian Standard Time",
-
-            "rexburg" or "idaho falls" or "pocatello" or "idaho"
-                => "Mountain Standard Time",
-
-            _ => null
-        };
-
-        if (id is null)
-            return null;
-
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(id);
+            countryCode = explicitRegion[..2];
+            regionCode = explicitRegion;
+            return true;
         }
-        catch
+
+        // "Idaho, US" -> country=US, region=US-ID (best effort when 2-letter region)
+        var parts = cleaned.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length >= 2 &&
+            TryResolveCountryCode(parts[^1], out var parsedCountry))
         {
-            return null;
+            countryCode = parsedCountry;
+            var regionCandidate = parts[0].Trim().ToUpperInvariant();
+            if (Regex.IsMatch(regionCandidate, @"^[A-Z]{2}$"))
+                regionCode = $"{countryCode}-{regionCandidate}";
+            return true;
         }
+
+        if (TryResolveCountryCode(cleaned, out var directCountry))
+        {
+            countryCode = directCountry;
+            return true;
+        }
+
+        // Last-token fallback: "holidays in canada please"
+        var tokens = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length > 0 && TryResolveCountryCode(tokens[^1], out var lastCountry))
+        {
+            countryCode = lastCountry;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveCountryCode(string raw, out string countryCode)
+    {
+        countryCode = "";
+        var cleaned = (raw ?? "").Trim().TrimEnd('?', '.', '!', ',');
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return false;
+
+        var upper = cleaned.ToUpperInvariant();
+        if (upper.Length == 2 && upper.All(char.IsLetter))
+        {
+            countryCode = upper;
+            return true;
+        }
+
+        if (CountryCodeMap.TryGetValue(cleaned.ToLowerInvariant(), out var mapped))
+        {
+            countryCode = mapped;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractUrlLike(string message, out string normalizedUrl)
+    {
+        normalizedUrl = "";
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var match = UrlLikePattern.Match(message);
+        if (!match.Success)
+            return false;
+
+        var raw = match.Groups[1].Value
+            .Trim()
+            .TrimEnd('?', '.', '!', ',', ';', ':', ')', ']', '}');
+
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = $"https://{raw}";
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+            return false;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            return false;
+
+        normalizedUrl = uri.ToString();
+        return true;
     }
 }
