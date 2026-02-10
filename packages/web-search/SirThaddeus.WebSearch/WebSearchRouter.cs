@@ -83,9 +83,24 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
     // Auto Mode — Cascade through providers
     // ─────────────────────────────────────────────────────────────────
 
+    private static bool LooksLikeNewsIntent(string query) =>
+        SearchIntentPatterns.LooksLikeNewsIntent(query);
+
     private async Task<SearchResults> SearchAutoAsync(
         string query, WebSearchOptions options, CancellationToken ct)
     {
+        // ── News queries: prefer Google News RSS first ────────────────
+        // Generic "give me the news" queries often produce low-signal
+        // homepage results from meta-search engines (\"Breaking news...\").
+        // Google News RSS returns actual article items with publish dates,
+        // which we can summarize into real events.
+        if (LooksLikeNewsIntent(query))
+        {
+            var google = await SearchWithGoogleNewsAsync(query, options, ct);
+            if (google.Results.Count > 0)
+                return google;
+        }
+
         await ProbeProvidersAsync(ct);
 
         // 1. SearxNG (if available)

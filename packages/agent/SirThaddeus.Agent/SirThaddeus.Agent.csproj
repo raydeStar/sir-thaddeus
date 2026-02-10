@@ -7,8 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="SirThaddeus.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
   </ItemGroup>
 
 </Project>

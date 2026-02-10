@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Xml;
+using SirThaddeus.WebSearch;
 
 namespace SirThaddeus.WebSearch.Providers;
 
@@ -34,15 +35,6 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
     private const string HeadlinesUrl = "https://news.google.com/rss";
     private readonly HttpClient _http;
 
-    // Generic queries that return junk from the search endpoint
-    // but great results from the top headlines feed
-    private static readonly string[] HeadlineTriggers =
-    [
-        "news", "headlines", "current events", "what's happening",
-        "today", "breaking", "top stories", "latest", "recent news",
-        "whats going on", "what is going on", "whats new", "news feed"
-    ];
-
     public GoogleNewsRssProvider(HttpClient? httpClient = null)
     {
         _http = httpClient ?? new HttpClient();
@@ -74,16 +66,21 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(options.TimeoutMs);
 
-            // Pick the right feed: top headlines for generic queries,
-            // search for specific topics
-            var url = IsGenericNewsQuery(query)
+            // Pick the right feed:
+            // - For generic queries with NO recency constraint, top headlines works well.
+            // - If the caller asked for day/week/month, prefer the search endpoint
+            //   so we can filter by publish date and avoid "current headlines only".
+            var useHeadlines = IsGenericNewsQuery(query) && options.Recency == "any";
+            var url = useHeadlines
                 ? $"{HeadlinesUrl}?hl=en-US&gl=US&ceid=US:en"
                 : $"{SearchUrl}?q={Uri.EscapeDataString(query)}&hl=en-US&gl=US&ceid=US:en";
+
+            var cutoffUtc = ComputeRecencyCutoffUtc(options.Recency, DateTime.UtcNow);
 
             var results = await RetryHelper.ExecuteAsync(async () =>
             {
                 var xml = await _http.GetStringAsync(url, cts.Token);
-                return ParseRssResults(xml, options.MaxResults);
+                return ParseRssResults(xml, options.MaxResults, cutoffUtc);
             }, cancellationToken);
 
             return new SearchResults
@@ -132,14 +129,8 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
     /// from the search endpoint but great individual articles from
     /// the top headlines feed.
     /// </summary>
-    private static bool IsGenericNewsQuery(string query)
-    {
-        var normalized = query.Trim().ToLowerInvariant();
-
-        return HeadlineTriggers.Any(trigger =>
-            normalized.Equals(trigger, StringComparison.Ordinal) ||
-            normalized.Contains(trigger, StringComparison.Ordinal));
-    }
+    private static bool IsGenericNewsQuery(string query) =>
+        SearchIntentPatterns.IsGenericHeadlineQuery(query);
 
     // ─────────────────────────────────────────────────────────────────
     // RSS XML Parsing
@@ -155,7 +146,7 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
     // The real article URL lives inside the <description> HTML.
     // ─────────────────────────────────────────────────────────────────
 
-    private static List<SearchResult> ParseRssResults(string xml, int maxResults)
+    private static List<SearchResult> ParseRssResults(string xml, int maxResults, DateTime? cutoffUtc)
     {
         var results    = new List<SearchResult>();
         var seenTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -225,7 +216,17 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
                 // Parse publication date if available
                 var snippet = "";
                 if (DateTime.TryParse(pubDate, out var parsedDate))
+                {
+                    var pubUtc = parsedDate.Kind == DateTimeKind.Utc
+                        ? parsedDate
+                        : parsedDate.ToUniversalTime();
+
+                    // Enforce recency window when requested.
+                    if (cutoffUtc.HasValue && pubUtc < cutoffUtc.Value)
+                        continue;
+
                     snippet = parsedDate.ToString("yyyy-MM-dd HH:mm");
+                }
 
                 results.Add(new SearchResult
                 {
@@ -243,6 +244,9 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
 
         return results;
     }
+
+    private static DateTime? ComputeRecencyCutoffUtc(string recency, DateTime nowUtc) =>
+        RecencyHelper.ToCutoffUtc(recency, nowUtc);
 
     // ─────────────────────────────────────────────────────────────────
     // URL Extraction from Description HTML

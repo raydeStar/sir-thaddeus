@@ -25,6 +25,7 @@ public static class ContentExtractor
     private const int DefaultTimeoutSecs  = 15;
     private const int FaviconMaxBytes     = 64 * 1024;  // 64 KB cap
     private const int FaviconTimeoutSecs  = 3;
+    private const int GoogleNewsResolveMaxLinks = 40;
 
     /// <summary>
     /// Extracted content from a single web page.
@@ -82,14 +83,33 @@ public static class ContentExtractor
             // Use GetAsync (not GetStringAsync) so we can capture the final
             // URL after redirects — critical for Google News redirect links.
             // Wrapped in retry for transient failures (DNS hiccups, 502s, etc.)
-            var (finalUri, html) = await RetryHelper.ExecuteAsync(async () =>
+            var (finalUri, html) = await FetchHtmlAsync(uri, http, cts.Token);
+
+            // Google News RSS links sometimes resolve to an HTML wrapper
+            // ("Google News") that requires extracting the real target URL
+            // from the page markup. If we detect that wrapper, attempt a
+            // single unwrap and re-fetch the actual article.
+            if (IsGoogleNewsWrapper(finalUri) && !string.IsNullOrWhiteSpace(html))
             {
-                using var resp = await http.GetAsync(uri, cts.Token);
-                resp.EnsureSuccessStatusCode();
-                var body     = await resp.Content.ReadAsStringAsync(cts.Token);
-                var resolved = resp.RequestMessage?.RequestUri ?? uri;
-                return (resolved, body);
-            }, cancellationToken);
+                var target = TryResolveGoogleNewsTargetUrl(html, finalUri);
+                if (!string.IsNullOrWhiteSpace(target) &&
+                    Uri.TryCreate(target, UriKind.Absolute, out var targetUri))
+                {
+                    try
+                    {
+                        var resolved = await FetchHtmlAsync(targetUri, http, cts.Token);
+                        if (!string.IsNullOrWhiteSpace(resolved.Html))
+                        {
+                            finalUri = resolved.FinalUri;
+                            html     = resolved.Html;
+                        }
+                    }
+                    catch
+                    {
+                        // Best-effort unwrap; fall back to the wrapper page.
+                    }
+                }
+            }
 
             url    = finalUri.ToString();
             domain = finalUri.Host.Replace("www.", "");
@@ -348,6 +368,217 @@ public static class ContentExtractor
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 
         return http;
+    }
+
+    private static async Task<(Uri FinalUri, string Html)> FetchHtmlAsync(
+        Uri uri, HttpClient http, CancellationToken ct)
+    {
+        return await RetryHelper.ExecuteAsync(async () =>
+        {
+            using var resp = await http.GetAsync(uri, ct);
+            resp.EnsureSuccessStatusCode();
+            var body     = await resp.Content.ReadAsStringAsync(ct);
+            var resolved = resp.RequestMessage?.RequestUri ?? uri;
+            return (resolved, body);
+        }, ct);
+    }
+
+    private static bool IsGoogleNewsWrapper(Uri uri)
+    {
+        var host = uri.Host.Replace("www.", "");
+        if (!host.Equals("news.google.com", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Most wrapper links come from RSS article endpoints.
+        return uri.AbsolutePath.Contains("/rss/articles/", StringComparison.OrdinalIgnoreCase) ||
+               uri.AbsolutePath.Contains("/articles/", StringComparison.OrdinalIgnoreCase) ||
+               uri.AbsolutePath.Contains("/rss/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryResolveGoogleNewsTargetUrl(string html, Uri pageUri)
+    {
+        // 1) Meta refresh
+        var meta = TryExtractMetaRefreshUrl(html, pageUri);
+        var metaUnwrapped = TryUnwrapGoogleRedirect(meta, pageUri);
+        if (!string.IsNullOrWhiteSpace(metaUnwrapped))
+            return metaUnwrapped;
+
+        // 2) Canonical link
+        var canonical = TryExtractCanonicalUrl(html, pageUri);
+        var canonicalUnwrapped = TryUnwrapGoogleRedirect(canonical, pageUri);
+        if (!string.IsNullOrWhiteSpace(canonicalUnwrapped))
+            return canonicalUnwrapped;
+
+        // 3) Anchor tags — pick the first plausible external article link
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
+
+        var links = doc.DocumentNode.SelectNodes("//a[@href]");
+        if (links is null)
+            return null;
+
+        var checkedCount = 0;
+        foreach (var node in links)
+        {
+            if (checkedCount++ > GoogleNewsResolveMaxLinks)
+                break;
+
+            var href = node.GetAttributeValue("href", null);
+            if (string.IsNullOrWhiteSpace(href))
+                continue;
+
+            var candidate = TryUnwrapGoogleRedirect(href, pageUri);
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            if (!Uri.TryCreate(candidate, UriKind.Absolute, out var u) ||
+                (u.Scheme != "http" && u.Scheme != "https"))
+                continue;
+
+            if (IsGoogleDomain(u.Host))
+                continue;
+
+            return u.ToString();
+        }
+
+        return null;
+    }
+
+    private static bool IsGoogleDomain(string host)
+    {
+        var h = (host ?? "").Replace("www.", "").ToLowerInvariant();
+        return h == "google.com" ||
+               h.EndsWith(".google.com", StringComparison.Ordinal) ||
+               h.EndsWith(".googleusercontent.com", StringComparison.Ordinal);
+    }
+
+    private static string? TryExtractCanonicalUrl(string html, Uri pageUri)
+    {
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
+
+        var node = doc.DocumentNode.SelectSingleNode("//link[@rel='canonical']");
+        var href = node?.GetAttributeValue("href", null);
+        if (string.IsNullOrWhiteSpace(href))
+            return null;
+
+        if (Uri.TryCreate(pageUri, href, out var absolute))
+            return absolute.ToString();
+
+        return null;
+    }
+
+    private static string? TryExtractMetaRefreshUrl(string html, Uri pageUri)
+    {
+        // Fast string scan — avoid full DOM parse for a simple pattern.
+        var idx = html.IndexOf("http-equiv=\"refresh\"", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            idx = html.IndexOf("http-equiv='refresh'", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return null;
+
+        // Find the next content="...".
+        var contentIdx = html.IndexOf("content", idx, StringComparison.OrdinalIgnoreCase);
+        if (contentIdx < 0)
+            return null;
+
+        var quoteIdx = html.IndexOf('"', contentIdx);
+        var quoteChar = '"';
+        if (quoteIdx < 0)
+        {
+            quoteIdx = html.IndexOf('\'', contentIdx);
+            quoteChar = '\'';
+        }
+        if (quoteIdx < 0)
+            return null;
+
+        var endIdx = html.IndexOf(quoteChar, quoteIdx + 1);
+        if (endIdx < 0)
+            return null;
+
+        var content = html[(quoteIdx + 1)..endIdx];
+        var urlIdx  = content.IndexOf("url=", StringComparison.OrdinalIgnoreCase);
+        if (urlIdx < 0)
+            return null;
+
+        var raw = content[(urlIdx + 4)..].Trim().Trim('\"', '\'', ' ');
+        raw = WebUtility.HtmlDecode(raw);
+
+        if (Uri.TryCreate(pageUri, raw, out var absolute))
+            return absolute.ToString();
+
+        return null;
+    }
+
+    private static string? TryUnwrapGoogleRedirect(string? href, Uri pageUri)
+    {
+        if (string.IsNullOrWhiteSpace(href))
+            return null;
+
+        if (!Uri.TryCreate(pageUri, href, out var uri))
+            return null;
+
+        // Direct external link (best case)
+        if (!IsGoogleDomain(uri.Host))
+            return uri.ToString();
+
+        // Google redirect wrappers (common patterns)
+        // Example: https://www.google.com/url?url=https%3A%2F%2Fexample.com%2Farticle&...
+        // Also seen: ?q=..., ?u=...
+        var query = uri.Query;
+        if (string.IsNullOrWhiteSpace(query) || query.Length < 4)
+            return null;
+
+        var kv = ParseQueryString(query);
+        if (TryGetFirst(kv, out var target, "url", "q", "u") &&
+            Uri.TryCreate(target, UriKind.Absolute, out var targetUri) &&
+            (targetUri.Scheme == "http" || targetUri.Scheme == "https") &&
+            !IsGoogleDomain(targetUri.Host))
+        {
+            return targetUri.ToString();
+        }
+
+        return null;
+    }
+
+    private static bool TryGetFirst(
+        Dictionary<string, string> map, out string value, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (map.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v))
+            {
+                value = v;
+                return true;
+            }
+        }
+
+        value = "";
+        return false;
+    }
+
+    private static Dictionary<string, string> ParseQueryString(string query)
+    {
+        var q = query.StartsWith('?') ? query[1..] : query;
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var part in q.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var idx = part.IndexOf('=');
+            if (idx <= 0 || idx >= part.Length - 1)
+                continue;
+
+            var key = WebUtility.UrlDecode(part[..idx]);
+            var val = WebUtility.UrlDecode(part[(idx + 1)..]);
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            // First value wins — avoid huge duplicates
+            if (!map.ContainsKey(key))
+                map[key] = val;
+        }
+
+        return map;
     }
 
     internal static string StripHtmlToText(string html)

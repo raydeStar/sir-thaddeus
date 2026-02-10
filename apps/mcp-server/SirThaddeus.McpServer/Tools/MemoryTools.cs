@@ -388,6 +388,106 @@ public static class MemoryTools
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // Browsing / Administration
+    // ─────────────────────────────────────────────────────────────────
+
+    [McpServerTool, Description(
+        "Lists stored memory facts with optional filtering and pagination. " +
+        "Returns facts with their stable fact_id (= memory_id), subject, " +
+        "predicate, object, and metadata. Use this to browse what the " +
+        "assistant has been asked to remember.")]
+    public static async Task<string> MemoryListFacts(
+        [Description("Optional text filter — matches against subject, predicate, or object")]
+        string? filter = null,
+        [Description("Number of items to skip (for pagination). Defaults to 0.")]
+        int skip = 0,
+        [Description("Max items to return (1-50). Defaults to 20.")]
+        int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var store = Backend.Value.Store;
+        if (store is null)
+            return JsonResponse(new { error = "Memory system not configured." });
+
+        // Clamp to safe bounds
+        skip  = Math.Max(0, skip);
+        limit = Math.Clamp(limit, 1, 50);
+
+        try
+        {
+            var (items, totalCount) = await store.ListFactsAsync(
+                filter, skip, limit, cancellationToken);
+
+            var facts = items.Select(f => new
+            {
+                fact_id    = f.MemoryId,
+                profile_id = f.ProfileId,
+                subject    = f.Subject,
+                predicate  = f.Predicate,
+                @object    = f.Object,
+                confidence = f.Confidence,
+                updated_at = f.UpdatedAt.ToString("o")
+            }).ToList();
+
+            return JsonResponse(new
+            {
+                facts,
+                total = totalCount,
+                skip,
+                limit,
+                has_more = (skip + limit) < totalCount
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonResponse(new { error = $"Failed to list facts: {ex.Message}" });
+        }
+    }
+
+    [McpServerTool, Description(
+        "Soft-deletes a memory fact by its fact_id (memory_id). " +
+        "The fact is not permanently removed — it is marked as deleted " +
+        "and excluded from future retrievals. Use this when the user " +
+        "asks to forget something specific.")]
+    public static async Task<string> MemoryDeleteFact(
+        [Description("The fact_id (memory_id) of the fact to delete")]
+        string factId,
+        CancellationToken cancellationToken = default)
+    {
+        var store = Backend.Value.Store;
+        if (store is null)
+            return JsonResponse(new { error = "Memory system not configured." });
+
+        if (string.IsNullOrWhiteSpace(factId))
+            return JsonResponse(new { error = "factId is required.", ok = false });
+
+        try
+        {
+            // Verify the fact exists before deleting
+            var existing = await store.FindFactByIdAsync(factId, cancellationToken);
+            if (existing is null)
+                return JsonResponse(new
+                {
+                    ok    = false,
+                    error = $"No fact found with id '{factId}'."
+                });
+
+            await store.DeleteFactAsync(factId, cancellationToken);
+
+            return JsonResponse(new
+            {
+                ok      = true,
+                deleted = factId,
+                message = $"Deleted: {existing.Subject} {existing.Predicate} '{existing.Object}'."
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonResponse(new { error = $"Failed to delete fact: {ex.Message}", ok = false });
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // Factory
     // ─────────────────────────────────────────────────────────────────
 

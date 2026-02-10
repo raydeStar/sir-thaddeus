@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 
@@ -15,15 +16,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly IMcpToolClient _mcp;
     private readonly IAuditLogger _audit;
     private readonly string _systemPrompt;
+    private readonly TimeProvider _timeProvider;
 
     private readonly List<ChatMessage> _history = [];
 
     /// <summary>
-    /// URLs from the most recent web search, keyed by title. Used by
-    /// follow-up enrichment to fetch full article content when the
-    /// user asks to go deeper on a topic from a previous search.
+    /// The search pipeline — owns SearchSession, mode routing, entity
+    /// resolution, query construction, and the 3 pipelines.
     /// </summary>
-    private List<(string Url, string Title)> _lastSearchSources = [];
+    private readonly SearchOrchestrator _searchOrchestrator;
 
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
@@ -41,6 +42,23 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         "they agree or differ. Be thorough. No URLs. " +
         "ONLY use facts from the provided sources. " +
         "Do NOT invent or guess details not in the results.";
+
+    // ── Summary instruction injected for follow-up deep dives ───────
+    private const string WebFollowUpInstruction =
+        "\n\nFull article content from prior sources is in the next message. " +
+        "Answer the user's latest question using ONLY the provided content. " +
+        "Be thorough. No URLs. " +
+        "If a detail is not present in the content, say so.";
+
+    private const string WebFollowUpWithRelatedInstruction =
+        "\n\nYou are answering a follow-up question about a specific news story. " +
+        "Full text from the primary article(s) is included first, followed by " +
+        "related coverage search results.\n" +
+        "Answer the user's question. Lead with the bottom line. Then explain:\n" +
+        "- What the primary article(s) say\n" +
+        "- What related sources add or contradict\n" +
+        "- Whether key details are confirmed or still alleged\n" +
+        "No URLs. Do not list sources unless you need to explain a disagreement.";
 
     // ── Token budget per intent ──────────────────────────────────────
     // Small models fill available space with filler. Tight caps force
@@ -101,6 +119,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     public string? ActiveProfileId { get; set; }
 
+    /// <summary>
+    /// Master switch for memory features. When false:
+    ///   1. Skips <c>RetrieveMemoryContextAsync</c> entirely
+    ///   2. Suppresses onboarding prompts that force memory_write
+    ///   3. Filters out memory_* tools from tool definitions
+    /// Set from <c>memory.enabled</c> in settings.
+    /// </summary>
+    public bool MemoryEnabled { get; set; } = true;
+
     private enum ChatIntent
     {
         Casual,
@@ -112,12 +139,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ILlmClient llm,
         IMcpToolClient mcp,
         IAuditLogger audit,
-        string systemPrompt)
+        string systemPrompt,
+        TimeProvider? timeProvider = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+
+        _searchOrchestrator = new SearchOrchestrator(llm, mcp, audit, systemPrompt);
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(_systemPrompt));
@@ -164,9 +195,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // model has relevant facts/events/chunks for its answer.
         // If retrieval takes longer than the timeout, we skip it
         // entirely rather than stalling the user's conversation.
+        //
+        // When MemoryEnabled is false (master memory off), skip
+        // retrieval entirely — no MCP call, no timeout wait.
         var memoryPackText = "";
         var onboardingNeeded = false;
-        try
+        if (!MemoryEnabled)
+        {
+            LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
+        }
+        else try
         {
             var memoryTask = RetrieveMemoryContextAsync(userMessage, cancellationToken);
             if (await Task.WhenAny(memoryTask, Task.Delay(MemoryRetrievalTimeout, cancellationToken)) == memoryTask)
@@ -212,7 +250,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         //
         // Also force the tool loop on so the LLM can call
         // memory_store_facts when the user shares their name.
-        if (onboardingNeeded)
+        //
+        // Suppressed when memory is off — the model can't store facts anyway.
+        if (onboardingNeeded && MemoryEnabled)
         {
             var isFirstTurn = _history.Count(m => m.Role == "user") <= 1;
             memoryPackText = isFirstTurn
@@ -243,13 +283,76 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         try
         {
-            // ── Web lookup: LLM decides search terms via tool call ─────
+            // ── Utility bypass: weather, time, calc, conversion ────────
+            // Intercepted BEFORE the search pipeline to avoid overhead.
+            var utilityResult = UtilityRouter.TryHandle(userMessage);
+            if (utilityResult is not null)
+            {
+                LogEvent("UTILITY_BYPASS", $"category={utilityResult.Category}");
+
+                // If the utility wants an MCP tool call, do it
+                if (utilityResult.McpToolName is not null && utilityResult.McpToolArgs is not null)
+                {
+                    try
+                    {
+                        var toolResult = await _mcp.CallToolAsync(
+                            utilityResult.McpToolName, utilityResult.McpToolArgs, cancellationToken);
+                        toolCallsMade.Add(new ToolCallRecord
+                        {
+                            ToolName  = utilityResult.McpToolName,
+                            Arguments = utilityResult.McpToolArgs,
+                            Result    = toolResult,
+                            Success   = true
+                        });
+
+                        // For weather, summarize this tool result directly
+                        // (do not re-run search pipeline/query building).
+                        if (utilityResult.Category == "weather")
+                        {
+                            return await SummarizeUtilitySearchResultAsync(
+                                userMessage, memoryPackText, toolResult,
+                                toolCallsMade, roundTrips, cancellationToken);
+                        }
+                    }
+                    catch
+                    {
+                        // Utility MCP call failed — fall through to normal pipeline
+                    }
+                }
+                else
+                {
+                    // Inline utility answer (time, calc, conversion)
+                    var text = utilityResult.Answer;
+                    _history.Add(ChatMessage.Assistant(text));
+                    LogEvent("AGENT_RESPONSE", text);
+                    return new AgentResponse
+                    {
+                        Text          = text,
+                        Success       = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = 0
+                    };
+                }
+            }
+
+            // ── Web lookup: delegate to SearchOrchestrator ─────────────
             if (intent == ChatIntent.WebLookup)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return await ExecuteWebSearchAsync(
-                    userMessage, memoryPackText,
-                    toolCallsMade, roundTrips, "AGENT", cancellationToken);
+
+                // Inject memory context before search pipeline
+                if (!string.IsNullOrWhiteSpace(memoryPackText))
+                    InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
+
+                var searchResponse = await _searchOrchestrator.ExecuteAsync(
+                    userMessage, memoryPackText, _history, toolCallsMade, cancellationToken);
+
+                // Add the assistant's response to conversation history
+                if (searchResponse.Success)
+                    _history.Add(ChatMessage.Assistant(searchResponse.Text));
+
+                LogEvent("AGENT_RESPONSE", searchResponse.Text);
+                return searchResponse;
             }
 
             // ── Inject memory context ─────────────────────────────────
@@ -477,11 +580,21 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         string logPrefix,
         CancellationToken cancellationToken)
     {
+        // ── Follow-up deep dive: reuse prior sources ─────────────────
+        // If the user is clearly asking "more details on that story",
+        // prefer fetching the articles we already discovered last turn
+        // rather than issuing a vague re-search ("more X news").
+        var followUp = await TryAnswerFollowUpFromLastSourcesAsync(
+            userMessage, memoryPackText, toolCallsMade, roundTrips, cancellationToken);
+        if (followUp is not null)
+            return followUp;
+
         // ── 1. Extract search query via structured tool call ─────────
         var (searchQuery, recency) = await ExtractSearchViaToolCallAsync(
             userMessage, memoryPackText, cancellationToken);
         LogEvent($"{logPrefix}_SEARCH_QUERY",
             $"\"{userMessage}\" → \"{searchQuery}\" (recency={recency})");
+        _searchOrchestrator.Session.LastRecency = recency;
 
         // ── 2. Execute web_search MCP tool ───────────────────────────
         var webSearchArgs = JsonSerializer.Serialize(new
@@ -526,15 +639,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         });
         LogEvent("AGENT_TOOL_RESULT", $"{toolName} -> {(toolOk ? "ok" : "error")}");
 
-        // ── 2.5. Cache source URLs + enrich from prior searches ──────
-        // Store the source URLs so follow-up turns can fetch full
-        // articles via BrowserNavigate without re-searching.
-        _lastSearchSources = ParseSourceUrls(toolResult);
-
-        // If prior search sources exist, enrich the current results
-        // with full article content from the most relevant URLs.
-        var enrichmentContent = await TryEnrichFromPreviousSearchAsync(
-            toolCallsMade, cancellationToken);
+        // ── 2.5. Cache source URLs for follow-ups ────────────────────
+        /* Sources now tracked in SearchOrchestrator.Session */
 
         // ── 3. Summarize results ─────────────────────────────────────
         // Feed tool output as a User message (not a ToolResult).
@@ -546,11 +652,6 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         var summaryInput = "[Search results — reference only, do not display to user]\n" +
                            toolResult;
-
-        // Append enriched full-article content if available.
-        if (!string.IsNullOrWhiteSpace(enrichmentContent))
-            summaryInput += "\n\n[Full article content from prior sources — use for depth]\n" +
-                            enrichmentContent;
 
         var messagesForSummary = InjectModeIntoSystemPrompt(
             _history, memoryPackText + WebSummaryInstruction);
@@ -616,6 +717,59 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         };
     }
 
+    /// <summary>
+    /// Summarizes utility-triggered web search results (e.g., weather)
+    /// without re-running query construction/search orchestration.
+    /// This keeps utility routing deterministic and avoids duplicate
+    /// web_search calls that can drift to unrelated results.
+    /// </summary>
+    private async Task<AgentResponse> SummarizeUtilitySearchResultAsync(
+        string userMessage,
+        string memoryPackText,
+        string toolResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var summaryInput = "[Search results — reference only, do not display to user]\n" +
+                           StripSourcesJsonSection(toolResult);
+
+        var messagesForSummary = InjectModeIntoSystemPrompt(
+            _history, memoryPackText + WebSummaryInstruction);
+        messagesForSummary.Add(ChatMessage.User(summaryInput));
+
+        roundTrips++;
+        string text;
+        try
+        {
+            var response = await CallLlmWithRetrySafe(
+                messagesForSummary, roundTrips, MaxTokensWebSummary, cancellationToken);
+
+            text = response.FinishReason == "error"
+                ? BuildExtractiveSummary(toolResult, userMessage)
+                : TruncateSelfDialogue(response.Content ?? "");
+        }
+        catch
+        {
+            text = BuildExtractiveSummary(toolResult, userMessage);
+        }
+
+        text = StripRawTemplateTokens(text);
+        if (string.IsNullOrWhiteSpace(text))
+            text = BuildExtractiveSummary(toolResult, userMessage);
+
+        _history.Add(ChatMessage.Assistant(text));
+        LogEvent("AGENT_RESPONSE", text);
+
+        return new AgentResponse
+        {
+            Text          = text,
+            Success       = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Web Search Fallback
     //
@@ -631,7 +785,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
     /// <summary>
     /// Runs the web search pipeline as a fallback when the chat-only
-    /// path fails. Wraps <see cref="ExecuteWebSearchAsync"/> with
+    /// path fails. Delegates to <see cref="SearchOrchestrator"/> with
     /// error handling so a search failure doesn't crash the turn.
     /// </summary>
     private async Task<AgentResponse> FallbackToWebSearchAsync(
@@ -643,9 +797,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     {
         try
         {
-            return await ExecuteWebSearchAsync(
-                userMessage, memoryPackText,
-                toolCallsMade, roundTrips, "FALLBACK", cancellationToken);
+            var response = await _searchOrchestrator.ExecuteAsync(
+                userMessage, memoryPackText, _history, toolCallsMade, cancellationToken);
+
+            if (response.Success)
+                _history.Add(ChatMessage.Assistant(response.Text));
+
+            return response;
         }
         catch (Exception ex)
         {
@@ -826,7 +984,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private const string SourcesJsonDelimiter  = "<!-- SOURCES_JSON -->";
     private const string BrowseToolName        = "browser_navigate";
     private const string BrowseToolNameAlt     = "BrowserNavigate";
-    private const int    MaxEnrichmentUrls     = 3;
+    private const int    MaxFollowUpUrls       = 2;
     private const int    MaxArticleChars       = 3000;
 
     /// <summary>
@@ -872,42 +1030,303 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return sources;
     }
 
-    /// <summary>
-    /// Checks whether prior search sources exist and fetches full article
-    /// content from the top URLs via the BrowserNavigate MCP tool. Each
-    /// call is recorded for audit. Returns the combined article text,
-    /// or null if no enrichment is available or needed.
-    /// </summary>
-    private async Task<string?> TryEnrichFromPreviousSearchAsync(
+    private static string StripSourcesJsonSection(string toolResult)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return "";
+
+        var idx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        return idx >= 0
+            ? toolResult[..idx].TrimEnd()
+            : toolResult.TrimEnd();
+    }
+
+    private static bool LooksLikeFollowUpDepthRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var asksForMore =
+            lower.Contains("tell me more") ||
+            lower.Contains("more info") ||
+            lower.Contains("more information") ||
+            lower.Contains("more detail") ||
+            lower.Contains("more details") ||
+            lower.Contains("more about") ||
+            lower.Contains("more on") ||
+            lower.Contains("go deeper") ||
+            lower.Contains("dig into") ||
+            lower.Contains("elaborate") ||
+            lower.Contains("expand on") ||
+            lower.StartsWith("more ");
+
+        if (!asksForMore)
+            return false;
+
+        // Prefer strong follow-up signals so we don't hijack legitimate
+        // standalone searches like "more efficient sorting algorithms".
+        var pointsAtPriorContext =
+            lower.Contains("this ") ||
+            lower.Contains("that ") ||
+            lower.Contains("it ") ||
+            lower.Contains("these ") ||
+            lower.Contains("those ");
+
+        return pointsAtPriorContext || lower.Contains("tell me more") || lower.StartsWith("more ");
+    }
+
+    private static IReadOnlyList<string> ExtractFollowUpKeywords(string text)
+    {
+        var normalized = NormalizeQueryText(text);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return [];
+
+        var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var kept = new List<string>(Math.Min(tokens.Length, 8));
+
+        foreach (var t in tokens)
+        {
+            var lower = t.ToLowerInvariant();
+            if (IsBannedSearchToken(lower))
+                continue;
+
+            // Follow-up boilerplate (keep topical nouns, drop meta)
+            if (lower is
+                "more" or "info" or "information" or "detail" or "details" or
+                "news" or "headline" or "headlines" or
+                "story" or "article" or "source" or "sources" or
+                "today" or "week" or "month" or "year" or
+                "latest" or "recent" or "recently" or "breaking")
+                continue;
+
+            kept.Add(lower);
+            if (kept.Count >= 6)
+                break;
+        }
+
+        return kept;
+    }
+
+    private static List<(string Url, string Title)> PickRelevantSources(
+        string userMessage,
+        IReadOnlyList<(string Url, string Title)> sources,
+        int maxUrls)
+    {
+        if (sources.Count == 0)
+            return [];
+
+        var keywords = ExtractFollowUpKeywords(userMessage);
+        if (keywords.Count == 0)
+            return [];
+
+        int Score(string title)
+        {
+            var tl = (title ?? "").ToLowerInvariant();
+            var score = 0;
+            foreach (var k in keywords)
+            {
+                if (tl.Contains(k, StringComparison.OrdinalIgnoreCase))
+                    score++;
+            }
+            return score;
+        }
+
+        return sources
+            .Select(s => (Source: s, Score: Score(s.Title)))
+            .Where(x => x.Score > 0)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Source.Title.Length) // shorter titles tend to be cleaner queries
+            .Take(Math.Max(1, maxUrls))
+            .Select(x => x.Source)
+            .ToList();
+    }
+
+    private async Task<string> TryCallWebSearchAsync(
+        string query,
+        string recency,
         List<ToolCallRecord> toolCallsMade,
         CancellationToken cancellationToken)
     {
-        if (_lastSearchSources.Count == 0)
+        var args = JsonSerializer.Serialize(new
+        {
+            query,
+            maxResults = DefaultWebSearchMaxResults,
+            recency
+        });
+
+        var toolName = WebSearchToolName;
+        var toolOk = false;
+        string toolResult;
+
+        try
+        {
+            LogEvent("AGENT_TOOL_CALL", $"{toolName}({args})");
+            toolResult = await _mcp.CallToolAsync(toolName, args, cancellationToken);
+            toolOk = true;
+        }
+        catch (Exception ex)
+        {
+            // Back-compat: some MCP stacks register PascalCase tool names.
+            try
+            {
+                toolName = WebSearchToolNameAlt;
+                LogEvent("AGENT_TOOL_CALL", $"{toolName}({args})");
+                toolResult = await _mcp.CallToolAsync(toolName, args, cancellationToken);
+                toolOk = true;
+            }
+            catch
+            {
+                toolResult = $"Tool error: {ex.Message}";
+            }
+        }
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName  = toolName,
+            Arguments = args,
+            Result    = toolResult,
+            Success   = toolOk
+        });
+        LogEvent("AGENT_TOOL_RESULT", $"{toolName} -> {(toolOk ? "ok" : "error")}");
+
+        return toolResult;
+    }
+
+    private async Task<AgentResponse?> TryAnswerFollowUpFromLastSourcesAsync(
+        string userMessage,
+        string memoryPackText,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (!LooksLikeFollowUpDepthRequest(userMessage))
+            return null;
+        if (_searchOrchestrator.Session.LastResults.Count == 0)
             return null;
 
-        // Only enrich if there are prior sources from a PREVIOUS turn.
-        // On the first search of a topic, _lastSearchSources was just
-        // set from the current search — skip enrichment to avoid
-        // re-fetching what we just searched.
-        // We detect this by checking if there are prior assistant
-        // messages in history (i.e., this isn't the first turn).
-        var hasPriorContext = _history.Any(m => m.Role == "assistant");
-        if (!hasPriorContext)
+        var sourcesToFetch = PickRelevantSources(userMessage, _searchOrchestrator.Session.LastResults.Select(r => (r.Url, r.Title)).ToList(), MaxFollowUpUrls);
+        if (sourcesToFetch.Count == 0)
             return null;
 
-        var urlsToFetch = _lastSearchSources
-            .Take(MaxEnrichmentUrls)
-            .ToList();
+        LogEvent("AGENT_FOLLOWUP_START",
+            $"Fetching {sourcesToFetch.Count} prior source(s) for follow-up");
 
-        if (urlsToFetch.Count == 0)
+        var fullText = await FetchArticleContentAsync(
+            sourcesToFetch, toolCallsMade, cancellationToken);
+        if (string.IsNullOrWhiteSpace(fullText))
             return null;
 
-        LogEvent("AGENT_ENRICHMENT_START",
-            $"Fetching full content from {urlsToFetch.Count} prior source(s)");
+        // ── Related coverage search ───────────────────────────────────
+        // After pulling the primary article(s), do a targeted search by
+        // story title to find additional coverage. This helps answer
+        // follow-up questions when one source is thin or paywalled.
+        var relatedQuery = (sourcesToFetch[0].Title ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(relatedQuery))
+            relatedQuery = TryParseFirstBrowserNavigateTitle(fullText) ?? "";
+
+        relatedQuery = relatedQuery.Trim().Trim('"');
+        var relatedRecency = (_searchOrchestrator.Session.LastRecency ?? "any") != "any"
+            ? _searchOrchestrator.Session.LastRecency!
+            : DetectRecencyFallback(userMessage);
+
+        string? relatedToolResult = null;
+        if (!string.IsNullOrWhiteSpace(relatedQuery) && relatedQuery.Length >= 8)
+        {
+            relatedToolResult = await TryCallWebSearchAsync(
+                relatedQuery, relatedRecency, toolCallsMade, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(relatedToolResult))
+            {
+                /* Sources now tracked in SearchOrchestrator.Session */
+                _searchOrchestrator.Session.LastRecency = relatedRecency;
+            }
+        }
+
+        roundTrips++;
+        var summaryInput = "[Primary article content — reference only, do not display to user]\n" +
+                           fullText;
+
+        if (!string.IsNullOrWhiteSpace(relatedToolResult))
+        {
+            summaryInput += "\n\n[Related coverage search results — reference only, do not display to user]\n" +
+                            StripSourcesJsonSection(relatedToolResult);
+        }
+
+        var instruction = !string.IsNullOrWhiteSpace(relatedToolResult)
+            ? WebFollowUpWithRelatedInstruction
+            : WebFollowUpInstruction;
+
+        var messagesForSummary = InjectModeIntoSystemPrompt(
+            _history, memoryPackText + instruction);
+        messagesForSummary.Add(ChatMessage.User(summaryInput));
+
+        var response = await CallLlmWithRetrySafe(
+            messagesForSummary, roundTrips, MaxTokensWebSummary, cancellationToken);
+
+        string text;
+        if (response.FinishReason == "error")
+        {
+            LogEvent("AGENT_SUMMARY_FOLLOWUP_FALLBACK",
+                "LLM summary failed — building extractive fallback");
+            text = BuildExtractiveSummaryFromContent(fullText);
+        }
+        else
+        {
+            text = TruncateSelfDialogue(response.Content ?? "[No response]");
+
+            // Raw dump → rewrite
+            if (LooksLikeRawDump(text))
+            {
+                LogEvent("AGENT_REWRITE", "Follow-up response looked like a raw dump — rewriting");
+                var rewriteMessages = new List<ChatMessage>
+                {
+                    ChatMessage.System(
+                        _systemPrompt + " " +
+                        "Rewrite the draft into the final answer. " +
+                        "Casual tone. Bottom line first. 2-3 short paragraphs. " +
+                        "No URLs. No copied excerpts. " +
+                        "Do NOT add facts not present in the draft."),
+                    ChatMessage.User(text)
+                };
+
+                roundTrips++;
+                var rewritten = await CallLlmWithRetrySafe(
+                    rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(rewritten.Content) &&
+                    rewritten.FinishReason != "error")
+                    text = rewritten.Content!;
+            }
+        }
+
+        text = StripRawTemplateTokens(text);
+        if (string.IsNullOrWhiteSpace(text))
+            text = "I wasn't able to generate a clean answer for that. " +
+                   "Could you try asking a different way?";
+
+        _history.Add(ChatMessage.Assistant(text));
+        LogEvent("AGENT_RESPONSE", text);
+
+        return new AgentResponse
+        {
+            Text          = text,
+            Success       = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<string?> FetchArticleContentAsync(
+        IReadOnlyList<(string Url, string Title)> sourcesToFetch,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        if (sourcesToFetch.Count == 0)
+            return null;
 
         // Fetch articles in parallel via MCP browser_navigate / BrowserNavigate.
         // Try snake_case first (MCP SDK default), fall back to PascalCase.
-        var fetchTasks = urlsToFetch.Select(async source =>
+        var fetchTasks = sourcesToFetch.Select(async source =>
         {
             var args = JsonSerializer.Serialize(new { url = source.Url });
             string? content = null;
@@ -929,7 +1348,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 catch (Exception ex)
                 {
-                    LogEvent("AGENT_ENRICHMENT_FAIL",
+                    LogEvent("AGENT_FOLLOWUP_FETCH_FAIL",
                         $"browser_navigate failed for {source.Url}: {ex.Message}");
 
                     toolCallsMade.Add(new ToolCallRecord
@@ -963,11 +1382,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         var results = await Task.WhenAll(fetchTasks);
 
-        // Build combined content from successful fetches.
         var sb = new StringBuilder();
         foreach (var (title, content, ok) in results)
         {
             if (!ok || string.IsNullOrWhiteSpace(content))
+                continue;
+
+            // If BrowserNavigate returned a thin wrapper page (common with
+            // Google News / RSS redirects), don't pretend we have "full
+            // article content" — let the caller fall back to re-searching.
+            if (IsLowSignalBrowserNavigateContent(content))
                 continue;
 
             sb.AppendLine($"=== {title} ===");
@@ -975,15 +1399,102 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             sb.AppendLine();
         }
 
-        var enriched = sb.ToString().TrimEnd();
-        if (string.IsNullOrWhiteSpace(enriched))
+        var combined = sb.ToString().TrimEnd();
+        if (string.IsNullOrWhiteSpace(combined))
             return null;
 
-        LogEvent("AGENT_ENRICHMENT_DONE",
-            $"Enriched with {results.Count(r => r.Ok)} article(s), " +
-            $"{enriched.Length} chars total");
+        LogEvent("AGENT_FOLLOWUP_FETCH_DONE",
+            $"Fetched {results.Count(r => r.Ok)} article(s), {combined.Length} chars total");
 
-        return enriched;
+        return combined;
+    }
+
+    private static bool IsLowSignalBrowserNavigateContent(string? content)
+    {
+        var lower = (content ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return true;
+
+        // If the tool explicitly says it's a basic non-article extraction,
+        // require a meaningful word count to treat it as usable.
+        var isBasic = lower.Contains("extraction: basic (non-article page)");
+        var wc = TryParseBrowserNavigateWordCount(content) ?? 0;
+
+        if (isBasic && wc < 120)
+            return true;
+
+        // Google News wrapper pages are usually tiny and useless.
+        if (lower.Contains("source: news.google.com") && wc < 300)
+            return true;
+
+        return false;
+    }
+
+    private static string? TryParseFirstBrowserNavigateTitle(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return null;
+
+        foreach (var line in content.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith("Title:", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var raw = trimmed["Title:".Length..].Trim();
+            raw = raw.Trim();
+
+            // BrowserNavigate formats as: Title: "..."
+            if (raw.StartsWith('"') && raw.EndsWith('"') && raw.Length >= 2)
+                raw = raw[1..^1].Trim();
+
+            return string.IsNullOrWhiteSpace(raw) ? null : raw;
+        }
+
+        return null;
+    }
+
+    private static int? TryParseBrowserNavigateWordCount(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return null;
+
+        foreach (var line in content.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith("Word Count:", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var raw = trimmed["Word Count:".Length..].Trim();
+            raw = raw.Replace(",", "");
+
+            if (int.TryParse(raw, out var wc))
+                return wc;
+        }
+
+        return null;
+    }
+
+    private static string BuildExtractiveSummaryFromContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return "I fetched the source, but couldn't extract usable content.";
+
+        var lines = content
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        if (lines.Count == 0)
+            return "I fetched the source, but couldn't extract usable content.";
+
+        var bottomLine = lines[0];
+        var details = string.Join('\n', lines.Skip(1).Take(4));
+
+        return string.IsNullOrWhiteSpace(details)
+            ? $"Bottom line:\n{bottomLine}"
+            : $"Bottom line:\n{bottomLine}\n\nDetails:\n{details}";
     }
 
     /// <summary>
@@ -1116,7 +1627,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     {
         _history.Clear();
         _history.Add(ChatMessage.System(_systemPrompt));
-        LogEvent("AGENT_RESET", "Conversation history cleared.");
+        _searchOrchestrator.Session.Clear();
+        LogEvent("AGENT_RESET", "Conversation history and search session cleared.");
     }
 
     /// <inheritdoc />
@@ -1143,7 +1655,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         try
         {
             var mcpTools = await _mcp.ListToolsAsync(ct);
-            var definitions = mcpTools.Select(t => new ToolDefinition
+
+            // When memory is disabled, filter out memory_* tools entirely
+            // so the LLM never sees them and can't attempt to call them.
+            var filteredTools = MemoryEnabled
+                ? mcpTools
+                : mcpTools.Where(t =>
+                    !t.Name.StartsWith("memory_", StringComparison.OrdinalIgnoreCase) &&
+                    !t.Name.StartsWith("Memory",  StringComparison.Ordinal))
+                  .ToList();
+
+            var definitions = filteredTools.Select(t => new ToolDefinition
             {
                 Function = new FunctionDefinition
                 {
@@ -1821,6 +2343,127 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             "top headlines";
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // Vague follow-up query detection + topic resolution
+    //
+    // Small local models frequently fail to resolve conversational
+    // references ("that", "it", "more") during search query extraction
+    // and echo back the user's vague wording instead. These helpers
+    // catch that case and pull the real topic from the last assistant
+    // response — entirely deterministic, no extra LLM call.
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns true if the extracted query looks like an unresolved
+    /// follow-up reference — words that only make sense in context
+    /// but carry zero topical signal for a search engine.
+    /// </summary>
+    private static bool IsVagueFollowUpQuery(string query)
+    {
+        var q = (query ?? "").Trim().ToLowerInvariant();
+
+        // Very short queries that are clearly contextual
+        if (q.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 3)
+        {
+            // Direct matches: the model literally echoed the filler
+            string[] vaguePatterns =
+            [
+                "more info",
+                "more information",
+                "more on that",
+                "more about that",
+                "more about it",
+                "more on it",
+                "more details",
+                "tell me more",
+                "go deeper",
+                "elaborate",
+                "that topic",
+                "the topic",
+                "that story",
+                "the story",
+                "that article",
+                "that",
+                "it",
+                "this"
+            ];
+
+            foreach (var pattern in vaguePatterns)
+            {
+                if (q == pattern || q.Contains(pattern))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to extract a concrete topic from the most recent
+    /// assistant message in history. Uses the first sentence (the
+    /// "bottom line") which typically contains the core subject.
+    /// Returns false if no usable topic can be extracted.
+    /// </summary>
+    private bool TryExtractTopicFromLastAssistant(out string topic)
+    {
+        topic = "";
+
+        // Walk history backwards to find the last assistant message
+        for (var i = _history.Count - 1; i >= 0; i--)
+        {
+            if (_history[i].Role != "assistant")
+                continue;
+
+            var content = (_history[i].Content ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(content))
+                continue;
+
+            // Strip common lead-ins: "Bottom line:", "Here's what I found:", etc.
+            var cleaned = content;
+            string[] leadIns =
+            [
+                "bottom line:",
+                "here's what i found:",
+                "here is what i found:",
+                "summary:",
+                "in short:",
+                "tl;dr:"
+            ];
+            var lower = cleaned.ToLowerInvariant();
+            foreach (var lead in leadIns)
+            {
+                if (lower.StartsWith(lead))
+                {
+                    cleaned = cleaned[lead.Length..].TrimStart();
+                    break;
+                }
+            }
+
+            // Take the first sentence — that's the core topic.
+            // Split on sentence terminators but not on abbreviations.
+            var firstSentence = cleaned;
+            var sentenceEnd = cleaned.IndexOfAny(['.', '!', '?', '\n']);
+            if (sentenceEnd > 10) // require at least a meaningful chunk
+                firstSentence = cleaned[..sentenceEnd].Trim();
+
+            // Compress to a search-friendly query: take up to
+            // the first ~80 chars and strip excessive whitespace.
+            if (firstSentence.Length > 80)
+                firstSentence = firstSentence[..80].Trim();
+
+            // Ensure we have something meaningful (>= 5 chars)
+            if (firstSentence.Length >= 5)
+            {
+                topic = firstSentence;
+                return true;
+            }
+
+            break; // only check the most recent assistant message
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Extracts a search query and recency by asking the LLM to produce
     /// a <c>web_search</c> tool call. The LLM receives the full
@@ -1845,22 +2488,36 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         try
         {
+            var now = _timeProvider.GetUtcNow();
+
             // ── Build messages with full conversation context ─────────
             // The model needs history to understand follow-ups like
             // "what about their earnings?" after a prior search. Without
             // it, short or vague messages produce garbage queries.
             var systemContent =
-                "You are a search query extractor. Read the conversation and " +
-                "determine what the user wants to search for.\n" +
+                "You are a search query extractor. Read the FULL conversation " +
+                "history and determine what the user wants to search for.\n" +
                 "Call the web_search tool with the appropriate query and recency.\n\n" +
+                $"Today's date is {now:yyyy-MM-dd} (UTC). The current year is {now.Year}.\n\n" +
                 "Rules:\n" +
                 "- Extract the TOPIC the user wants to look up — 2 to 6 keywords.\n" +
+                "- CRITICAL: If the user uses pronouns or vague references like " +
+                "'that', 'it', 'this', 'more info', 'tell me more', 'more about', " +
+                "'go deeper', 'elaborate', you MUST resolve the reference.\n" +
+                "  Look at the PREVIOUS assistant message to find the actual topic.\n" +
+                "  Example: if the last answer was about 'UK Prime Minister staff " +
+                "resignations' and the user says 'more on that', " +
+                "the query is 'UK Prime Minister staff resignations', NOT 'more info'.\n" +
+                "- NEVER use the user's vague wording as the query. " +
+                "Always resolve to the concrete topic from the conversation.\n" +
                 "- Ignore greetings, filler, discourse markers (well, ok, so...), " +
                 "and the assistant's name. These are NEVER search terms.\n" +
                 "- If the user asks for 'news', 'headlines', or 'latest', " +
                 "set recency to 'day'.\n" +
                 "- For generic news requests with no specific topic, " +
                 "use query: \"top headlines\".\n" +
+                "- If the user asks an evergreen fact question (e.g., \"who won X\"), " +
+                "do NOT guess a year. Prefer queries like \"most recent X winner\".\n" +
                 "- ALWAYS call the tool. Never reply with text.";
 
             if (!string.IsNullOrWhiteSpace(memoryPackText))
@@ -1918,6 +2575,30 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 if (IsGenericHeadlineQuery(cleanedQuery.ToLowerInvariant()))
                     cleanedQuery = wantsUs ? "U.S. top headlines" : "top headlines";
 
+                // Generic headlines with no recency specified should default to day.
+                if (IsGenericHeadlineQuery(cleanedQuery.ToLowerInvariant()) && recency == "any")
+                    recency = "day";
+
+                // Follow-up: if we already have sources from the prior search,
+                // prefer a concrete title over a generic query like "more X news".
+                if (LooksLikeFollowUpDepthRequest(userMessage ?? "") &&
+                    _searchOrchestrator.Session.LastResults.Count > 0)
+                {
+                    var candidates = PickRelevantSources(userMessage ?? "", _searchOrchestrator.Session.LastResults.Select(r => (r.Url, r.Title)).ToList(), maxUrls: 1);
+                    if (candidates.Count > 0 && !string.IsNullOrWhiteSpace(candidates[0].Title))
+                    {
+                        var titleQuery = candidates[0].Title.Trim();
+                        if (titleQuery.Length > 120) titleQuery = titleQuery[..120].Trim();
+
+                        LogEvent("AGENT_QUERY_RESOLVE",
+                            $"Follow-up query resolved from prior sources: \"{cleanedQuery}\" → \"{titleQuery}\"");
+                        cleanedQuery = titleQuery;
+                    }
+
+                    if (recency == "any" && (_searchOrchestrator.Session.LastRecency ?? "any") != "any")
+                        recency = _searchOrchestrator.Session.LastRecency!;
+                }
+
                 // Identity queries: prepend "who is"/"what is" if needed.
                 if (isIdentity && !string.IsNullOrWhiteSpace(cleanedQuery))
                 {
@@ -1930,6 +2611,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     }
 
                     recency = "any";
+                }
+
+                (cleanedQuery, recency) = ApplyTemporalSanityChecks(
+                    userMessage ?? "", cleanedQuery, recency);
+
+                // ── Vague follow-up detection ────────────────────────
+                // Small models often echo the user's vague wording
+                // ("more info", "that topic") instead of resolving
+                // the reference from history. When the extracted query
+                // looks like a follow-up placeholder and we have prior
+                // context, replace it with the actual topic.
+                if (IsVagueFollowUpQuery(cleanedQuery) &&
+                    TryExtractTopicFromLastAssistant(out var resolvedTopic))
+                {
+                    LogEvent("AGENT_QUERY_RESOLVE",
+                        $"Vague query \"{cleanedQuery}\" → " +
+                        $"resolved to \"{resolvedTopic}\" from prior context");
+                    cleanedQuery = resolvedTopic;
                 }
 
                 // Accept if non-empty and within bounds.
@@ -1964,6 +2663,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var fallbackQuery = CleanSearchQuery(StripConversationalFiller(userMessage ?? ""));
         var fallbackRecency = DetectRecencyFallback(userMessage ?? "");
 
+        // Apply the same vague follow-up resolution here too.
+        if (IsVagueFollowUpQuery(fallbackQuery) &&
+            TryExtractTopicFromLastAssistant(out var fallbackResolvedTopic))
+        {
+            LogEvent("AGENT_QUERY_RESOLVE",
+                $"Deterministic fallback: vague \"{fallbackQuery}\" → " +
+                $"\"{fallbackResolvedTopic}\" from prior context");
+            fallbackQuery = fallbackResolvedTopic;
+        }
+
         if (isIdentity)
         {
             if (TryExtractIdentitySubject(userMessage ?? "", out var subject))
@@ -1989,10 +2698,105 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             }
         }
 
+        (fallbackQuery, fallbackRecency) = ApplyTemporalSanityChecks(
+            userMessage ?? "", fallbackQuery, fallbackRecency);
+
         if (IsGenericHeadlineQuery(fallbackQuery.ToLowerInvariant()))
             fallbackQuery = wantsUs ? "U.S. top headlines" : "top headlines";
 
         return (fallbackQuery, fallbackRecency);
+    }
+
+    /// <summary>
+    /// Applies narrow, deterministic sanity checks to reduce obvious
+    /// time-related mistakes from local models (e.g., injecting an
+    /// arbitrary year the user never asked for).
+    /// </summary>
+    private (string Query, string Recency) ApplyTemporalSanityChecks(
+        string userMessage, string query, string recency)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return (query, recency);
+
+        var lowerMsg = (userMessage ?? "").ToLowerInvariant();
+        var lowerQuery = query.ToLowerInvariant();
+
+        // If the user specified a year (2024) or a relative-year hint ("last year"),
+        // do not override — they know what they asked for.
+        if (ContainsExplicitYear(lowerMsg) || ContainsRelativeYearHint(lowerMsg))
+            return (query, recency);
+
+        // Super Bowl winner questions are common and local models tend to
+        // hallucinate the last year they "remember". Force a stable query.
+        if (LooksLikeSuperBowlWinnerQuestion(lowerMsg, lowerQuery))
+        {
+            if (TryExtractYear(query, out var year))
+            {
+                var nowYear = _timeProvider.GetUtcNow().Year;
+                if (year != nowYear && year != nowYear - 1)
+                    LogEvent("AGENT_TEMPORAL_FIXUP",
+                        $"Replacing guessed year {year} in query \"{query}\"");
+            }
+
+            return ("most recent Super Bowl winner", "any");
+        }
+
+        return (query, recency);
+    }
+
+    private static bool LooksLikeSuperBowlWinnerQuestion(string lowerMsg, string lowerQuery)
+    {
+        var mentionsSuperBowl = lowerMsg.Contains("super bowl") || lowerMsg.Contains("superbowl") ||
+                                lowerQuery.Contains("super bowl") || lowerQuery.Contains("superbowl");
+
+        if (!mentionsSuperBowl) return false;
+
+        var winnerIntent =
+            lowerMsg.Contains("who won") ||
+            lowerMsg.Contains("winner") ||
+            lowerMsg.Contains("won the super bowl") ||
+            lowerMsg.Contains("won the superbowl") ||
+            lowerQuery.Contains("winner");
+
+        return winnerIntent;
+    }
+
+    private static bool ContainsRelativeYearHint(string lower)
+        => lower.Contains("last year") ||
+           lower.Contains("this year") ||
+           lower.Contains("years ago") ||
+           lower.Contains("year ago") ||
+           lower.Contains("previous year") ||
+           lower.Contains("prior year");
+
+    private static bool ContainsExplicitYear(string text)
+        => TryExtractYear(text, out _);
+
+    private static bool TryExtractYear(string text, out int year)
+    {
+        year = 0;
+        if (string.IsNullOrEmpty(text) || text.Length < 4)
+            return false;
+
+        for (var i = 0; i <= text.Length - 4; i++)
+        {
+            if (!char.IsDigit(text[i]) ||
+                !char.IsDigit(text[i + 1]) ||
+                !char.IsDigit(text[i + 2]) ||
+                !char.IsDigit(text[i + 3]))
+                continue;
+
+            if (!int.TryParse(text.AsSpan(i, 4), out var candidate))
+                continue;
+
+            if (candidate is >= 1900 and <= 2100)
+            {
+                year = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2040,7 +2844,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             lower.Contains("recently"))
             return "month";
         if (lower.Contains("breaking") || lower.Contains("headline") || lower.Contains("headlines") ||
-            lower.Contains("top stories") || lower.Contains("news") ||
+            lower.Contains("top stories") ||
             (lower.Contains("latest") &&
              (lower.Contains("news") || lower.Contains("headline") || lower.Contains("headlines") ||
               lower.Contains("update") || lower.Contains("updates") || lower.Contains("happening"))))
@@ -2334,6 +3138,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         if (lower.StartsWith("/browse ") || lower.StartsWith("browse:"))
             return MakeRoute(Intents.BrowseOnce, confidence: 1.0,
                 needsWeb: true, needsBrowser: true);
+
+        // Follow-up depth requests ("tell me more about that") should route
+        // through the deterministic search pipeline, not the general tool
+        // loop. The SearchOrchestrator handles source selection and deep-dive.
+        if (SearchModeRouter.IsFollowUpMessage(lower) &&
+            _searchOrchestrator.Session.HasRecentResults(DateTimeOffset.UtcNow))
+            return MakeRoute(Intents.LookupSearch, confidence: 0.95,
+                needsWeb: true, needsSearch: true, needsBrowser: true);
 
         // Screen requests are unambiguously tool-driven, but smaller local
         // models sometimes misclassify them as "chat". Route these

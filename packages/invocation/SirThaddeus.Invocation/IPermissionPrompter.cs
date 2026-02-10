@@ -34,8 +34,35 @@ public sealed record PermissionDecision
     /// </summary>
     public string? DenialReason { get; init; }
 
-    public static PermissionDecision Allow() => new() { Approved = true };
-    public static PermissionDecision Deny(string reason) => new() { Approved = false, DenialReason = reason };
+    /// <summary>
+    /// When true, the grant should be cached for the remainder of
+    /// the current conversation session. Clears on "New Chat" or
+    /// app restart. Default false (single-call approval).
+    /// </summary>
+    public bool RememberForSession { get; init; }
+
+    /// <summary>
+    /// When true, the group's policy should be persisted as "always"
+    /// in settings.json so the user is never prompted again for this
+    /// capability. The runtime is responsible for the actual save.
+    /// </summary>
+    public bool PersistAsAlways { get; init; }
+
+    public static PermissionDecision AllowOnce()
+        => new() { Approved = true };
+
+    public static PermissionDecision AllowSession()
+        => new() { Approved = true, RememberForSession = true };
+
+    public static PermissionDecision AllowAlways()
+        => new() { Approved = true, PersistAsAlways = true };
+
+    public static PermissionDecision Deny(string reason)
+        => new() { Approved = false, DenialReason = reason };
+
+    // Backwards compatibility — existing callers use Allow()
+    public static PermissionDecision Allow()
+        => AllowOnce();
 }
 
 /// <summary>

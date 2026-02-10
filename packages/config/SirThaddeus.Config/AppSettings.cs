@@ -172,6 +172,75 @@ public sealed record McpSettings
     /// </summary>
     [JsonPropertyName("serverPath")]
     public string ServerPath { get; init; } = "auto";
+
+    /// <summary>
+    /// Per-group permission policies for MCP tool calls.
+    /// Controls whether tools require explicit approval, are always
+    /// allowed, or are completely disabled.
+    /// </summary>
+    [JsonPropertyName("permissions")]
+    public McpPermissionsSettings Permissions { get; init; } = new();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MCP Permission Policies
+//
+// Each tool group can be set to:
+//   "off"    — hard block, no prompt, returns "Disabled in Settings"
+//   "ask"    — prompt every call (Allow once / Allow session / Deny)
+//   "always" — auto-approve without prompting
+//
+// The developer override applies only to "dangerous" groups
+// (Screen/Files/System/Web) and wins over their per-group setting.
+// Memory groups are unaffected by the developer override.
+//
+// When memory.enabled is false, memoryRead and memoryWrite are
+// treated as "off" regardless of what's stored here.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Per-group permission policies for MCP tool calls.
+/// All values are lowercase strings for backwards-safe JSON serialization.
+/// </summary>
+public sealed record McpPermissionsSettings
+{
+    /// <summary>
+    /// Developer override for dangerous groups (Screen/Files/System/Web).
+    /// Values: "none" (use per-group), "off", "ask", "always".
+    /// Does NOT affect memory groups.
+    /// </summary>
+    [JsonPropertyName("developerOverride")]
+    public string DeveloperOverride { get; init; } = "none";
+
+    /// <summary>Screen tools: screen_capture, get_active_window.</summary>
+    [JsonPropertyName("screen")]
+    public string Screen { get; init; } = "ask";
+
+    /// <summary>File tools: file_read, file_list.</summary>
+    [JsonPropertyName("files")]
+    public string Files { get; init; } = "ask";
+
+    /// <summary>System tools: system_execute.</summary>
+    [JsonPropertyName("system")]
+    public string System { get; init; } = "ask";
+
+    /// <summary>Web tools: web_search, browser_navigate.</summary>
+    [JsonPropertyName("web")]
+    public string Web { get; init; } = "ask";
+
+    /// <summary>
+    /// Memory read tools: memory_retrieve, memory_list_facts.
+    /// Overridden to "off" when memory.enabled is false.
+    /// </summary>
+    [JsonPropertyName("memoryRead")]
+    public string MemoryRead { get; init; } = "always";
+
+    /// <summary>
+    /// Memory write tools: memory_store_facts, memory_update_fact, memory_delete_fact.
+    /// Overridden to "off" when memory.enabled is false.
+    /// </summary>
+    [JsonPropertyName("memoryWrite")]
+    public string MemoryWrite { get; init; } = "ask";
 }
 
 /// <summary>

@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
     <ProjectReference Include="..\..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
     <ProjectReference Include="..\..\..\packages\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
     <ProjectReference Include="..\..\..\packages\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />

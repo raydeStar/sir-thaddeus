@@ -1522,16 +1522,186 @@
                                Foreground="{StaticResource GreenBrush}"
                                Margin="0,0,0,8"/>
 
-                    <CheckBox Content="Enable memory retrieval"
+                    <CheckBox Content="Enable memory (read + write)"
                               IsChecked="{Binding MemoryEnabled}"
                               Foreground="{StaticResource TextBrush}"
                               FontSize="12"
-                              Margin="0,0,0,6"/>
+                              Margin="0,0,0,4"/>
+                    <TextBlock Text="When off, all memory features are disabled — no retrieval, no storage, no prompts."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="18,0,0,6"/>
                     <CheckBox Content="Use embeddings for semantic search"
                               IsChecked="{Binding EmbeddingsEnabled}"
                               Foreground="{StaticResource TextBrush}"
                               FontSize="12"
                               Margin="0,0,0,20"/>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── MCP Permissions ─────────────────────────────── -->
+                    <TextBlock Text="MCP PERMISSIONS"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource YellowBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="Controls which tool groups the assistant may use. Off = hard block (no prompt). Ask = prompt every call. Always = auto-approve."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <!-- Developer Override -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Developer override"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource PeachBrush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermDeveloperOverride, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="none"/>
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock Text="Overrides Screen/Files/System/Web at runtime when not 'none'. Per-group settings are preserved and apply when override is reverted."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <!-- Per-group dropdowns -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Screen"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermScreen, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Files"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermFiles, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="System"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermSystem, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Web"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermWeb, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Memory Read"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermMemoryRead, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Memory Write"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermMemoryWrite, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
 
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"

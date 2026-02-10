@@ -40,6 +40,8 @@ public partial class App : System.Windows.Application
 
     private LmStudioClient? _llmClient;
     private McpProcessClient? _mcpClient;
+    private AuditedMcpToolClient? _auditedMcpClient;
+    private WpfPermissionGate? _permissionGate;
 
     // ─────────────────────────────────────────────────────────────────────
     // Layer 2: Agent Orchestrator
@@ -145,16 +147,35 @@ public partial class App : System.Windows.Application
             // but the chat UI will now show "0 tools (MCP offline)"
         }
 
-        // ── 5. Create Agent Orchestrator (Layer 2) ───────────────────
+        // ── 5. Wrap MCP client with audit + permission gate ──────────
+        var sessionId = Guid.NewGuid().ToString("N")[..12];
+        var wpfPrompter = new WpfPermissionPrompter(this);
+        _permissionGate = new WpfPermissionGate(
+            _permissionBroker!, wpfPrompter, _auditLogger, _settings);
+        _auditedMcpClient = new AuditedMcpToolClient(
+            _mcpClient, _auditLogger, _permissionGate, sessionId);
+
+        // "Allow always" from the permission prompt — persist the
+        // group policy change to settings.json and swap the snapshot
+        _permissionGate.PersistGroupAsAlways += group =>
+        {
+            Dispatcher.InvokeAsync(() => PersistGroupPolicyAsAlways(group));
+        };
+
+        // ── 6. Create Agent Orchestrator (Layer 2) ───────────────────
         _orchestrator = new AgentOrchestrator(
             _llmClient,
-            _mcpClient,
+            _auditedMcpClient,
             _auditLogger,
             _settings.Llm.SystemPrompt);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
         _orchestrator.ActiveProfileId = _settings.ActiveProfileId;
+
+        // Propagate memory master off — when disabled, orchestrator
+        // skips retrieval and filters out memory_* tool definitions
+        _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
 
         _auditLogger.Append(new AuditEvent
         {
@@ -506,6 +527,12 @@ public partial class App : System.Windows.Application
 
         window.SetViewModel(viewModel);
 
+        // Clear session-scoped permission grants on "New Chat"
+        viewModel.ConversationCleared += () =>
+        {
+            _permissionGate?.ClearSessionGrants();
+        };
+
         // ── Memory + Profile Browsers ────────────────────────────────
         // Open a direct connection to the SQLite memory DB for the
         // user's browsing panels. This is user-initiated data management,
@@ -537,6 +564,18 @@ public partial class App : System.Windows.Application
                     Environment.SetEnvironmentVariable(
                         "ST_ACTIVE_PROFILE_ID", profileId ?? "");
                 };
+
+                // Propagate settings changes to the permission gate
+                // so the immutable policy snapshot is swapped atomically
+                settingsVm.SettingsChanged += updated =>
+                {
+                    _permissionGate?.UpdateSettings(updated);
+
+                    // Propagate memory master off to orchestrator
+                    if (_orchestrator is not null)
+                        _orchestrator.MemoryEnabled = updated.Memory.Enabled;
+                };
+
                 window.SetSettingsViewModel(settingsVm);
             }
             catch (Exception ex)
@@ -551,6 +590,48 @@ public partial class App : System.Windows.Application
         }
 
         return window;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // "Allow always" from permission prompt
+    //
+    // Persists a single group's policy change to settings.json,
+    // swaps the gate's snapshot, and refreshes the SettingsViewModel
+    // so the UI reflects the new value.
+    // ─────────────────────────────────────────────────────────────────────
+
+    private void PersistGroupPolicyAsAlways(string group)
+    {
+        if (_settings is null) return;
+
+        var perms = _settings.Mcp.Permissions;
+        var updated = _settings with
+        {
+            Mcp = _settings.Mcp with
+            {
+                Permissions = group switch
+                {
+                    "screen"      => perms with { Screen      = "always" },
+                    "files"       => perms with { Files       = "always" },
+                    "system"      => perms with { System      = "always" },
+                    "web"         => perms with { Web         = "always" },
+                    "memoryRead"  => perms with { MemoryRead  = "always" },
+                    "memoryWrite" => perms with { MemoryWrite = "always" },
+                    _             => perms
+                }
+            }
+        };
+
+        SettingsManager.Save(updated);
+        _settings = updated;
+        _permissionGate?.UpdateSettings(updated);
+
+        _auditLogger?.Append(new AuditEvent
+        {
+            Actor  = "user",
+            Action = "SETTINGS_SAVED",
+            Result = $"group={group} policy=always (via permission prompt)"
+        });
     }
 
     /// <summary>

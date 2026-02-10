@@ -35,6 +35,7 @@ public static class WebSearchTools
     private const int ExcerptMaxChars   = 1000;
     private const int CardExcerptChars  = 250;
     private const int PageTimeoutSecs   = 10;
+    private const int MinUsefulNonArticleWords = 120;
     internal const string SourcesDelimiter = "<!-- SOURCES_JSON -->";
 
     private static readonly Lazy<WebSearchRouter> Router = new(
@@ -142,7 +143,7 @@ public static class WebSearchTools
 
         foreach (var r in results)
         {
-            var domain = ExtractDomainFromUrl(r.Url);
+            var domain = ExtractDomainKey(r);
             if (seen.Add(domain))
                 deduped.Add(r);
         }
@@ -150,11 +151,48 @@ public static class WebSearchTools
         return deduped;
     }
 
+    private static string ExtractDomainKey(SearchResult r)
+    {
+        // Prefer the provider-reported source when it looks like a domain.
+        // This avoids collapsing Google News RSS results to "news.google.com"
+        // when the item URL is a wrapper/redirect.
+        var source = (r.Source ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(source) &&
+            source.Contains('.', StringComparison.Ordinal) &&
+            !source.Contains(' ', StringComparison.Ordinal))
+        {
+            return source;
+        }
+
+        return ExtractDomainFromUrl(r.Url);
+    }
+
     private static string ExtractDomainFromUrl(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return uri.Host.Replace("www.", "");
         return url;
+    }
+
+    private static bool LooksLikeNewsQuery(string query) =>
+        SearchIntentPatterns.LooksLikeNewsIntent(query);
+
+    private static bool IsUsefulExtraction(ContentExtractor.ExtractionResult ext, bool strictNewsMode)
+    {
+        if (!ext.Succeeded)
+            return false;
+
+        if (ext.IsArticle)
+            return true;
+
+        // For generic news briefings, non-article pages are almost always
+        // homepages or category pages ("Breaking News") and add junk.
+        if (strictNewsMode)
+            return false;
+
+        // Non-article pages can still be useful (e.g., Wikipedia),
+        // but tiny wrappers (Google News, cookie walls, etc.) are not.
+        return ext.WordCount >= MinUsefulNonArticleWords;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -178,6 +216,7 @@ public static class WebSearchTools
         List<string> originalUrls)
     {
         var sb = new StringBuilder();
+        var strictNewsMode = LooksLikeNewsQuery(query);
 
         // Build URL -> extraction lookup (keyed by both original and resolved URLs)
         var extractionMap = new Dictionary<string, ContentExtractor.ExtractionResult>(
@@ -197,10 +236,15 @@ public static class WebSearchTools
                       "If a detail is not in the sources, do NOT guess or make it up.");
         sb.AppendLine();
 
+        var included = 0;
         for (var i = 0; i < results.Count; i++)
         {
             var r = results[i];
-            var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && ext.Succeeded;
+            var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && IsUsefulExtraction(ext, strictNewsMode);
+
+            // For news briefings, skip non-article/homepage results entirely.
+            if (strictNewsMode && !hasExtraction)
+                continue;
 
             var title  = !string.IsNullOrWhiteSpace(r.Title)
                 ? r.Title
@@ -208,7 +252,9 @@ public static class WebSearchTools
             var source = hasExtraction ? ext!.Domain : r.Source;
 
             // No URLs, no brackets — just title, source, and excerpt
-            sb.AppendLine($"{i + 1}. \"{title}\" — {source}");
+            var number = strictNewsMode ? (included + 1) : (i + 1);
+            sb.AppendLine($"{number}. \"{title}\" — {source}");
+            included++;
 
             if (hasExtraction)
             {
@@ -217,7 +263,7 @@ public static class WebSearchTools
                 if (!string.IsNullOrWhiteSpace(excerpt))
                     sb.AppendLine($"   {excerpt}");
             }
-            else if (!string.IsNullOrWhiteSpace(r.Snippet))
+            else if (!strictNewsMode && !string.IsNullOrWhiteSpace(r.Snippet))
             {
                 var excerpt = CleanExcerpt(r.Snippet);
                 if (!string.IsNullOrWhiteSpace(excerpt))
@@ -225,6 +271,26 @@ public static class WebSearchTools
             }
 
             sb.AppendLine();
+        }
+
+        // If we filtered everything (e.g., paywalls/timeouts), fall back to
+        // listing titles + snippets so the LLM isn't left with nothing.
+        if (strictNewsMode && included == 0)
+        {
+            for (var i = 0; i < results.Count; i++)
+            {
+                var r = results[i];
+                var title  = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : "(untitled)";
+                var source = r.Source;
+
+                sb.AppendLine($"{i + 1}. \"{title}\" — {source}");
+
+                var excerpt = CleanExcerpt(r.Snippet);
+                if (!string.IsNullOrWhiteSpace(excerpt))
+                    sb.AppendLine($"   {excerpt}");
+
+                sb.AppendLine();
+            }
         }
 
         // ── Sources JSON Section (UI only — invisible to the user) ────
@@ -235,7 +301,7 @@ public static class WebSearchTools
         for (var i = 0; i < results.Count; i++)
         {
             var r = results[i];
-            var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && ext.Succeeded;
+            var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && IsUsefulExtraction(ext, strictNewsMode);
 
             var title     = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : (hasExtraction ? ext!.Title : "(untitled)");
             var excerpt   = hasExtraction
@@ -400,15 +466,6 @@ public static class WebSearchTools
     /// Accepts fuzzy inputs (e.g. "today" → "day") so callers
     /// don't have to be exact.
     /// </summary>
-    private static string NormalizeRecency(string raw)
-    {
-        var r = (raw ?? "any").Trim().ToLowerInvariant();
-        return r switch
-        {
-            "day" or "today" or "24h" or "1d"   => "day",
-            "week" or "7d" or "1w"               => "week",
-            "month" or "30d" or "1m"             => "month",
-            _                                     => "any"
-        };
-    }
+    private static string NormalizeRecency(string raw) =>
+        RecencyHelper.Normalize(raw);
 }

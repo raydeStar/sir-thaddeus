@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
+    <ProjectReference Include="..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
   </ItemGroup>
 
 </Project>

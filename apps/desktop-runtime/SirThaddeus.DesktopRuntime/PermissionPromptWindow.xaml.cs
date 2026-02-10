@@ -36,9 +36,23 @@ public partial class PermissionPromptWindow : Window
         return _decision ?? PermissionDecision.Deny("Dialog closed without response");
     }
 
-    private void AllowButton_Click(object sender, RoutedEventArgs e)
+    private void AllowOnceButton_Click(object sender, RoutedEventArgs e)
     {
-        _decision = PermissionDecision.Allow();
+        _decision = PermissionDecision.AllowOnce();
+        DialogResult = true;
+        Close();
+    }
+
+    private void AllowSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        _decision = PermissionDecision.AllowSession();
+        DialogResult = true;
+        Close();
+    }
+
+    private void AllowAlwaysButton_Click(object sender, RoutedEventArgs e)
+    {
+        _decision = PermissionDecision.AllowAlways();
         DialogResult = true;
         Close();
     }

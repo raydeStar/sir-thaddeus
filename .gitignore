@@ -34,6 +34,9 @@ bld/
 *.coverage
 *.coveragexml
 
+# Build artifacts (dev/test.ps1 output)
+artifacts/
+
 # OS generated files
 .DS_Store
 .DS_Store?

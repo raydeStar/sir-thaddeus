@@ -39,6 +39,15 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool   _memoryEnabled     = true;
     private bool   _embeddingsEnabled = true;
 
+    // MCP Permissions
+    private string _mcpPermDeveloperOverride = "none";
+    private string _mcpPermScreen            = "ask";
+    private string _mcpPermFiles             = "ask";
+    private string _mcpPermSystem            = "ask";
+    private string _mcpPermWeb               = "ask";
+    private string _mcpPermMemoryRead        = "always";
+    private string _mcpPermMemoryWrite       = "ask";
+
     // Profile
     private ProfileOption? _selectedProfile;
     private string         _statusText = "";
@@ -56,8 +65,30 @@ public sealed class SettingsViewModel : ViewModelBase
     public string PttKey         { get => _pttKey;          set { if (SetProperty(ref _pttKey, value))         MarkDirty(); } }
 
     // Memory
-    public bool   MemoryEnabled     { get => _memoryEnabled;     set { if (SetProperty(ref _memoryEnabled, value))     MarkDirty(); } }
+    public bool MemoryEnabled
+    {
+        get => _memoryEnabled;
+        set
+        {
+            if (SetProperty(ref _memoryEnabled, value))
+            {
+                MarkDirty();
+                // Memory master off disables memory permission dropdowns
+                OnPropertyChanged(nameof(McpPermMemoryRead));
+                OnPropertyChanged(nameof(McpPermMemoryWrite));
+            }
+        }
+    }
     public bool   EmbeddingsEnabled { get => _embeddingsEnabled; set { if (SetProperty(ref _embeddingsEnabled, value)) MarkDirty(); } }
+
+    // MCP Permissions
+    public string McpPermDeveloperOverride { get => _mcpPermDeveloperOverride; set { if (SetProperty(ref _mcpPermDeveloperOverride, value)) MarkDirty(); } }
+    public string McpPermScreen            { get => _mcpPermScreen;            set { if (SetProperty(ref _mcpPermScreen, value))            MarkDirty(); } }
+    public string McpPermFiles             { get => _mcpPermFiles;             set { if (SetProperty(ref _mcpPermFiles, value))             MarkDirty(); } }
+    public string McpPermSystem            { get => _mcpPermSystem;            set { if (SetProperty(ref _mcpPermSystem, value))            MarkDirty(); } }
+    public string McpPermWeb               { get => _mcpPermWeb;               set { if (SetProperty(ref _mcpPermWeb, value))               MarkDirty(); } }
+    public string McpPermMemoryRead        { get => _mcpPermMemoryRead;        set { if (SetProperty(ref _mcpPermMemoryRead, value))        MarkDirty(); } }
+    public string McpPermMemoryWrite       { get => _mcpPermMemoryWrite;       set { if (SetProperty(ref _mcpPermMemoryWrite, value))       MarkDirty(); } }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
@@ -82,13 +113,19 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand SaveCommand    { get; }
     public ICommand RefreshCommand { get; }
 
-    // ─── Raised when the active profile changes ──────────────────────
+    // ─── Raised when settings change ──────────────────────────────────
 
     /// <summary>
     /// Raised when the active profile selection changes so the host
     /// can propagate the choice to the agent and MCP layers.
     /// </summary>
     public event Action<string?>? ActiveProfileChanged;
+
+    /// <summary>
+    /// Raised after settings are saved so the runtime can swap the
+    /// immutable permission snapshot in <c>WpfPermissionGate</c>.
+    /// </summary>
+    public event Action<AppSettings>? SettingsChanged;
 
     // ─── Constructor ─────────────────────────────────────────────────
 
@@ -131,6 +168,15 @@ public sealed class SettingsViewModel : ViewModelBase
         _memoryEnabled     = s.Memory.Enabled;
         _embeddingsEnabled = s.Memory.UseEmbeddings;
 
+        // MCP Permissions
+        _mcpPermDeveloperOverride = s.Mcp.Permissions.DeveloperOverride;
+        _mcpPermScreen            = s.Mcp.Permissions.Screen;
+        _mcpPermFiles             = s.Mcp.Permissions.Files;
+        _mcpPermSystem            = s.Mcp.Permissions.System;
+        _mcpPermWeb               = s.Mcp.Permissions.Web;
+        _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
+        _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
+
         // Notify all bindings
         OnPropertyChanged(nameof(LlmBaseUrl));
         OnPropertyChanged(nameof(LlmModel));
@@ -140,6 +186,13 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(PttKey));
         OnPropertyChanged(nameof(MemoryEnabled));
         OnPropertyChanged(nameof(EmbeddingsEnabled));
+        OnPropertyChanged(nameof(McpPermDeveloperOverride));
+        OnPropertyChanged(nameof(McpPermScreen));
+        OnPropertyChanged(nameof(McpPermFiles));
+        OnPropertyChanged(nameof(McpPermSystem));
+        OnPropertyChanged(nameof(McpPermWeb));
+        OnPropertyChanged(nameof(McpPermMemoryRead));
+        OnPropertyChanged(nameof(McpPermMemoryWrite));
     }
 
     private async Task LoadProfilesAsync()
@@ -210,6 +263,19 @@ public sealed class SettingsViewModel : ViewModelBase
                 Enabled       = _memoryEnabled,
                 UseEmbeddings = _embeddingsEnabled
             },
+            Mcp = _settings.Mcp with
+            {
+                Permissions = new Config.McpPermissionsSettings
+                {
+                    DeveloperOverride = _mcpPermDeveloperOverride,
+                    Screen            = _mcpPermScreen,
+                    Files             = _mcpPermFiles,
+                    System            = _mcpPermSystem,
+                    Web               = _mcpPermWeb,
+                    MemoryRead        = _mcpPermMemoryRead,
+                    MemoryWrite       = _mcpPermMemoryWrite
+                }
+            },
             ActiveProfileId = _selectedProfile?.ProfileId
         };
 
@@ -219,6 +285,7 @@ public sealed class SettingsViewModel : ViewModelBase
         StatusText = "Settings saved.";
 
         ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        SettingsChanged?.Invoke(updated);
 
         _audit.Append(new AuditEvent
         {

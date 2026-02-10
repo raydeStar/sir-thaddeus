@@ -148,6 +148,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// </summary>
     public event Action? LogEntryAdded;
 
+    /// <summary>
+    /// Raised when the user clears the conversation ("New Chat").
+    /// The runtime uses this to clear session-scoped permission grants.
+    /// </summary>
+    public event Action? ConversationCleared;
+
     // ─────────────────────────────────────────────────────────────────
     // Connection Health Check
     // ─────────────────────────────────────────────────────────────────
@@ -342,6 +348,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Action = "CHAT_CLEARED",
             Result = "ok"
         });
+
+        // Notify runtime to clear session-scoped permission grants
+        ConversationCleared?.Invoke();
 
         // Re-check connection and show welcome status
         _ = CheckConnectionAsync();
