@@ -34,6 +34,14 @@ Any valid `dotnet test --filter` expression works here.
 
 Restores packages, builds in Release, then runs the full suite.
 
+## Production preflight (before release)
+
+```powershell
+.\dev\preflight.ps1
+```
+
+Runs bootstrap + full Release test suite as a single gate before packaging.
+
 ## Outputs
 
 - TRX results are written to `./artifacts/test/`

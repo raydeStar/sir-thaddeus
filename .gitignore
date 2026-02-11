@@ -36,6 +36,7 @@ bld/
 
 # Build artifacts (dev/test.ps1 output)
 artifacts/
+dev/build-temp/
 
 # OS generated files
 .DS_Store

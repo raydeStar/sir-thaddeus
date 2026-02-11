@@ -105,7 +105,7 @@ sir-thaddeus/
 ## Prerequisites
 
 - **Windows 10/11**
-- **.NET 8 SDK**
+- **.NET SDK pinned in `global.json`** (currently `9.0.305`)
 - **LM Studio** (or any OpenAI-compatible local server)
   - Default expected base URL: `http://localhost:1234`
   - Endpoints used: `/v1/chat/completions`, `/v1/embeddings` (optional)
@@ -159,9 +159,20 @@ Notes:
 ## Building & tests
 
 ```powershell
-dotnet build
-dotnet test
+# First-time setup / restore
+.\dev\bootstrap.ps1
+
+# Fast local loop (Debug build + tests)
+.\dev\test.ps1
+
+# Full suite (Release + restore) for pre-commit checks
+.\dev\test_all.ps1
+
+# Production preflight gate before release/distribution
+.\dev\preflight.ps1
 ```
+
+Testing details and filters are documented in `README_TESTING.md`.
 
 ## Running
 
@@ -223,7 +234,9 @@ dotnet run --project apps/mcp-server/SirThaddeus.McpServer
 
 ## More docs
 
-See [project-notes/architectural-design.md](project-notes/architectural-design.md).
+- [README_TESTING.md](README_TESTING.md) - test harness usage and troubleshooting
+- [README_DEPLOY.md](README_DEPLOY.md) - production preflight and deployment checklist
+- [project-notes/architectural-design.md](project-notes/architectural-design.md) - architecture reference
 
 ## License
 

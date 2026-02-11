@@ -256,8 +256,8 @@ public partial class App : System.Windows.Application
             Details = new Dictionary<string, object> { ["audioFile"] = audioFilePath }
         });
 
-        // TODO: Replace with real Whisper transcription when integrated.
-        // For now, send a placeholder message so the pipeline is testable end-to-end.
+        // Placeholder transcription path until local Whisper is wired in.
+        // Keeps the voice pipeline testable end-to-end in the meantime.
         var transcribedText = "[Voice input received - transcription pending integration]";
 
         _runtimeController?.SetState(Core.AssistantState.Thinking, "Processing voice input");
@@ -804,38 +804,6 @@ public partial class App : System.Windows.Application
             {
                 ["reason"] = "Window close intercepted (tray mode)"
             }
-        });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Permission Prompting
-    // ─────────────────────────────────────────────────────────────────────
-
-    private Task<PermissionDecision> PromptForPermissionAsync(PermissionRequest request)
-    {
-        return Dispatcher.Invoke(() =>
-        {
-            var promptWindow = new PermissionPromptWindow();
-            promptWindow.SetRequest(request);
-            promptWindow.Owner = _commandPaletteWindow;
-            promptWindow.ShowDialog();
-
-            var decision = promptWindow.GetDecision();
-
-            _auditLogger?.Append(new AuditEvent
-            {
-                Actor = "user",
-                Action = decision.Approved ? "PERMISSION_PROMPT_ALLOWED" : "PERMISSION_PROMPT_DENIED",
-                Result = decision.Approved ? "ok" : "denied",
-                Details = new Dictionary<string, object>
-                {
-                    ["capability"] = request.Capability.ToString(),
-                    ["purpose"] = request.Purpose ?? "",
-                    ["reason"] = decision.DenialReason ?? ""
-                }
-            });
-
-            return Task.FromResult(decision);
         });
     }
 
