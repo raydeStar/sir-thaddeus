@@ -1,0 +1,43 @@
+{
+  "id": "08-idempotency-retry-guard",
+  "description": "Repeated status probes remain deterministic and bounded.",
+  "llm": {
+    "mode": "never",
+    "fixedResponse": "LLM should not be called"
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "status_check_url": {
+        "defaultResponse": "{\"url\":\"https://github.com/\",\"reachable\":true,\"httpStatus\":200,\"method\":\"HEAD\",\"latencyMs\":83,\"error\":null,\"checkedAt\":\"2026-02-10T18:00:00Z\",\"source\":\"direct\",\"cache\":{\"hit\":false,\"ageSeconds\":0}}"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "Is github.com up?",
+      "expect": {
+        "success": true,
+        "textContains": ["github.com", "reachable"],
+        "toolCalls": {
+          "include": ["status_check_url"],
+          "exclude": ["web_search"]
+        },
+        "toolArgsContains": ["github.com"]
+      }
+    },
+    {
+      "userMessage": "Is github.com up?",
+      "expect": {
+        "success": true,
+        "textContains": ["github.com", "reachable"],
+        "toolCalls": {
+          "include": ["status_check_url"],
+          "exclude": ["web_search"]
+        },
+        "toolArgsContains": ["github.com"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "01-location-reuse-today",
+  "description": "Location set, then today follow-up reuses location.",
+  "llm": {
+    "mode": "never",
+    "fixedResponse": "LLM should not be called"
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "weather_geocode": {
+        "defaultResponse": "{\"query\":\"Boise, ID\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Boise, Idaho, US\",\"regionCode\":\"ID\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":43.616613,\"longitude\":-116.200886,\"confidence\":0.95}]}"
+      },
+      "weather_forecast": {
+        "defaultResponse": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Boise, Idaho, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":43.616613,\"longitude\":-116.200886},\"current\":{\"temperature\":32,\"unit\":\"F\",\"condition\":\"partly sunny\",\"wind\":\"3 mph\",\"humidityPercent\":34},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":48,\"tempLow\":38,\"avgTemp\":43,\"unit\":\"F\",\"condition\":\"partly sunny\"}],\"alerts\":[]}"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "What's the weather like in Boise, ID?",
+      "expect": {
+        "success": true,
+        "textContains": ["Boise"],
+        "toolCalls": {
+          "include": ["weather_geocode", "weather_forecast"],
+          "exclude": ["web_search"]
+        },
+        "context": {
+          "location": "Boise"
+        }
+      }
+    },
+    {
+      "userMessage": "today?",
+      "expect": {
+        "success": true,
+        "textContains": ["Using your previous location context", "Boise"],
+        "toolCalls": {
+          "include": ["weather_geocode", "weather_forecast"],
+          "exclude": ["web_search"]
+        },
+        "toolArgsContains": ["\"place\":\"Boise"],
+        "toolArgsNotContains": ["\"place\":\"today"],
+        "context": {
+          "location": "Boise",
+          "locationInferred": true
+        }
+      }
+    }
+  ]
+}

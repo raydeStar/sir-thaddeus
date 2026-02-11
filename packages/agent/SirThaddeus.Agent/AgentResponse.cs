@@ -1,3 +1,5 @@
+using SirThaddeus.Agent.Dialogue;
+
 namespace SirThaddeus.Agent;
 
 /// <summary>
@@ -42,6 +44,11 @@ public sealed record AgentResponse
     /// Error message if the request failed.
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Compact continuity snapshot for UI context chips and lock/mismatch indicators.
+    /// </summary>
+    public DialogueContextSnapshot? ContextSnapshot { get; init; }
 
     public static AgentResponse FromError(string error) => new()
     {

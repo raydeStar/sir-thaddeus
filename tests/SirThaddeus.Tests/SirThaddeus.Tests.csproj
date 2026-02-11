@@ -35,4 +35,10 @@
     <ProjectReference Include="..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="continuity\scripts\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

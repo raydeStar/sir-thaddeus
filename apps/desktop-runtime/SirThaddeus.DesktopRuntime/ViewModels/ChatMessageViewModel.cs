@@ -36,6 +36,8 @@ public enum ChatMessageRole
 public sealed class ChatMessageViewModel : ViewModelBase
 {
     private string _content = string.Empty;
+    private string _thoughtContent = string.Empty;
+    private bool _isThoughtExpanded;
     private int    _carouselPage;
 
     /// <summary>How many source cards are visible per carousel page.</summary>
@@ -66,6 +68,34 @@ public sealed class ChatMessageViewModel : ViewModelBase
     {
         get => _content;
         set => SetProperty(ref _content, value);
+    }
+
+    /// <summary>
+    /// Optional model reasoning trace rendered in a collapsed expander.
+    /// This keeps the main answer concise while still making thought text accessible.
+    /// </summary>
+    public string ThoughtContent
+    {
+        get => _thoughtContent;
+        set
+        {
+            if (SetProperty(ref _thoughtContent, value))
+                OnPropertyChanged(nameof(HasThoughtContent));
+        }
+    }
+
+    /// <summary>
+    /// True when this message has extracted thought text to display.
+    /// </summary>
+    public bool HasThoughtContent => !string.IsNullOrWhiteSpace(_thoughtContent);
+
+    /// <summary>
+    /// Expanded/collapsed state for the thought expander in the chat bubble.
+    /// </summary>
+    public bool IsThoughtExpanded
+    {
+        get => _isThoughtExpanded;
+        set => SetProperty(ref _isThoughtExpanded, value);
     }
 
     public DateTime Timestamp { get; init; } = DateTime.Now;

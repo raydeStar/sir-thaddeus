@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Windows.Input;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Core;
+using SirThaddeus.DesktopRuntime.Services;
 using SirThaddeus.Invocation;
 using SirThaddeus.LlmClient;
 
@@ -34,6 +37,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private readonly IToolExecutionHost _host;
     private readonly IAuditLogger _audit;
     private readonly Action _closeWindow;
+    private readonly IDialogueStatePersistence? _dialogueStatePersistence;
 
     // ─────────────────────────────────────────────────────────────────
     // State
@@ -43,7 +47,20 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _isProcessing;
     private bool _isLlmConnected;
     private string _connectionStatus = "Checking...";
+    private bool _contextLocked;
     private CancellationTokenSource? _processingCts;
+
+    private static readonly Regex TaggedThinkingRegex = new(
+        @"<(?<tag>think|thinking|reasoning)>(?<body>[\s\S]*?)</\k<tag>>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex NumberedReasoningLeadRegex = new(
+        @"^\d+[\.\)]\s*(analy(?:ze|sis)?|reason(?:ing)?|think(?:ing)?|thought|consult|plan|approach|breakdown)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex NumberedLineRegex = new(
+        @"^\d+[\.\)]\s+",
+        RegexOptions.Compiled);
 
     // ─────────────────────────────────────────────────────────────────
     // Constructor
@@ -54,17 +71,23 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         ILlmClient llmClient,
         IToolExecutionHost host,
         IAuditLogger audit,
-        Action closeWindow)
+        Action closeWindow,
+        IDialogueStatePersistence? dialogueStatePersistence = null)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _llmClient    = llmClient    ?? throw new ArgumentNullException(nameof(llmClient));
         _host         = host         ?? throw new ArgumentNullException(nameof(host));
         _audit        = audit        ?? throw new ArgumentNullException(nameof(audit));
         _closeWindow  = closeWindow  ?? throw new ArgumentNullException(nameof(closeWindow));
+        _dialogueStatePersistence = dialogueStatePersistence;
 
         SendCommand   = new AsyncRelayCommand(SendAsync, CanSend);
         ClearCommand  = new RelayCommand(ClearConversation);
         CancelCommand = new RelayCommand(CancelProcessing, () => _isProcessing);
+        ToggleContextLockCommand = new RelayCommand(_ => ContextLocked = !ContextLocked);
+
+        _contextLocked = _orchestrator.ContextLocked;
+        ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
 
         // Check connection on construction (fire-and-forget, logged on failure)
         _ = CheckConnectionAsync();
@@ -83,6 +106,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// Debug activity log (right pane). Shows tool calls, results, and diagnostics.
     /// </summary>
     public ObservableCollection<LogEntry> ActivityLog { get; } = [];
+
+    /// <summary>
+    /// Compact continuity chips rendered above chat input.
+    /// </summary>
+    public ObservableCollection<ContextChipViewModel> ContextChips { get; } = [];
 
     /// <summary>
     /// Current text in the input box.
@@ -126,6 +154,22 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         private set => SetProperty(ref _connectionStatus, value);
     }
 
+    /// <summary>
+    /// Locks context updates to explicit location changes.
+    /// </summary>
+    public bool ContextLocked
+    {
+        get => _contextLocked;
+        set
+        {
+            if (!SetProperty(ref _contextLocked, value))
+                return;
+
+            _orchestrator.ContextLocked = value;
+            ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Commands
     // ─────────────────────────────────────────────────────────────────
@@ -133,6 +177,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public ICommand SendCommand   { get; }
     public ICommand ClearCommand  { get; }
     public ICommand CancelCommand { get; }
+    public ICommand ToggleContextLockCommand { get; }
 
     // ─────────────────────────────────────────────────────────────────
     // Events
@@ -263,10 +308,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
             if (result.Success)
             {
+                var displayParts = ParseAssistantDisplayParts(result.Text);
                 var assistantMsg = new ChatMessageViewModel
                 {
                     Role    = ChatMessageRole.Assistant,
-                    Content = CleanLlmOutput(result.Text)
+                    Content = displayParts.DisplayText,
+                    ThoughtContent = displayParts.ThinkingText
                 };
 
                 // ── Parse source cards from web search results ───
@@ -278,6 +325,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
                 Messages.Add(assistantMsg);
                 MessageAdded?.Invoke();
+
+                if (assistantMsg.HasThoughtContent)
+                {
+                    AddLog(LogEntryKind.Info,
+                        $"Assistant reasoning captured ({assistantMsg.ThoughtContent.Length} chars, collapsed by default).");
+                }
 
                 // ── Log tool calls to activity pane ──────────────
                 if (result.ToolCallsMade.Count > 0)
@@ -309,6 +362,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 AddMessage(ChatMessageRole.Status, $"Error: {result.Error}");
                 AddLog(LogEntryKind.Error, $"Agent error: {result.Error}");
             }
+
+            ApplyContextSnapshot(result.ContextSnapshot ?? _orchestrator.GetContextSnapshot());
+            await PersistDialogueStateAsync();
         }
         catch (OperationCanceledException)
         {
@@ -347,7 +403,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         Messages.Clear();
         ActivityLog.Clear();
+        ContextChips.Clear();
         _orchestrator.ResetConversation();
+        ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
 
         _audit.Append(new AuditEvent
         {
@@ -355,6 +413,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Action = "CHAT_CLEARED",
             Result = "ok"
         });
+
+        if (_dialogueStatePersistence is not null)
+        {
+            _ = _dialogueStatePersistence.ClearAsync();
+        }
 
         // Notify runtime to clear session-scoped permission grants
         ConversationCleared?.Invoke();
@@ -379,6 +442,61 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     // ─────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────
+
+    private void ApplyContextSnapshot(DialogueContextSnapshot? snapshot)
+    {
+        ContextChips.Clear();
+
+        if (snapshot is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(snapshot.Topic))
+            ContextChips.Add(new ContextChipViewModel($"Topic: {snapshot.Topic}"));
+
+        if (!string.IsNullOrWhiteSpace(snapshot.Location))
+        {
+            var inferred = snapshot.LocationInferred ? " (inferred)" : "";
+            ContextChips.Add(new ContextChipViewModel($"Location: {snapshot.Location}{inferred}"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.TimeScope))
+            ContextChips.Add(new ContextChipViewModel($"Time: {snapshot.TimeScope}"));
+
+        if (snapshot.GeocodeMismatch)
+            ContextChips.Add(new ContextChipViewModel("Mismatch", isWarning: true));
+
+        _contextLocked = snapshot.ContextLocked;
+        OnPropertyChanged(nameof(ContextLocked));
+        OnPropertyChanged(nameof(ContextChips));
+    }
+
+    private async Task PersistDialogueStateAsync()
+    {
+        if (_dialogueStatePersistence is null)
+            return;
+
+        try
+        {
+            var snapshot = _orchestrator.GetContextSnapshot();
+            var state = new DialogueState
+            {
+                Topic = snapshot.Topic ?? "",
+                LocationName = snapshot.Location,
+                TimeScope = snapshot.TimeScope,
+                ContextLocked = snapshot.ContextLocked,
+                GeocodeMismatch = snapshot.GeocodeMismatch,
+                LocationInferred = snapshot.LocationInferred,
+                RollingSummary = "",
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+
+            await _dialogueStatePersistence.SaveAsync(state);
+        }
+        catch (Exception ex)
+        {
+            AddLog(LogEntryKind.Error, $"Dialogue state save failed: {ex.Message}");
+        }
+    }
 
     private void AddMessage(ChatMessageRole role, string content)
     {
@@ -410,6 +528,23 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             : compact[..maxLength] + "\u2026";
     }
 
+    private sealed record AssistantDisplayParts(string DisplayText, string ThinkingText);
+
+    private static AssistantDisplayParts ParseAssistantDisplayParts(string text)
+    {
+        var cleaned = CleanLlmOutput(text);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return new AssistantDisplayParts(cleaned, "");
+
+        if (TryExtractTaggedThinking(cleaned, out var taggedDisplay, out var taggedThinking))
+            return new AssistantDisplayParts(taggedDisplay, taggedThinking);
+
+        if (TryExtractStructuredThinkingPreamble(cleaned, out var structuredDisplay, out var structuredThinking))
+            return new AssistantDisplayParts(structuredDisplay, structuredThinking);
+
+        return new AssistantDisplayParts(cleaned, "");
+    }
+
     /// <summary>
     /// Strips formatting artifacts that local LLMs sometimes echo back.
     /// They see our bracketed markers and mimic them in their output.
@@ -425,6 +560,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             .Where(line =>
             {
                 var trimmed = line.Trim();
+                if (IsLikelyInternalMarkerLine(trimmed))
+                    return false;
+
                 // Remove [END OF ...], [INSTRUCTIONS ...], [REFERENCE DATA ...] etc.
                 if (trimmed.StartsWith('[') && trimmed.EndsWith(']') &&
                     (trimmed.Contains("END OF", StringComparison.OrdinalIgnoreCase) ||
@@ -438,6 +576,166 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         return string.Join('\n', cleaned).Trim();
     }
+
+    private static bool IsLikelyInternalMarkerLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        if (!line.StartsWith('[') || !line.EndsWith(']'))
+            return false;
+
+        var marker = line[1..^1].Trim();
+        if (marker.StartsWith("/", StringComparison.Ordinal))
+            marker = marker[1..].Trim();
+
+        if (string.IsNullOrWhiteSpace(marker))
+            return false;
+
+        if (marker.Contains("TOOL", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("INSTRUCTION", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("REFERENCE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("PROFILE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("MEMORY", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var normalized = marker.Replace("/", "", StringComparison.Ordinal).Trim();
+        if (normalized.Length == 0)
+            return false;
+
+        return normalized.All(c =>
+            char.IsUpper(c) ||
+            char.IsDigit(c) ||
+            c == '_' ||
+            c == '-' ||
+            c == ' ');
+    }
+
+    private static bool TryExtractTaggedThinking(
+        string text,
+        out string displayText,
+        out string thinkingText)
+    {
+        displayText = text;
+        thinkingText = "";
+
+        var match = TaggedThinkingRegex.Match(text);
+        if (!match.Success)
+            return false;
+
+        var thought = match.Groups["body"].Value.Trim();
+        var visible = text.Remove(match.Index, match.Length).Trim();
+
+        // If the model only produced thought text, keep existing behavior.
+        if (string.IsNullOrWhiteSpace(visible) || string.IsNullOrWhiteSpace(thought))
+            return false;
+
+        displayText = visible;
+        thinkingText = thought;
+        return true;
+    }
+
+    private static bool TryExtractStructuredThinkingPreamble(
+        string text,
+        out string displayText,
+        out string thinkingText)
+    {
+        displayText = text;
+        thinkingText = "";
+
+        var normalized = NormalizeNewlines(text);
+        var lines = normalized.Split('\n');
+        var start = Array.FindIndex(lines, line => !string.IsNullOrWhiteSpace(line));
+        if (start < 0)
+            return false;
+
+        var lead = lines[start].Trim();
+        if (!LooksLikeThinkingLead(lead))
+            return false;
+
+        var sawReasoningLine = false;
+        var splitIndex = -1;
+
+        for (var i = start; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                if (sawReasoningLine)
+                    continue;
+                continue;
+            }
+
+            if (IsReasoningLine(trimmed))
+            {
+                sawReasoningLine = true;
+                continue;
+            }
+
+            if (sawReasoningLine)
+            {
+                splitIndex = i;
+                break;
+            }
+
+            return false;
+        }
+
+        if (!sawReasoningLine || splitIndex <= start || splitIndex >= lines.Length)
+            return false;
+
+        var thought = string.Join('\n', lines[start..splitIndex]).Trim();
+        var visible = string.Join('\n', lines[splitIndex..]).Trim();
+        if (string.IsNullOrWhiteSpace(thought) || string.IsNullOrWhiteSpace(visible))
+            return false;
+
+        displayText = visible;
+        thinkingText = thought;
+        return true;
+    }
+
+    private static bool LooksLikeThinkingLead(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var lower = line.ToLowerInvariant();
+        return lower.StartsWith("thought for ", StringComparison.Ordinal) ||
+               lower.StartsWith("analysis:", StringComparison.Ordinal) ||
+               lower.StartsWith("reasoning:", StringComparison.Ordinal) ||
+               lower.StartsWith("thinking:", StringComparison.Ordinal) ||
+               lower.StartsWith("let me think", StringComparison.Ordinal) ||
+               NumberedReasoningLeadRegex.IsMatch(line);
+    }
+
+    private static bool IsReasoningLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return true;
+
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith("- ", StringComparison.Ordinal) ||
+            trimmed.StartsWith("* ", StringComparison.Ordinal) ||
+            trimmed.StartsWith("\u2022 ", StringComparison.Ordinal) ||
+            NumberedLineRegex.IsMatch(trimmed))
+        {
+            return true;
+        }
+
+        if (trimmed.EndsWith(':') && trimmed.Length <= 120)
+            return true;
+
+        var lower = trimmed.ToLowerInvariant();
+        return lower.Contains("analyze", StringComparison.Ordinal) ||
+               lower.Contains("analysis", StringComparison.Ordinal) ||
+               lower.Contains("reasoning", StringComparison.Ordinal) ||
+               lower.Contains("consult memory", StringComparison.Ordinal) ||
+               lower.Contains("step-by-step", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeNewlines(string text)
+        => (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
 
     // ─────────────────────────────────────────────────────────────────
     // Source Card Extraction
@@ -527,4 +825,16 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         public string? Favicon   { get; init; }
         public string? Thumbnail { get; init; }
     }
+}
+
+public sealed class ContextChipViewModel
+{
+    public ContextChipViewModel(string text, bool isWarning = false)
+    {
+        Text = text;
+        IsWarning = isWarning;
+    }
+
+    public string Text { get; }
+    public bool IsWarning { get; }
 }

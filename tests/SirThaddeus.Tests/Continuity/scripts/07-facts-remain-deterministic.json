@@ -1,0 +1,50 @@
+{
+  "id": "07-facts-remain-deterministic",
+  "description": "Moon/basic facts stay deterministic with no web cards.",
+  "llm": {
+    "mode": "never",
+    "fixedResponse": "LLM should not be called"
+  },
+  "mcp": {
+    "mode": "fixed",
+    "fixedValue": "MCP should not be called"
+  },
+  "turns": [
+    {
+      "userMessage": "How many miles is it from the earth to the moon?",
+      "expect": {
+        "success": true,
+        "textContains": ["Earth-Moon distance"],
+        "suppressSourceCardsUi": true,
+        "suppressToolActivityUi": true,
+        "toolCalls": {
+          "exclude": ["web_search", "WebSearch"]
+        }
+      }
+    },
+    {
+      "userMessage": "I need a more precise figure!",
+      "expect": {
+        "success": true,
+        "textContains": ["384,400.0 km", "238,855"],
+        "suppressSourceCardsUi": true,
+        "suppressToolActivityUi": true,
+        "toolCalls": {
+          "exclude": ["web_search", "WebSearch"]
+        }
+      }
+    },
+    {
+      "userMessage": "What is the speed of light?",
+      "expect": {
+        "success": true,
+        "textContains": ["299,792,458"],
+        "suppressSourceCardsUi": true,
+        "suppressToolActivityUi": true,
+        "toolCalls": {
+          "exclude": ["web_search", "WebSearch"]
+        }
+      }
+    }
+  ]
+}

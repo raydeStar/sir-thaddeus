@@ -1,0 +1,51 @@
+{
+  "id": "03-there-resolves-last-location",
+  "description": "Pronoun follow-up uses last known location.",
+  "llm": {
+    "mode": "never",
+    "fixedResponse": "LLM should not be called"
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "weather_geocode": {
+        "defaultResponse": "{\"query\":\"Tokyo\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Tokyo, JP\",\"regionCode\":\"13\",\"countryCode\":\"JP\",\"isUs\":false,\"latitude\":35.6762,\"longitude\":139.6503,\"confidence\":0.95}]}"
+      },
+      "resolve_timezone": {
+        "defaultResponse": "{\"latitude\":35.6762,\"longitude\":139.6503,\"timezone\":\"Asia/Tokyo\",\"source\":\"open-meteo\",\"cache\":{\"hit\":false,\"ageSeconds\":0}}"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "What time is it in Tokyo?",
+      "expect": {
+        "success": true,
+        "textContains": ["Tokyo", "Asia/Tokyo"],
+        "toolCalls": {
+          "include": ["weather_geocode", "resolve_timezone"],
+          "exclude": ["web_search"]
+        },
+        "context": {
+          "location": "Tokyo"
+        }
+      }
+    },
+    {
+      "userMessage": "What time is it there?",
+      "expect": {
+        "success": true,
+        "textContains": ["Using your previous location context", "Tokyo", "Asia/Tokyo"],
+        "toolCalls": {
+          "include": ["weather_geocode", "resolve_timezone"],
+          "exclude": ["web_search"]
+        },
+        "context": {
+          "location": "Tokyo",
+          "locationInferred": true
+        }
+      }
+    }
+  ]
+}

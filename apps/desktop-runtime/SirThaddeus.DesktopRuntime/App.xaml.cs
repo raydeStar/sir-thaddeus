@@ -48,6 +48,7 @@ public partial class App : System.Windows.Application
     // ─────────────────────────────────────────────────────────────────────
 
     private AgentOrchestrator? _orchestrator;
+    private IDialogueStatePersistence? _dialogueStatePersistence;
 
     // ─────────────────────────────────────────────────────────────────────
     // Layer 1: UI Surface & Audio
@@ -163,11 +164,18 @@ public partial class App : System.Windows.Application
         };
 
         // ── 6. Create Agent Orchestrator (Layer 2) ───────────────────
+        if (_settings.Dialogue.PersistenceEnabled)
+        {
+            var dialoguePath = ResolveDialogueStatePath(_settings);
+            _dialogueStatePersistence = new FileDialogueStatePersistence(dialoguePath, _auditLogger);
+        }
+
         _orchestrator = new AgentOrchestrator(
             _llmClient,
             _auditedMcpClient,
             _auditLogger,
-            _settings.Llm.SystemPrompt);
+            _settings.Llm.SystemPrompt,
+            geocodeMismatchMode: _settings.Dialogue.GeocodeMismatchMode);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
@@ -176,6 +184,16 @@ public partial class App : System.Windows.Application
         // Propagate memory master off — when disabled, orchestrator
         // skips retrieval and filters out memory_* tool definitions
         _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
+
+        if (_dialogueStatePersistence is not null)
+        {
+            var seededState = await _dialogueStatePersistence.LoadAsync();
+            if (seededState is not null)
+            {
+                _orchestrator.SeedDialogueState(seededState);
+                _orchestrator.ContextLocked = seededState.ContextLocked;
+            }
+        }
 
         _auditLogger.Append(new AuditEvent
         {
@@ -539,7 +557,8 @@ public partial class App : System.Windows.Application
             _llmClient!,
             host,
             _auditLogger!,
-            closeWindow: () => window.Hide());
+            closeWindow: () => window.Hide(),
+            dialogueStatePersistence: _dialogueStatePersistence);
 
         window.SetViewModel(viewModel);
 
@@ -547,6 +566,8 @@ public partial class App : System.Windows.Application
         viewModel.ConversationCleared += () =>
         {
             _permissionGate?.ClearSessionGrants();
+            if (_dialogueStatePersistence is not null)
+                _ = _dialogueStatePersistence.ClearAsync();
         };
 
         // ── Memory + Profile Browsers ────────────────────────────────
@@ -686,6 +707,27 @@ public partial class App : System.Windows.Application
             var localAppData = Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData);
             path = Path.Combine(localAppData, "SirThaddeus", "weather-places.json");
+        }
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        return path;
+    }
+
+    /// <summary>
+    /// Resolves optional dialogue-state persistence path. "auto" maps to
+    /// %LOCALAPPDATA%\SirThaddeus\dialogue-state.json.
+    /// </summary>
+    private static string ResolveDialogueStatePath(AppSettings settings)
+    {
+        var path = settings.Dialogue.PersistencePath;
+        if (string.Equals(path, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            path = Path.Combine(localAppData, "SirThaddeus", "dialogue-state.json");
         }
 
         var dir = Path.GetDirectoryName(path);

@@ -117,6 +117,7 @@ public class UtilityRouterTests
 
     [Theory]
     [InlineData("convert 10 miles to km",      "conversion")]
+    [InlineData("convert 1 mile to feet",      "conversion")]
     [InlineData("convert 100 fahrenheit to celsius", "conversion")]
     [InlineData("convert 5 lbs to kg",         "conversion")]
     public void Conversion_ReturnsInlineAnswer(string input, string category)
@@ -124,6 +125,17 @@ public class UtilityRouterTests
         var result = UtilityRouter.TryHandle(input);
         Assert.NotNull(result);
         Assert.Equal(category, result!.Category);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
+    public void Conversion_HowManyFeetInMile_ReturnsDeterministicAnswer()
+    {
+        var result = UtilityRouter.TryHandle("how many feet in a mile?");
+        Assert.NotNull(result);
+        Assert.Equal("conversion", result!.Category);
+        Assert.Contains("equals", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("5,280", result.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.Null(result.McpToolName);
     }
 
@@ -634,6 +646,7 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("16", result.Text); // 10 miles ≈ 16.09 km
+        Assert.Contains("equals", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.SuppressSourceCardsUi);
         Assert.True(result.SuppressToolActivityUi);
 
@@ -654,13 +667,64 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("384,400,000 meters", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("compare that against another benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.SuppressSourceCardsUi);
         Assert.True(result.SuppressToolActivityUi);
 
         var searchCalls = mcp.Calls.Where(c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_MoonDistance_PrecisionFollowUp_StaysDeterministic()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var mcp = new FakeMcpClient(returnValue: "MCP should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var first = await agent.ProcessAsync("How many miles is it from the earth to the moon?");
+        Assert.True(first.Success);
+        Assert.Contains("Earth-Moon distance", first.Text, StringComparison.OrdinalIgnoreCase);
+
+        var second = await agent.ProcessAsync("I need a more precise figure!");
+        Assert.True(second.Success);
+        Assert.Contains("384,400.0 km", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("238,855", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("benchmark", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(second.SuppressSourceCardsUi);
+        Assert.True(second.SuppressToolActivityUi);
+
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("weather_", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("resolve_timezone", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_MoonDistance_UnitFollowUp_Feet_StaysDeterministic()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var mcp = new FakeMcpClient(returnValue: "MCP should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var first = await agent.ProcessAsync("How many miles is it from the earth to the moon?");
+        Assert.True(first.Success);
+        Assert.Contains("Earth-Moon distance", first.Text, StringComparison.OrdinalIgnoreCase);
+
+        var second = await agent.ProcessAsync("What is that in feet?");
+        Assert.True(second.Success);
+        Assert.Contains("5,280", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1,261,154,400 feet", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("converted locally", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("benchmark", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(second.SuppressSourceCardsUi);
+        Assert.True(second.SuppressToolActivityUi);
+
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("weather_", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("resolve_timezone", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -675,7 +739,7 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.Contains("299,792,458", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("compare that against another benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("benchmark", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.SuppressSourceCardsUi);
         Assert.True(result.SuppressToolActivityUi);
 

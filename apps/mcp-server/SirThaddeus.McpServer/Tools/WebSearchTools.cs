@@ -36,7 +36,23 @@ public static class WebSearchTools
     private const int CardExcerptChars  = 250;
     private const int PageTimeoutSecs   = 10;
     private const int MinUsefulNonArticleWords = 120;
+    private const int RelevanceExtractionChars = 800;
     internal const string SourcesDelimiter = "<!-- SOURCES_JSON -->";
+
+    private static readonly HashSet<string> StopTokens =
+    [
+        "what", "whats", "what's", "is", "are", "was", "were", "the", "a", "an",
+        "in", "on", "at", "to", "from", "for", "of", "and", "or", "with", "about",
+        "can", "could", "would", "should", "please", "me", "my", "i", "you",
+        "today", "tonight", "tomorrow", "week", "month", "year"
+    ];
+
+    private static readonly HashSet<string> WeakSignalTokens =
+    [
+        "latest", "current", "recent", "news", "info", "information", "detail",
+        "details", "figure", "exact", "precise", "precision", "value", "number",
+        "average", "distance", "kilometer", "kilometers", "km", "mile", "miles", "mi"
+    ];
 
     private static readonly Lazy<WebSearchRouter> Router = new(
         () => new WebSearchRouter(
@@ -128,8 +144,13 @@ public static class WebSearchTools
                 cancellationToken)
             : [];
 
+        // ── Phase 2.5: Relevance vetting (non-news) ───────────────────
+        var vettedResults = LooksLikeNewsQuery(query)
+            ? dedupedResults
+            : VetResultsByQuery(query, dedupedResults, extractions, urlsToRead);
+
         // ── Phase 3: Format output (text for LLM + JSON for UI) ──────
-        return FormatResults(query, dedupedResults, extractions, urlsToRead);
+        return FormatResults(query, vettedResults, extractions, urlsToRead);
     }
 
     /// <summary>
@@ -193,6 +214,115 @@ public static class WebSearchTools
         // Non-article pages can still be useful (e.g., Wikipedia),
         // but tiny wrappers (Google News, cookie walls, etc.) are not.
         return ext.WordCount >= MinUsefulNonArticleWords;
+    }
+
+    /// <summary>
+    /// Filters clearly irrelevant results for non-news factual queries.
+    /// Keeps a fail-open fallback so we never return an empty set solely
+    /// due to heuristic scoring.
+    /// </summary>
+    private static List<SearchResult> VetResultsByQuery(
+        string query,
+        IReadOnlyList<SearchResult> results,
+        List<ContentExtractor.ExtractionResult> extractions,
+        List<string> originalUrls)
+    {
+        var tokens = ExtractQueryTokens(query);
+        if (tokens.Count == 0 || results.Count == 0)
+            return results.ToList();
+
+        var anchorTokens = tokens.Where(t => !WeakSignalTokens.Contains(t)).ToList();
+        if (anchorTokens.Count == 0)
+            anchorTokens = tokens.ToList();
+
+        var extractionMap = new Dictionary<string, ContentExtractor.ExtractionResult>(
+            StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < originalUrls.Count && i < extractions.Count; i++)
+            extractionMap[originalUrls[i]] = extractions[i];
+        foreach (var e in extractions)
+            extractionMap[e.Url] = e;
+
+        var minTokenMatches = tokens.Count >= 4 ? 2 : 1;
+        var minAnchorMatches = anchorTokens.Count >= 2 ? 2 : 1;
+        var requiresMoonToken = tokens.Contains("moon");
+
+        var vetted = new List<SearchResult>();
+        foreach (var r in results)
+        {
+            var relevanceText = BuildRelevanceText(r, extractionMap);
+            if (string.IsNullOrWhiteSpace(relevanceText))
+                continue;
+
+            var text = relevanceText.ToLowerInvariant();
+            var tokenMatches = tokens.Count(t => text.Contains(t, StringComparison.Ordinal));
+            var anchorMatches = anchorTokens.Count(t => text.Contains(t, StringComparison.Ordinal));
+
+            if (requiresMoonToken && !text.Contains("moon", StringComparison.Ordinal))
+                continue;
+
+            if (tokenMatches >= minTokenMatches && anchorMatches >= minAnchorMatches)
+                vetted.Add(r);
+        }
+
+        // Fail-open fallback to avoid brittle empty responses.
+        if (vetted.Count == 0)
+            return results.Take(Math.Min(3, results.Count)).ToList();
+
+        return vetted;
+    }
+
+    private static string BuildRelevanceText(
+        SearchResult result,
+        IReadOnlyDictionary<string, ContentExtractor.ExtractionResult> extractionMap)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(result.Title))
+            sb.Append(result.Title).Append(' ');
+        if (!string.IsNullOrWhiteSpace(result.Snippet))
+            sb.Append(result.Snippet).Append(' ');
+
+        if (extractionMap.TryGetValue(result.Url, out var ext))
+        {
+            if (!string.IsNullOrWhiteSpace(ext.Title))
+                sb.Append(ext.Title).Append(' ');
+            if (!string.IsNullOrWhiteSpace(ext.TextContent))
+            {
+                var clip = ext.TextContent.Length <= RelevanceExtractionChars
+                    ? ext.TextContent
+                    : ext.TextContent[..RelevanceExtractionChars];
+                sb.Append(clip);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static List<string> ExtractQueryTokens(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return [];
+
+        var parts = query.ToLowerInvariant().Split(
+            [' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '/', '\\', '-', '_'],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        var tokens = new List<string>(parts.Length);
+        foreach (var raw in parts)
+        {
+            var token = raw.Trim();
+            if (token.Length == 0)
+                continue;
+            if (StopTokens.Contains(token))
+                continue;
+            if (token.All(char.IsDigit))
+                continue;
+            if (token.Length < 3 && token is not ("ai" or "uk" or "us"))
+                continue;
+            if (!tokens.Contains(token, StringComparer.Ordinal))
+                tokens.Add(token);
+        }
+
+        return tokens;
     }
 
     // ─────────────────────────────────────────────────────────────────

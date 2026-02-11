@@ -445,6 +445,38 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="HeaderToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="Foreground"      Value="{StaticResource Subtext0Brush}"/>
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="Padding"         Value="10,5"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface0Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource Surface1Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -467,6 +499,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
@@ -521,8 +554,15 @@
                                   Style="{StaticResource ViewTabStyle}"/>
                 </StackPanel>
 
+                <!-- Context lock -->
+                <ToggleButton Grid.Column="3"
+                              Content="Lock Context"
+                              IsChecked="{Binding ContextLocked, Mode=TwoWay}"
+                              Style="{StaticResource HeaderToggleButtonStyle}"
+                              Margin="0,0,8,0"/>
+
                 <!-- New Chat (only visible in Chat mode) -->
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         x:Name="NewChatButton"
                         Content="New Chat"
                         Command="{Binding ClearCommand}"
@@ -563,6 +603,43 @@
                                                    FontSize="10"
                                                    Foreground="{StaticResource Overlay0Brush}"
                                                    Margin="0,0,0,3"/>
+                                        <Border x:Name="ThinkingPanel"
+                                                Visibility="Collapsed"
+                                                Margin="0,0,0,8"
+                                                Background="#3322283A"
+                                                BorderBrush="{StaticResource Surface1Brush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Padding="8,6">
+                                            <Expander IsExpanded="{Binding IsThoughtExpanded, Mode=TwoWay}"
+                                                      Background="Transparent"
+                                                      BorderThickness="0"
+                                                      Foreground="{StaticResource Subtext0Brush}">
+                                                <Expander.Header>
+                                                    <TextBlock Text="Model thinking"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource Subtext0Brush}"/>
+                                                </Expander.Header>
+                                                <TextBox Text="{Binding ThoughtContent, Mode=OneWay}"
+                                                         Margin="0,6,0,0"
+                                                         TextWrapping="Wrap"
+                                                         FontSize="12"
+                                                         FontFamily="Consolas, Cascadia Mono, monospace"
+                                                         Foreground="{StaticResource Overlay0Brush}"
+                                                         Background="Transparent"
+                                                         BorderThickness="0"
+                                                         Padding="0"
+                                                         IsReadOnly="True"
+                                                         IsReadOnlyCaretVisible="False"
+                                                         IsTabStop="False"
+                                                         FocusVisualStyle="{x:Null}"
+                                                         Cursor="IBeam"
+                                                         SelectionBrush="{StaticResource BlueBrush}"
+                                                         SelectionOpacity="0.35"
+                                                         CaretBrush="{StaticResource TextBrush}"/>
+                                            </Expander>
+                                        </Border>
                                         <!--
                                             Message body
                                             - Default: lightweight Markdown-ish rendering (bold + bullets) via FlowDocument.
@@ -880,6 +957,12 @@
                                             Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
 
+                                <!-- ── Assistant thought traces (collapsed expander) ── -->
+                                <DataTrigger Binding="{Binding HasThoughtContent}" Value="True">
+                                    <Setter TargetName="ThinkingPanel"
+                                            Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+
                                 <!-- ── User: right-aligned accent bubble ──── -->
                                 <DataTrigger Binding="{Binding IsUser}" Value="True">
                                     <Setter TargetName="Bubble"
@@ -902,6 +985,8 @@
                                     <Setter TargetName="TimeLabel"
                                             Property="HorizontalAlignment" Value="Right"/>
                                     <Setter TargetName="SourceCardsPanel"
+                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel"
                                             Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
 
@@ -927,6 +1012,8 @@
                                     <Setter TargetName="TimeLabel"
                                             Property="Visibility" Value="Collapsed"/>
                                     <Setter TargetName="SourceCardsPanel"
+                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel"
                                             Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
 
@@ -956,6 +1043,8 @@
                                     <Setter TargetName="TimeLabel"
                                             Property="Visibility" Value="Collapsed"/>
                                     <Setter TargetName="SourceCardsPanel"
+                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel"
                                             Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
                             </DataTemplate.Triggers>
@@ -1796,19 +1885,60 @@
                 BorderBrush="{StaticResource Surface0Brush}"
                 BorderThickness="0,1,0,0">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBox Grid.Column="0"
+                <!-- Context chips -->
+                <ItemsControl Grid.Row="0"
+                              Grid.ColumnSpan="2"
+                              ItemsSource="{Binding ContextChips}"
+                              Margin="0,0,0,8">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,8,6"
+                                    Padding="8,4"
+                                    CornerRadius="10"
+                                    BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource Surface1Brush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWarning}" Value="True">
+                                                <Setter Property="Background" Value="#44F38BA8"/>
+                                                <Setter Property="BorderBrush" Value="#88F38BA8"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding Text}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextBrush}"/>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBox Grid.Row="1"
+                         Grid.Column="0"
                          x:Name="ChatInput"
                          Style="{StaticResource ChatInputStyle}"
                          Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,8,0"/>
 
                 <!-- Send / Cancel button swap -->
-                <Grid Grid.Column="1">
+                <Grid Grid.Row="1" Grid.Column="1">
                     <!-- Send (visible when NOT processing) -->
                     <Button Content="Send ↵"
                             Command="{Binding SendCommand}">

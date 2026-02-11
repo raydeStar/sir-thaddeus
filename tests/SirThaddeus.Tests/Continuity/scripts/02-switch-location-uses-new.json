@@ -1,0 +1,71 @@
+{
+  "id": "02-switch-location-uses-new",
+  "description": "Switch from location A to B, then tomorrow follows B.",
+  "llm": {
+    "mode": "never",
+    "fixedResponse": "LLM should not be called"
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "weather_geocode": {
+        "contains": {
+          "seattle": "{\"query\":\"Seattle, WA\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Seattle, Washington, US\",\"regionCode\":\"WA\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":47.6062,\"longitude\":-122.3321,\"confidence\":0.95}]}",
+          "portland": "{\"query\":\"Portland, OR\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Portland, Oregon, US\",\"regionCode\":\"OR\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":45.5152,\"longitude\":-122.6784,\"confidence\":0.95}]}"
+        },
+        "defaultResponse": "{\"query\":\"Portland, OR\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Portland, Oregon, US\",\"regionCode\":\"OR\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":45.5152,\"longitude\":-122.6784,\"confidence\":0.95}]}"
+      },
+      "weather_forecast": {
+        "contains": {
+          "47.6062": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Seattle, Washington, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":47.6062,\"longitude\":-122.3321},\"current\":{\"temperature\":41,\"unit\":\"F\",\"condition\":\"cloudy\",\"wind\":\"5 mph\",\"humidityPercent\":72},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":47,\"tempLow\":39,\"avgTemp\":43,\"unit\":\"F\",\"condition\":\"cloudy\"}],\"alerts\":[]}",
+          "45.5152": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Portland, Oregon, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":45.5152,\"longitude\":-122.6784},\"current\":{\"temperature\":44,\"unit\":\"F\",\"condition\":\"light rain\",\"wind\":\"6 mph\",\"humidityPercent\":80},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":51,\"tempLow\":42,\"avgTemp\":47,\"unit\":\"F\",\"condition\":\"light rain\"}],\"alerts\":[]}"
+        },
+        "defaultResponse": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Portland, Oregon, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":45.5152,\"longitude\":-122.6784},\"current\":{\"temperature\":44,\"unit\":\"F\",\"condition\":\"light rain\",\"wind\":\"6 mph\",\"humidityPercent\":80},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":51,\"tempLow\":42,\"avgTemp\":47,\"unit\":\"F\",\"condition\":\"light rain\"}],\"alerts\":[]}"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "Weather in Seattle, WA",
+      "expect": {
+        "success": true,
+        "textContains": ["Seattle"],
+        "toolCalls": {
+          "include": ["weather_geocode", "weather_forecast"],
+          "exclude": ["web_search"]
+        }
+      }
+    },
+    {
+      "userMessage": "Weather in Portland, OR",
+      "expect": {
+        "success": true,
+        "textContains": ["Portland"],
+        "toolCalls": {
+          "include": ["weather_geocode", "weather_forecast"],
+          "exclude": ["web_search"]
+        },
+        "context": {
+          "location": "Portland"
+        }
+      }
+    },
+    {
+      "userMessage": "tomorrow?",
+      "expect": {
+        "success": true,
+        "textContains": ["Using your previous location context", "Portland"],
+        "toolArgsContains": ["\"place\":\"Portland"],
+        "toolCalls": {
+          "include": ["weather_geocode", "weather_forecast"],
+          "exclude": ["web_search"]
+        },
+        "context": {
+          "location": "Portland",
+          "locationInferred": true
+        }
+      }
+    }
+  ]
+}

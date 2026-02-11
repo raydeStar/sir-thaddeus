@@ -1,0 +1,54 @@
+{
+  "id": "06-news-continuity-last-week-anything-else",
+  "description": "News continuity carries location into follow-up.",
+  "llm": {
+    "mode": "pipeline",
+    "classification": "search",
+    "entityJson": "{\"name\":\"\",\"type\":\"none\",\"hint\":\"\"}",
+    "queryJson": "{\"query\":\"boise latest news\",\"recency\":\"week\"}",
+    "followupQueryJson": "{\"query\":\"boise more news\",\"recency\":\"week\"}",
+    "summaryText": "Here is a Boise-focused news summary."
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "web_search": {
+        "defaultResponse": "1. Boise city update -- example.com\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://example.com/boise-news\",\"title\":\"Boise city update\"}]"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "What happened in the news last week in Boise?",
+      "expect": {
+        "success": true,
+        "textContains": ["Boise"],
+        "toolCalls": {
+          "includeAny": ["web_search", "browser_navigate"],
+          "exclude": ["weather_geocode"]
+        },
+        "toolArgsContains": ["boise"],
+        "context": {
+          "location": "Boise"
+        }
+      }
+    },
+    {
+      "userMessage": "anything else?",
+      "expect": {
+        "success": true,
+        "textContains": ["Boise"],
+        "toolCalls": {
+          "includeAny": ["web_search", "browser_navigate"],
+          "exclude": ["weather_geocode"]
+        },
+        "toolArgsContains": ["boise"],
+        "context": {
+          "location": "Boise",
+          "locationInferred": true
+        }
+      }
+    }
+  ]
+}

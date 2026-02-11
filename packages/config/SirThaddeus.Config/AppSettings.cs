@@ -29,6 +29,9 @@ public sealed record AppSettings
     [JsonPropertyName("memory")]
     public MemorySettings Memory { get; init; } = new();
 
+    [JsonPropertyName("dialogue")]
+    public DialogueSettings Dialogue { get; init; } = new();
+
     /// <summary>
     /// The profile_id of the currently active user profile.
     /// When set, the agent injects this profile's card into every
@@ -364,4 +367,32 @@ public sealed record WeatherSettings
     [JsonPropertyName("userAgent")]
     public string UserAgent { get; init; } =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
+}
+
+/// <summary>
+/// Dialogue continuity settings for deterministic multi-turn context.
+/// Runtime owns optional persistence; agent remains in-memory only.
+/// </summary>
+public sealed record DialogueSettings
+{
+    /// <summary>
+    /// Geocode mismatch policy:
+    ///   - "fallback_previous" (default)
+    ///   - "require_confirm"
+    /// </summary>
+    [JsonPropertyName("geocodeMismatchMode")]
+    public string GeocodeMismatchMode { get; init; } = "fallback_previous";
+
+    /// <summary>
+    /// Enables optional runtime-owned persistence of dialogue state snapshots.
+    /// </summary>
+    [JsonPropertyName("persistenceEnabled")]
+    public bool PersistenceEnabled { get; init; } = false;
+
+    /// <summary>
+    /// Optional dialogue state persistence path. "auto" resolves to
+    /// %LOCALAPPDATA%\SirThaddeus\dialogue-state.json.
+    /// </summary>
+    [JsonPropertyName("persistencePath")]
+    public string PersistencePath { get; init; } = "auto";
 }

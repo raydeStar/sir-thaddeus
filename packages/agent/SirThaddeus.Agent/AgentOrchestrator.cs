@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -26,6 +27,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// resolution, query construction, and the 3 pipelines.
     /// </summary>
     private readonly SearchOrchestrator _searchOrchestrator;
+    private readonly IDialogueStateStore _dialogueStore;
+    private readonly SlotExtract _slotExtract;
+    private readonly MergeSlots _mergeSlots;
+    private readonly ValidateSlots _validateSlots;
+    private readonly IToolPlanner _toolPlanner;
 
     // Last resolved place from weather flow. Used to anchor short
     // follow-up weather/news prompts like "forecast for today?"
@@ -33,10 +39,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private string? _lastPlaceContextName;
     private string? _lastPlaceContextCountryCode;
     private DateTimeOffset _lastPlaceContextAt;
+    private string? _lastUtilityContextKey;
+    private DateTimeOffset _lastUtilityContextAt;
 
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
     private static readonly TimeSpan PlaceContextTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan UtilityContextTtl = TimeSpan.FromMinutes(20);
 
     // ── Web search tool names ────────────────────────────────────────
     // MCP stacks may register tools in snake_case or PascalCase.
@@ -59,6 +68,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string FeedFetchToolNameAlt       = "FeedFetch";
     private const string StatusCheckToolName        = "status_check_url";
     private const string StatusCheckToolNameAlt     = "StatusCheckUrl";
+    private const string MemoryListFactsToolName    = "memory_list_facts";
+    private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
@@ -154,6 +165,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     public bool MemoryEnabled { get; set; } = true;
 
+    /// <inheritdoc />
+    public bool ContextLocked
+    {
+        get => _dialogueStore.Get().ContextLocked;
+        set
+        {
+            var current = _dialogueStore.Get();
+            if (current.ContextLocked == value)
+                return;
+
+            _dialogueStore.Update(current with { ContextLocked = value });
+        }
+    }
+
     private enum ChatIntent
     {
         Casual,
@@ -166,7 +191,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         IMcpToolClient mcp,
         IAuditLogger audit,
         string systemPrompt,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IDialogueStateStore? dialogueStateStore = null,
+        SlotExtract? slotExtract = null,
+        MergeSlots? mergeSlots = null,
+        ValidateSlots? validateSlots = null,
+        IToolPlanner? toolPlanner = null,
+        string geocodeMismatchMode = "fallback_previous")
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -175,6 +206,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         _searchOrchestrator = new SearchOrchestrator(llm, mcp, audit, systemPrompt);
+        _dialogueStore = dialogueStateStore ?? new DialogueStateStore(_timeProvider);
+        _slotExtract = slotExtract ?? new SlotExtract(llm, audit);
+        _mergeSlots = mergeSlots ?? new MergeSlots();
+        _validateSlots = validateSlots ?? new ValidateSlots(new ValidationOptions
+        {
+            GeocodeMismatchMode = geocodeMismatchMode
+        });
+        _toolPlanner = toolPlanner ?? new ToolPlanner();
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(_systemPrompt));
@@ -186,7 +225,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
-            return AgentResponse.FromError("Empty message.");
+            return AttachContextSnapshot(AgentResponse.FromError("Empty message."));
 
         // ── Add user message to history ──────────────────────────────
         _history.Add(ChatMessage.User(userMessage));
@@ -226,6 +265,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // retrieval entirely — no MCP call, no timeout wait.
         var memoryPackText = "";
         var onboardingNeeded = false;
+        var memoryError = "";
         if (!MemoryEnabled)
         {
             LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
@@ -235,13 +275,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var memoryTask = RetrieveMemoryContextAsync(userMessage, cancellationToken);
             if (await Task.WhenAny(memoryTask, Task.Delay(MemoryRetrievalTimeout, cancellationToken)) == memoryTask)
             {
-                (memoryPackText, onboardingNeeded) = await memoryTask;
+                (memoryPackText, onboardingNeeded, memoryError) = await memoryTask;
 
                 // Surface the retrieval in the activity log so the user
                 // can see what was recalled (or that nothing was found).
-                var summary = string.IsNullOrWhiteSpace(memoryPackText)
-                    ? "No relevant memories found."
-                    : memoryPackText.Replace("\n", " ").Trim();
+                var summary = !string.IsNullOrWhiteSpace(memoryError)
+                    ? $"Memory retrieve error: {memoryError}"
+                    : string.IsNullOrWhiteSpace(memoryPackText)
+                        ? "No relevant memories found."
+                        : memoryPackText.Replace("\n", " ").Trim();
                 if (summary.Length > 200) summary = summary[..200] + "\u2026";
 
                 toolCallsMade.Add(new ToolCallRecord
@@ -249,7 +291,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     ToolName  = "MemoryRetrieve",
                     Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
                     Result    = summary,
-                    Success   = true
+                    Success   = string.IsNullOrWhiteSpace(memoryError)
                 });
             }
             else
@@ -307,18 +349,48 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                             : "Follow-up — passively capturing info.");
         }
 
-        var contextualUserMessage = ApplyPlaceContextIfHelpful(userMessage);
+        var stateBefore = _dialogueStore.Get();
+        var extractedSlots = await _slotExtract.RunAsync(userMessage, stateBefore, cancellationToken);
+        var mergedSlots = _mergeSlots.Run(stateBefore, extractedSlots, _timeProvider.GetUtcNow());
+        var validatedSlots = _validateSlots.Run(stateBefore, mergedSlots);
+        UpdateDialogueStateFromValidatedSlots(validatedSlots);
+        var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore);
+
+        var contextualUserMessage = validatedSlots.NormalizedMessage;
+        if (string.IsNullOrWhiteSpace(contextualUserMessage))
+            contextualUserMessage = ApplyPlaceContextIfHelpful(userMessage);
+
         if (!string.Equals(contextualUserMessage, userMessage, StringComparison.Ordinal))
         {
             LogEvent("PLACE_CONTEXT_INFERRED",
                 $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
         }
 
+        var hasLoadedProfileContext =
+            !string.IsNullOrWhiteSpace(ActiveProfileId) ||
+            memoryPackText.Contains("[PROFILE]", StringComparison.OrdinalIgnoreCase);
+
+        if (MemoryEnabled &&
+            !IsSelfMemoryKnowledgeRequest(contextualUserMessage) &&
+            IsPersonalizedUsingKnownSelfContextRequest(contextualUserMessage, hasLoadedProfileContext))
+        {
+            var personalizedFactsContext = await BuildSelfMemoryContextBlockAsync(
+                toolCallsMade, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(personalizedFactsContext))
+            {
+                memoryPackText = string.IsNullOrWhiteSpace(memoryPackText)
+                    ? personalizedFactsContext
+                    : $"{memoryPackText}\n{personalizedFactsContext}";
+            }
+        }
+
         try
         {
             // ── Utility bypass: weather, time, calc, conversion ────────
             // Intercepted BEFORE the search pipeline to avoid overhead.
-            var utilityResult = UtilityRouter.TryHandle(contextualUserMessage);
+            var utilityResult = BuildUtilityResultFromToolPlan(toolPlan, contextualUserMessage);
+            utilityResult ??= TryHandleUtilityFollowUpWithContext(contextualUserMessage)
+                ?? UtilityRouter.TryHandle(contextualUserMessage);
             if (utilityResult is null)
             {
                 utilityResult = await TryInferUtilityRouteWithLlmAsync(
@@ -327,38 +399,43 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (utilityResult is not null)
             {
                 LogEvent("UTILITY_BYPASS", $"category={utilityResult.Category}");
+                RememberUtilityContext(utilityResult);
 
                 // Weather uses a dedicated two-step MCP flow:
                 //   weather_geocode -> weather_forecast
                 // This keeps routing deterministic and avoids brittle string search.
                 if (string.Equals(utilityResult.Category, "weather", StringComparison.OrdinalIgnoreCase))
                 {
-                    return await ExecuteWeatherUtilityAsync(
-                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                    var weatherResponse = await ExecuteWeatherUtilityAsync(
+                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken, validatedSlots);
+                    return AttachContextSnapshot(
+                        AddLocationInferenceDisclosure(weatherResponse, validatedSlots));
                 }
 
                 if (string.Equals(utilityResult.Category, "time", StringComparison.OrdinalIgnoreCase))
                 {
-                    return await ExecuteTimeUtilityAsync(
-                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                    var timeResponse = await ExecuteTimeUtilityAsync(
+                        contextualUserMessage, utilityResult, toolCallsMade, roundTrips, cancellationToken, validatedSlots);
+                    return AttachContextSnapshot(
+                        AddLocationInferenceDisclosure(timeResponse, validatedSlots));
                 }
 
                 if (string.Equals(utilityResult.Category, "holiday", StringComparison.OrdinalIgnoreCase))
                 {
-                    return await ExecuteHolidayUtilityAsync(
-                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                    return AttachContextSnapshot(await ExecuteHolidayUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken));
                 }
 
                 if (string.Equals(utilityResult.Category, "feed", StringComparison.OrdinalIgnoreCase))
                 {
-                    return await ExecuteFeedUtilityAsync(
-                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                    return AttachContextSnapshot(await ExecuteFeedUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken));
                 }
 
                 if (string.Equals(utilityResult.Category, "status", StringComparison.OrdinalIgnoreCase))
                 {
-                    return await ExecuteStatusUtilityAsync(
-                        utilityResult, toolCallsMade, roundTrips, cancellationToken);
+                    return AttachContextSnapshot(await ExecuteStatusUtilityAsync(
+                        utilityResult, toolCallsMade, roundTrips, cancellationToken));
                 }
 
                 // If the utility wants an MCP tool call, do it
@@ -388,7 +465,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     var suppressUiArtifacts = ShouldSuppressUtilityUiArtifacts(utilityResult.Category);
                     _history.Add(ChatMessage.Assistant(text));
                     LogEvent("AGENT_RESPONSE", text);
-                    return new AgentResponse
+                    var inlineResponse = new AgentResponse
                     {
                         Text          = text,
                         Success       = true,
@@ -397,7 +474,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         SuppressSourceCardsUi = suppressUiArtifacts,
                         SuppressToolActivityUi = suppressUiArtifacts
                     };
+                    return AttachContextSnapshot(
+                        AddLocationInferenceDisclosure(inlineResponse, validatedSlots));
                 }
+            }
+
+            if (MemoryEnabled && IsSelfMemoryKnowledgeRequest(contextualUserMessage))
+            {
+                var memorySummary = await ExecuteSelfMemorySummaryAsync(
+                    toolCallsMade, roundTrips, cancellationToken);
+                _history.Add(ChatMessage.Assistant(memorySummary.Text));
+                LogEvent("AGENT_RESPONSE", memorySummary.Text);
+                return AttachContextSnapshot(memorySummary);
             }
 
             // ── Web lookup: delegate to SearchOrchestrator ─────────────
@@ -417,7 +505,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     _history.Add(ChatMessage.Assistant(searchResponse.Text));
 
                 LogEvent("AGENT_RESPONSE", searchResponse.Text);
-                return searchResponse;
+                return AttachContextSnapshot(
+                    AddLocationInferenceDisclosure(searchResponse, validatedSlots));
             }
 
             // ── Inject memory context ─────────────────────────────────
@@ -450,21 +539,21 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         "Response was all template garbage — " +
                         "falling back to web search.");
 
-                    return await FallbackToWebSearchAsync(
+                    return AttachContextSnapshot(await FallbackToWebSearchAsync(
                         contextualUserMessage, memoryPackText,
-                        toolCallsMade, roundTrips, cancellationToken);
+                        toolCallsMade, roundTrips, cancellationToken));
                 }
 
                 _history.Add(ChatMessage.Assistant(text));
                 LogEvent("AGENT_RESPONSE", text);
 
-                return new AgentResponse
+                return AttachContextSnapshot(new AgentResponse
                 {
                     Text = text,
                     Success = true,
                     ToolCallsMade = toolCallsMade,
                     LlmRoundTrips = roundTrips
-                };
+                });
             }
 
             // ── Policy-filtered tool loop ────────────────────────────
@@ -477,32 +566,32 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
-            return await RunToolLoopAsync(
-                tools, toolCallsMade, roundTrips, cancellationToken);
+            return AttachContextSnapshot(await RunToolLoopAsync(
+                tools, toolCallsMade, roundTrips, cancellationToken));
         }
         catch (OperationCanceledException)
         {
             LogEvent("AGENT_CANCELLED", "Processing was cancelled.");
-            return new AgentResponse
+            return AttachContextSnapshot(new AgentResponse
             {
                 Text = "Request was cancelled.",
                 Success = false,
                 Error = "Cancelled",
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
-            };
+            });
         }
         catch (Exception ex)
         {
             LogEvent("AGENT_ERROR", ex.Message);
-            return new AgentResponse
+            return AttachContextSnapshot(new AgentResponse
             {
                 Text          = $"Error: {ex.Message}",
                 Success       = false,
                 Error         = ex.Message,
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
-            };
+            });
         }
     }
 
@@ -792,7 +881,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ValidatedSlots? validatedSlots = null)
     {
         if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
             return AgentResponse.FromError("Weather utility is missing required geocode args.");
@@ -837,7 +927,69 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             };
         }
 
-        RememberPlaceContext(geo.Name, geo.CountryCode);
+        var activeState = _dialogueStore.Get();
+        var explicitLocationChange = validatedSlots?.ExplicitLocationChange ?? false;
+        var mismatchReason = "";
+        var geocodeMismatch = false;
+        if (!explicitLocationChange)
+        {
+            geocodeMismatch = ValidateSlots.IsStronglyDivergent(
+                activeState,
+                geo.CountryCode,
+                geo.RegionCode,
+                geo.Latitude,
+                geo.Longitude,
+                out mismatchReason);
+        }
+        var mismatchWarning = "";
+
+        if (geocodeMismatch)
+        {
+            if (_validateSlots.ShouldRequireConfirm())
+            {
+                var confirmText =
+                    $"I found **{geo.Name}**, but that conflicts with your current location context " +
+                    $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
+
+                _history.Add(ChatMessage.Assistant(confirmText));
+                _dialogueStore.Update(activeState with { GeocodeMismatch = true });
+                return new AgentResponse
+                {
+                    Text = confirmText,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = roundTrips
+                };
+            }
+
+            if (!activeState.ContextLocked &&
+                activeState.Latitude.HasValue &&
+                activeState.Longitude.HasValue &&
+                !string.IsNullOrWhiteSpace(activeState.LocationName))
+            {
+                mismatchWarning =
+                    $"I detected a location mismatch ({mismatchReason.Replace('_', ' ')}), " +
+                    $"so I kept your prior location context: **{activeState.LocationName}**.";
+
+                geo = (
+                    activeState.LocationName!,
+                    activeState.CountryCode ?? geo.CountryCode,
+                    activeState.RegionCode ?? geo.RegionCode,
+                    activeState.Latitude.Value,
+                    activeState.Longitude.Value
+                );
+            }
+        }
+
+        RememberPlaceContext(
+            geo.Name,
+            geo.CountryCode,
+            geo.RegionCode,
+            geo.Latitude,
+            geo.Longitude,
+            locationInferred: validatedSlots?.LocationInferred ?? false,
+            geocodeMismatch: geocodeMismatch,
+            explicitLocationChange: validatedSlots?.ExplicitLocationChange ?? false);
 
         var forecastArgs = JsonSerializer.Serialize(new
         {
@@ -883,6 +1035,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                            "Try asking again and I'll refresh it.";
         }
 
+        if (!string.IsNullOrWhiteSpace(mismatchWarning))
+            weatherBrief = $"{mismatchWarning}\n\n{weatherBrief}";
+
         _history.Add(ChatMessage.Assistant(weatherBrief));
         LogEvent("AGENT_RESPONSE", weatherBrief);
 
@@ -900,7 +1055,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ValidatedSlots? validatedSlots = null)
     {
         if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
             return AgentResponse.FromError("Time utility is missing required geocode args.");
@@ -943,7 +1099,69 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             };
         }
 
-        RememberPlaceContext(geo.Name, geo.CountryCode);
+        var activeState = _dialogueStore.Get();
+        var explicitLocationChange = validatedSlots?.ExplicitLocationChange ?? false;
+        var mismatchReason = "";
+        var geocodeMismatch = false;
+        if (!explicitLocationChange)
+        {
+            geocodeMismatch = ValidateSlots.IsStronglyDivergent(
+                activeState,
+                geo.CountryCode,
+                geo.RegionCode,
+                geo.Latitude,
+                geo.Longitude,
+                out mismatchReason);
+        }
+        var mismatchWarning = "";
+
+        if (geocodeMismatch)
+        {
+            if (_validateSlots.ShouldRequireConfirm())
+            {
+                var confirmText =
+                    $"I found **{geo.Name}**, but that conflicts with your current location context " +
+                    $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
+
+                _history.Add(ChatMessage.Assistant(confirmText));
+                _dialogueStore.Update(activeState with { GeocodeMismatch = true });
+                return new AgentResponse
+                {
+                    Text = confirmText,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = roundTrips
+                };
+            }
+
+            if (!activeState.ContextLocked &&
+                activeState.Latitude.HasValue &&
+                activeState.Longitude.HasValue &&
+                !string.IsNullOrWhiteSpace(activeState.LocationName))
+            {
+                mismatchWarning =
+                    $"I detected a location mismatch ({mismatchReason.Replace('_', ' ')}), " +
+                    $"so I kept your prior location context: **{activeState.LocationName}**.";
+
+                geo = (
+                    activeState.LocationName!,
+                    activeState.CountryCode ?? geo.CountryCode,
+                    activeState.RegionCode ?? geo.RegionCode,
+                    activeState.Latitude.Value,
+                    activeState.Longitude.Value
+                );
+            }
+        }
+
+        RememberPlaceContext(
+            geo.Name,
+            geo.CountryCode,
+            geo.RegionCode,
+            geo.Latitude,
+            geo.Longitude,
+            locationInferred: validatedSlots?.LocationInferred ?? false,
+            geocodeMismatch: geocodeMismatch,
+            explicitLocationChange: validatedSlots?.ExplicitLocationChange ?? false);
 
         var timezoneArgs = JsonSerializer.Serialize(new
         {
@@ -984,6 +1202,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         {
             timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
         }
+
+        if (!string.IsNullOrWhiteSpace(mismatchWarning))
+            timeBrief = $"{mismatchWarning}\n\n{timeBrief}";
 
         _history.Add(ChatMessage.Assistant(timeBrief));
         LogEvent("AGENT_RESPONSE", timeBrief);
@@ -1195,6 +1416,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         try
         {
             var result = await _mcp.CallToolAsync(primaryToolName, argsJson, cancellationToken);
+            if (IsUnknownToolError(result, primaryToolName))
+            {
+                try
+                {
+                    var altResult = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
+                    return (alternateToolName, altResult, true);
+                }
+                catch (Exception alternateError)
+                {
+                    var errorText = $"Error: {result}; fallback failed: {alternateError.Message}";
+                    return (primaryToolName, errorText, false);
+                }
+            }
+
             return (primaryToolName, result, true);
         }
         catch (Exception primaryError)
@@ -1214,7 +1449,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private static bool TryParseBestGeocodeCandidate(
         string geocodeJson,
-        out (string Name, string CountryCode, double Latitude, double Longitude) candidate)
+        out (string Name, string CountryCode, string RegionCode, double Latitude, double Longitude) candidate)
     {
         candidate = default;
         if (string.IsNullOrWhiteSpace(geocodeJson))
@@ -1261,8 +1496,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var name = r.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "") : "";
             var countryCode = r.TryGetProperty("countryCode", out var ccEl) ? (ccEl.GetString() ?? "") : "";
+            var regionCode =
+                r.TryGetProperty("regionCode", out var rcEl) ? (rcEl.GetString() ?? "") :
+                (r.TryGetProperty("region", out var regionEl) ? (regionEl.GetString() ?? "") : "");
 
-            candidate = (name, countryCode, lat, lon);
+            candidate = (name, countryCode, regionCode, lat, lon);
             return true;
         }
         catch
@@ -1415,15 +1653,224 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 var local = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, tzInfo);
                 var formatted = local.ToString("h:mm tt on dddd, MMM d");
-                return $"It's currently **{formatted}** in {location} ({timezone}).\n\nIf you want, I can check another city too.";
+                return $"It's currently **{formatted}** in {location} ({timezone}).\n\nNeed another city checked too?";
             }
 
-            return $"The timezone for {location} is **{timezone}**.\n\nIf you want, I can also estimate local time there.";
+            return $"The timezone for {location} is **{timezone}**.\n\nWant local time there as well?";
         }
         catch
         {
             return null;
         }
+    }
+
+    private void RememberUtilityContext(UtilityRouter.UtilityResult utilityResult)
+    {
+        if (utilityResult is null || string.IsNullOrWhiteSpace(utilityResult.ContextKey))
+            return;
+
+        _lastUtilityContextKey = utilityResult.ContextKey.Trim();
+        _lastUtilityContextAt = _timeProvider.GetUtcNow();
+
+        var state = _dialogueStore.Get();
+        _dialogueStore.Update(state with
+        {
+            Topic = utilityResult.ContextKey.Trim()
+        });
+    }
+
+    private bool TryGetActiveUtilityContext(out string contextKey)
+    {
+        contextKey = "";
+        if (string.IsNullOrWhiteSpace(_lastUtilityContextKey))
+            return false;
+
+        var now = _timeProvider.GetUtcNow();
+        if ((now - _lastUtilityContextAt) > UtilityContextTtl)
+            return false;
+
+        contextKey = _lastUtilityContextKey!;
+        return true;
+    }
+
+    private UtilityRouter.UtilityResult? TryHandleUtilityFollowUpWithContext(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        if (!TryGetActiveUtilityContext(out var contextKey))
+            return null;
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+        if (contextKey.Equals("moon_distance", StringComparison.OrdinalIgnoreCase) &&
+            TryResolveMoonFollowUpUnit(lower, out var requestedUnit))
+        {
+            return BuildMoonUnitFollowUpResult(requestedUnit);
+        }
+
+        if (contextKey.Equals("moon_distance", StringComparison.OrdinalIgnoreCase) &&
+            LooksLikePrecisionFollowUp(lower))
+        {
+            return BuildMoonPrecisionFollowUpResult(lower);
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikePrecisionFollowUp(string lowerMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lowerMessage))
+            return false;
+
+        return lowerMessage.Contains("more precise", StringComparison.Ordinal) ||
+               lowerMessage.Contains("precise figure", StringComparison.Ordinal) ||
+               lowerMessage.Contains("more exact", StringComparison.Ordinal) ||
+               lowerMessage.Contains("exact figure", StringComparison.Ordinal) ||
+               lowerMessage.Contains("exact value", StringComparison.Ordinal) ||
+               lowerMessage.Contains("higher precision", StringComparison.Ordinal) ||
+               lowerMessage.Contains("more accurate", StringComparison.Ordinal) ||
+               lowerMessage.Contains("to the decimal", StringComparison.Ordinal) ||
+               lowerMessage.Contains("more digits", StringComparison.Ordinal) ||
+               lowerMessage.Contains("significant digit", StringComparison.Ordinal) ||
+               lowerMessage.Contains("more detail", StringComparison.Ordinal) ||
+               lowerMessage.Equals("i need a more precise figure!", StringComparison.Ordinal) ||
+               lowerMessage.Equals("more precise", StringComparison.Ordinal) ||
+               lowerMessage.Equals("exactly", StringComparison.Ordinal);
+    }
+
+    private static bool TryResolveMoonFollowUpUnit(string lowerMessage, out string unit)
+    {
+        unit = "";
+        if (string.IsNullOrWhiteSpace(lowerMessage))
+            return false;
+
+        var referencesPreviousValue =
+            lowerMessage.Contains("that", StringComparison.Ordinal) ||
+            lowerMessage.Contains("it", StringComparison.Ordinal) ||
+            lowerMessage.Contains("distance", StringComparison.Ordinal) ||
+            lowerMessage.Contains("moon", StringComparison.Ordinal);
+
+        if (!referencesPreviousValue)
+            return false;
+
+        var tokens = lowerMessage
+            .Split(
+                [' ', '\t', '\r', '\n', '?', '!', ',', '.', ';', ':', '(', ')', '/', '\\', '-'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        static bool ContainsAnyToken(string[] source, params string[] candidates)
+        {
+            foreach (var token in source)
+            {
+                for (var i = 0; i < candidates.Length; i++)
+                {
+                    if (token.Equals(candidates[i], StringComparison.Ordinal))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (ContainsAnyToken(tokens, "feet", "foot", "ft"))
+        {
+            unit = "feet";
+            return true;
+        }
+
+        if (ContainsAnyToken(tokens, "mile", "miles", "mi"))
+        {
+            unit = "miles";
+            return true;
+        }
+
+        if (ContainsAnyToken(tokens, "kilometer", "kilometers", "km"))
+        {
+            unit = "kilometers";
+            return true;
+        }
+
+        if (ContainsAnyToken(tokens, "meter", "meters", "m"))
+        {
+            unit = "meters";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static UtilityRouter.UtilityResult BuildMoonPrecisionFollowUpResult(string lowerMessage)
+    {
+        const double averageKm = 384_400.0;
+        const double perigeeKm = 363_300.0;
+        const double apogeeKm = 405_500.0;
+        const double kmToMiles = 0.621371;
+
+        var averageMiles = averageKm * kmToMiles;
+        var perigeeMiles = perigeeKm * kmToMiles;
+        var apogeeMiles = apogeeKm * kmToMiles;
+
+        string answer;
+        if (lowerMessage.Contains("mile", StringComparison.Ordinal))
+        {
+            answer =
+                $"More precise numbers: average Earth-Moon distance is **{averageMiles:N1} miles**. " +
+                $"Because the orbit is elliptical, it ranges from about **{perigeeMiles:N0} miles** " +
+                $"(perigee) to **{apogeeMiles:N0} miles** (apogee).";
+        }
+        else if (lowerMessage.Contains("km", StringComparison.Ordinal) ||
+                 lowerMessage.Contains("kilometer", StringComparison.Ordinal))
+        {
+            answer =
+                $"More precise numbers: average Earth-Moon distance is **{averageKm:N1} km**. " +
+                $"It ranges from about **{perigeeKm:N0} km** (perigee) to **{apogeeKm:N0} km** (apogee).";
+        }
+        else
+        {
+            answer =
+                $"More precise numbers: average Earth-Moon distance is **{averageKm:N1} km** " +
+                $"(**{averageMiles:N1} miles**). The orbit varies between about **{perigeeKm:N0} km** " +
+                $"(**{perigeeMiles:N0} miles**) and **{apogeeKm:N0} km** (**{apogeeMiles:N0} miles**).";
+        }
+
+        return new UtilityRouter.UtilityResult
+        {
+            Category = "fact",
+            Answer = answer,
+            ContextKey = "moon_distance"
+        };
+    }
+
+    private static UtilityRouter.UtilityResult BuildMoonUnitFollowUpResult(string unit)
+    {
+        const double averageKm = 384_400.0;
+        const double kmToMiles = 0.621371;
+        const double milesToFeet = 5_280.0;
+
+        var averageMilesRounded = Math.Round(averageKm * kmToMiles);
+        var averageFeetFromMiles = averageMilesRounded * milesToFeet;
+        var averageMeters = averageKm * 1_000.0;
+
+        var normalizedUnit = unit.Trim().ToLowerInvariant();
+        var answer = normalizedUnit switch
+        {
+            "feet" =>
+                $"That is about **{averageFeetFromMiles:N0} feet** " +
+                $"(using **{averageMilesRounded:N0} miles * 5,280 ft/mile**, average Earth-Moon distance).",
+            "meters" =>
+                $"That is about **{averageMeters:N0} meters** (average Earth-Moon distance).",
+            "miles" =>
+                $"That is about **{averageMilesRounded:N0} miles** (average Earth-Moon distance).",
+            _ =>
+                $"That is about **{averageKm:N0} kilometers** (average Earth-Moon distance)."
+        };
+
+        return new UtilityRouter.UtilityResult
+        {
+            Category = "fact",
+            Answer = answer,
+            ContextKey = "moon_distance"
+        };
     }
 
     private static bool TryResolveTimeZoneInfo(string timezoneId, out TimeZoneInfo tzInfo)
@@ -1525,7 +1972,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     }
                 }
 
-                return $"{firstLine}\n\nIf you want, I can list the full holiday calendar for the year.";
+                return $"{firstLine}\n\nWant the full holiday calendar for the year?";
             }
 
             if (toolName.Equals(HolidaysNextToolName, StringComparison.OrdinalIgnoreCase))
@@ -1537,7 +1984,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     var first = holidays.EnumerateArray().First();
                     var name = first.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "the next holiday") : "the next holiday";
                     var date = first.TryGetProperty("date", out var dateEl) ? (dateEl.GetString() ?? "an upcoming date") : "an upcoming date";
-                    return $"The next public holiday in **{scope}** is **{name}** on **{date}**.\n\nIf you want, I can list the next few after that.";
+                    return $"The next public holiday in **{scope}** is **{name}** on **{date}**.\n\nWant the next few after that?";
                 }
 
                 return $"I couldn't find upcoming public holidays for **{scope}**.";
@@ -1565,7 +2012,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return $"I couldn't find public holidays for **{scope}** in **{year}**.";
 
             var preview = entries.Count > 0 ? string.Join(", ", entries) : "no preview available";
-            return $"I found **{count}** public holidays in **{scope}** for **{year}**. First entries: {preview}.\n\nIf you'd like, I can narrow it to a specific region.";
+            return $"I found **{count}** public holidays in **{scope}** for **{year}**. First entries: {preview}.\n\nWant this narrowed to a specific region?";
         }
         catch
         {
@@ -1614,14 +2061,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             if (count == 0)
             {
-                return $"I reached **{label}**, but there were no recent feed items to show.\n\nIf you want, I can retry or check a different feed URL.";
+                return $"I reached **{label}**, but there were no recent feed items to show.\n\nWant a retry or a different feed URL?";
             }
 
             var headlineList = items.Count > 0
                 ? string.Join("; ", items.Select((t, i) => $"{i + 1}) {t}"))
                 : "recent items were returned";
 
-            return $"I fetched **{count}** recent feed item(s) from **{label}**. Latest: {headlineList}\n\nIf you want, I can summarize any one of those in detail.";
+            return $"I fetched **{count}** recent feed item(s) from **{label}**. Latest: {headlineList}\n\nPick one and I'll summarize it.";
         }
         catch
         {
@@ -1666,11 +2113,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (reachable)
             {
                 var statusText = code.HasValue ? $"HTTP {code.Value}" : "a network response";
-                return $"**{hostLabel}** is reachable ({statusText} via {method} in {latency} ms).\n\nIf you want, I can re-check in a few seconds.";
+                return $"**{hostLabel}** is reachable ({statusText} via {method} in {latency} ms).\n\nNeed a quick re-check in a few seconds?";
             }
 
             var reason = string.IsNullOrWhiteSpace(error) ? "no response" : error;
-            return $"I couldn't reach **{hostLabel}** ({reason}).\n\nIf you want, I can retry or test a different URL variant.";
+            return $"I couldn't reach **{hostLabel}** ({reason}).\n\nWant a retry or a different URL variant?";
         }
         catch
         {
@@ -1694,7 +2141,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return string.IsNullOrWhiteSpace(location) ? null : location;
     }
 
-    private void RememberPlaceContext(string placeName, string countryCode)
+    private void RememberPlaceContext(
+        string placeName,
+        string countryCode,
+        string? regionCode = null,
+        double? latitude = null,
+        double? longitude = null,
+        bool locationInferred = false,
+        bool geocodeMismatch = false,
+        bool explicitLocationChange = true)
     {
         if (string.IsNullOrWhiteSpace(placeName))
             return;
@@ -1703,8 +2158,28 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var normalizedCountryCode = string.IsNullOrWhiteSpace(countryCode)
             ? ""
             : countryCode.Trim().ToUpperInvariant();
+        var normalizedRegionCode = string.IsNullOrWhiteSpace(regionCode)
+            ? null
+            : regionCode.Trim().ToUpperInvariant();
 
         var now = _timeProvider.GetUtcNow();
+
+        var current = _dialogueStore.Get();
+        if (!current.ContextLocked || explicitLocationChange)
+        {
+            _dialogueStore.Update(current with
+            {
+                Topic = string.IsNullOrWhiteSpace(current.Topic) ? "location" : current.Topic,
+                LocationName = normalizedName,
+                CountryCode = string.IsNullOrWhiteSpace(normalizedCountryCode) ? null : normalizedCountryCode,
+                RegionCode = normalizedRegionCode,
+                Latitude = latitude ?? current.Latitude,
+                Longitude = longitude ?? current.Longitude,
+                LocationInferred = locationInferred,
+                GeocodeMismatch = geocodeMismatch
+            });
+        }
+
         _lastPlaceContextName = normalizedName;
         _lastPlaceContextCountryCode = normalizedCountryCode;
         _lastPlaceContextAt = now;
@@ -1721,6 +2196,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private bool TryGetActivePlaceContext(out string placeName)
     {
         placeName = "";
+        var state = _dialogueStore.Get();
+        if (!string.IsNullOrWhiteSpace(state.LocationName))
+        {
+            placeName = state.LocationName!;
+            return true;
+        }
+
         if (string.IsNullOrWhiteSpace(_lastPlaceContextName))
             return false;
 
@@ -2664,14 +3146,30 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// <inheritdoc />
     public void ResetConversation()
     {
+        var preserveLock = _dialogueStore.Get().ContextLocked;
         _history.Clear();
         _history.Add(ChatMessage.System(_systemPrompt));
         _searchOrchestrator.Session.Clear();
+        _dialogueStore.Reset();
+        if (preserveLock)
+            _dialogueStore.Update(_dialogueStore.Get() with { ContextLocked = true });
         _lastPlaceContextName = null;
         _lastPlaceContextCountryCode = null;
         _lastPlaceContextAt = default;
+        _lastUtilityContextKey = null;
+        _lastUtilityContextAt = default;
         LogEvent("AGENT_RESET", "Conversation history and search session cleared.");
     }
+
+    /// <inheritdoc />
+    public void SeedDialogueState(DialogueState state)
+    {
+        _dialogueStore.Seed(state);
+    }
+
+    /// <inheritdoc />
+    public DialogueContextSnapshot GetContextSnapshot() =>
+        _dialogueStore.Get().ToSnapshot();
 
     /// <inheritdoc />
     public async Task<int> GetAvailableToolCountAsync(CancellationToken cancellationToken = default)
@@ -2687,6 +3185,594 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
+    private void UpdateDialogueStateFromValidatedSlots(ValidatedSlots slots)
+    {
+        var current = _dialogueStore.Get();
+
+        var locationName = current.LocationName;
+        var countryCode = current.CountryCode;
+        var regionCode = current.RegionCode;
+        if (!current.ContextLocked || slots.ExplicitLocationChange)
+        {
+            if (!string.IsNullOrWhiteSpace(slots.LocationText))
+                locationName = slots.LocationText;
+            if (!string.IsNullOrWhiteSpace(slots.CountryCode))
+                countryCode = slots.CountryCode;
+            if (!string.IsNullOrWhiteSpace(slots.RegionCode))
+                regionCode = slots.RegionCode;
+        }
+
+        _dialogueStore.Update(current with
+        {
+            Topic = string.IsNullOrWhiteSpace(slots.Topic) ? current.Topic : slots.Topic!,
+            LocationName = locationName,
+            CountryCode = countryCode,
+            RegionCode = regionCode,
+            TimeScope = string.IsNullOrWhiteSpace(slots.TimeScope) ? current.TimeScope : slots.TimeScope,
+            LocationInferred = slots.LocationInferred,
+            GeocodeMismatch = slots.GeocodeMismatch
+        });
+    }
+
+    private UtilityRouter.UtilityResult? BuildUtilityResultFromToolPlan(
+        ToolPlanDecision plan,
+        string normalizedMessage)
+    {
+        if (plan is null || string.Equals(plan.Category, "none", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var utility = UtilityRouter.TryHandle(normalizedMessage);
+        if (utility is null)
+        {
+            utility = new UtilityRouter.UtilityResult
+            {
+                Category = plan.Category,
+                Answer = plan.InlineAnswer ?? $"[{plan.Category}]"
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(plan.InlineAnswer))
+            utility = utility with { Answer = plan.InlineAnswer };
+
+        if (plan.ToolCalls.Count > 0)
+        {
+            var first = plan.ToolCalls[0];
+            utility = utility with
+            {
+                McpToolName = first.ToolName,
+                McpToolArgs = first.ArgumentsJson
+            };
+        }
+
+        return utility;
+    }
+
+    private async Task<AgentResponse> ExecuteSelfMemorySummaryAsync(
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var (facts, error) = await LoadSelfScopedFactsAsync(toolCallsMade, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            return new AgentResponse
+            {
+                Text = $"I couldn't read your stored facts right now ({error}).",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var text = BuildSelfMemorySummaryText(facts);
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<string> BuildSelfMemoryContextBlockAsync(
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        var (facts, error) = await LoadSelfScopedFactsAsync(toolCallsMade, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            LogEvent("SELF_MEMORY_CONTEXT_SKIP", error);
+            return "";
+        }
+
+        return BuildSelfMemoryContextBlock(facts);
+    }
+
+    private async Task<(IReadOnlyList<SelfMemoryFact> Facts, string? Error)> LoadSelfScopedFactsAsync(
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        var argsJson = JsonSerializer.Serialize(new
+        {
+            skip = 0,
+            limit = 50
+        });
+
+        var listCall = await CallToolWithAliasAsync(
+            MemoryListFactsToolName, MemoryListFactsToolNameAlt, argsJson, cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = listCall.ToolName,
+            Arguments = argsJson,
+            Result = listCall.Result,
+            Success = listCall.Success
+        });
+
+        if (!listCall.Success)
+            return ([], "memory list facts unavailable");
+
+        try
+        {
+            using var doc = JsonDocument.Parse(listCall.Result);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var errEl) &&
+                errEl.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(errEl.GetString()))
+            {
+                return ([], errEl.GetString());
+            }
+
+            var facts = ExtractSelfScopedFacts(root, ActiveProfileId)
+                .OrderByDescending(f => f.UpdatedAtUtc)
+                .Take(12)
+                .ToList();
+            return (facts, null);
+        }
+        catch
+        {
+            return ([], "could not parse memory facts");
+        }
+    }
+
+    private sealed record SelfMemoryFact(
+        string Subject,
+        string Predicate,
+        string Object,
+        string? ProfileId,
+        DateTimeOffset UpdatedAtUtc);
+
+    private static IReadOnlyList<SelfMemoryFact> ExtractSelfScopedFacts(
+        JsonElement root,
+        string? activeProfileId)
+    {
+        var output = new List<SelfMemoryFact>();
+        if (!root.TryGetProperty("facts", out var factsEl) ||
+            factsEl.ValueKind != JsonValueKind.Array)
+        {
+            return output;
+        }
+
+        var hasActiveProfile = !string.IsNullOrWhiteSpace(activeProfileId);
+        foreach (var item in factsEl.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var subject = GetString(item, "subject");
+            var predicate = GetString(item, "predicate");
+            var obj = GetString(item, "object");
+            var profileId = GetString(item, "profile_id");
+
+            if (string.IsNullOrWhiteSpace(predicate) || string.IsNullOrWhiteSpace(obj))
+                continue;
+
+            var include = hasActiveProfile
+                ? string.Equals(profileId, activeProfileId, StringComparison.OrdinalIgnoreCase) ||
+                  (string.IsNullOrWhiteSpace(profileId) && IsSelfSubject(subject))
+                : IsSelfSubject(subject);
+
+            if (!include)
+                continue;
+
+            var updatedAtUtc = DateTimeOffset.MinValue;
+            var updatedRaw = GetString(item, "updated_at");
+            if (!string.IsNullOrWhiteSpace(updatedRaw) &&
+                DateTimeOffset.TryParse(updatedRaw, out var parsedUpdated))
+            {
+                updatedAtUtc = parsedUpdated;
+            }
+
+            output.Add(new SelfMemoryFact(
+                subject ?? "user",
+                predicate!,
+                obj!,
+                profileId,
+                updatedAtUtc));
+        }
+
+        return output;
+    }
+
+    private static string BuildSelfMemorySummaryText(IReadOnlyList<SelfMemoryFact> facts)
+    {
+        if (facts.Count == 0)
+        {
+            return "I pulled your profile, but I don't yet have many detailed saved facts about you. " +
+                   "If you want, tell me your preferences, projects, goals, or routines and I'll keep them handy.";
+        }
+
+        var rendered = facts
+            .Select(RenderSelfMemoryFact)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+
+        if (rendered.Count == 0)
+        {
+            return "I pulled your profile, but there aren't any clear fact entries to summarize yet.";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Here's what I currently know about you:");
+        foreach (var line in rendered)
+            sb.AppendLine($"- {line}");
+        sb.AppendLine();
+        sb.Append("If you'd like, I can update or forget any of these.");
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string BuildSelfMemoryContextBlock(IReadOnlyList<SelfMemoryFact> facts)
+    {
+        if (facts.Count == 0)
+            return "";
+
+        var rendered = facts
+            .Select(RenderSelfMemoryFact)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+
+        if (rendered.Count == 0)
+            return "";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("[USER_MEMORY_FACTS]");
+        foreach (var line in rendered)
+            sb.AppendLine($"- {line}");
+        sb.AppendLine("[/USER_MEMORY_FACTS]");
+        sb.AppendLine("Use these known user facts when the user asks for personalized advice.");
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string RenderSelfMemoryFact(SelfMemoryFact fact)
+    {
+        var subject = (fact.Subject ?? "user").Trim();
+        var predicate = (fact.Predicate ?? "").Trim();
+        var obj = (fact.Object ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(predicate) || string.IsNullOrWhiteSpace(obj))
+            return "";
+
+        var pred = predicate.Replace('_', ' ').Trim();
+        var predLower = pred.ToLowerInvariant();
+
+        if (IsSelfSubject(subject))
+        {
+            return predLower switch
+            {
+                "name" or "name is" => $"Your name is {obj}.",
+                "likes" => $"You like {obj}.",
+                "prefers" => $"You prefer {obj}.",
+                "works on" => $"You work on {obj}.",
+                "is" => $"You are {obj}.",
+                _ => $"You {predLower} {obj}."
+            };
+        }
+
+        return $"{subject} {predLower} {obj}.";
+    }
+
+    private static bool IsSelfMemoryKnowledgeRequest(string message)
+    {
+        var lower = (message ?? "").ToLowerInvariant().Trim();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasAboutMe = lower.Contains("about me", StringComparison.Ordinal) ||
+                         lower.Contains("know me", StringComparison.Ordinal) ||
+                         lower.Contains("remember me", StringComparison.Ordinal);
+        if (!hasAboutMe)
+            return false;
+
+        return lower.Contains("what do you know", StringComparison.Ordinal) ||
+               lower.Contains("what kind of things", StringComparison.Ordinal) ||
+               lower.Contains("what do you remember", StringComparison.Ordinal) ||
+               lower.Contains("what have you learned", StringComparison.Ordinal) ||
+               lower.Contains("what information", StringComparison.Ordinal) ||
+               lower.Contains("what info", StringComparison.Ordinal);
+    }
+
+    private static bool IsPersonalizedUsingKnownSelfContextRequest(
+        string message,
+        bool hasLoadedProfileContext)
+    {
+        var lower = (message ?? "").ToLowerInvariant().Trim();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasAdviceCue =
+            lower.Contains("recommend", StringComparison.Ordinal) ||
+            lower.Contains("suggest", StringComparison.Ordinal) ||
+            lower.Contains("plan", StringComparison.Ordinal) ||
+            lower.Contains("best", StringComparison.Ordinal) ||
+            lower.Contains("perfect", StringComparison.Ordinal) ||
+            lower.Contains("help me choose", StringComparison.Ordinal) ||
+            lower.Contains("what should i", StringComparison.Ordinal) ||
+            lower.Contains("should i", StringComparison.Ordinal) ||
+            lower.Contains("tailor", StringComparison.Ordinal) ||
+            lower.Contains("personalized", StringComparison.Ordinal);
+
+        if (!hasAdviceCue)
+            return false;
+
+        var referencesKnownSelf =
+            lower.Contains("what you know about me", StringComparison.Ordinal) ||
+            lower.Contains("based on what you know about me", StringComparison.Ordinal) ||
+            lower.Contains("given what you know about me", StringComparison.Ordinal) ||
+            lower.Contains("from what you know about me", StringComparison.Ordinal) ||
+            lower.Contains("considering what you know about me", StringComparison.Ordinal);
+
+        if (referencesKnownSelf)
+            return true;
+
+        if (!hasLoadedProfileContext)
+            return false;
+
+        var hasPersonalDomainCue =
+            lower.Contains("diet", StringComparison.Ordinal) ||
+            lower.Contains("meal", StringComparison.Ordinal) ||
+            lower.Contains("nutrition", StringComparison.Ordinal) ||
+            lower.Contains("food", StringComparison.Ordinal) ||
+            lower.Contains("eat", StringComparison.Ordinal) ||
+            lower.Contains("recipe", StringComparison.Ordinal) ||
+            lower.Contains("workout", StringComparison.Ordinal) ||
+            lower.Contains("exercise", StringComparison.Ordinal) ||
+            lower.Contains("training", StringComparison.Ordinal) ||
+            lower.Contains("routine", StringComparison.Ordinal) ||
+            lower.Contains("habit", StringComparison.Ordinal) ||
+            lower.Contains("sleep", StringComparison.Ordinal) ||
+            lower.Contains("focus", StringComparison.Ordinal) ||
+            lower.Contains("productivity", StringComparison.Ordinal);
+
+        if (!hasPersonalDomainCue)
+            return false;
+
+        return lower.Contains("for me", StringComparison.Ordinal) ||
+               lower.Contains(" me ", StringComparison.Ordinal) ||
+               lower.StartsWith("me ", StringComparison.Ordinal) ||
+               lower.EndsWith(" me", StringComparison.Ordinal) ||
+               lower.StartsWith("i ", StringComparison.Ordinal) ||
+               lower.Contains(" i ", StringComparison.Ordinal) ||
+               lower.StartsWith("i'm ", StringComparison.Ordinal) ||
+               lower.StartsWith("i'd ", StringComparison.Ordinal) ||
+               lower.StartsWith("my ", StringComparison.Ordinal) ||
+               lower.Contains(" my ", StringComparison.Ordinal);
+    }
+
+    private static bool IsSelfSubject(string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return true;
+
+        var token = subject.Trim().ToLowerInvariant();
+        return token is "user" or "me" or "i" or "myself";
+    }
+
+    private static string? GetString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var node))
+            return null;
+        if (node.ValueKind == JsonValueKind.Null)
+            return null;
+        if (node.ValueKind != JsonValueKind.String)
+            return null;
+        return node.GetString();
+    }
+
+    private AgentResponse AddLocationInferenceDisclosure(
+        AgentResponse response,
+        ValidatedSlots? validatedSlots)
+    {
+        if (validatedSlots is null ||
+            !validatedSlots.LocationInferred ||
+            string.IsNullOrWhiteSpace(validatedSlots.LocationText))
+        {
+            return response;
+        }
+
+        var note = $"Using your previous location context (**{validatedSlots.LocationText}**).";
+        if (response.Text.Contains(note, StringComparison.OrdinalIgnoreCase))
+            return response;
+
+        return response with
+        {
+            Text = $"{note}\n\n{response.Text}"
+        };
+    }
+
+    private AgentResponse AttachContextSnapshot(AgentResponse response)
+    {
+        var sanitizedText = SanitizeAssistantResponseText(
+            response.Text, response.ToolCallsMade);
+        if (!string.Equals(sanitizedText, response.Text, StringComparison.Ordinal))
+        {
+            LogEvent("RESPONSE_SANITIZED",
+                "Removed leaked markers or unsupported capability claims.");
+            response = response with { Text = sanitizedText };
+        }
+
+        var current = _dialogueStore.Get();
+        var summaryText = BuildRollingSummary(response.Text);
+        _dialogueStore.Update(current with { RollingSummary = summaryText });
+        return response with { ContextSnapshot = _dialogueStore.Get().ToSnapshot() };
+    }
+
+    private static string BuildRollingSummary(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var compact = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (compact.Length > 180)
+            compact = compact[..180].TrimEnd() + "...";
+        return compact;
+    }
+
+    private static string SanitizeAssistantResponseText(
+        string text,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text ?? "";
+
+        var hasEmailToolEvidence = toolCallsMade.Any(
+            t => LooksLikeEmailToolName(t.ToolName));
+        var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var filtered = new List<string>(lines.Length);
+        var removedUnsupportedDispatch = false;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (IsInternalMarkerLine(trimmed))
+                continue;
+
+            if (!hasEmailToolEvidence &&
+                LooksLikeUnsupportedEmailDispatchLine(trimmed))
+            {
+                removedUnsupportedDispatch = true;
+                continue;
+            }
+
+            if (!hasEmailToolEvidence &&
+                removedUnsupportedDispatch &&
+                LooksLikeFollowUpDispatchPromptLine(trimmed))
+            {
+                continue;
+            }
+
+            filtered.Add(line);
+        }
+
+        if (filtered.Count == 0)
+            return text.Trim();
+
+        var compact = new List<string>(filtered.Count);
+        var previousBlank = false;
+
+        foreach (var line in filtered)
+        {
+            var isBlank = string.IsNullOrWhiteSpace(line);
+            if (isBlank && previousBlank)
+                continue;
+
+            compact.Add(line);
+            previousBlank = isBlank;
+        }
+
+        return string.Join('\n', compact).Trim();
+    }
+
+    private static bool IsInternalMarkerLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        if (!line.StartsWith("[", StringComparison.Ordinal) ||
+            !line.EndsWith("]", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var marker = line[1..^1].Trim();
+        if (marker.StartsWith("/", StringComparison.Ordinal))
+            marker = marker[1..].Trim();
+
+        if (string.IsNullOrWhiteSpace(marker))
+            return false;
+
+        if (marker.Contains("TOOL", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("INSTRUCTION", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("REFERENCE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("ASSISTANT RESPONSE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("PROFILE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("MEMORY", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var markerChars = marker.Replace("/", "", StringComparison.Ordinal).Trim();
+        if (markerChars.Length == 0)
+            return false;
+
+        return markerChars.All(c =>
+            char.IsUpper(c) ||
+            char.IsDigit(c) ||
+            c == '_' ||
+            c == '-' ||
+            c == ' ');
+    }
+
+    private static bool LooksLikeUnsupportedEmailDispatchLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var lower = line.ToLowerInvariant();
+        if (!lower.Contains("email", StringComparison.Ordinal) &&
+            !lower.Contains("e-mail", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return lower.Contains("i can", StringComparison.Ordinal) ||
+               lower.Contains("i'll", StringComparison.Ordinal) ||
+               lower.Contains("i will", StringComparison.Ordinal) ||
+               lower.Contains("just say", StringComparison.Ordinal) ||
+               lower.Contains("send", StringComparison.Ordinal) ||
+               lower.Contains("mail", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeFollowUpDispatchPromptLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var lower = line.ToLowerInvariant();
+        return lower.StartsWith("want me to send", StringComparison.Ordinal) ||
+               lower.Contains("say \"send", StringComparison.Ordinal) ||
+               lower.Contains("say 'send", StringComparison.Ordinal) ||
+               (lower.Contains("send it", StringComparison.Ordinal) &&
+                (lower.Contains("over", StringComparison.Ordinal) ||
+                 lower.Contains("to you", StringComparison.Ordinal)));
+    }
+
+    private static bool LooksLikeEmailToolName(string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return false;
+
+        var lower = toolName.ToLowerInvariant();
+        return lower.Contains("email", StringComparison.Ordinal) ||
+               lower.Contains("mail_", StringComparison.Ordinal) ||
+               lower.Contains("_mail", StringComparison.Ordinal) ||
+               lower.Contains("smtp", StringComparison.Ordinal);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────
@@ -2700,9 +3786,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var personalityLine = utilityResult.Category.ToLowerInvariant() switch
         {
             "calculator" =>
-                "Need another quick one? I can chain the next math step too.",
+                "Need another quick one? Toss over the next math step.",
+            "conversion" =>
+                "Need another unit converted?",
             "fact" =>
-                "If you want, I can compare that against another benchmark.",
+                "Want a quick benchmark comparison next?",
             _ => ""
         };
 
@@ -2997,7 +4085,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// <c>mode = "greet"</c> to keep retrieval shallow (profile + 1-2
     /// nuggets, no deep fact/event/chunk digging).
     /// </summary>
-    private async Task<(string PackText, bool OnboardingNeeded)> RetrieveMemoryContextAsync(
+    private async Task<(string PackText, bool OnboardingNeeded, string? Error)> RetrieveMemoryContextAsync(
         string userMessage, CancellationToken cancellationToken)
     {
         try
@@ -3009,13 +4097,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 LogEvent("COLD_GREET_DETECTED",
                     "First user message is a greeting — using shallow retrieval.");
 
-            // Include the active profile ID so the MCP server knows
-            // who's talking — env vars are static after process start.
-            var profileArg = ActiveProfileId ?? "";
-            var args = isColdGreet
-                ? JsonSerializer.Serialize(new { query = userMessage, mode = "greet", activeProfileId = profileArg })
-                : JsonSerializer.Serialize(new { query = userMessage, activeProfileId = profileArg });
-            string result;
+            // Include activeProfileId only when explicitly selected.
+            // Passing an empty string means "no profile selected", which
+            // suppresses legacy fallback profile loading.
+            var argsObj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["query"] = userMessage
+            };
+            if (isColdGreet)
+                argsObj["mode"] = "greet";
+            if (!string.IsNullOrWhiteSpace(ActiveProfileId))
+                argsObj["activeProfileId"] = ActiveProfileId;
+
+            var args = JsonSerializer.Serialize(argsObj);
+            string? result = null;
 
             try
             {
@@ -3024,7 +4119,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }
             catch
             {
-                // Fallback: some MCP stacks may register snake_case names
+                // We'll retry via canonical snake_case below.
+            }
+
+            // Some MCP client wrappers return unknown-tool failures as a
+            // plain string payload instead of throwing. Detect and retry.
+            if (string.IsNullOrWhiteSpace(result) || IsUnknownToolError(result, "MemoryRetrieve"))
+            {
                 try
                 {
                     result = await _mcp.CallToolAsync(
@@ -3032,12 +4133,24 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }
                 catch
                 {
-                    return ("", false);
+                    return ("", false, "Unknown tool alias for memory retrieval.");
                 }
             }
 
+            if (string.IsNullOrWhiteSpace(result))
+                return ("", false, "Empty response from memory retrieval tool.");
+
             using var doc = JsonDocument.Parse(result);
             var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var errEl) &&
+                errEl.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(errEl.GetString()))
+            {
+                var error = errEl.GetString()!;
+                LogEvent("MEMORY_RETRIEVE_ERROR", error);
+                return ("", false, error);
+            }
 
             // Onboarding flag: true when no profile exists at all
             var onboarding = root.TryGetProperty("onboardingNeeded", out var ob)
@@ -3063,16 +4176,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         $"{chunks} chunks, {nuggets} nuggets" +
                         $"{(hasProf ? " (profile loaded)" : "")} for this reply.");
 
-                    return (packText, onboarding);
+                    return (packText, onboarding, null);
                 }
             }
 
-            return ("", onboarding);
+            return ("", onboarding, null);
         }
         catch
         {
             // Memory retrieval is best-effort — never block the main flow
-            return ("", false);
+            return ("", false, "Memory retrieval failed before parse.");
         }
     }
 
@@ -3122,6 +4235,25 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             copy.Insert(0, ChatMessage.System(modeSuffix));
 
         return copy;
+    }
+
+    private static bool IsUnknownToolError(string payload, string requestedTool)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        if (!payload.Contains("Unknown tool", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(requestedTool))
+            return true;
+
+        if (payload.Contains(requestedTool, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var pascalAlias = ToPascalCaseToolAlias(requestedTool);
+        return !string.IsNullOrWhiteSpace(pascalAlias) &&
+               payload.Contains(pascalAlias, StringComparison.OrdinalIgnoreCase);
     }
 
     // ─────────────────────────────────────────────────────────────────

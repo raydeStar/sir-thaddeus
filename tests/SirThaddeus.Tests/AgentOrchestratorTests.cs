@@ -1,4 +1,5 @@
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using Microsoft.Extensions.Time.Testing;
@@ -728,6 +729,424 @@ public class MemoryRetrievalAuditTests
         // No MEMORY_RETRIEVED event when pack has no content
         var memoryEvents = audit.GetByAction("MEMORY_RETRIEVED");
         Assert.Empty(memoryEvents);
+    }
+
+    [Fact]
+    public async Task MemoryQuestion_DoesNotRouteToWeather_WhenStateContainsNoneSentinel()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"name","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I know you as Mark.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+        agent.SeedDialogueState(new DialogueState
+        {
+            Topic = "weather",
+            LocationName = "none",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var result = await agent.ProcessAsync("What do you know about me, thadds?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(result.ToolCallsMade,
+            t => t.ToolName.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.ToolCallsMade,
+            t => t.ToolName.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("Using your previous location context",
+            result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SelfMemoryQuestion_ReturnsStoredFactsSummary()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "This should not be used for the final answer.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        const string listFactsJson = """
+            {
+                "facts": [
+                    {"fact_id":"f1","profile_id":"prof-sample","subject":"user","predicate":"likes","object":"mountain biking","confidence":0.9,"updated_at":"2026-02-10T23:00:00Z"},
+                    {"fact_id":"f2","profile_id":"prof-sample","subject":"user","predicate":"works_on","object":"local AI tooling","confidence":0.9,"updated_at":"2026-02-10T22:55:00Z"},
+                    {"fact_id":"f3","profile_id":"prof-other","subject":"user","predicate":"likes","object":"skiing","confidence":0.9,"updated_at":"2026-02-10T22:50:00Z"}
+                ],
+                "total": 3,
+                "skip": 0,
+                "limit": 50,
+                "has_more": false
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "memory_list_facts" => listFactsJson,
+            "MemoryListFacts" => listFactsJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ActiveProfileId = "prof-sample"
+        };
+
+        var result = await agent.ProcessAsync("what kind of things do you know about me?");
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Contains(result.ToolCallsMade,
+            t => t.ToolName.Equals("memory_list_facts", StringComparison.OrdinalIgnoreCase) ||
+                 t.ToolName.Equals("MemoryListFacts", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("mountain biking", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("local AI tooling", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("skiing", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PersonalizedAboutMeRequest_LoadsFactsBeforeLlmAnswer()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            var hasUserFacts = sys.Contains("[USER_MEMORY_FACTS]", StringComparison.OrdinalIgnoreCase) &&
+                               sys.Contains("mountain biking", StringComparison.OrdinalIgnoreCase);
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = hasUserFacts
+                    ? "Given what I know about you, I'd recommend a high-protein bowl that fits your active lifestyle."
+                    : "I'd recommend a generic meal.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        const string listFactsJson = """
+            {
+                "facts": [
+                    {"fact_id":"f1","profile_id":"prof-sample","subject":"user","predicate":"likes","object":"mountain biking","confidence":0.9,"updated_at":"2026-02-10T23:00:00Z"},
+                    {"fact_id":"f2","profile_id":"prof-sample","subject":"user","predicate":"prefers","object":"high-protein meals","confidence":0.9,"updated_at":"2026-02-10T22:55:00Z"}
+                ],
+                "total": 2,
+                "skip": 0,
+                "limit": 50,
+                "has_more": false
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "memory_list_facts" => listFactsJson,
+            "MemoryListFacts" => listFactsJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ActiveProfileId = "prof-sample"
+        };
+
+        var result = await agent.ProcessAsync(
+            "based on what you know about me, recommend me the perfect meal for me");
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.LlmRoundTrips);
+        Assert.Contains(result.ToolCallsMade,
+            t => t.ToolName.Equals("memory_list_facts", StringComparison.OrdinalIgnoreCase) ||
+                 t.ToolName.Equals("MemoryListFacts", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Given what I know about you", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Here's what I currently know about you", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PersonalizedRecommendationWithProfile_LoadsFactsBeforeLlmAnswer()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            var hasUserFacts = sys.Contains("[USER_MEMORY_FACTS]", StringComparison.OrdinalIgnoreCase) &&
+                               sys.Contains("high-protein meals", StringComparison.OrdinalIgnoreCase);
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = hasUserFacts
+                    ? "Given your preferences, a balanced high-protein Mediterranean-style diet is a good fit."
+                    : "A generic balanced diet should work.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        const string listFactsJson = """
+            {
+                "facts": [
+                    {"fact_id":"f1","profile_id":"prof-sample","subject":"user","predicate":"prefers","object":"high-protein meals","confidence":0.9,"updated_at":"2026-02-10T23:00:00Z"},
+                    {"fact_id":"f2","profile_id":"prof-sample","subject":"user","predicate":"likes","object":"simple weekly planning","confidence":0.9,"updated_at":"2026-02-10T22:55:00Z"}
+                ],
+                "total": 2,
+                "skip": 0,
+                "limit": 50,
+                "has_more": false
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "memory_list_facts" => listFactsJson,
+            "MemoryListFacts" => listFactsJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ActiveProfileId = "prof-sample"
+        };
+
+        var result = await agent.ProcessAsync("recommend me a good diet");
+
+        Assert.True(result.Success);
+        Assert.Contains(result.ToolCallsMade,
+            t => t.ToolName.Equals("memory_list_facts", StringComparison.OrdinalIgnoreCase) ||
+                 t.ToolName.Equals("MemoryListFacts", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Given your preferences", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("A generic balanced diet should work", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ChatResponse_SanitizesInternalMarkers_AndUnsupportedEmailClaims()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = """
+                          Here's a meal plan you can start with:
+                          - Breakfast: eggs and fruit
+                          - Lunch: grilled chicken salad
+
+                          I can email you the nutritional stats and timings. Just say "Send it!" and I've got you covered.
+                          [/TOOL_OUTPUT]
+                          Want me to send it over?
+                          """,
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("can you recommend me a good meal plan?");
+
+        Assert.True(result.Success);
+        Assert.Contains("Here's a meal plan", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[/TOOL_OUTPUT]", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("email", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("send it over", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 }
 

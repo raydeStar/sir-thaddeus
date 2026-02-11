@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -29,6 +30,7 @@ public static class UtilityRouter
         public required string Answer   { get; init; }  // Inline answer text
         public string? McpToolName      { get; init; }  // If non-null, route to this MCP tool instead
         public string? McpToolArgs      { get; init; }  // JSON args for the MCP tool
+        public string? ContextKey       { get; init; }  // Optional follow-up context marker
     }
 
     // ── Weather patterns ─────────────────────────────────────────────
@@ -110,7 +112,7 @@ public static class UtilityRouter
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex MoonDistancePattern = new(
-        @"(?:how\s+far\s+(?:is|to)\s+(?:the\s+)?moon|distance\s+(?:to|from)\s+(?:the\s+)?moon|how\s+many\s+\w+\s+(?:is|are)\s+(?:it\s+)?(?:to\s+)?(?:the\s+)?moon|earth\s+to\s+moon)",
+        @"(?:how\s+far\s+(?:is|to)\s+(?:the\s+)?moon|distance\s+(?:to|from)\s+(?:the\s+)?moon|how\s+many\s+\w+\s+(?:is|are)\s+(?:it\s+)?(?:from\s+(?:the\s+)?earth\s+)?(?:to\s+)?(?:the\s+)?moon|earth\s+to\s+moon)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SpeedOfLightPattern = new(
@@ -495,7 +497,8 @@ public static class UtilityRouter
             return new UtilityResult
             {
                 Category = "fact",
-                Answer = $"The average Earth-Moon distance is about **{formatted}**."
+                Answer = $"The average Earth-Moon distance is about **{formatted}**.",
+                ContextKey = "moon_distance"
             };
         }
 
@@ -563,7 +566,7 @@ public static class UtilityRouter
                 return new UtilityResult
                 {
                     Category = "conversion",
-                    Answer   = $"{value} {fromUnit} = **{converted:N4} {toUnit}**"
+                    Answer   = $"{FormatQuantity(value, fromUnit)} equals **{FormatQuantity(converted.Value, toUnit)}**."
                 };
             }
         }
@@ -581,12 +584,45 @@ public static class UtilityRouter
                 return new UtilityResult
                 {
                     Category = "conversion",
-                    Answer   = $"There are **{converted:N4} {smallUnit}** in 1 {bigUnit}."
+                    Answer   = $"{FormatQuantity(1.0, bigUnit)} equals **{FormatQuantity(converted.Value, smallUnit)}**."
                 };
             }
         }
 
         return null;
+    }
+
+    private static string FormatQuantity(double value, string normalizedUnit)
+    {
+        return $"{FormatConversionNumber(value)} {ToDisplayUnit(normalizedUnit, value)}";
+    }
+
+    private static string FormatConversionNumber(double value)
+    {
+        var rounded = Math.Round(value);
+        if (Math.Abs(value - rounded) < 0.0000001)
+            return rounded.ToString("N0", CultureInfo.InvariantCulture);
+
+        return value.ToString("N4", CultureInfo.InvariantCulture)
+            .TrimEnd('0')
+            .TrimEnd('.');
+    }
+
+    private static string ToDisplayUnit(string normalizedUnit, double value)
+    {
+        var singular = Math.Abs(value - 1.0) < 0.0000001;
+        return normalizedUnit switch
+        {
+            "miles"   => singular ? "mile"   : "miles",
+            "feet"    => singular ? "foot"   : "feet",
+            "meters"  => singular ? "meter"  : "meters",
+            "inches"  => singular ? "inch"   : "inches",
+            "lbs"     => singular ? "lb"     : "lbs",
+            "grams"   => singular ? "gram"   : "grams",
+            "liters"  => singular ? "liter"  : "liters",
+            "gallons" => singular ? "gallon" : "gallons",
+            _ => normalizedUnit
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -600,6 +636,7 @@ public static class UtilityRouter
         [("feet", "meters")]  = 0.3048,      [("meters", "feet")]  = 3.28084,
         [("inches", "cm")]    = 2.54,        [("cm", "inches")]    = 0.393701,
         [("miles", "meters")] = 1609.34,     [("meters", "miles")] = 0.000621371,
+        [("miles", "feet")]   = 5280.0,      [("feet", "miles")]   = 1.0 / 5280.0,
         [("feet", "inches")]  = 12.0,        [("inches", "feet")]  = 1.0 / 12.0,
         [("km", "meters")]    = 1000.0,      [("meters", "km")]    = 0.001,
 
