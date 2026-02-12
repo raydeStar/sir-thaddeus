@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Globalization;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 
@@ -47,6 +49,26 @@ public sealed class SearchOrchestrator
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 768;
+
+    private static readonly Regex PercentDirectionRegex = new(
+        @"\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b[^%\n]{0,40}?(?<pct>[+-]?\d+(?:\.\d+)?)\s*%",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex DirectionAfterPercentRegex = new(
+        @"(?<pct>[+-]?\d+(?:\.\d+)?)\s*%[^.\n]{0,30}\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SignedPercentRegex = new(
+        @"(?<pct>[+-]\d+(?:\.\d+)?)\s*%",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LevelRegex = new(
+        @"\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?:\.\d+)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LeadingMarketLineWithLevelRegex = new(
+        @"^(?<prefix>(?:the\s+)?(?:dow jones|nasdaq|s&p 500|stock market)\s+is\s+(?:up|down)\s+\d+(?:\.\d+)?%\s+today)\s*,\s*at\s+\$?[0-9][0-9,]*(?:\.\d+)?\.?$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
@@ -124,13 +146,15 @@ public sealed class SearchOrchestrator
 
         try
         {
-            return mode switch
+            var response = mode switch
             {
                 SearchMode.FollowUp      => await ExecuteFollowUpAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.NewsAggregate  => await ExecuteNewsAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.WebFactFind    => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
             };
+
+            return AddMarketLeadLineIfHelpful(userMessage, response, toolCallsMade);
         }
         catch (OperationCanceledException)
         {
@@ -593,6 +617,495 @@ public sealed class SearchOrchestrator
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = 1
         };
+    }
+
+    private static AgentResponse AddMarketLeadLineIfHelpful(
+        string userMessage,
+        AgentResponse response,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (!response.Success || string.IsNullOrWhiteSpace(response.Text))
+            return response;
+
+        if (!LooksLikeMarketQuoteRequest(userMessage))
+            return response;
+
+        var hasExistingLead = TryGetLeadingMarketLine(response.Text, out var existingLeadLine, out var textWithoutLeadingLine);
+        if (TryBuildMarketLeadLine(userMessage, toolCallsMade, out var leadLine))
+        {
+            if (!hasExistingLead)
+            {
+                return response with
+                {
+                    Text = $"{leadLine}\n\n{response.Text.TrimStart()}"
+                };
+            }
+
+            var merged = string.IsNullOrWhiteSpace(textWithoutLeadingLine)
+                ? leadLine
+                : $"{leadLine}\n\n{textWithoutLeadingLine}";
+            return response with { Text = merged };
+        }
+
+        // If we cannot verify a market level from tool evidence, avoid
+        // publishing a potentially hallucinated level in the lead line.
+        if (hasExistingLead &&
+            TryRemoveNumericLevelFromLeadLine(existingLeadLine, out var sanitizedLead))
+        {
+            var merged = string.IsNullOrWhiteSpace(textWithoutLeadingLine)
+                ? sanitizedLead
+                : $"{sanitizedLead}\n\n{textWithoutLeadingLine}";
+            return response with { Text = merged };
+        }
+
+        return response;
+    }
+
+    private static bool LooksLikeMarketQuoteRequest(string message)
+    {
+        var lower = (message ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("dow jones", StringComparison.Ordinal) ||
+               lower.Contains("djia", StringComparison.Ordinal) ||
+               lower.Contains("nasdaq", StringComparison.Ordinal) ||
+               lower.Contains("s&p", StringComparison.Ordinal) ||
+               lower.Contains("s and p", StringComparison.Ordinal) ||
+               lower.Contains("sp500", StringComparison.Ordinal) ||
+               lower.Contains("stock market", StringComparison.Ordinal) ||
+               lower.Contains("stocks", StringComparison.Ordinal) ||
+               lower.Contains("market index", StringComparison.Ordinal);
+    }
+
+    private static bool StartsWithMarketLeadLine(string text)
+    {
+        var trimmed = text.TrimStart();
+        return trimmed.StartsWith("The Dow Jones is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Dow Jones is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("The Nasdaq is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Nasdaq is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("The S&P 500 is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("S&P 500 is ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("The stock market is ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryBuildMarketLeadLine(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        out string leadLine)
+    {
+        leadLine = "";
+
+        var marketLabel = ResolveMarketLabel(userMessage);
+        var aliases = GetMarketAliases(marketLabel);
+        var corpus = BuildMarketParsingCorpus(toolCallsMade);
+        if (string.IsNullOrWhiteSpace(corpus))
+            return false;
+
+        if (!TryExtractDirectionAndPercent(corpus, aliases, out var direction, out var percent))
+            return false;
+
+        if (TryExtractMarketLevel(corpus, aliases, marketLabel, out var level))
+        {
+            leadLine = $"The {marketLabel} is {direction} {percent} today, at {level}.";
+            return true;
+        }
+
+        leadLine = $"The {marketLabel} is {direction} {percent} today.";
+        return true;
+    }
+
+    private static string ResolveMarketLabel(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+        if (lower.Contains("dow jones", StringComparison.Ordinal) || lower.Contains("djia", StringComparison.Ordinal))
+            return "Dow Jones";
+        if (lower.Contains("nasdaq", StringComparison.Ordinal))
+            return "Nasdaq";
+        if (lower.Contains("s&p", StringComparison.Ordinal) ||
+            lower.Contains("s and p", StringComparison.Ordinal) ||
+            lower.Contains("sp500", StringComparison.Ordinal))
+            return "S&P 500";
+        return "stock market";
+    }
+
+    private static string[] GetMarketAliases(string marketLabel) =>
+        marketLabel switch
+        {
+            "Dow Jones" => ["dow jones", "djia", "dow"],
+            "Nasdaq" => ["nasdaq", "nasdaq composite"],
+            "S&P 500" => ["s&p 500", "s&p", "s and p", "sp500"],
+            _ => ["stock market", "stocks", "market"]
+        };
+
+    private static string BuildMarketParsingCorpus(
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var call in toolCallsMade)
+        {
+            if (!call.Success || string.IsNullOrWhiteSpace(call.Result))
+                continue;
+
+            if (call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.AppendLine(StripSourcesJson(call.Result));
+                continue;
+            }
+
+            if (call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.AppendLine(call.Result);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool TryExtractDirectionAndPercent(
+        string corpus,
+        string[] aliases,
+        out string direction,
+        out string percent)
+    {
+        direction = "";
+        percent = "";
+
+        if (TryExtractAliasBoundDirectionAndPercent(corpus, aliases, out direction, out percent))
+            return true;
+
+        var window = ExtractMarketWindow(corpus, aliases);
+        if (TryExtractDirectionAndPercentFromText(window, out direction, out percent))
+            return true;
+
+        return TryExtractDirectionAndPercentFromText(corpus, out direction, out percent);
+    }
+
+    private static bool TryExtractDirectionAndPercentFromText(
+        string text,
+        out string direction,
+        out string percent)
+    {
+        direction = "";
+        percent = "";
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var directional = PercentDirectionRegex.Match(text);
+        if (directional.Success)
+        {
+            direction = NormalizeDirection(directional.Groups["dir"].Value);
+            percent = NormalizePercentValue(directional.Groups["pct"].Value);
+            return !string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent);
+        }
+
+        var reverseDirectional = DirectionAfterPercentRegex.Match(text);
+        if (reverseDirectional.Success)
+        {
+            direction = NormalizeDirection(reverseDirectional.Groups["dir"].Value);
+            percent = NormalizePercentValue(reverseDirectional.Groups["pct"].Value);
+            return !string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent);
+        }
+
+        var signed = SignedPercentRegex.Match(text);
+        if (!signed.Success)
+            return false;
+
+        var raw = signed.Groups["pct"].Value.Trim();
+        if (raw.Length == 0)
+            return false;
+
+        direction = raw.StartsWith("-", StringComparison.Ordinal) ? "down" : "up";
+        percent = NormalizePercentValue(raw.TrimStart('+', '-'));
+        return !string.IsNullOrWhiteSpace(percent);
+    }
+
+    private static bool TryExtractMarketLevel(
+        string corpus,
+        string[] aliases,
+        string marketLabel,
+        out string level)
+    {
+        level = "";
+
+        if (TryExtractAliasBoundLevel(corpus, aliases, marketLabel, out level))
+            return true;
+
+        var window = ExtractMarketWindow(corpus, aliases);
+        if (TryExtractLevelFromText(window, marketLabel, out level))
+            return true;
+
+        return TryExtractLevelFromText(corpus, marketLabel, out level);
+    }
+
+    private static bool TryExtractLevelFromText(string text, string marketLabel, out string level)
+    {
+        level = "";
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        foreach (Match match in LevelRegex.Matches(text))
+        {
+            if (!match.Success)
+                continue;
+
+            var raw = match.Groups["lvl"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+                continue;
+
+            if (!TryParseMarketLevel(raw, out var numeric))
+                continue;
+
+            if (!IsPlausibleMarketLevel(numeric, marketLabel))
+                continue;
+
+            level = FormatMarketLevel(raw, numeric);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string ExtractMarketWindow(string corpus, string[] aliases)
+    {
+        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
+            return corpus;
+
+        var lower = corpus.ToLowerInvariant();
+        foreach (var alias in aliases)
+        {
+            var idx = lower.IndexOf(alias, StringComparison.Ordinal);
+            if (idx < 0)
+                continue;
+
+            var start = Math.Max(0, idx - 80);
+            var length = Math.Min(corpus.Length - start, 260);
+            return corpus.Substring(start, length);
+        }
+
+        return corpus;
+    }
+
+    private static string NormalizeDirection(string raw)
+    {
+        var lower = (raw ?? "").Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "up" or "higher" or "gained" or "gain" or "rose" or "rallied" or "advanced" => "up",
+            "down" or "lower" or "fell" or "dropped" or "declined" or "slipped" => "down",
+            _ => ""
+        };
+    }
+
+    private static string NormalizePercentValue(string raw)
+    {
+        var cleaned = (raw ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return "";
+
+        return cleaned.EndsWith('%') ? cleaned : $"{cleaned}%";
+    }
+
+    private static bool TryExtractAliasBoundDirectionAndPercent(
+        string corpus,
+        string[] aliases,
+        out string direction,
+        out string percent)
+    {
+        direction = "";
+        percent = "";
+
+        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
+            return false;
+
+        foreach (var alias in aliases
+                     .Where(a => !string.IsNullOrWhiteSpace(a))
+                     .OrderByDescending(a => a.Length))
+        {
+            var escapedAlias = Regex.Escape(alias);
+            var aliasDirectional = new Regex(
+                $@"\b{escapedAlias}\b[^%\n]{{0,120}}?\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b[^%\n]{{0,40}}?(?<pct>[+-]?\d+(?:\.\d+)?)\s*%",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+            var match = aliasDirectional.Match(corpus);
+            if (match.Success)
+            {
+                direction = NormalizeDirection(match.Groups["dir"].Value);
+                percent = NormalizePercentValue(match.Groups["pct"].Value);
+                if (!string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent))
+                    return true;
+            }
+
+            var aliasSignedPercent = new Regex(
+                $@"\b{escapedAlias}\b[^%\n]{{0,120}}?(?<pct>[+-]\d+(?:\.\d+)?)\s*%",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var signed = aliasSignedPercent.Match(corpus);
+            if (signed.Success)
+            {
+                var raw = signed.Groups["pct"].Value.Trim();
+                direction = raw.StartsWith("-", StringComparison.Ordinal) ? "down" : "up";
+                percent = NormalizePercentValue(raw.TrimStart('+', '-'));
+                if (!string.IsNullOrWhiteSpace(percent))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractAliasBoundLevel(
+        string corpus,
+        string[] aliases,
+        string marketLabel,
+        out string level)
+    {
+        level = "";
+        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
+            return false;
+
+        foreach (var alias in aliases
+                     .Where(a => !string.IsNullOrWhiteSpace(a))
+                     .OrderByDescending(a => a.Length))
+        {
+            var escapedAlias = Regex.Escape(alias);
+            var levelPattern = @"(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?:\.\d+)?";
+
+            var aliasBeforeLevel = new Regex(
+                $@"\b{escapedAlias}\b[^.\n]{{0,140}}?\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>{levelPattern})\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var match = aliasBeforeLevel.Match(corpus);
+            if (TryResolveLevelMatch(match, marketLabel, out level))
+                return true;
+
+            var aliasAfterLevel = new Regex(
+                $@"\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>{levelPattern})\b[^.\n]{{0,70}}?\b{escapedAlias}\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            match = aliasAfterLevel.Match(corpus);
+            if (TryResolveLevelMatch(match, marketLabel, out level))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveLevelMatch(Match match, string marketLabel, out string level)
+    {
+        level = "";
+        if (!match.Success)
+            return false;
+
+        var raw = match.Groups["lvl"].Value.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        if (!TryParseMarketLevel(raw, out var numeric))
+            return false;
+
+        if (!IsPlausibleMarketLevel(numeric, marketLabel))
+            return false;
+
+        level = FormatMarketLevel(raw, numeric);
+        return true;
+    }
+
+    private static bool TryGetLeadingMarketLine(
+        string text,
+        out string leadLine,
+        out string remainder)
+    {
+        leadLine = "";
+        remainder = text;
+
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n').ToList();
+        var firstContentIndex = -1;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(lines[i]))
+            {
+                firstContentIndex = i;
+                break;
+            }
+        }
+
+        if (firstContentIndex < 0)
+            return false;
+
+        var candidate = lines[firstContentIndex].Trim();
+        if (!StartsWithMarketLeadLine(candidate))
+            return false;
+
+        leadLine = candidate;
+        lines.RemoveAt(firstContentIndex);
+        while (firstContentIndex < lines.Count && string.IsNullOrWhiteSpace(lines[firstContentIndex]))
+            lines.RemoveAt(firstContentIndex);
+
+        remainder = string.Join("\n", lines).Trim();
+        return true;
+    }
+
+    private static bool TryRemoveNumericLevelFromLeadLine(
+        string line,
+        out string sanitized)
+    {
+        sanitized = line;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var match = LeadingMarketLineWithLevelRegex.Match(line.Trim());
+        if (!match.Success)
+            return false;
+
+        var prefix = match.Groups["prefix"].Value.Trim();
+        if (string.IsNullOrWhiteSpace(prefix))
+            return false;
+
+        sanitized = $"{prefix}.";
+        return true;
+    }
+
+    private static bool TryParseMarketLevel(string raw, out double value)
+    {
+        var cleaned = (raw ?? "").Trim().Replace(",", "");
+        return double.TryParse(
+            cleaned,
+            NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+            CultureInfo.InvariantCulture,
+            out value);
+    }
+
+    private static bool IsPlausibleMarketLevel(double value, string marketLabel)
+    {
+        if (value <= 0)
+            return false;
+
+        var (min, max) = GetMarketLevelBounds(marketLabel);
+        return value >= min && value <= max;
+    }
+
+    private static (double Min, double Max) GetMarketLevelBounds(string marketLabel) =>
+        marketLabel switch
+        {
+            "Dow Jones" => (20_000d, 60_000d),
+            "Nasdaq" => (5_000d, 25_000d),
+            "S&P 500" => (2_000d, 8_000d),
+            _ => (1_000d, 60_000d)
+        };
+
+    private static string FormatMarketLevel(string rawValue, double numericValue)
+    {
+        if (rawValue.Contains(',', StringComparison.Ordinal))
+            return rawValue;
+
+        if (rawValue.Contains('.', StringComparison.Ordinal))
+            return rawValue;
+
+        return numericValue.ToString("N0", CultureInfo.InvariantCulture);
     }
 
     /// <summary>

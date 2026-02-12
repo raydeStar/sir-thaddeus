@@ -574,6 +574,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }
             }
 
+            if (MemoryEnabled && IsSelfNameRecallRequest(contextualUserMessage))
+            {
+                var nameRecall = await ExecuteSelfNameRecallAsync(
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+                _history.Add(ChatMessage.Assistant(nameRecall.Text));
+                LogEvent("AGENT_RESPONSE", nameRecall.Text);
+                return AttachContextSnapshot(nameRecall);
+            }
+
             if (ShouldAttemptReasoningGuardrails(route, contextualUserMessage))
             {
                 var guardrailsResult = await _reasoningGuardrailsPipeline.TryRunAsync(
@@ -3805,6 +3817,77 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         };
     }
 
+    private async Task<AgentResponse> ExecuteSelfNameRecallAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var (name, error) = await TryResolveSelfNameAsync(
+            userMessage,
+            toolCallsMade,
+            cancellationToken);
+
+        var text = !string.IsNullOrWhiteSpace(name)
+            ? $"Your name is {name}."
+            : !string.IsNullOrWhiteSpace(error)
+                ? "I couldn't load your profile right now. Ask again in a moment and I'll retry."
+                : "I couldn't find a stored name yet. Tell me what name you want me to use, and I'll remember it.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<(string? Name, string? Error)> TryResolveSelfNameAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        var argsObj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["query"] = userMessage
+        };
+        if (!string.IsNullOrWhiteSpace(ActiveProfileId))
+            argsObj["activeProfileId"] = ActiveProfileId;
+
+        var argsJson = JsonSerializer.Serialize(argsObj);
+        var retrieveCall = await CallToolWithAliasAsync(
+            MemoryRetrieveToolName,
+            MemoryRetrieveToolNameAlt,
+            argsJson,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = retrieveCall.ToolName,
+            Arguments = argsJson,
+            Result = retrieveCall.Result,
+            Success = retrieveCall.Success
+        });
+
+        if (retrieveCall.Success && !string.IsNullOrWhiteSpace(retrieveCall.Result))
+        {
+            var fromPack = TryExtractNameFromMemoryRetrievePayload(retrieveCall.Result);
+            if (!string.IsNullOrWhiteSpace(fromPack))
+                return (fromPack, null);
+        }
+
+        var (facts, factsError) = await LoadSelfScopedFactsAsync(toolCallsMade, cancellationToken);
+        var fromFacts = TryExtractNameFromSelfFacts(facts);
+        if (!string.IsNullOrWhiteSpace(fromFacts))
+            return (fromFacts, null);
+
+        if (!retrieveCall.Success)
+            return (null, "memory retrieve unavailable");
+
+        return (null, factsError);
+    }
+
     private async Task<string> BuildSelfMemoryContextBlockAsync(
         List<ToolCallRecord> toolCallsMade,
         CancellationToken cancellationToken)
@@ -3979,6 +4062,84 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return sb.ToString().TrimEnd();
     }
 
+    private static string? TryExtractNameFromSelfFacts(IReadOnlyList<SelfMemoryFact> facts)
+    {
+        foreach (var fact in facts)
+        {
+            if (string.IsNullOrWhiteSpace(fact.Object))
+                continue;
+
+            var predicate = (fact.Predicate ?? "")
+                .Replace('_', ' ')
+                .Trim()
+                .ToLowerInvariant();
+
+            if (predicate is "name" or "name is" or "preferred name" or "first name" or "goes by")
+                return fact.Object.Trim();
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractNameFromMemoryRetrievePayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("packText", out var packTextEl) ||
+                packTextEl.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var packText = packTextEl.GetString() ?? "";
+            return TryExtractNameFromPackText(packText);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryExtractNameFromPackText(string packText)
+    {
+        if (string.IsNullOrWhiteSpace(packText))
+            return null;
+
+        var lines = packText
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Split('\n');
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (!line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = line["Name:".Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        var marker = "You know this user as \"";
+        var markerIndex = packText.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        var start = markerIndex + marker.Length;
+        var end = packText.IndexOf('"', start);
+        if (end <= start)
+            return null;
+
+        var extracted = packText[start..end].Trim();
+        return string.IsNullOrWhiteSpace(extracted) ? null : extracted;
+    }
+
     private static string RenderSelfMemoryFact(SelfMemoryFact fact)
     {
         var subject = (fact.Subject ?? "user").Trim();
@@ -4025,6 +4186,24 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lower.Contains("what have you learned", StringComparison.Ordinal) ||
                lower.Contains("what information", StringComparison.Ordinal) ||
                lower.Contains("what info", StringComparison.Ordinal);
+    }
+
+    private static bool IsSelfNameRecallRequest(string message)
+    {
+        var lower = (message ?? "")
+            .ToLowerInvariant()
+            .Replace('’', '\'')
+            .Trim();
+
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("what is my name", StringComparison.Ordinal) ||
+               lower.Contains("what's my name", StringComparison.Ordinal) ||
+               lower.Contains("whats my name", StringComparison.Ordinal) ||
+               lower.Contains("do you know my name", StringComparison.Ordinal) ||
+               lower.Contains("who am i", StringComparison.Ordinal) ||
+               lower.Contains("who i am", StringComparison.Ordinal);
     }
 
     private static bool IsPersonalizedUsingKnownSelfContextRequest(
@@ -6960,7 +7139,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             lower.Contains("forecast") || lower.Contains("score")     ||
             lower.Contains("crypto")   || lower.Contains("bitcoin")   ||
             lower.Contains("dogecoin") || lower.Contains("ethereum")  ||
-            lower.Contains("solana")   || lower.Contains("forex");
+            lower.Contains("solana")   || lower.Contains("forex")     ||
+            lower.Contains("dow jones") || lower.Contains("djia")     ||
+            lower.Contains("nasdaq")   || lower.Contains("s&p")       ||
+            lower.Contains("s&p 500")  || lower.Contains("s and p")   ||
+            lower.Contains("sp500")    || lower.Contains("industrial average");
 
         if (!hasTopic)
             return false;
