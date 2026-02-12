@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using NAudio.Wave;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
+using SirThaddeus.DesktopRuntime.Services;
 using SirThaddeus.Memory;
 using SirThaddeus.Memory.Sqlite;
 
@@ -34,6 +37,16 @@ public sealed class SettingsViewModel : ViewModelBase
     // Audio
     private bool   _ttsEnabled   = true;
     private string _pttKey       = "F13";
+    private string _pttChord     = "Ctrl+Shift+Space";
+    private string _shutupChord  = "Ctrl+Shift+Escape";
+    private bool   _voiceHostEnabled = true;
+    private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
+    private int    _voiceHostStartupTimeoutMs = 20000;
+    private string _voiceHostHealthPath = "/health";
+    private bool   _voicePreferLocalTts = true;
+    private int    _voiceAsrTimeoutMs = 45000;
+    private int    _voiceAgentTimeoutMs = 90000;
+    private int    _voiceSpeakingTimeoutMs = 90000;
 
     // Memory
     private bool   _memoryEnabled     = true;
@@ -52,6 +65,21 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _weatherUserAgent =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
 
+    // Audio Devices
+    private AudioDeviceInfo? _selectedInputDevice;
+    private AudioDeviceInfo? _selectedOutputDevice;
+    private double _inputGain = 1.0;
+
+    // Mic Test
+    private readonly object _testGate = new();
+    private WaveInEvent?    _testWaveIn;
+    private MemoryStream?   _testPcmBuffer;
+    private byte[]?         _testRecordingBytes;
+    private double          _micTestLevel;
+    private bool            _isTestingMic;
+    private string          _micTestStatus = "";
+    private CancellationTokenSource? _testTimerCts;
+
     // Profile
     private ProfileOption? _selectedProfile;
     private string         _statusText = "";
@@ -67,6 +95,16 @@ public sealed class SettingsViewModel : ViewModelBase
     // Audio
     public bool   TtsEnabled     { get => _ttsEnabled;     set { if (SetProperty(ref _ttsEnabled, value))     MarkDirty(); } }
     public string PttKey         { get => _pttKey;          set { if (SetProperty(ref _pttKey, value))         MarkDirty(); } }
+    public string PttChord       { get => _pttChord;        set { if (SetProperty(ref _pttChord, value))       MarkDirty(); } }
+    public string ShutupChord    { get => _shutupChord;     set { if (SetProperty(ref _shutupChord, value))    MarkDirty(); } }
+    public bool VoiceHostEnabled { get => _voiceHostEnabled; set { if (SetProperty(ref _voiceHostEnabled, value)) MarkDirty(); } }
+    public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
+    public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
+    public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
+    public bool VoicePreferLocalTts { get => _voicePreferLocalTts; set { if (SetProperty(ref _voicePreferLocalTts, value)) MarkDirty(); } }
+    public int VoiceAsrTimeoutMs { get => _voiceAsrTimeoutMs; set { if (SetProperty(ref _voiceAsrTimeoutMs, value)) MarkDirty(); } }
+    public int VoiceAgentTimeoutMs { get => _voiceAgentTimeoutMs; set { if (SetProperty(ref _voiceAgentTimeoutMs, value)) MarkDirty(); } }
+    public int VoiceSpeakingTimeoutMs { get => _voiceSpeakingTimeoutMs; set { if (SetProperty(ref _voiceSpeakingTimeoutMs, value)) MarkDirty(); } }
 
     // Memory
     public bool MemoryEnabled
@@ -96,6 +134,60 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // Weather
     public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
+
+    // ─── Audio Devices ──────────────────────────────────────────────
+
+    public ObservableCollection<AudioDeviceInfo> AvailableInputDevices  { get; } = new();
+    public ObservableCollection<AudioDeviceInfo> AvailableOutputDevices { get; } = new();
+
+    public AudioDeviceInfo? SelectedInputDevice
+    {
+        get => _selectedInputDevice;
+        set { if (SetProperty(ref _selectedInputDevice, value)) MarkDirty(); }
+    }
+
+    public AudioDeviceInfo? SelectedOutputDevice
+    {
+        get => _selectedOutputDevice;
+        set { if (SetProperty(ref _selectedOutputDevice, value)) MarkDirty(); }
+    }
+
+    public double InputGain
+    {
+        get => _inputGain;
+        set { if (SetProperty(ref _inputGain, Math.Clamp(value, 0.0, 2.0))) MarkDirty(); }
+    }
+
+    // ─── Mic Test ───────────────────────────────────────────────────
+
+    public double MicTestLevel
+    {
+        get => _micTestLevel;
+        private set => SetProperty(ref _micTestLevel, value);
+    }
+
+    public bool IsTestingMic
+    {
+        get => _isTestingMic;
+        private set
+        {
+            if (SetProperty(ref _isTestingMic, value))
+                CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string MicTestStatus
+    {
+        get => _micTestStatus;
+        set => SetProperty(ref _micTestStatus, value);
+    }
+
+    public bool HasTestRecording => _testRecordingBytes is { Length: > 100 };
+
+    public ICommand TestMicCommand          { get; }
+    public ICommand StopTestMicCommand      { get; }
+    public ICommand PlayTestRecordingCommand { get; }
+    public ICommand RefreshDevicesCommand    { get; }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
@@ -145,7 +237,13 @@ public sealed class SettingsViewModel : ViewModelBase
         SaveCommand    = new RelayCommand(_ => SaveSettings());
         RefreshCommand = new AsyncRelayCommand(() => LoadAsync());
 
+        TestMicCommand           = new RelayCommand(_ => StartMicTest(),       _ => !IsTestingMic);
+        StopTestMicCommand       = new RelayCommand(_ => StopMicTest(),        _ => IsTestingMic);
+        PlayTestRecordingCommand = new RelayCommand(_ => PlayTestRecording(),  _ => HasTestRecording && !IsTestingMic);
+        RefreshDevicesCommand    = new RelayCommand(_ => RefreshAudioDevices());
+
         LoadFromSettings(settings);
+        LoadAudioDevices();
     }
 
     // ─── Load / Save ─────────────────────────────────────────────────
@@ -158,6 +256,7 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         _settings = SettingsManager.Load();
         LoadFromSettings(_settings);
+        LoadAudioDevices();
         await LoadProfilesAsync();
         StatusText = "Settings loaded.";
     }
@@ -171,6 +270,18 @@ public sealed class SettingsViewModel : ViewModelBase
 
         _ttsEnabled     = s.Audio.TtsEnabled;
         _pttKey         = s.Audio.PttKey;
+        _pttChord       = s.Audio.PttChord;
+        _shutupChord    = s.Audio.ShutupChord;
+        _voiceHostEnabled = s.Voice.VoiceHostEnabled;
+        _voiceHostBaseUrl = s.Voice.GetVoiceHostBaseUrl();
+        _voiceHostStartupTimeoutMs = s.Voice.VoiceHostStartupTimeoutMs;
+        _voiceHostHealthPath = string.IsNullOrWhiteSpace(s.Voice.VoiceHostHealthPath)
+            ? "/health"
+            : s.Voice.VoiceHostHealthPath.Trim();
+        _voicePreferLocalTts = s.Voice.PreferLocalTts;
+        _voiceAsrTimeoutMs = s.Voice.AsrTimeoutMs;
+        _voiceAgentTimeoutMs = s.Voice.AgentTimeoutMs;
+        _voiceSpeakingTimeoutMs = s.Voice.SpeakingTimeoutMs;
 
         _memoryEnabled     = s.Memory.Enabled;
         _embeddingsEnabled = s.Memory.UseEmbeddings;
@@ -184,6 +295,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
         _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
         _weatherUserAgent         = s.Weather.UserAgent;
+        _inputGain                = s.Audio.InputGain;
 
         // Notify all bindings
         OnPropertyChanged(nameof(LlmBaseUrl));
@@ -192,6 +304,16 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(LlmTemperature));
         OnPropertyChanged(nameof(TtsEnabled));
         OnPropertyChanged(nameof(PttKey));
+        OnPropertyChanged(nameof(PttChord));
+        OnPropertyChanged(nameof(ShutupChord));
+        OnPropertyChanged(nameof(VoiceHostEnabled));
+        OnPropertyChanged(nameof(VoiceHostBaseUrl));
+        OnPropertyChanged(nameof(VoiceHostStartupTimeoutMs));
+        OnPropertyChanged(nameof(VoiceHostHealthPath));
+        OnPropertyChanged(nameof(VoicePreferLocalTts));
+        OnPropertyChanged(nameof(VoiceAsrTimeoutMs));
+        OnPropertyChanged(nameof(VoiceAgentTimeoutMs));
+        OnPropertyChanged(nameof(VoiceSpeakingTimeoutMs));
         OnPropertyChanged(nameof(MemoryEnabled));
         OnPropertyChanged(nameof(EmbeddingsEnabled));
         OnPropertyChanged(nameof(McpPermDeveloperOverride));
@@ -202,6 +324,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(McpPermMemoryRead));
         OnPropertyChanged(nameof(McpPermMemoryWrite));
         OnPropertyChanged(nameof(WeatherUserAgent));
+        OnPropertyChanged(nameof(InputGain));
     }
 
     private async Task LoadProfilesAsync()
@@ -251,6 +374,245 @@ public sealed class SettingsViewModel : ViewModelBase
         // Future: could debounce auto-save here
     }
 
+    // ─── Audio Device Management ────────────────────────────────────
+
+    private void LoadAudioDevices()
+    {
+        System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            AvailableInputDevices.Clear();
+            AvailableOutputDevices.Clear();
+
+            foreach (var device in AudioDeviceEnumerator.GetInputDevices())
+                AvailableInputDevices.Add(device);
+
+            foreach (var device in AudioDeviceEnumerator.GetOutputDevices())
+                AvailableOutputDevices.Add(device);
+
+            // Restore persisted selection by product name
+            _selectedInputDevice = AvailableInputDevices.FirstOrDefault(d =>
+                    !string.IsNullOrEmpty(_settings.Audio.InputDeviceName) &&
+                    d.ProductName.Equals(_settings.Audio.InputDeviceName, StringComparison.OrdinalIgnoreCase))
+                ?? AvailableInputDevices.FirstOrDefault();
+
+            _selectedOutputDevice = AvailableOutputDevices.FirstOrDefault(d =>
+                    !string.IsNullOrEmpty(_settings.Audio.OutputDeviceName) &&
+                    d.ProductName.Equals(_settings.Audio.OutputDeviceName, StringComparison.OrdinalIgnoreCase))
+                ?? AvailableOutputDevices.FirstOrDefault();
+
+            OnPropertyChanged(nameof(SelectedInputDevice));
+            OnPropertyChanged(nameof(SelectedOutputDevice));
+        });
+    }
+
+    private void RefreshAudioDevices()
+    {
+        LoadAudioDevices();
+        MicTestStatus = "Devices refreshed.";
+    }
+
+    // ─── Mic Test ────────────────────────────────────────────────────
+
+    private void StartMicTest()
+    {
+        if (_isTestingMic)
+            return;
+
+        try
+        {
+            var deviceNumber = _selectedInputDevice?.DeviceNumber ?? 0;
+
+            _testRecordingBytes = null;
+            OnPropertyChanged(nameof(HasTestRecording));
+
+            _testPcmBuffer = new MemoryStream();
+
+            _testWaveIn = new WaveInEvent
+            {
+                DeviceNumber       = deviceNumber,
+                WaveFormat         = new WaveFormat(16000, 16, 1),
+                BufferMilliseconds = 50,
+                NumberOfBuffers    = 3
+            };
+            _testWaveIn.DataAvailable    += OnTestDataAvailable;
+            _testWaveIn.RecordingStopped += OnTestRecordingStopped;
+            _testWaveIn.StartRecording();
+
+            IsTestingMic  = true;
+            MicTestStatus = "Recording — speak now...";
+            MicTestLevel  = 0;
+
+            // Auto-stop after 30 seconds to prevent orphaned recordings
+            _testTimerCts = new CancellationTokenSource();
+            var token = _testTimerCts.Token;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(30_000, token);
+                    System.Windows.Application.Current?.Dispatcher?.InvokeAsync(StopMicTest);
+                }
+                catch (OperationCanceledException) { /* expected on manual stop */ }
+            }, token);
+        }
+        catch (Exception ex)
+        {
+            MicTestStatus = $"Failed to open device: {ex.Message}";
+            CleanupMicTest();
+        }
+    }
+
+    private void StopMicTest()
+    {
+        if (!_isTestingMic)
+            return;
+
+        try { _testTimerCts?.Cancel(); }
+        catch { /* best effort */ }
+        _testTimerCts?.Dispose();
+        _testTimerCts = null;
+
+        try { _testWaveIn?.StopRecording(); }
+        catch { /* triggers OnTestRecordingStopped */ }
+    }
+
+    private void OnTestDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        // Compute RMS for the level meter
+        double level = ComputeRmsLevel(e.Buffer, e.BytesRecorded);
+
+        // Scale by gain for visual feedback
+        double scaled = Math.Min(1.0, level * Math.Max(0.1, _inputGain));
+
+        System.Windows.Application.Current?.Dispatcher?.InvokeAsync(() =>
+        {
+            MicTestLevel = scaled;
+        });
+
+        // Buffer raw PCM for playback
+        lock (_testGate)
+        {
+            _testPcmBuffer?.Write(e.Buffer, 0, e.BytesRecorded);
+        }
+    }
+
+    private void OnTestRecordingStopped(object? sender, StoppedEventArgs e)
+    {
+        // Finalize the recording — wrap raw PCM into a WAV container
+        byte[] pcm;
+        lock (_testGate)
+        {
+            pcm = _testPcmBuffer?.ToArray() ?? Array.Empty<byte>();
+            _testPcmBuffer?.Dispose();
+            _testPcmBuffer = null;
+        }
+
+        if (pcm.Length > 0)
+        {
+            var wavStream = new MemoryStream();
+            using (var writer = new WaveFileWriter(wavStream, new WaveFormat(16000, 16, 1)))
+            {
+                writer.Write(pcm, 0, pcm.Length);
+            }
+            _testRecordingBytes = wavStream.ToArray();
+        }
+
+        CleanupMicTest();
+
+        System.Windows.Application.Current?.Dispatcher?.InvokeAsync(() =>
+        {
+            IsTestingMic = false;
+            MicTestLevel = 0;
+            MicTestStatus = _testRecordingBytes is { Length: > 100 }
+                ? $"Recorded {_testRecordingBytes.Length / 1024}KB — click Play to review."
+                : "No audio captured.";
+            OnPropertyChanged(nameof(HasTestRecording));
+        });
+    }
+
+    private void CleanupMicTest()
+    {
+        if (_testWaveIn is not null)
+        {
+            _testWaveIn.DataAvailable    -= OnTestDataAvailable;
+            _testWaveIn.RecordingStopped -= OnTestRecordingStopped;
+            _testWaveIn.Dispose();
+            _testWaveIn = null;
+        }
+    }
+
+    private void PlayTestRecording()
+    {
+        if (_testRecordingBytes is not { Length: > 100 })
+            return;
+
+        var deviceNumber = _selectedOutputDevice?.DeviceNumber ?? -1;
+        var audioBytes   = _testRecordingBytes;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                System.Windows.Application.Current?.Dispatcher?.InvokeAsync(() =>
+                    MicTestStatus = "Playing...");
+
+                using var stream = new MemoryStream(audioBytes, writable: false);
+                using var reader = new WaveFileReader(stream);
+                using var output = new WaveOutEvent { DeviceNumber = deviceNumber };
+
+                var tcs = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
+                output.PlaybackStopped += (_, args) =>
+                {
+                    if (args.Exception is not null)
+                        tcs.TrySetException(args.Exception);
+                    else
+                        tcs.TrySetResult(true);
+                };
+
+                output.Init(reader);
+                output.Play();
+                await tcs.Task;
+
+                System.Windows.Application.Current?.Dispatcher?.InvokeAsync(() =>
+                    MicTestStatus = "Playback complete.");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Application.Current?.Dispatcher?.InvokeAsync(() =>
+                    MicTestStatus = $"Playback failed: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Computes RMS energy of 16-bit PCM samples and maps to a 0.0–1.0 range
+    /// using a dB scale with a -60 dB floor for natural-feeling meter response.
+    /// </summary>
+    private static double ComputeRmsLevel(byte[] buffer, int bytesRecorded)
+    {
+        if (bytesRecorded < 2) return 0;
+
+        double sum = 0;
+        int sampleCount = bytesRecorded / 2;
+
+        for (int i = 0; i + 1 < bytesRecorded; i += 2)
+        {
+            short sample = (short)(buffer[i] | (buffer[i + 1] << 8));
+            sum += (double)sample * sample;
+        }
+
+        double rms        = Math.Sqrt(sum / sampleCount);
+        double normalized  = rms / 32768.0;
+        if (normalized < 1e-10) return 0;
+
+        double db = 20.0 * Math.Log10(normalized);
+        return Math.Clamp((db + 60.0) / 60.0, 0, 1);
+    }
+
+    // ─── Persistence ─────────────────────────────────────────────────
+
     private void SaveSettings()
     {
         var updated = _settings with
@@ -264,8 +626,28 @@ public sealed class SettingsViewModel : ViewModelBase
             },
             Audio = _settings.Audio with
             {
-                TtsEnabled = _ttsEnabled,
-                PttKey     = _pttKey
+                TtsEnabled       = _ttsEnabled,
+                PttKey           = _pttKey,
+                PttChord         = _pttChord,
+                ShutupChord      = _shutupChord,
+                InputDeviceName  = _selectedInputDevice?.ProductName ?? "",
+                OutputDeviceName = _selectedOutputDevice?.ProductName ?? "",
+                InputGain        = Math.Clamp(_inputGain, 0.0, 2.0)
+            },
+            Voice = _settings.Voice with
+            {
+                VoiceHostEnabled = _voiceHostEnabled,
+                VoiceHostBaseUrl = string.IsNullOrWhiteSpace(_voiceHostBaseUrl)
+                    ? "http://127.0.0.1:17845"
+                    : _voiceHostBaseUrl.Trim(),
+                VoiceHostStartupTimeoutMs = Math.Max(5_000, _voiceHostStartupTimeoutMs),
+                VoiceHostHealthPath = string.IsNullOrWhiteSpace(_voiceHostHealthPath)
+                    ? "/health"
+                    : _voiceHostHealthPath.Trim(),
+                PreferLocalTts = _voicePreferLocalTts,
+                AsrTimeoutMs = Math.Max(5_000, _voiceAsrTimeoutMs),
+                AgentTimeoutMs = Math.Max(10_000, _voiceAgentTimeoutMs),
+                SpeakingTimeoutMs = Math.Max(10_000, _voiceSpeakingTimeoutMs)
             },
             Memory = _settings.Memory with
             {

@@ -444,9 +444,14 @@ public static class UtilityRouter
     private static UtilityResult? TryCalculator(string message)
     {
         var normalized = message.Trim().TrimEnd('?', '!', '.');
+        var normalizedPercent = Regex.Replace(
+            normalized,
+            @"\bpercent\b",
+            "%",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Percentage: "what's 15% of 230"
-        var pctMatch = PercentOfPattern.Match(normalized);
+        var pctMatch = PercentOfPattern.Match(normalizedPercent);
         if (pctMatch.Success &&
             double.TryParse(pctMatch.Groups[1].Value, out var pct) &&
             double.TryParse(pctMatch.Groups[2].Value, out var baseVal))
@@ -459,8 +464,10 @@ public static class UtilityRouter
             };
         }
 
-        // Basic arithmetic: "5 * 12", "100 + 50 - 20"
-        var calcMatch = CalcPattern.Match(normalized);
+        // Basic arithmetic: "5 * 12", "100 + 50 - 20",
+        // and word operators like "what is 6 plus 7".
+        var arithmetic = NormalizeArithmeticExpressionWords(normalized);
+        var calcMatch = CalcPattern.Match(arithmetic);
         if (!calcMatch.Success)
             return null;
 
@@ -483,6 +490,33 @@ public static class UtilityRouter
         {
             return null; // Fall through to search pipeline
         }
+    }
+
+    private static string NormalizeArithmeticExpressionWords(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var expr = value.Trim().ToLowerInvariant();
+        expr = Regex.Replace(
+            expr,
+            @"^(?:what(?:'s| is)\s+|calculate\s+|compute\s+|solve\s+)+",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = expr.Replace(",", "");
+
+        expr = Regex.Replace(expr, @"\bmultiplied\s+by\b", "*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = Regex.Replace(expr, @"\bdivided\s+by\b", "/", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = Regex.Replace(expr, @"\bplus\b", "+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = Regex.Replace(expr, @"\bminus\b", "-", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = Regex.Replace(expr, @"\btimes\b", "*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        expr = Regex.Replace(expr, @"\bover\b", "/", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // "6 x 7" shorthand for multiplication.
+        expr = Regex.Replace(expr, @"(?<=\d)\s*x\s*(?=\d)", " * ", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        expr = Regex.Replace(expr, @"\s+", " ", RegexOptions.Compiled).Trim();
+        return expr;
     }
 
     private static UtilityResult? TrySimpleFact(string message)

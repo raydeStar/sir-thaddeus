@@ -255,6 +255,52 @@ public partial class CommandPaletteWindow : Window
         ChatInput.Focus();
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // Voice Test Panel (Hold-to-Talk Button)
+    // ─────────────────────────────────────────────────────────────────
+
+    private void PttButton_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_viewModel is null) return;
+
+        if (sender is System.Windows.Controls.Button btn)
+            btn.CaptureMouse();
+
+        _viewModel.IsVoiceActive = true;
+        _viewModel.VoiceStatusText = "Listening...";
+        _viewModel.VoiceTranscriptText = "";
+        _viewModel.VoiceMicDown?.Invoke();
+        e.Handled = true;
+    }
+
+    private void PttButton_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_viewModel is null) return;
+
+        if (sender is System.Windows.Controls.Button btn && btn.IsMouseCaptured)
+            btn.ReleaseMouseCapture();
+
+        _viewModel.VoiceMicUp?.Invoke();
+        e.Handled = true;
+    }
+
+    private void PttButton_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        // If the user drags off the button while holding, treat as mouse-up.
+        if (_viewModel is null) return;
+
+        if (sender is System.Windows.Controls.Button btn && btn.IsMouseCaptured)
+        {
+            btn.ReleaseMouseCapture();
+            _viewModel.VoiceMicUp?.Invoke();
+        }
+    }
+
+    private void VoiceStopButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel?.VoiceShutup?.Invoke();
+    }
+
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)

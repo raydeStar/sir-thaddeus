@@ -33,12 +33,20 @@
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
     <ProjectReference Include="..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+    <ProjectReference Include="..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="continuity\scripts\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <!-- Compile VoiceHost process manager directly for focused supervision tests
+       without introducing a WPF runtime dependency in this test assembly. -->
+  <ItemGroup>
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
+             Link="DesktopRuntime\VoiceHostProcessManager.cs" />
   </ItemGroup>
 
 </Project>

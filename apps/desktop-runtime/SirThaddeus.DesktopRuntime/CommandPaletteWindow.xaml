@@ -1823,8 +1823,136 @@
                             Background="{StaticResource Surface0Brush}"
                             Margin="0,0,0,20"/>
 
-                    <!-- ── Audio ───────────────────────────────────────── -->
-                    <TextBlock Text="AUDIO"
+                    <!-- ── Audio Devices ───────────────────────────────── -->
+                    <TextBlock Text="AUDIO DEVICES"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource TealBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="Select recording and playback devices. Use Test to verify levels before a voice session."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <!-- Input Device -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Input Device"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableInputDevices}"
+                                  SelectedItem="{Binding SelectedInputDevice, Mode=TwoWay}"
+                                  DisplayMemberPath="DisplayName"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                    </Grid>
+
+                    <!-- Output Device -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Output Device"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableOutputDevices}"
+                                  SelectedItem="{Binding SelectedOutputDevice, Mode=TwoWay}"
+                                  DisplayMemberPath="DisplayName"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                    </Grid>
+
+                    <!-- Input Gain -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="40"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Input Gain"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1"
+                                Value="{Binding InputGain}"
+                                Minimum="0" Maximum="2"
+                                TickFrequency="0.1"
+                                IsSnapToTickEnabled="True"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2"
+                                   Text="{Binding InputGain, StringFormat={}{0:F1}x}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"
+                                   VerticalAlignment="Center"
+                                   HorizontalAlignment="Right"/>
+                    </Grid>
+
+                    <!-- Microphone Test -->
+                    <TextBlock Text="MICROPHONE TEST"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource TealBrush}"
+                               Margin="0,8,0,8"/>
+
+                    <!-- Level Meter -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Level"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ProgressBar Grid.Column="1"
+                                     Value="{Binding MicTestLevel, Mode=OneWay}"
+                                     Minimum="0" Maximum="1"
+                                     Height="10"
+                                     Background="{StaticResource Surface0Brush}"
+                                     Foreground="{StaticResource GreenBrush}"
+                                     BorderThickness="0"/>
+                    </Grid>
+
+                    <!-- Test Status -->
+                    <TextBlock Text="{Binding MicTestStatus}"
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"/>
+
+                    <!-- Test Buttons -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                        <Button Content="Test Mic"
+                                Command="{Binding TestMicCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Stop"
+                                Command="{Binding StopTestMicCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Play Recording"
+                                Command="{Binding PlayTestRecordingCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Refresh Devices"
+                                Command="{Binding RefreshDevicesCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </StackPanel>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,20"/>
+
+                    <!-- ── Voice Hotkeys ───────────────────────────────── -->
+                    <TextBlock Text="VOICE HOTKEYS"
                                FontSize="11" FontWeight="Bold"
                                Foreground="{StaticResource PeachBrush}"
                                Margin="0,0,0,8"/>
@@ -1835,7 +1963,7 @@
                               FontSize="12"
                               Margin="0,0,0,6"/>
 
-                    <Grid Margin="0,0,0,20">
+                    <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="120"/>
                             <ColumnDefinition Width="*"/>
@@ -1846,6 +1974,138 @@
                                    VerticalAlignment="Center"/>
                         <TextBox Grid.Column="1"
                                  Text="{Binding PttKey, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="PTT Chord"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding PttChord, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Shutup Chord"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding ShutupChord, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <CheckBox Content="Enable VoiceHost"
+                              IsChecked="{Binding VoiceHostEnabled}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,8"/>
+
+                    <CheckBox Content="Prefer local TTS endpoint"
+                              IsChecked="{Binding VoicePreferLocalTts}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,8"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="VoiceHost URL"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceHostBaseUrl, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Health Path"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceHostHealthPath, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Host Startup ms"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceHostStartupTimeoutMs, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="ASR Timeout ms"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceAsrTimeoutMs, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Agent Timeout"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceAgentTimeoutMs, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Speak Timeout"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceSpeakingTimeoutMs, UpdateSourceTrigger=LostFocus}"
                                  Style="{StaticResource ChatInputStyle}"
                                  FontSize="12" Padding="8,6"/>
                     </Grid>
@@ -1886,6 +2146,7 @@
                 BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
@@ -1963,6 +2224,72 @@
                                          Converter={StaticResource BoolToVis}}"
                             Style="{StaticResource CancelButtonStyle}"/>
                 </Grid>
+
+                <!-- Voice debug panel (manual hold-to-talk + live transcript) -->
+                <Border Grid.Row="2"
+                        Grid.ColumnSpan="2"
+                        Margin="0,8,0,0"
+                        Padding="8,6"
+                        Background="{StaticResource Surface0Brush}"
+                        BorderBrush="{StaticResource Surface1Brush}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Button x:Name="PttButton"
+                                    Content="Hold to Talk"
+                                    Padding="12,5"
+                                    FontSize="11"
+                                    Foreground="{StaticResource TextBrush}"
+                                    Background="{StaticResource Surface1Brush}"
+                                    BorderBrush="{StaticResource BlueBrush}"
+                                    BorderThickness="1"
+                                    Cursor="Hand"
+                                    PreviewMouseLeftButtonDown="PttButton_MouseDown"
+                                    PreviewMouseLeftButtonUp="PttButton_MouseUp"
+                                    MouseLeave="PttButton_MouseLeave"/>
+
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding VoiceStatusText}"
+                                       FontSize="11"
+                                       Foreground="{StaticResource Subtext0Brush}"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"/>
+
+                            <Button Grid.Column="2"
+                                    Content="Stop"
+                                    Padding="10,4"
+                                    FontSize="10"
+                                    Click="VoiceStopButton_Click"
+                                    Visibility="{Binding IsVoiceActive,
+                                                 Converter={StaticResource BoolToVis}}"
+                                    Style="{StaticResource CancelButtonStyle}"/>
+                        </Grid>
+
+                        <TextBox Text="{Binding VoiceTranscriptText, Mode=OneWay}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 MaxHeight="100"
+                                 FontSize="11"
+                                 FontFamily="Consolas"
+                                 Foreground="{StaticResource TextBrush}"
+                                 Background="{StaticResource MantleBrush}"
+                                 BorderBrush="{StaticResource Surface1Brush}"
+                                 BorderThickness="1"
+                                 Padding="6,4"
+                                 Margin="0,6,0,0"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Visibility="{Binding IsVoiceActive,
+                                              Converter={StaticResource BoolToVis}}"/>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
     </Grid>

@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\..\packages\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
     <ProjectReference Include="..\..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
     <ProjectReference Include="..\..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
+    <ProjectReference Include="..\..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -24,6 +25,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="System.Speech" Version="8.0.0" />
   </ItemGroup>
 

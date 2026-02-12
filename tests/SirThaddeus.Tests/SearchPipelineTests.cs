@@ -104,7 +104,9 @@ public class UtilityRouterTests
 {
     [Theory]
     [InlineData("what's 15% of 230",  "calculator", "15% of 230 = **34.50**")]
+    [InlineData("what is 15 percent of 230", "calculator", "15% of 230 = **34.50**")]
     [InlineData("what's 10*45?",      "calculator", "10*45 = **450**")]
+    [InlineData("what is 6 plus 7?",  "calculator", "6 + 7 = **13**")]
     [InlineData("100 + 50",           "calculator", "100 + 50 = **150**")]
     public void Calculator_ReturnsInlineAnswer(string input, string category, string expected)
     {
@@ -629,6 +631,27 @@ public class SearchPipelineGoldenTests
         Assert.True(result.SuppressToolActivityUi);
 
         // No web_search calls
+        var searchCalls = mcp.Calls.Where(c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_CalculatorWordOperator_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("Should not be called for calculator");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what is 6 plus 7?");
+
+        Assert.True(result.Success);
+        Assert.Contains("6 + 7 = **13**", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Need another quick one", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
         var searchCalls = mcp.Calls.Where(c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.Empty(searchCalls);

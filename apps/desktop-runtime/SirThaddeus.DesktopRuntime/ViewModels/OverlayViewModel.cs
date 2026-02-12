@@ -4,6 +4,7 @@ using SirThaddeus.AuditLog;
 using SirThaddeus.Core;
 using SirThaddeus.PermissionBroker;
 using SirThaddeus.ToolRunner;
+using SirThaddeus.Voice;
 
 namespace SirThaddeus.DesktopRuntime.ViewModels;
 
@@ -17,6 +18,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private readonly IPermissionBroker _permissionBroker;
     private readonly IToolRunner _toolRunner;
     private readonly Action _requestShutdown;
+    private readonly IVoiceStateSource? _voiceStateSource;
     
     private bool _isDrawerOpen;
     private string _stateLabel = "";
@@ -31,13 +33,15 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         IAuditLogger auditLogger,
         IPermissionBroker permissionBroker,
         IToolRunner toolRunner,
-        Action requestShutdown)
+        Action requestShutdown,
+        IVoiceStateSource? voiceStateSource = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
         _permissionBroker = permissionBroker ?? throw new ArgumentNullException(nameof(permissionBroker));
         _toolRunner = toolRunner ?? throw new ArgumentNullException(nameof(toolRunner));
         _requestShutdown = requestShutdown ?? throw new ArgumentNullException(nameof(requestShutdown));
+        _voiceStateSource = voiceStateSource;
 
         // Initialize commands
         ToggleDrawerCommand = new RelayCommand(ToggleDrawer);
@@ -49,6 +53,8 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
         // Subscribe to state changes
         _controller.StateChanged += OnStateChanged;
+        if (_voiceStateSource is not null)
+            _voiceStateSource.StateChanged += OnVoiceStateChanged;
         
         // Initialize state
         UpdateStateDisplay();
@@ -202,8 +208,20 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
     private void OnStateChanged(object? sender, StateChangedEventArgs e)
     {
-        // Ensure we're on the UI thread
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        // Must be InvokeAsync (non-blocking) — these handlers fire on the voice
+        // orchestrator's single event-loop thread. Synchronous Dispatcher.Invoke
+        // blocks that thread until the UI processes the callback, which stalls
+        // the entire voice pipeline when the audit log is large.
+        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            UpdateStateDisplay();
+            RefreshAuditFeed();
+        });
+    }
+
+    private void OnVoiceStateChanged(object? sender, VoiceStateChangedEventArgs e)
+    {
+        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
         {
             UpdateStateDisplay();
             RefreshAuditFeed();
@@ -212,10 +230,37 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
     private void UpdateStateDisplay()
     {
+        if (_voiceStateSource is not null && _voiceStateSource.CurrentState != VoiceState.Idle)
+        {
+            StateLabel = VoiceStateToLabel(_voiceStateSource.CurrentState);
+            StateIcon = VoiceStateToIcon(_voiceStateSource.CurrentState);
+            return;
+        }
+
         var state = _controller.CurrentState;
         StateLabel = state.ToDisplayLabel();
         StateIcon = state.ToIconHint();
     }
+
+    private static string VoiceStateToLabel(VoiceState state) => state switch
+    {
+        VoiceState.Listening => "Listening",
+        VoiceState.Transcribing => "Transcribing",
+        VoiceState.Thinking => "Thinking",
+        VoiceState.Speaking => "Speaking",
+        VoiceState.Faulted => "Faulted",
+        _ => "Idle"
+    };
+
+    private static string VoiceStateToIcon(VoiceState state) => state switch
+    {
+        VoiceState.Listening => "Ear",
+        VoiceState.Transcribing => "Waveform",
+        VoiceState.Thinking => "Brain",
+        VoiceState.Speaking => "Speaker",
+        VoiceState.Faulted => "Error",
+        _ => "Idle"
+    };
 
     private void UpdateActiveTokenCount()
     {
@@ -307,5 +352,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
         _disposed = true;
         _controller.StateChanged -= OnStateChanged;
+        if (_voiceStateSource is not null)
+            _voiceStateSource.StateChanged -= OnVoiceStateChanged;
     }
 }

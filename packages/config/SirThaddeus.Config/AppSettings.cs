@@ -14,6 +14,9 @@ public sealed record AppSettings
     [JsonPropertyName("audio")]
     public AudioSettings Audio { get; init; } = new();
 
+    [JsonPropertyName("voice")]
+    public VoiceSettings Voice { get; init; } = new();
+
     [JsonPropertyName("ui")]
     public UiSettings Ui { get; init; } = new();
 
@@ -151,8 +154,101 @@ public sealed record AudioSettings
     [JsonPropertyName("pttKey")]
     public string PttKey { get; init; } = "F13";
 
+    [JsonPropertyName("pttChord")]
+    public string PttChord { get; init; } = "Ctrl+Shift+Space";
+
+    [JsonPropertyName("shutupChord")]
+    public string ShutupChord { get; init; } = "Ctrl+Shift+Escape";
+
     [JsonPropertyName("ttsEnabled")]
     public bool TtsEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Persisted product name of the selected input (recording) device.
+    /// Empty string means "use the system default device."
+    /// Matched by name at startup since device indices can shift between sessions.
+    /// </summary>
+    [JsonPropertyName("inputDeviceName")]
+    public string InputDeviceName { get; init; } = "";
+
+    /// <summary>
+    /// Persisted product name of the selected output (playback) device.
+    /// Empty string means "use WAVE_MAPPER (system default)."
+    /// </summary>
+    [JsonPropertyName("outputDeviceName")]
+    public string OutputDeviceName { get; init; } = "";
+
+    /// <summary>
+    /// Software input gain multiplier applied to captured audio.
+    /// 1.0 = unity (no change), 0.0 = mute, 2.0 = double amplitude.
+    /// Clamped to [0.0, 2.0] at runtime.
+    /// </summary>
+    [JsonPropertyName("inputGain")]
+    public double InputGain { get; init; } = 1.0;
+}
+
+/// <summary>
+/// Voice pipeline settings for local ASR/TTS orchestration.
+/// </summary>
+public sealed record VoiceSettings
+{
+    [JsonPropertyName("voiceHostEnabled")]
+    public bool VoiceHostEnabled { get; init; } = true;
+
+    [JsonPropertyName("voiceHostBaseUrl")]
+    public string VoiceHostBaseUrl { get; init; } = "http://127.0.0.1:17845";
+
+    [JsonPropertyName("voiceHostStartupTimeoutMs")]
+    public int VoiceHostStartupTimeoutMs { get; init; } = 60_000;
+
+    [JsonPropertyName("voiceHostHealthPath")]
+    public string VoiceHostHealthPath { get; init; } = "/health";
+
+    /// <summary>
+    /// Deprecated compatibility field. VoiceHostBaseUrl is authoritative.
+    /// </summary>
+    [JsonPropertyName("asrEndpoint")]
+    public string AsrEndpoint { get; init; } = "";
+
+    /// <summary>
+    /// Deprecated compatibility field. VoiceHostBaseUrl is authoritative.
+    /// </summary>
+    [JsonPropertyName("ttsEndpoint")]
+    public string TtsEndpoint { get; init; } = "";
+
+    [JsonPropertyName("preferLocalTts")]
+    public bool PreferLocalTts { get; init; } = true;
+
+    [JsonPropertyName("asrTimeoutMs")]
+    public int AsrTimeoutMs { get; init; } = 45_000;
+
+    [JsonPropertyName("agentTimeoutMs")]
+    public int AgentTimeoutMs { get; init; } = 90_000;
+
+    [JsonPropertyName("speakingTimeoutMs")]
+    public int SpeakingTimeoutMs { get; init; } = 30_000;
+
+    public string GetVoiceHostBaseUrl()
+    {
+        var raw = string.IsNullOrWhiteSpace(VoiceHostBaseUrl)
+            ? "http://127.0.0.1:17845"
+            : VoiceHostBaseUrl.Trim();
+        return raw.TrimEnd('/');
+    }
+
+    public string GetHealthUrl() => CombineWithBase(GetVoiceHostBaseUrl(), VoiceHostHealthPath);
+
+    public string GetAsrUrl() => CombineWithBase(GetVoiceHostBaseUrl(), "/asr");
+
+    public string GetTtsUrl() => CombineWithBase(GetVoiceHostBaseUrl(), "/tts");
+
+    private static string CombineWithBase(string baseUrl, string relativePath)
+    {
+        var safePath = string.IsNullOrWhiteSpace(relativePath) ? "/" : relativePath.Trim();
+        if (!safePath.StartsWith('/'))
+            safePath = "/" + safePath;
+        return baseUrl.TrimEnd('/') + safePath;
+    }
 }
 
 /// <summary>

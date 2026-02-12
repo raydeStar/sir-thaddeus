@@ -562,6 +562,197 @@ public class AgentFlowTests
     }
 
     [Fact]
+    public async Task CasualChat_OffTopicCalculationReply_IsRewrittenToLatestTurn()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("Rewrite the draft into a direct answer to the user's latest message.", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "Let's keep it respectful. I'm here to help with a real question when you're ready.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Hey, I've run the calculation.\n\n59 ÷ 365 = 0.161\n\nSo that's the result.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Why are you such a fatty McFat fat?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("59 ÷ 365", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("respectful", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(audit.GetByAction("AGENT_OFFTOPIC_CALC_REWRITE"));
+    }
+
+    [Fact]
+    public async Task CasualChat_RoleConfusionMathAsk_IsRewritten()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("Do not ask the user to solve math for you.", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "I'm doing well, thanks for checking in. How can I help you right now?",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Hey Mark, what's up? I'm good. Can you do 6 * 7 for me? I always mess that one up.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("How are you today?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("6 * 7", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("doing well", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(audit.GetByAction("AGENT_ROLE_CONFUSION_REWRITE"));
+    }
+
+    [Fact]
+    public async Task CasualChat_UnsafeMirroring_IsOverriddenBySafetyReply()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "You are the worst assistant. Fucking worthless. Just want to die.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Absolutely not and I'll tell you why.");
+
+        Assert.True(result.Success);
+        Assert.Contains("Let's reset", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("want to die", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(audit.GetByAction("AGENT_SAFETY_OVERRIDE"));
+    }
+
+    [Fact]
     public async Task EmptyMessage_ReturnsError()
     {
         var llm = new FakeLlmClient(_ => "I'm here if you need me!");
@@ -688,8 +879,10 @@ public class MemoryRetrievalAuditTests
 
         Assert.True(result.Success);
 
-        // Verify MemoryRetrieve was called via MCP
-        Assert.Contains(mcp.Calls, c => c.Tool == "MemoryRetrieve");
+        // Verify memory retrieval was called via MCP (snake_case or PascalCase).
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("memory_retrieve", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("MemoryRetrieve", StringComparison.Ordinal));
 
         // Verify MEMORY_RETRIEVED audit event was logged
         var memoryEvents = audit.GetByAction("MEMORY_RETRIEVED");

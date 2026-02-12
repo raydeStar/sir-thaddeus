@@ -1,14 +1,12 @@
-using System.IO;
 using System.Runtime.InteropServices;
 using SirThaddeus.AuditLog;
-using SirThaddeus.Core;
 
 namespace SirThaddeus.DesktopRuntime.Services;
 
 /// <summary>
-/// Push-to-talk service for voice input.
-/// Holds a key to start listening, releases to stop.
-/// Currently just records audio to a temp file - no transcription yet.
+/// Input-only push-to-talk service.
+/// Emits MicDown/MicUp/Shutup events and does not own recording,
+/// playback, or orchestration state transitions.
 /// </summary>
 public sealed class PushToTalkService : IDisposable
 {
@@ -36,54 +34,53 @@ public sealed class PushToTalkService : IDisposable
     private static extern IntPtr GetModuleHandle(string lpModuleName);
 
     // ─────────────────────────────────────────────────────────────────────
-    // NAudio (or stub) for audio capture
-    // Note: Full implementation would use NAudio; this is a stub skeleton
-    // ─────────────────────────────────────────────────────────────────────
-
-    // ─────────────────────────────────────────────────────────────────────
     // State
     // ─────────────────────────────────────────────────────────────────────
 
     private readonly IAuditLogger _auditLogger;
-    private readonly RuntimeController _runtimeController;
-    private readonly uint _activationKey;
-    private readonly string _audioFolder;
-    private readonly Func<string, Task>? _onRecordingComplete;
+    private readonly uint _legacyPttKey;
+    private readonly KeyChord? _pttChord;
+    private readonly KeyChord? _shutupChord;
 
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _hookProc;
     private bool _isListening;
-    private string? _currentRecordingPath;
-    private DateTime _recordingStartTime;
+    private bool _shutupLatched;
+    private readonly HashSet<uint> _pressedKeys = [];
     private bool _disposed;
+
+    /// <summary>
+    /// Raised when the configured push-to-talk input is pressed.
+    /// </summary>
+    public event Action? MicDown;
+
+    /// <summary>
+    /// Raised when the configured push-to-talk input is released.
+    /// </summary>
+    public event Action? MicUp;
+
+    /// <summary>
+    /// Raised when the configured "shutup" chord is pressed.
+    /// </summary>
+    public event Action? Shutup;
 
     /// <summary>
     /// Creates a new push-to-talk service.
     /// </summary>
     /// <param name="auditLogger">Audit logger for recording events.</param>
-    /// <param name="runtimeController">Runtime controller for state management.</param>
-    /// <param name="activationKey">Virtual key code for the PTT key (default: F13 = 0x7C).</param>
-    /// <param name="onRecordingComplete">
-    /// Optional callback invoked with the audio file path when recording stops.
-    /// This is the hook point for the transcription -> orchestrator pipeline.
-    /// </param>
+    /// <param name="legacyPttKey">Legacy single-key PTT binding (for backwards compatibility).</param>
+    /// <param name="pttChord">Optional chord PTT binding (e.g. Ctrl+Shift+Space).</param>
+    /// <param name="shutupChord">Optional chord for immediate cancellation.</param>
     public PushToTalkService(
         IAuditLogger auditLogger,
-        RuntimeController runtimeController,
-        uint activationKey = 0x7C, // VK_F13
-        Func<string, Task>? onRecordingComplete = null)
+        string legacyPttKey = "F13",
+        string? pttChord = "Ctrl+Shift+Space",
+        string? shutupChord = "Ctrl+Shift+Escape")
     {
-        _auditLogger = auditLogger;
-        _runtimeController = runtimeController;
-        _activationKey = activationKey;
-        _onRecordingComplete = onRecordingComplete;
-
-        // Create audio folder
-        _audioFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SirThaddeus",
-            "audio");
-        Directory.CreateDirectory(_audioFolder);
+        _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
+        _legacyPttKey = ParseVirtualKeyOrDefault(legacyPttKey, 0x7C);
+        _pttChord = ParseChord(pttChord);
+        _shutupChord = ParseChord(shutupChord);
     }
 
     /// <summary>
@@ -127,7 +124,9 @@ public sealed class PushToTalkService : IDisposable
             Result = "ok",
             Details = new Dictionary<string, object>
             {
-                ["activation_key"] = $"0x{_activationKey:X2}"
+                ["legacyPttKey"] = $"0x{_legacyPttKey:X2}",
+                ["pttChord"] = _pttChord?.RawText ?? "",
+                ["shutupChord"] = _shutupChord?.RawText ?? ""
             }
         });
 
@@ -147,7 +146,7 @@ public sealed class PushToTalkService : IDisposable
 
         if (_isListening)
         {
-            StopRecording();
+            _isListening = false;
         }
 
         _auditLogger.Append(new AuditEvent
@@ -163,130 +162,255 @@ public sealed class PushToTalkService : IDisposable
         if (nCode >= 0)
         {
             var vkCode = (uint)Marshal.ReadInt32(lParam);
+            var message = (int)wParam;
 
-            if (vkCode == _activationKey)
+            if (message == WM_KEYDOWN)
             {
-                if (wParam == WM_KEYDOWN && !_isListening)
-                {
-                    StartRecording();
-                }
-                else if (wParam == WM_KEYUP && _isListening)
-                {
-                    StopRecording();
-                }
+                _pressedKeys.Add(vkCode);
+                HandleKeyDown(vkCode);
+            }
+            else if (message == WM_KEYUP)
+            {
+                HandleKeyUp(vkCode);
+                _pressedKeys.Remove(vkCode);
             }
         }
 
         return CallNextHookEx(_hookId, nCode, wParam, lParam);
     }
 
-    private void StartRecording()
+    private void HandleKeyDown(uint vkCode)
     {
-        _isListening = true;
-        _recordingStartTime = DateTime.UtcNow;
-        _currentRecordingPath = Path.Combine(
-            _audioFolder,
-            $"ptt_{_recordingStartTime:yyyyMMdd_HHmmss}.wav");
-
-        // Update runtime state to Listening
-        _runtimeController.SetState(AssistantState.Listening, "PTT key held");
-
-        _auditLogger.Append(new AuditEvent
+        if (!_isListening && (MatchesLegacyPtt(vkCode) || MatchesChordOnKeyDown(vkCode, _pttChord)))
         {
-            Actor = "user",
-            Action = "PTT_RECORDING_START",
-            Result = "ok",
-            Details = new Dictionary<string, object>
+            _isListening = true;
+            MicDown?.Invoke();
+            _auditLogger.Append(new AuditEvent
             {
-                ["path"] = _currentRecordingPath
-            }
-        });
+                Actor = "user",
+                Action = "VOICE_MIC_DOWN",
+                Result = "ok"
+            });
+        }
 
-        // Note: Actual audio recording would be implemented here using NAudio
-        // For now this is just a skeleton that creates an empty placeholder
-        CreatePlaceholderWavFile(_currentRecordingPath);
-    }
-
-    private void StopRecording()
-    {
-        _isListening = false;
-        var duration = DateTime.UtcNow - _recordingStartTime;
-        var recordedPath = _currentRecordingPath;
-
-        // Transition: Listening -> Thinking (orchestrator will move to Idle on completion)
-        _runtimeController.SetState(AssistantState.Idle, "PTT key released");
-
-        _auditLogger.Append(new AuditEvent
+        if (!_shutupLatched && MatchesChordOnKeyDown(vkCode, _shutupChord))
         {
-            Actor = "user",
-            Action = "PTT_RECORDING_STOP",
-            Result = "ok",
-            Details = new Dictionary<string, object>
+            _shutupLatched = true;
+            Shutup?.Invoke();
+            _auditLogger.Append(new AuditEvent
             {
-                ["path"] = recordedPath ?? "",
-                ["duration_ms"] = (int)duration.TotalMilliseconds
-            }
-        });
-
-        _currentRecordingPath = null;
-
-        // Fire the pipeline callback if registered (async fire-and-forget)
-        if (_onRecordingComplete != null && recordedPath != null)
-        {
-            _ = Task.Run(async () =>
-            {
-                try { await _onRecordingComplete(recordedPath); }
-                catch (Exception ex)
-                {
-                    _auditLogger.Append(new AuditEvent
-                    {
-                        Actor = "runtime",
-                        Action = "PTT_PIPELINE_ERROR",
-                        Result = "error",
-                        Details = new Dictionary<string, object>
-                        {
-                            ["error"] = ex.Message
-                        }
-                    });
-                }
+                Actor = "user",
+                Action = "VOICE_SHUTUP",
+                Result = "ok"
             });
         }
     }
 
-    /// <summary>
-    /// Creates a minimal valid WAV file header as a placeholder.
-    /// Real implementation would use NAudio for actual recording.
-    /// </summary>
-    private static void CreatePlaceholderWavFile(string path)
+    private void HandleKeyUp(uint vkCode)
     {
-        // Create a minimal valid WAV file (44-byte header + no data)
-        using var fs = new FileStream(path, FileMode.Create);
-        using var bw = new BinaryWriter(fs);
+        if (_isListening && (MatchesLegacyPtt(vkCode) || IsChordTriggerKey(vkCode, _pttChord)))
+        {
+            _isListening = false;
+            MicUp?.Invoke();
+            _auditLogger.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "VOICE_MIC_UP",
+                Result = "ok"
+            });
+        }
 
-        // RIFF header
-        bw.Write("RIFF"u8);
-        bw.Write(36); // File size - 8 (placeholder)
-        bw.Write("WAVE"u8);
-
-        // fmt chunk
-        bw.Write("fmt "u8);
-        bw.Write(16); // Chunk size
-        bw.Write((short)1); // Audio format (PCM)
-        bw.Write((short)1); // Num channels
-        bw.Write(16000); // Sample rate
-        bw.Write(32000); // Byte rate
-        bw.Write((short)2); // Block align
-        bw.Write((short)16); // Bits per sample
-
-        // data chunk
-        bw.Write("data"u8);
-        bw.Write(0); // Data size (empty for placeholder)
+        if (_shutupChord is not null && vkCode == _shutupChord.TriggerKey)
+        {
+            _shutupLatched = false;
+        }
     }
 
     /// <summary>
-    /// Gets whether PTT is currently listening (key held).
+    /// Emits a Shutup event from non-keyboard paths (for example UI button).
+    /// </summary>
+    public void RequestShutup()
+    {
+        Shutup?.Invoke();
+        _auditLogger.Append(new AuditEvent
+        {
+            Actor = "user",
+            Action = "VOICE_SHUTUP",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["source"] = "request"
+            }
+        });
+    }
+
+    /// <summary>
+    /// Gets whether PTT input is currently held.
     /// </summary>
     public bool IsListening => _isListening;
+
+    private bool MatchesLegacyPtt(uint vkCode) => vkCode == _legacyPttKey;
+
+    private bool IsChordTriggerKey(uint vkCode, KeyChord? chord)
+        => chord is not null && vkCode == chord.TriggerKey;
+
+    private bool MatchesChordOnKeyDown(uint vkCode, KeyChord? chord)
+    {
+        if (chord is null || vkCode != chord.TriggerKey)
+            return false;
+
+        return AreModifiersPressed(chord.Modifiers);
+    }
+
+    private bool AreModifiersPressed(KeyModifiers required)
+    {
+        if (required.HasFlag(KeyModifiers.Control) &&
+            !(IsPressed(0xA2) || IsPressed(0xA3)))
+            return false;
+
+        if (required.HasFlag(KeyModifiers.Shift) &&
+            !(IsPressed(0xA0) || IsPressed(0xA1)))
+            return false;
+
+        if (required.HasFlag(KeyModifiers.Alt) &&
+            !(IsPressed(0xA4) || IsPressed(0xA5)))
+            return false;
+
+        if (required.HasFlag(KeyModifiers.Win) &&
+            !(IsPressed(0x5B) || IsPressed(0x5C)))
+            return false;
+
+        return true;
+    }
+
+    private bool IsPressed(uint vkCode) => _pressedKeys.Contains(vkCode);
+
+    private static KeyChord? ParseChord(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var raw = text.Trim();
+        var parts = raw.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return null;
+
+        var modifiers = KeyModifiers.None;
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            var token = parts[i];
+            if (token.Equals("ctrl", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("control", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Control;
+            }
+            else if (token.Equals("shift", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Shift;
+            }
+            else if (token.Equals("alt", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Alt;
+            }
+            else if (token.Equals("win", StringComparison.OrdinalIgnoreCase) ||
+                     token.Equals("meta", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Win;
+            }
+        }
+
+        if (!TryParseVirtualKey(parts[^1], out var trigger))
+            return null;
+
+        return new KeyChord(raw, trigger, modifiers);
+    }
+
+    private static uint ParseVirtualKeyOrDefault(string? keyText, uint fallback)
+        => TryParseVirtualKey(keyText, out var vk) ? vk : fallback;
+
+    private static bool TryParseVirtualKey(string? keyText, out uint vk)
+    {
+        vk = 0;
+        if (string.IsNullOrWhiteSpace(keyText))
+            return false;
+
+        var key = keyText.Trim();
+
+        if (key.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            uint.TryParse(key[2..], System.Globalization.NumberStyles.HexNumber, null, out var hex))
+        {
+            vk = hex;
+            return true;
+        }
+
+        if ((key.StartsWith('F') || key.StartsWith('f')) &&
+            int.TryParse(key[1..], out var fn) &&
+            fn is >= 1 and <= 24)
+        {
+            vk = (uint)(0x6F + fn);
+            return true;
+        }
+
+        if (key.Equals("space", StringComparison.OrdinalIgnoreCase))
+        {
+            vk = 0x20;
+            return true;
+        }
+
+        if (key.Equals("escape", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("esc", StringComparison.OrdinalIgnoreCase))
+        {
+            vk = 0x1B;
+            return true;
+        }
+
+        if (key.Equals("enter", StringComparison.OrdinalIgnoreCase))
+        {
+            vk = 0x0D;
+            return true;
+        }
+
+        if (key.Equals("tab", StringComparison.OrdinalIgnoreCase))
+        {
+            vk = 0x09;
+            return true;
+        }
+
+        if (key.Equals("backspace", StringComparison.OrdinalIgnoreCase))
+        {
+            vk = 0x08;
+            return true;
+        }
+
+        if (key.Length == 1)
+        {
+            var c = key[0];
+            if (char.IsLetter(c))
+            {
+                vk = (uint)char.ToUpperInvariant(c);
+                return true;
+            }
+            if (char.IsDigit(c))
+            {
+                vk = (uint)c;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [Flags]
+    private enum KeyModifiers
+    {
+        None = 0,
+        Control = 1 << 0,
+        Shift = 1 << 1,
+        Alt = 1 << 2,
+        Win = 1 << 3
+    }
+
+    private sealed record KeyChord(string RawText, uint TriggerKey, KeyModifiers Modifiers);
 
     /// <inheritdoc />
     public void Dispose()

@@ -94,9 +94,16 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         if (!File.Exists(_filePath))
             return [];
 
-        // Read all lines and take the last N
-        // For V0, this is acceptable; a production impl would read from the end
-        var lines = File.ReadAllLines(_filePath, Encoding.UTF8);
+        // Open with FileShare.ReadWrite so UI reads never block concurrent appends.
+        var lines = new List<string>();
+        using (var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+        {
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+                lines.Add(line);
+        }
+
         var relevantLines = lines.TakeLast(maxEvents);
 
         var events = new List<AuditEvent>();

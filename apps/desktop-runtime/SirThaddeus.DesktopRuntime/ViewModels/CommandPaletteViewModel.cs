@@ -38,6 +38,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private readonly IAuditLogger _audit;
     private readonly Action _closeWindow;
     private readonly IDialogueStatePersistence? _dialogueStatePersistence;
+    // Voice PTT delegates are now set as public properties (VoiceMicDown, VoiceMicUp, VoiceShutup)
+    // after construction — the ViewModel doesn't own the orchestrator.
 
     // ─────────────────────────────────────────────────────────────────
     // State
@@ -49,6 +51,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private string _connectionStatus = "Checking...";
     private bool _contextLocked;
     private CancellationTokenSource? _processingCts;
+
+    // ── Voice debug state ────────────────────────────────────────────
+    private string _voiceStatusText = "";
+    private string _voiceTranscriptText = "";
+    private bool _isVoiceActive;
+    // Old voice test fields removed — replaced by VoiceStatusText / VoiceTranscriptText / IsVoiceActive.
 
     private static readonly Regex TaggedThinkingRegex = new(
         @"<(?<tag>think|thinking|reasoning)>(?<body>[\s\S]*?)</\k<tag>>",
@@ -169,6 +177,46 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Voice Debug Properties (push-button ASR test panel)
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Current voice pipeline phase label (e.g. "Listening...", "Transcribing...").
+    /// </summary>
+    public string VoiceStatusText
+    {
+        get => _voiceStatusText;
+        set => SetProperty(ref _voiceStatusText, value);
+    }
+
+    /// <summary>
+    /// Live transcript / agent response text for debugging.
+    /// </summary>
+    public string VoiceTranscriptText
+    {
+        get => _voiceTranscriptText;
+        set => SetProperty(ref _voiceTranscriptText, value);
+    }
+
+    /// <summary>
+    /// True while a voice session is in progress (non-idle).
+    /// Controls visibility of the transcript debug area.
+    /// </summary>
+    public bool IsVoiceActive
+    {
+        get => _isVoiceActive;
+        set => SetProperty(ref _isVoiceActive, value);
+    }
+
+    /// <summary>
+    /// Delegates wired by the composition root to trigger PTT actions.
+    /// The ViewModel doesn't own the voice orchestrator directly.
+    /// </summary>
+    public Action? VoiceMicDown { get; set; }
+    public Action? VoiceMicUp  { get; set; }
+    public Action? VoiceShutup { get; set; }
 
     // ─────────────────────────────────────────────────────────────────
     // Commands
@@ -506,6 +554,47 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Content = content
         });
         MessageAdded?.Invoke();
+    }
+
+    /// <summary>
+    /// Appends a user chat bubble from the voice pipeline.
+    /// </summary>
+    public void AddVoiceUserMessage(string transcript)
+    {
+        if (string.IsNullOrWhiteSpace(transcript))
+            return;
+
+        AddMessage(ChatMessageRole.User, transcript.Trim());
+    }
+
+    /// <summary>
+    /// Appends an assistant chat bubble from the voice pipeline.
+    /// Applies the same cleaning/reasoning extraction path as typed chat.
+    /// </summary>
+    public void AddVoiceAssistantMessage(string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return;
+
+        var displayParts = ParseAssistantDisplayParts(responseText);
+        Messages.Add(new ChatMessageViewModel
+        {
+            Role = ChatMessageRole.Assistant,
+            Content = displayParts.DisplayText,
+            ThoughtContent = displayParts.ThinkingText
+        });
+        MessageAdded?.Invoke();
+    }
+
+    /// <summary>
+    /// Appends a voice diagnostics entry to the activity log.
+    /// </summary>
+    public void AddVoiceLog(string text, LogEntryKind kind = LogEntryKind.Info)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        AddLog(kind, text.Trim());
     }
 
     private void AddStatus(string content)

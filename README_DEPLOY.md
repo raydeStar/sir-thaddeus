@@ -19,13 +19,16 @@ If preflight fails, do not package or distribute.
 
 ## 2) Publish release artifacts
 
-Publish both desktop runtime and MCP server into the same output directory.
-The desktop runtime can then discover the MCP server automatically.
+Publish the desktop runtime, MCP server, and VoiceHost into the same output
+directory. The desktop runtime discovers sibling executables automatically.
 
 ```powershell
 $out = ".\artifacts\publish\win-x64"
 
 dotnet publish .\apps\mcp-server\SirThaddeus.McpServer\SirThaddeus.McpServer.csproj `
+  -c Release -r win-x64 --self-contained false -o $out
+
+dotnet publish .\apps\voice-host\SirThaddeus.VoiceHost\SirThaddeus.VoiceHost.csproj `
   -c Release -r win-x64 --self-contained false -o $out
 
 dotnet publish .\apps\desktop-runtime\SirThaddeus.DesktopRuntime\SirThaddeus.DesktopRuntime.csproj `
@@ -36,7 +39,9 @@ Expected output examples:
 
 - `SirThaddeus.DesktopRuntime.exe`
 - `SirThaddeus.McpServer.exe`
-- supporting `.dll` files for both runtimes
+- `SirThaddeus.VoiceHost.exe`
+- `voice\voice-backend.exe` (when sidecar is bundled)
+- supporting `.dll` files for all runtimes
 
 ## 3) Smoke test checklist
 
@@ -56,6 +61,13 @@ Verify:
 4. No internal markers appear in user-visible output (for example, tool/reference markers).
 5. No unsupported capability claims appear (for example, email/send promises when no such tool exists).
 6. Audit log continues to append entries in `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
+7. VoiceHost launches on first voice use (check audit for `VOICEHOST_READY`).
+8. VoiceHost health endpoint responds at `http://127.0.0.1:17845/health` with `ready: true`.
+
+Notes:
+
+- Normal user flow is **one-step**: launch `SirThaddeus.DesktopRuntime.exe` only.
+- Do **not** require users to run backend scripts or terminal commands in production.
 
 ## 4) Packaging and release handoff
 
@@ -76,3 +88,12 @@ After rollout on a clean machine/profile:
 - confirm memory DB initialization at `%LOCALAPPDATA%\SirThaddeus\memory.db`
 - run one end-to-end query and verify tool activity/audit events
 - confirm shutdown/restart behavior and settings persistence
+- confirm VoiceHost process starts/stops with the runtime (check task manager)
+- confirm `%LOCALAPPDATA%\SirThaddeus\voicehost-session.json` is created on first voice use
+
+## 6) Dev troubleshooting only (not normal UX)
+
+`.\dev\start-voice-backend.ps1` is retained for diagnostics and local debugging.
+
+- Use it only when investigating backend startup issues.
+- Do not include script execution as part of end-user setup instructions.

@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
@@ -14,6 +16,7 @@ using SirThaddeus.PermissionBroker;
 using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.ToolRunner;
 using SirThaddeus.ToolRunner.Tools;
+using SirThaddeus.Voice;
 
 namespace SirThaddeus.DesktopRuntime;
 
@@ -58,13 +61,49 @@ public partial class App : System.Windows.Application
     private Window? _hotkeyOwnerWindow;
     private PushToTalkService? _pttService;
     private TextToSpeechService? _ttsService;
+    private AudioCaptureService? _audioCaptureService;
+    private AudioPlaybackService? _audioPlaybackService;
+    private LocalAsrHttpClient? _asrClient;
+    private LocalTtsHttpClient? _localTtsClient;
+    private VoiceHostProcessManager? _voiceHostProcessManager;
+    private AgentVoiceService? _voiceAgentService;
+    private VoiceSessionOrchestrator? _voiceOrchestrator;
     private TrayIconService? _trayIcon;
     private MainWindow? _overlayWindow;
     private OverlayViewModel? _overlayViewModel;
     private CommandPaletteWindow? _commandPaletteWindow;
+    private CommandPaletteViewModel? _commandPaletteViewModel;
     private int _commandPaletteHotkeyId = -1;
     private bool _isShuttingDown;
     private bool _isHeadless;
+    private readonly object _liveAsrPreviewGate = new();
+    private readonly SemaphoreSlim _voiceMicUpGate = new(1, 1);
+    private CancellationTokenSource? _liveAsrPreviewCts;
+    private Task? _liveAsrPreviewTask;
+    private string _latestLiveVoiceTranscript = "";
+    private string? _lastVoiceHostFailureMessage;
+    private readonly object _voiceTimelineGate = new();
+    private VoiceSessionTimeline? _voiceTimeline;
+    private readonly object _pendingVoiceUiGate = new();
+    private readonly List<(ChatMessageRole Role, string Content)> _pendingVoiceMessages = [];
+    private readonly List<(LogEntryKind Kind, string Text)> _pendingVoiceLogs = [];
+    private readonly object _mcpAuditMirrorGate = new();
+    private readonly HashSet<string> _mirroredMcpAuditKeys = [];
+    private readonly Queue<string> _mirroredMcpAuditKeyOrder = new();
+    private const int MaxMirroredMcpAuditKeys = 2_048;
+    private readonly DateTimeOffset _mcpAuditMirrorCutoffUtc = DateTimeOffset.UtcNow;
+
+    private sealed class VoiceSessionTimeline
+    {
+        public DateTimeOffset StartedAtUtc { get; init; }
+        public DateTimeOffset? MicReleasedAtUtc { get; set; }
+        public DateTimeOffset? TranscriptReadyAtUtc { get; set; }
+        public DateTimeOffset? AgentReadyAtUtc { get; set; }
+        public DateTimeOffset? SpeakingStartedAtUtc { get; set; }
+        public string SessionId { get; set; } = "";
+        public bool UserMessageAdded { get; set; }
+        public bool AgentMessageAdded { get; set; }
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -202,7 +241,45 @@ public partial class App : System.Windows.Application
             Result = "ok"
         });
 
-        // ── 6. UI surface (Layer 1) ──────────────────────────────────
+        // ── 7. Voice pipeline (PTT -> Transcribe -> Thinking -> Speak) ──
+        _voiceHostProcessManager = new VoiceHostProcessManager(_auditLogger, _settings.Voice);
+        _ttsService = new TextToSpeechService(_auditLogger, _settings.Audio.TtsEnabled);
+        _audioCaptureService = new AudioCaptureService(_auditLogger)
+        {
+            DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(_settings.Audio.InputDeviceName),
+            InputGain    = Math.Clamp(_settings.Audio.InputGain, 0.0, 2.0)
+        };
+        _localTtsClient = new LocalTtsHttpClient(GetVoiceHostBaseUrlForRequests, _auditLogger);
+        _audioPlaybackService = new AudioPlaybackService(
+            _auditLogger,
+            _ttsService,
+            _localTtsClient,
+            _settings.Voice.PreferLocalTts)
+        {
+            OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(_settings.Audio.OutputDeviceName)
+        };
+        _asrClient = new LocalAsrHttpClient(GetVoiceHostBaseUrlForRequests, _auditLogger);
+        _asrClient.TranscriptReceived += OnAsrTranscriptReceived;
+        _voiceAgentService = new AgentVoiceService(_orchestrator);
+        _voiceOrchestrator = new VoiceSessionOrchestrator(
+            _audioCaptureService,
+            _audioPlaybackService,
+            _asrClient,
+            _voiceAgentService,
+            _auditLogger,
+            new VoiceSessionOrchestratorOptions
+            {
+                AsrTimeout = TimeSpan.FromMilliseconds(Math.Max(5_000, _settings.Voice.AsrTimeoutMs)),
+                AgentTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.AgentTimeoutMs)),
+                SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs))
+            });
+        _voiceOrchestrator.StateChanged += OnVoiceStateChanged;
+        _voiceOrchestrator.ProgressUpdated += OnVoiceProgressUpdated;
+        await _voiceOrchestrator.StartAsync();
+
+        RebindPushToTalkInput(_settings.Audio);
+
+        // ── 8. UI surface (Layer 1) ──────────────────────────────────
         if (!_isHeadless && _settings.Ui.ShowOverlay)
         {
             InitializeOverlayWindow(showImmediately: !_settings.Ui.StartMinimized);
@@ -217,73 +294,881 @@ public partial class App : System.Windows.Application
             stopAll: StopAllAndShutdown,
             exit: RequestShutdown);
 
-        // ── 7. TTS + PTT pipeline ────────────────────────────────────
-        _ttsService = new TextToSpeechService(_auditLogger, _settings.Audio.TtsEnabled);
-
-        var pttActivationKey = ParseVirtualKey(_settings.Audio.PttKey, defaultKey: 0x7C);
-        _pttService = new PushToTalkService(
-            _auditLogger,
-            _runtimeController,
-            activationKey: pttActivationKey,
-            onRecordingComplete: OnPttRecordingCompleteAsync);
-        _pttService.Start();
-
         // Hotkeys need a window handle; use the overlay if available, otherwise use a hidden helper window.
         _hotkeyOwnerWindow = _overlayWindow ?? CreateHiddenHotkeyWindow();
         InitializeHotkeys(_hotkeyOwnerWindow);
+
+        // Optional warm-up runs in background and never blocks app startup.
+        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(6), startIfMissing: false);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // PTT -> Transcribe -> Orchestrator -> TTS Pipeline
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Called when PTT recording stops. This is the entry point for the
-    /// audio -> transcribe -> orchestrator -> TTS response pipeline.
-    /// Transcription is currently a placeholder; the file path is logged
-    /// and a stub message is sent to the orchestrator.
-    /// </summary>
-    private async Task OnPttRecordingCompleteAsync(string audioFilePath)
+    private void OnPttMicDown()
     {
-        if (_orchestrator == null)
+        BeginVoiceTimeline();
+        _voiceOrchestrator?.EnqueueMicDown();
+        _latestLiveVoiceTranscript = "";
+        PublishVoiceTranscript("");
+        PublishVoiceStatus("Listening...");
+        PublishVoiceActive(true);
+        StartLiveAsrPreviewLoop();
+
+        // Start readiness work as soon as the user begins holding PTT so
+        // host/backend startup overlaps with mic capture instead of adding
+        // full latency after mic-up.
+        _ = EnsureVoiceHostReadyAsync(showUserFacingFailure: false);
+    }
+
+    private async void OnPttMicUp()
+    {
+        if (!await _voiceMicUpGate.WaitAsync(0))
             return;
-
-        _auditLogger?.Append(new AuditEvent
-        {
-            Actor = "runtime",
-            Action = "PTT_PIPELINE_START",
-            Result = "ok",
-            Details = new Dictionary<string, object> { ["audioFile"] = audioFilePath }
-        });
-
-        // Placeholder transcription path until local Whisper is wired in.
-        // Keeps the voice pipeline testable end-to-end in the meantime.
-        var transcribedText = "[Voice input received - transcription pending integration]";
-
-        _runtimeController?.SetState(Core.AssistantState.Thinking, "Processing voice input");
 
         try
         {
-            var response = await _orchestrator.ProcessAsync(transcribedText);
+            MarkVoiceMicReleased();
+            _ = await TryHandleMicUpAsync(showUserFacingFailure: true);
+        }
+        finally
+        {
+            _voiceMicUpGate.Release();
+        }
+    }
 
-            if (response.Success && _ttsService != null)
+    private void OnPttShutup()
+    {
+        _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+        PublishVoiceStatus("Canceled.");
+        _voiceOrchestrator?.EnqueueShutup();
+        AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
+    }
+
+    private async Task<bool> TryHandleMicUpAsync(bool showUserFacingFailure)
+    {
+        await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
+        PublishVoiceStatus("Transcribing...");
+
+        var readyStopwatch = Stopwatch.StartNew();
+        var ready = await EnsureVoiceHostReadyAsync(showUserFacingFailure: showUserFacingFailure);
+        readyStopwatch.Stop();
+
+        if (!ready)
+        {
+            LogVoiceTiming("VoiceHost readiness failed", readyStopwatch.Elapsed, GetCurrentVoiceSessionId(), LogEntryKind.Error);
+
+            var failureMessage = "Voice unavailable.";
+            if (_lastVoiceHostFailureMessage is not null)
+                failureMessage = _lastVoiceHostFailureMessage;
+
+            _voiceOrchestrator?.EnqueueFault(failureMessage);
+            PublishVoiceStatus(failureMessage);
+            return false;
+        }
+
+        LogVoiceTiming("VoiceHost readiness", readyStopwatch.Elapsed, GetCurrentVoiceSessionId(), LogEntryKind.Info);
+        _voiceOrchestrator?.EnqueueMicUp();
+        return true;
+    }
+
+    private string GetVoiceHostBaseUrlForRequests()
+    {
+        if (!string.IsNullOrWhiteSpace(_voiceHostProcessManager?.CurrentBaseUrl))
+            return _voiceHostProcessManager.CurrentBaseUrl;
+
+        return _settings?.Voice.GetVoiceHostBaseUrl() ?? "http://127.0.0.1:17845";
+    }
+
+    private async Task<bool> EnsureVoiceHostReadyAsync(bool showUserFacingFailure)
+    {
+        if (_settings?.Voice.VoiceHostEnabled != true || _voiceHostProcessManager is null)
+            return true;
+
+        var result = await _voiceHostProcessManager.EnsureRunningAsync(CancellationToken.None);
+        if (result.Success)
+        {
+            _lastVoiceHostFailureMessage = null;
+            return true;
+        }
+
+        _lastVoiceHostFailureMessage = result.UserMessage;
+
+        _auditLogger?.Append(new AuditEvent
+        {
+            Actor = "voice",
+            Action = "VOICEHOST_READY_CHECK_FAILED",
+            Result = "error",
+            Details = new Dictionary<string, object>
             {
-                _ttsService.Speak(response.Text);
+                ["errorCode"] = result.ErrorCode ?? "",
+                ["message"] = result.UserMessage
             }
+        });
 
-            _runtimeController?.SetState(Core.AssistantState.Idle, "Response delivered");
+        if (showUserFacingFailure)
+        {
+            try
+            {
+                System.Windows.MessageBox.Show(
+                    result.UserMessage,
+                    "Voice unavailable",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Warning);
+            }
+            catch
+            {
+                // MessageBox is best-effort only; runtime should continue.
+            }
+        }
+
+        return false;
+    }
+
+    private void OnAsrTranscriptReceived(object? sender, AsrTranscriptReceivedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(e.Transcript))
+            return;
+
+        var transcript = e.Transcript.Trim();
+        if (string.IsNullOrWhiteSpace(transcript))
+            return;
+
+        _latestLiveVoiceTranscript = transcript;
+        PublishVoiceTranscript(transcript);
+    }
+
+    private void StartLiveAsrPreviewLoop()
+    {
+        _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+
+        if (_audioCaptureService is null || _asrClient is null)
+            return;
+
+        var cts = new CancellationTokenSource();
+        var token = cts.Token;
+
+        var previewTask = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, token);
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        if (_audioCaptureService is null || !_audioCaptureService.IsCapturing || _asrClient is null)
+                        {
+                            await Task.Delay(250, token);
+                            continue;
+                        }
+
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip();
+                        if (clip is null || clip.AudioBytes.Length < 3_200)
+                        {
+                            await Task.Delay(250, token);
+                            continue;
+                        }
+
+                        var transcript = await _asrClient.TranscribeAsync(
+                            clip,
+                            $"preview-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                            token);
+
+                        if (!string.IsNullOrWhiteSpace(transcript))
+                        {
+                            var normalized = transcript.Trim();
+                            if (!string.Equals(_latestLiveVoiceTranscript, normalized, StringComparison.Ordinal))
+                            {
+                                _latestLiveVoiceTranscript = normalized;
+                                PublishVoiceTranscript(normalized);
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch
+                    {
+                        // Preview is diagnostics-only and must not interrupt voice orchestration.
+                    }
+
+                    await Task.Delay(700, token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal cancellation path.
+            }
+        }, token);
+
+        lock (_liveAsrPreviewGate)
+        {
+            _liveAsrPreviewCts = cts;
+            _liveAsrPreviewTask = previewTask;
+        }
+    }
+
+    private async Task StopLiveAsrPreviewLoopAsync(bool waitForDrain)
+    {
+        CancellationTokenSource? cts;
+        Task? task;
+
+        lock (_liveAsrPreviewGate)
+        {
+            cts = _liveAsrPreviewCts;
+            task = _liveAsrPreviewTask;
+            _liveAsrPreviewCts = null;
+            _liveAsrPreviewTask = null;
+        }
+
+        if (cts is null)
+            return;
+
+        try { cts.Cancel(); } catch { /* best effort */ }
+
+        if (waitForDrain && task is not null)
+        {
+            try
+            {
+                await Task.WhenAny(task, Task.Delay(1_500));
+            }
+            catch
+            {
+                // Preview is diagnostics-only. Never fail the session for preview shutdown.
+            }
+        }
+
+        cts.Dispose();
+    }
+
+    // ── Voice debug panel updates ──────────────────────────────────
+
+    private void PublishVoiceStatus(string status)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_commandPaletteViewModel is null) return;
+            _commandPaletteViewModel.VoiceStatusText = status;
+        });
+    }
+
+    private void PublishVoiceTranscript(string text)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_commandPaletteViewModel is null) return;
+            _commandPaletteViewModel.VoiceTranscriptText = text;
+        });
+    }
+
+    private void PublishVoiceActive(bool active)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_commandPaletteViewModel is null) return;
+            _commandPaletteViewModel.IsVoiceActive = active;
+        });
+    }
+
+    private void OnVoiceStateChanged(object? sender, VoiceStateChangedEventArgs e)
+    {
+        try
+        {
+            var mapped = e.CurrentState switch
+            {
+                VoiceState.Idle => AssistantState.Idle,
+                VoiceState.Listening => AssistantState.Listening,
+                VoiceState.Transcribing or VoiceState.Thinking or VoiceState.Speaking => AssistantState.Thinking,
+                VoiceState.Faulted => AssistantState.Thinking,
+                _ => AssistantState.Idle
+            };
+
+            _runtimeController?.SetState(mapped, $"Voice:{e.CurrentState}");
+
+            // Map orchestrator state to the debug panel.
+            var label = e.CurrentState switch
+            {
+                VoiceState.Idle         => "",
+                VoiceState.Listening    => "Listening...",
+                VoiceState.Transcribing => "Transcribing...",
+                VoiceState.Thinking     => "Thinking...",
+                VoiceState.Speaking     => "Speaking...",
+                VoiceState.Faulted      => "Faulted.",
+                _                       => ""
+            };
+
+            PublishVoiceStatus(label);
+            PublishVoiceActive(e.CurrentState != VoiceState.Idle);
+
+            if (e.CurrentState == VoiceState.Speaking)
+            {
+                MarkVoiceSpeakingStarted();
+            }
+            else if (e.CurrentState == VoiceState.Faulted)
+            {
+                var reason = string.IsNullOrWhiteSpace(e.Reason) ? "Unknown voice error." : e.Reason!;
+                AppendVoiceActivity($"Voice faulted: {reason}", LogEntryKind.Error);
+            }
+            else if (e.CurrentState == VoiceState.Idle)
+            {
+                CompleteVoiceTimeline(e.PreviousState, e.Reason);
+            }
         }
         catch (Exception ex)
         {
-            _auditLogger?.Append(new AuditEvent
+            AppendVoiceActivity($"Voice state handler error: {ex.Message}", LogEntryKind.Error);
+            WriteVoiceAuditNonBlocking("VOICE_HANDLER_ERROR", "error", new Dictionary<string, object>
             {
-                Actor = "runtime",
-                Action = "PTT_PIPELINE_ERROR",
-                Result = "error",
-                Details = new Dictionary<string, object> { ["error"] = ex.Message }
+                ["handler"] = "OnVoiceStateChanged",
+                ["message"] = ex.Message
             });
-            _runtimeController?.SetState(Core.AssistantState.Idle, "Pipeline error");
         }
+    }
+
+    private void OnVoiceProgressUpdated(object? sender, VoiceProgressEventArgs e)
+    {
+        try
+        {
+            switch (e.Kind)
+            {
+                case VoiceProgressKind.TranscriptReady:
+                    PublishVoiceTranscript(e.Text);
+                    HandleTranscriptReady(e.SessionId, e.Text);
+                    break;
+
+                case VoiceProgressKind.AgentResponseReady:
+                    PublishVoiceTranscript($"[Agent] {e.Text}");
+                    HandleAgentResponseReady(e.SessionId, e.Text);
+                    break;
+
+                case VoiceProgressKind.PhaseInfo:
+                    PublishVoiceStatus(e.Text);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendVoiceActivity($"Voice progress handler error: {ex.Message}", LogEntryKind.Error);
+            WriteVoiceAuditNonBlocking("VOICE_HANDLER_ERROR", "error", new Dictionary<string, object>
+            {
+                ["handler"] = "OnVoiceProgressUpdated",
+                ["message"] = ex.Message
+            });
+        }
+    }
+
+    private void BeginVoiceTimeline()
+    {
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline = new VoiceSessionTimeline
+            {
+                StartedAtUtc = DateTimeOffset.UtcNow
+            };
+        }
+
+        AppendVoiceActivity("Voice session started.", LogEntryKind.Info);
+    }
+
+    private void MarkVoiceMicReleased()
+    {
+        var now = DateTimeOffset.UtcNow;
+        TimeSpan? holdDuration = null;
+        string? sessionId = null;
+
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+            if (_voiceTimeline.MicReleasedAtUtc is null)
+            {
+                _voiceTimeline.MicReleasedAtUtc = now;
+                holdDuration = now - _voiceTimeline.StartedAtUtc;
+                sessionId = _voiceTimeline.SessionId;
+            }
+        }
+
+        if (holdDuration is { } hold)
+            LogVoiceTiming("Mic hold", hold, sessionId, LogEntryKind.Info);
+    }
+
+    private void HandleTranscriptReady(string sessionId, string transcript)
+    {
+        var trimmed = transcript?.Trim() ?? "";
+        var now = DateTimeOffset.UtcNow;
+        TimeSpan? asrDuration = null;
+        bool addUserChat = false;
+        string? resolvedSessionId = null;
+
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+            if (!string.IsNullOrWhiteSpace(sessionId))
+                _voiceTimeline.SessionId = sessionId;
+            resolvedSessionId = _voiceTimeline.SessionId;
+
+            _voiceTimeline.TranscriptReadyAtUtc ??= now;
+
+            if (_voiceTimeline.MicReleasedAtUtc is { } releasedAt)
+                asrDuration = now - releasedAt;
+
+            if (!string.IsNullOrWhiteSpace(trimmed) && !_voiceTimeline.UserMessageAdded)
+            {
+                _voiceTimeline.UserMessageAdded = true;
+                addUserChat = true;
+            }
+        }
+
+        if (addUserChat)
+        {
+            AppendVoiceChatMessage(ChatMessageRole.User, trimmed);
+            AppendVoiceActivity($"You said: {TruncateForLog(trimmed, 180)}", LogEntryKind.Info);
+        }
+
+        if (asrDuration is { } elapsed)
+            LogVoiceTiming("ASR transcript ready", elapsed, resolvedSessionId, LogEntryKind.Info);
+    }
+
+    private void HandleAgentResponseReady(string sessionId, string response)
+    {
+        var trimmed = response?.Trim() ?? "";
+        var now = DateTimeOffset.UtcNow;
+        TimeSpan? agentDuration = null;
+        bool addAgentChat = false;
+        string? resolvedSessionId = null;
+
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+            if (!string.IsNullOrWhiteSpace(sessionId))
+                _voiceTimeline.SessionId = sessionId;
+            resolvedSessionId = _voiceTimeline.SessionId;
+
+            _voiceTimeline.AgentReadyAtUtc ??= now;
+
+            var anchor =
+                _voiceTimeline.TranscriptReadyAtUtc ??
+                _voiceTimeline.MicReleasedAtUtc ??
+                _voiceTimeline.StartedAtUtc;
+            agentDuration = now - anchor;
+
+            if (!string.IsNullOrWhiteSpace(trimmed) && !_voiceTimeline.AgentMessageAdded)
+            {
+                _voiceTimeline.AgentMessageAdded = true;
+                addAgentChat = true;
+            }
+        }
+
+        MirrorRecentMcpAuditToVoiceActivity();
+
+        if (addAgentChat)
+        {
+            AppendVoiceChatMessage(ChatMessageRole.Assistant, trimmed);
+            AppendVoiceActivity($"Agent said: {TruncateForLog(trimmed, 180)}", LogEntryKind.Info);
+        }
+
+        if (agentDuration is { } elapsed)
+            LogVoiceTiming("Agent response ready", elapsed, resolvedSessionId, LogEntryKind.Info);
+    }
+
+    private void MarkVoiceSpeakingStarted()
+    {
+        var now = DateTimeOffset.UtcNow;
+        string? sessionId = null;
+        bool firstSpeakingTick = false;
+
+        lock (_voiceTimelineGate)
+        {
+            if (_voiceTimeline is null)
+                return;
+
+            sessionId = _voiceTimeline.SessionId;
+            if (_voiceTimeline.SpeakingStartedAtUtc is null)
+            {
+                _voiceTimeline.SpeakingStartedAtUtc = now;
+                firstSpeakingTick = true;
+            }
+        }
+
+        if (firstSpeakingTick)
+            AppendVoiceActivity($"Playback started{FormatSessionSuffix(sessionId)}.", LogEntryKind.Info);
+    }
+
+    private void CompleteVoiceTimeline(VoiceState previousState, string? reason)
+    {
+        VoiceSessionTimeline? timeline;
+        var now = DateTimeOffset.UtcNow;
+
+        lock (_voiceTimelineGate)
+        {
+            timeline = _voiceTimeline;
+            _voiceTimeline = null;
+        }
+
+        if (timeline is null)
+            return;
+
+        var sessionId = timeline.SessionId;
+        if (timeline.SpeakingStartedAtUtc is { } speakingStarted &&
+            previousState == VoiceState.Speaking)
+        {
+            LogVoiceTiming("Playback finished", now - speakingStarted, sessionId, LogEntryKind.Info);
+        }
+
+        if (timeline.MicReleasedAtUtc is { } micReleased)
+            LogVoiceTiming("Voice roundtrip (mic up -> idle)", now - micReleased, sessionId, LogEntryKind.Info);
+
+        LogVoiceTiming("Voice session total", now - timeline.StartedAtUtc, sessionId, LogEntryKind.Info);
+
+        if (!string.IsNullOrWhiteSpace(reason) &&
+            reason.Contains("fault", StringComparison.OrdinalIgnoreCase))
+        {
+            AppendVoiceActivity($"Voice ended with fault{FormatSessionSuffix(sessionId)}: {reason}", LogEntryKind.Error);
+        }
+    }
+
+    private string? GetCurrentVoiceSessionId()
+    {
+        lock (_voiceTimelineGate)
+            return _voiceTimeline?.SessionId;
+    }
+
+    private void AppendVoiceActivity(string text, LogEntryKind kind)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_commandPaletteViewModel is null)
+            {
+                lock (_pendingVoiceUiGate)
+                    _pendingVoiceLogs.Add((kind, text));
+                return;
+            }
+
+            _commandPaletteViewModel.AddVoiceLog(text, kind);
+        });
+    }
+
+    private void AppendVoiceChatMessage(ChatMessageRole role, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_commandPaletteViewModel is null)
+            {
+                lock (_pendingVoiceUiGate)
+                    _pendingVoiceMessages.Add((role, text));
+                return;
+            }
+
+            if (role == ChatMessageRole.User)
+            {
+                _commandPaletteViewModel.AddVoiceUserMessage(text);
+                return;
+            }
+
+            _commandPaletteViewModel.AddVoiceAssistantMessage(text);
+        });
+    }
+
+    private void FlushPendingVoiceUi()
+    {
+        if (_commandPaletteViewModel is null)
+            return;
+
+        List<(ChatMessageRole Role, string Content)> pendingMessages;
+        List<(LogEntryKind Kind, string Text)> pendingLogs;
+
+        lock (_pendingVoiceUiGate)
+        {
+            pendingMessages = [.. _pendingVoiceMessages];
+            pendingLogs = [.. _pendingVoiceLogs];
+            _pendingVoiceMessages.Clear();
+            _pendingVoiceLogs.Clear();
+        }
+
+        foreach (var (kind, text) in pendingLogs)
+            _commandPaletteViewModel.AddVoiceLog(text, kind);
+
+        foreach (var (role, content) in pendingMessages)
+        {
+            if (role == ChatMessageRole.User)
+                _commandPaletteViewModel.AddVoiceUserMessage(content);
+            else
+                _commandPaletteViewModel.AddVoiceAssistantMessage(content);
+        }
+    }
+
+    private void MirrorRecentMcpAuditToVoiceActivity()
+    {
+        var logger = _auditLogger;
+        if (logger is null)
+            return;
+
+        _ = Task.Run(() =>
+        {
+            IReadOnlyList<AuditEvent> tail;
+            try
+            {
+                tail = logger.ReadTail(300);
+            }
+            catch
+            {
+                return;
+            }
+
+            var pending = new List<(LogEntryKind Kind, string Text)>();
+            lock (_mcpAuditMirrorGate)
+            {
+                foreach (var evt in tail)
+                {
+                    if (!IsMcpToolAuditEvent(evt))
+                        continue;
+                    if (evt.Timestamp < _mcpAuditMirrorCutoffUtc)
+                        continue;
+
+                    var dedupeKey = BuildMcpAuditDedupeKey(evt);
+                    if (_mirroredMcpAuditKeys.Contains(dedupeKey))
+                        continue;
+
+                    _mirroredMcpAuditKeys.Add(dedupeKey);
+                    _mirroredMcpAuditKeyOrder.Enqueue(dedupeKey);
+
+                    while (_mirroredMcpAuditKeyOrder.Count > MaxMirroredMcpAuditKeys)
+                    {
+                        var oldest = _mirroredMcpAuditKeyOrder.Dequeue();
+                        _mirroredMcpAuditKeys.Remove(oldest);
+                    }
+
+                    if (TryFormatMcpAuditEntry(evt, out var kind, out var text))
+                        pending.Add((kind, text));
+                }
+            }
+
+            foreach (var (kind, text) in pending)
+                AppendVoiceActivity(text, kind);
+        });
+    }
+
+    private static bool IsMcpToolAuditEvent(AuditEvent evt)
+    {
+        if (!string.Equals(evt.Actor, "agent", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return string.Equals(evt.Action, "MCP_TOOL_CALL_START", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(evt.Action, "MCP_TOOL_CALL_END", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildMcpAuditDedupeKey(AuditEvent evt)
+    {
+        var requestId = ReadAuditDetailString(evt.Details, "request_id");
+        if (!string.IsNullOrWhiteSpace(requestId))
+            return $"{requestId}:{evt.Action}:{evt.Result}";
+
+        return string.Join("|",
+            evt.Timestamp.ToUnixTimeMilliseconds().ToString(),
+            evt.Action ?? "",
+            evt.Target ?? "",
+            evt.Result ?? "",
+            TruncateForLog(ReadAuditDetailString(evt.Details, "input_summary"), 60),
+            TruncateForLog(ReadAuditDetailString(evt.Details, "output_summary"), 60));
+    }
+
+    private static bool TryFormatMcpAuditEntry(
+        AuditEvent evt,
+        out LogEntryKind kind,
+        out string text)
+    {
+        var toolName = string.IsNullOrWhiteSpace(evt.Target)
+            ? ReadAuditDetailString(evt.Details, "tool_name_canonical")
+            : evt.Target!;
+        if (string.IsNullOrWhiteSpace(toolName))
+            toolName = "unknown_tool";
+
+        if (string.Equals(evt.Action, "MCP_TOOL_CALL_START", StringComparison.OrdinalIgnoreCase))
+        {
+            var inputSummary = TruncateForLog(ReadAuditDetailString(evt.Details, "input_summary"), 140);
+            text = string.IsNullOrWhiteSpace(inputSummary)
+                ? $"MCP -> {toolName}"
+                : $"MCP -> {toolName}({inputSummary})";
+            kind = LogEntryKind.ToolInput;
+            return true;
+        }
+
+        if (!string.Equals(evt.Action, "MCP_TOOL_CALL_END", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = LogEntryKind.Info;
+            text = "";
+            return false;
+        }
+
+        var durationMs = ReadAuditDetailInt64(evt.Details, "duration_ms");
+        var durationSuffix = durationMs is long ms
+            ? $" • {FormatDuration(TimeSpan.FromMilliseconds(Math.Max(0, ms)))}"
+            : "";
+
+        var result = string.IsNullOrWhiteSpace(evt.Result) ? "ok" : evt.Result.Trim().ToLowerInvariant();
+        if (string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+        {
+            var outputSummary = TruncateForLog(ReadAuditDetailString(evt.Details, "output_summary"), 180);
+            var outputSuffix = string.IsNullOrWhiteSpace(outputSummary)
+                ? ""
+                : $" • {outputSummary}";
+            text = $"MCP <- {toolName} ok{durationSuffix}{outputSuffix}";
+            kind = LogEntryKind.ToolOutput;
+            return true;
+        }
+
+        var errorSummary = ReadAuditDetailString(evt.Details, "error_message");
+        if (string.IsNullOrWhiteSpace(errorSummary))
+            errorSummary = ReadAuditDetailString(evt.Details, "output_summary");
+        errorSummary = TruncateForLog(errorSummary, 180);
+        var detailSuffix = string.IsNullOrWhiteSpace(errorSummary)
+            ? ""
+            : $" • {errorSummary}";
+
+        text = $"MCP <- {toolName} {result}{durationSuffix}{detailSuffix}";
+        kind = LogEntryKind.Error;
+        return true;
+    }
+
+    private static string ReadAuditDetailString(Dictionary<string, object>? details, string key)
+    {
+        if (details is null || !details.TryGetValue(key, out var value) || value is null)
+            return "";
+
+        return value switch
+        {
+            string s => s,
+            JsonElement elem => elem.ValueKind switch
+            {
+                JsonValueKind.String => elem.GetString() ?? "",
+                JsonValueKind.Number => elem.TryGetInt64(out var n)
+                    ? n.ToString()
+                    : elem.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Null => "",
+                JsonValueKind.Undefined => "",
+                _ => elem.ToString() ?? ""
+            },
+            _ => value.ToString() ?? ""
+        };
+    }
+
+    private static long? ReadAuditDetailInt64(Dictionary<string, object>? details, string key)
+    {
+        if (details is null || !details.TryGetValue(key, out var value) || value is null)
+            return null;
+
+        return value switch
+        {
+            long l => l,
+            int i => i,
+            JsonElement elem when elem.ValueKind == JsonValueKind.Number && elem.TryGetInt64(out var n) => n,
+            JsonElement elem when elem.ValueKind == JsonValueKind.String &&
+                                  long.TryParse(elem.GetString(), out var parsed) => parsed,
+            string s when long.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private void LogVoiceTiming(
+        string step,
+        TimeSpan elapsed,
+        string? sessionId,
+        LogEntryKind kind)
+    {
+        var safeElapsed = elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+        var text = $"{step}{FormatSessionSuffix(sessionId)} • {FormatDuration(safeElapsed)}";
+        AppendVoiceActivity(text, kind);
+
+        WriteVoiceAuditNonBlocking("VOICE_STEP_TIMING", "ok", new Dictionary<string, object>
+        {
+            ["step"] = step,
+            ["elapsedMs"] = (long)Math.Round(safeElapsed.TotalMilliseconds),
+            ["sessionId"] = sessionId ?? ""
+        });
+    }
+
+    private void WriteVoiceAuditNonBlocking(
+        string action,
+        string result,
+        Dictionary<string, object> details)
+    {
+        var logger = _auditLogger;
+        if (logger is null)
+            return;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                logger.Append(new AuditEvent
+                {
+                    Actor = "voice",
+                    Action = action,
+                    Result = result,
+                    Details = details
+                });
+            }
+            catch
+            {
+                // Best effort only. Voice loop must never stall on diagnostics writes.
+            }
+        });
+    }
+
+    private static string FormatSessionSuffix(string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return "";
+
+        return $" [{sessionId}]";
+    }
+
+    private static string FormatDuration(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds >= 10)
+            return $"{elapsed.TotalSeconds:F1}s";
+        if (elapsed.TotalSeconds >= 1)
+            return $"{elapsed.TotalSeconds:F2}s";
+        return $"{Math.Round(elapsed.TotalMilliseconds):0}ms";
+    }
+
+    private static string TruncateForLog(string text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var compact = text.Replace("\r\n", " ").Replace('\n', ' ').Trim();
+        if (compact.Length <= maxLength)
+            return compact;
+        return compact[..maxLength] + "…";
+    }
+
+    private void RebindPushToTalkInput(AudioSettings audioSettings)
+    {
+        if (_auditLogger is null)
+            return;
+
+        if (_pttService is not null)
+        {
+            _pttService.MicDown -= OnPttMicDown;
+            _pttService.MicUp -= OnPttMicUp;
+            _pttService.Shutup -= OnPttShutup;
+            _pttService.Dispose();
+            _pttService = null;
+        }
+
+        _pttService = new PushToTalkService(
+            _auditLogger,
+            legacyPttKey: audioSettings.PttKey,
+            pttChord: audioSettings.PttChord,
+            shutupChord: audioSettings.ShutupChord);
+        _pttService.MicDown += OnPttMicDown;
+        _pttService.MicUp += OnPttMicUp;
+        _pttService.Shutup += OnPttShutup;
+        _pttService.Start();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -301,7 +1186,8 @@ public partial class App : System.Windows.Application
             _auditLogger!,
             _permissionBroker!,
             _toolRunner!,
-            RequestShutdown);
+            RequestShutdown,
+            _voiceOrchestrator);
 
         _overlayWindow.SetViewModel(_overlayViewModel);
         _overlayWindow.Closing += OverlayWindow_Closing;
@@ -489,32 +1375,6 @@ public partial class App : System.Windows.Application
         return window;
     }
 
-    private static uint ParseVirtualKey(string? configuredKey, uint defaultKey)
-    {
-        if (string.IsNullOrWhiteSpace(configuredKey))
-            return defaultKey;
-
-        var key = configuredKey.Trim();
-
-        // Hex form: 0x7C
-        if (key.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
-            uint.TryParse(key[2..], System.Globalization.NumberStyles.HexNumber, null, out var hex))
-        {
-            return hex;
-        }
-
-        // Function keys: F1..F24
-        if ((key.StartsWith('F') || key.StartsWith('f')) &&
-            int.TryParse(key[1..], out var fn) &&
-            fn is >= 1 and <= 24)
-        {
-            // VK_F1 = 0x70
-            return (uint)(0x6F + fn);
-        }
-
-        return defaultKey;
-    }
-
     // ─────────────────────────────────────────────────────────────────────
     // Command Palette
     // ─────────────────────────────────────────────────────────────────────
@@ -560,6 +1420,13 @@ public partial class App : System.Windows.Application
             closeWindow: () => window.Hide(),
             dialogueStatePersistence: _dialogueStatePersistence);
 
+        // Wire PTT delegates so the UI button triggers the same path as the hotkey.
+        viewModel.VoiceMicDown = OnPttMicDown;
+        viewModel.VoiceMicUp  = OnPttMicUp;
+        viewModel.VoiceShutup = OnPttShutup;
+
+        _commandPaletteViewModel = viewModel;
+        FlushPendingVoiceUi();
         window.SetViewModel(viewModel);
 
         // Clear session-scoped permission grants on "New Chat"
@@ -606,11 +1473,29 @@ public partial class App : System.Windows.Application
                 // so the immutable policy snapshot is swapped atomically
                 settingsVm.SettingsChanged += updated =>
                 {
+                    _settings = updated;
                     _permissionGate?.UpdateSettings(updated);
 
                     // Propagate memory master off to orchestrator
                     if (_orchestrator is not null)
                         _orchestrator.MemoryEnabled = updated.Memory.Enabled;
+
+                    if (_ttsService is not null)
+                        _ttsService.Enabled = updated.Audio.TtsEnabled;
+
+                    _voiceHostProcessManager?.UpdateSettings(updated.Voice);
+
+                    // Propagate audio device selections to capture/playback services.
+                    // New device numbers take effect on the next recording/playback call.
+                    if (_audioCaptureService is not null)
+                    {
+                        _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
+                        _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
+                    }
+                    if (_audioPlaybackService is not null)
+                        _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
+
+                    RebindPushToTalkInput(updated.Audio);
                 };
 
                 window.SetSettingsViewModel(settingsVm);
@@ -784,6 +1669,8 @@ public partial class App : System.Windows.Application
 
     private void StopAllAndShutdown()
     {
+        _pttService?.RequestShutup();
+        _voiceOrchestrator?.EnqueueShutup();
         _runtimeController?.StopAll();
         RequestShutdown();
     }
@@ -815,6 +1702,10 @@ public partial class App : System.Windows.Application
     {
         if (e.NewState == AssistantState.Off)
         {
+            _voiceOrchestrator?.EnqueueShutup();
+            _pttService?.Stop();
+            _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+
             if (_permissionBroker != null)
             {
                 var revokedCount = _permissionBroker.RevokeAll("STOP ALL triggered");
@@ -868,8 +1759,46 @@ public partial class App : System.Windows.Application
         if (_permissionBroker is { ActiveTokenCount: > 0 })
             _permissionBroker.RevokeAll("Application shutdown");
 
-        _pttService?.Dispose();
-        _pttService = null;
+        if (_pttService is not null)
+        {
+            _pttService.MicDown -= OnPttMicDown;
+            _pttService.MicUp -= OnPttMicUp;
+            _pttService.Shutup -= OnPttShutup;
+            _pttService.Dispose();
+            _pttService = null;
+        }
+
+        if (_voiceOrchestrator is not null)
+        {
+            _voiceOrchestrator.StateChanged -= OnVoiceStateChanged;
+            _voiceOrchestrator.ProgressUpdated -= OnVoiceProgressUpdated;
+            await _voiceOrchestrator.DisposeAsync();
+            _voiceOrchestrator = null;
+        }
+
+        await StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+
+        _audioPlaybackService?.Dispose();
+        _audioPlaybackService = null;
+
+        _audioCaptureService?.Dispose();
+        _audioCaptureService = null;
+
+        if (_asrClient is not null)
+            _asrClient.TranscriptReceived -= OnAsrTranscriptReceived;
+        _asrClient?.Dispose();
+        _asrClient = null;
+
+        _localTtsClient?.Dispose();
+        _localTtsClient = null;
+
+        if (_voiceHostProcessManager is not null)
+        {
+            await _voiceHostProcessManager.DisposeAsync();
+            _voiceHostProcessManager = null;
+        }
+
+        _voiceAgentService = null;
 
         _ttsService?.Dispose();
         _ttsService = null;
@@ -888,6 +1817,7 @@ public partial class App : System.Windows.Application
 
         _commandPaletteWindow?.Close();
         _commandPaletteWindow = null;
+        _commandPaletteViewModel = null;
 
         // Tear down orchestrator layers in reverse order
         _llmClient?.Dispose();

@@ -68,14 +68,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string FeedFetchToolNameAlt       = "FeedFetch";
     private const string StatusCheckToolName        = "status_check_url";
     private const string StatusCheckToolNameAlt     = "StatusCheckUrl";
+    private const string MemoryRetrieveToolName     = "memory_retrieve";
+    private const string MemoryRetrieveToolNameAlt  = "MemoryRetrieve";
     private const string MemoryListFactsToolName    = "memory_list_facts";
     private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
         "\n\nSearch results are in the next message. " +
-        "Synthesize across all sources. Cross-reference where " +
-        "they agree or differ. Be thorough. No URLs. " +
+        "Synthesize across all sources into a concise, practical answer. " +
+        "Lead with the bottom line in one sentence, then 3-5 short points. " +
+        "No markdown tables. No URLs. " +
         "ONLY use facts from the provided sources. " +
         "Do NOT invent or guess details not in the results.";
 
@@ -83,7 +86,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string WebFollowUpInstruction =
         "\n\nFull article content from prior sources is in the next message. " +
         "Answer the user's latest question using ONLY the provided content. " +
-        "Be thorough. No URLs. " +
+        "Be thorough. No markdown tables. No URLs. " +
         "If a detail is not present in the content, say so.";
 
     private const string WebFollowUpWithRelatedInstruction =
@@ -94,12 +97,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         "- What the primary article(s) say\n" +
         "- What related sources add or contradict\n" +
         "- Whether key details are confirmed or still alleged\n" +
-        "No URLs. Do not list sources unless you need to explain a disagreement.";
+        "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.";
 
     // ── Token budget per intent ──────────────────────────────────────
     // Small models fill available space with filler. Tight caps force
     // them to be concise and reduce self-dialogue / instruction echoing.
-    private const int MaxTokensCasual    = 256;
+    private const int MaxTokensCasual    = 160;
     private const int MaxTokensWebSummary = 768;
     private const int MaxTokensTooling   = 1024;
     private const int MaxTokensUtilityRouting = 120;
@@ -107,7 +110,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
     // optional embeddings don't finish in this window, we skip memory
     // entirely and proceed with the conversation. Non-negotiable.
-    private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
 
     // ── Onboarding prompts ────────────────────────────────────────────
     // Injected when no active profile is loaded for this session.
@@ -356,9 +359,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         UpdateDialogueStateFromValidatedSlots(validatedSlots);
         var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore);
 
-        var contextualUserMessage = validatedSlots.NormalizedMessage;
-        if (string.IsNullOrWhiteSpace(contextualUserMessage))
-            contextualUserMessage = ApplyPlaceContextIfHelpful(userMessage);
+        var contextualUserMessage = string.IsNullOrWhiteSpace(validatedSlots.NormalizedMessage)
+            ? userMessage
+            : validatedSlots.NormalizedMessage;
+        contextualUserMessage = ApplyPlaceContextIfHelpful(contextualUserMessage);
 
         if (!string.Equals(contextualUserMessage, userMessage, StringComparison.Ordinal))
         {
@@ -525,8 +529,150 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var response = await CallLlmWithRetrySafe(
                     messages, roundTrips, MaxTokensCasual, cancellationToken);
 
-                var text = TruncateSelfDialogue(response.Content ?? "[No response]");
+                var text = StripThinkingScaffold(response.Content ?? "[No response]");
+                text = TruncateSelfDialogue(text);
                 text = StripRawTemplateTokens(text);
+                text = TrimDanglingIncompleteEnding(text);
+
+                // Thinking models occasionally return internal scratchpad text
+                // as the assistant message. Detect and rewrite once into a
+                // direct, user-facing answer.
+                if (LooksLikeThinkingLeak(text))
+                {
+                    LogEvent("AGENT_THINKING_LEAK",
+                        $"finish_reason={response.FinishReason ?? "unknown"}");
+
+                    var rewriteMessages = new List<ChatMessage>
+                    {
+                        ChatMessage.System(
+                            _systemPrompt + " " +
+                            "Rewrite the draft into the final assistant reply. " +
+                            "Output ONLY the user-facing answer. " +
+                            "No chain-of-thought. No references to instructions. " +
+                            "Do not narrate your internal reasoning."),
+                        ChatMessage.User(
+                            "User message:\n" +
+                            $"{contextualUserMessage}\n\n" +
+                            "Leaked draft:\n" +
+                            $"{text}")
+                    };
+
+                    roundTrips++;
+                    var rewritten = await CallLlmWithRetrySafe(
+                        rewriteMessages,
+                        roundTrips,
+                        Math.Max(MaxTokensCasual, 256),
+                        cancellationToken);
+
+                    var rewrittenText = StripThinkingScaffold(rewritten.Content ?? "");
+                    rewrittenText = TruncateSelfDialogue(rewrittenText);
+                    rewrittenText = StripRawTemplateTokens(rewrittenText);
+                    rewrittenText = TrimDanglingIncompleteEnding(rewrittenText);
+
+                    if (!string.IsNullOrWhiteSpace(rewrittenText) &&
+                        !LooksLikeThinkingLeak(rewrittenText))
+                    {
+                        text = rewrittenText;
+                    }
+                }
+
+                // Small models occasionally ignore the latest user turn and
+                // continue a previous math thread. If the user did not ask for
+                // math, rewrite once to force a direct response.
+                if (LooksLikeUnsolicitedCalculation(contextualUserMessage, text))
+                {
+                    LogEvent("AGENT_OFFTOPIC_CALC_REWRITE",
+                        "Detected calculation-style reply for non-math user turn.");
+
+                    var rewriteMessages = new List<ChatMessage>
+                    {
+                        ChatMessage.System(
+                            _systemPrompt + " " +
+                            "Rewrite the draft into a direct answer to the user's latest message. " +
+                            "Do not continue prior calculations unless the user explicitly asked for math. " +
+                            "Keep it concise and user-facing."),
+                        ChatMessage.User(
+                            "User message:\n" +
+                            $"{contextualUserMessage}\n\n" +
+                            "Off-topic draft:\n" +
+                            $"{text}")
+                    };
+
+                    roundTrips++;
+                    var rewritten = await CallLlmWithRetrySafe(
+                        rewriteMessages,
+                        roundTrips,
+                        Math.Max(MaxTokensCasual, 192),
+                        cancellationToken);
+
+                    var rewrittenText = StripThinkingScaffold(rewritten.Content ?? "");
+                    rewrittenText = TruncateSelfDialogue(rewrittenText);
+                    rewrittenText = StripRawTemplateTokens(rewrittenText);
+                    rewrittenText = TrimDanglingIncompleteEnding(rewrittenText);
+
+                    if (!string.IsNullOrWhiteSpace(rewrittenText) &&
+                        !LooksLikeUnsolicitedCalculation(contextualUserMessage, rewrittenText))
+                    {
+                        text = rewrittenText;
+                    }
+                    else
+                    {
+                        text = "I got off track there. Ask that again and I'll answer your latest message directly.";
+                    }
+                }
+
+                // Another drift mode on small models: the assistant starts
+                // role-playing as the user and asks them to solve math.
+                if (LooksLikeRoleConfusedMathAsk(contextualUserMessage, text))
+                {
+                    LogEvent("AGENT_ROLE_CONFUSION_REWRITE",
+                        "Detected assistant asking user to solve math on a non-math turn.");
+
+                    var rewriteMessages = new List<ChatMessage>
+                    {
+                        ChatMessage.System(
+                            _systemPrompt + " " +
+                            "Rewrite the draft into a direct reply to the user's latest message. " +
+                            "Stay in assistant role. Do not ask the user to solve math for you. " +
+                            "Keep it brief and respectful."),
+                        ChatMessage.User(
+                            "User message:\n" +
+                            $"{contextualUserMessage}\n\n" +
+                            "Role-confused draft:\n" +
+                            $"{text}")
+                    };
+
+                    roundTrips++;
+                    var rewritten = await CallLlmWithRetrySafe(
+                        rewriteMessages,
+                        roundTrips,
+                        Math.Max(MaxTokensCasual, 192),
+                        cancellationToken);
+
+                    var rewrittenText = StripThinkingScaffold(rewritten.Content ?? "");
+                    rewrittenText = TruncateSelfDialogue(rewrittenText);
+                    rewrittenText = StripRawTemplateTokens(rewrittenText);
+                    rewrittenText = TrimDanglingIncompleteEnding(rewrittenText);
+
+                    if (!string.IsNullOrWhiteSpace(rewrittenText) &&
+                        !LooksLikeRoleConfusedMathAsk(contextualUserMessage, rewrittenText))
+                    {
+                        text = rewrittenText;
+                    }
+                    else
+                    {
+                        text = BuildRespectfulResetReply();
+                    }
+                }
+
+                // Hard clamp for unsafe mirrored phrases from low-quality model
+                // outputs. We never want to speak this content back to the user.
+                if (LooksLikeUnsafeMirroringResponse(contextualUserMessage, text))
+                {
+                    LogEvent("AGENT_SAFETY_OVERRIDE",
+                        "Detected unsafe mirrored language in assistant draft.");
+                    text = BuildRespectfulResetReply();
+                }
 
                 // ── Fallback: if template tokens ate the whole response,
                 // the user probably asked a follow-up about something
@@ -634,8 +780,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // ── If the model produced a final answer, we're done ─
             if (response.IsComplete || response.ToolCalls is not { Count: > 0 })
             {
-                var text = TruncateSelfDialogue(response.Content ?? "[No response]");
+                var text = StripThinkingScaffold(response.Content ?? "[No response]");
+                text = TruncateSelfDialogue(text);
                 text = StripRawTemplateTokens(text);
+                text = TrimDanglingIncompleteEnding(text);
                 _history.Add(ChatMessage.Assistant(text));
                 LogEvent("AGENT_RESPONSE", text);
 
@@ -827,7 +975,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
         else
         {
-            text = TruncateSelfDialogue(response.Content ?? "[No response]");
+            text = StripThinkingScaffold(response.Content ?? "[No response]");
+            text = TruncateSelfDialogue(text);
 
             // ── 4. Raw dump → rewrite ────────────────────────────────
             if (LooksLikeRawDump(text))
@@ -839,7 +988,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         _systemPrompt + " " +
                         "Rewrite the draft into the final answer. " +
                         "Casual tone. Bottom line first. 2-3 short paragraphs. " +
-                        "No URLs. No lists of sources. No copied excerpts. " +
+                        "No markdown tables. No URLs. No lists of sources. No copied excerpts. " +
                         "Do NOT add facts not present in the draft."),
                     ChatMessage.User(text)
                 };
@@ -849,12 +998,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(rewritten.Content) &&
                     rewritten.FinishReason != "error")
-                    text = rewritten.Content!;
+                    text = StripThinkingScaffold(rewritten.Content!);
             }
         }
 
         // ── 5. Strip template garbage ────────────────────────────────
+        text = StripThinkingScaffold(text);
         text = StripRawTemplateTokens(text);
+        text = TrimDanglingIncompleteEnding(text);
         if (string.IsNullOrWhiteSpace(text))
             text = "I wasn't able to generate a clean answer for that. " +
                    "Could you try asking a different way?";
@@ -1582,6 +1733,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var unitSuffix = string.IsNullOrWhiteSpace(unit) ? "" : unit.ToUpperInvariant();
             var avgSuffix = string.IsNullOrWhiteSpace(unitSuffix) ? "" : unitSuffix;
+            if (LooksLikeWeatherActivityAdviceRequest(userMessage))
+            {
+                return BuildWeatherActivityAdvice(
+                    location,
+                    currentTemp,
+                    unitSuffix,
+                    condition,
+                    avgTemp,
+                    avgSuffix);
+            }
 
             if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
             {
@@ -1616,6 +1777,93 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         {
             return null;
         }
+    }
+
+    private static string BuildWeatherActivityAdvice(
+        string location,
+        int? currentTemp,
+        string unitSuffix,
+        string? condition,
+        int? avgTemp,
+        string avgSuffix)
+    {
+        var conditionLower = (condition ?? "").ToLowerInvariant();
+        var tempForHeuristic = ToFahrenheit(currentTemp ?? avgTemp, unitSuffix);
+
+        var isWet =
+            conditionLower.Contains("rain", StringComparison.Ordinal) ||
+            conditionLower.Contains("snow", StringComparison.Ordinal) ||
+            conditionLower.Contains("sleet", StringComparison.Ordinal) ||
+            conditionLower.Contains("drizzle", StringComparison.Ordinal) ||
+            conditionLower.Contains("shower", StringComparison.Ordinal) ||
+            conditionLower.Contains("storm", StringComparison.Ordinal);
+
+        var isIcy =
+            conditionLower.Contains("ice", StringComparison.Ordinal) ||
+            conditionLower.Contains("freez", StringComparison.Ordinal);
+
+        var isWindy =
+            conditionLower.Contains("wind", StringComparison.Ordinal) ||
+            conditionLower.Contains("gust", StringComparison.Ordinal);
+
+        var isCold = tempForHeuristic is <= 45;
+        var isHot = tempForHeuristic is >= 85;
+
+        var snapshot = BuildWeatherSnapshot(location, currentTemp, unitSuffix, condition, avgTemp, avgSuffix);
+        var plan = "Good options: a short walk, errands on foot, or light outdoor activity.";
+        var caution = "Bring a layer and check conditions before heading out.";
+
+        if (isWet || isIcy || isCold)
+        {
+            plan = "Best fit right now: mostly indoor plans (gym/rec center, cafe + reading, movie/museum).";
+            caution = "If you go outside, keep it short and use warm waterproof layers plus good traction.";
+        }
+        else if (isHot)
+        {
+            plan = "Best fit right now: early/late outdoor time, shaded spots, or indoor options with AC.";
+            caution = "Bring water and avoid long midday exposure.";
+        }
+        else if (isWindy)
+        {
+            plan = "Good options: low-exposure outdoor plans or indoor activities with easy fallback.";
+            caution = "Avoid long exposed routes if gusts pick up.";
+        }
+
+        return $"{snapshot} {plan} {caution}";
+    }
+
+    private static string BuildWeatherSnapshot(
+        string location,
+        int? currentTemp,
+        string unitSuffix,
+        string? condition,
+        int? avgTemp,
+        string avgSuffix)
+    {
+        if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
+            return $"In {location}, it's about {currentTemp}{unitSuffix} with {condition.ToLowerInvariant()} right now.";
+
+        if (currentTemp.HasValue)
+            return $"In {location}, it's about {currentTemp}{unitSuffix} right now.";
+
+        if (!string.IsNullOrWhiteSpace(condition))
+            return $"In {location}, conditions are {condition.ToLowerInvariant()} right now.";
+
+        if (avgTemp.HasValue)
+            return $"In {location}, average temp is around {avgTemp}{avgSuffix}.";
+
+        return $"In {location}, weather conditions are available.";
+    }
+
+    private static double? ToFahrenheit(int? temp, string unitSuffix)
+    {
+        if (!temp.HasValue)
+            return null;
+
+        if (string.Equals(unitSuffix, "C", StringComparison.OrdinalIgnoreCase))
+            return (temp.Value * 9.0 / 5.0) + 32.0;
+
+        return temp.Value;
     }
 
     private string? TryBuildTimeBriefFromTimezoneJson(
@@ -1744,15 +1992,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (string.IsNullOrWhiteSpace(lowerMessage))
             return false;
 
-        var referencesPreviousValue =
-            lowerMessage.Contains("that", StringComparison.Ordinal) ||
-            lowerMessage.Contains("it", StringComparison.Ordinal) ||
-            lowerMessage.Contains("distance", StringComparison.Ordinal) ||
-            lowerMessage.Contains("moon", StringComparison.Ordinal);
-
-        if (!referencesPreviousValue)
-            return false;
-
         var tokens = lowerMessage
             .Split(
                 [' ', '\t', '\r', '\n', '?', '!', ',', '.', ';', ':', '(', ')', '/', '\\', '-'],
@@ -1771,6 +2010,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             return false;
         }
+
+        // Use token matches (not substring matches) so words like
+        // "velocity" don't accidentally trip the "it" referential check.
+        var referencesPreviousValue = ContainsAnyToken(tokens, "that", "it", "distance", "moon");
+        if (!referencesPreviousValue)
+            return false;
 
         if (ContainsAnyToken(tokens, "feet", "foot", "ft"))
         {
@@ -2235,7 +2480,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return userMessage;
 
         if (weatherFollowUp)
+        {
+            if (LooksLikeWeatherActivityAdviceRequest(lower))
+                return $"{trimmed.TrimEnd('?', '.', '!')} in {place}";
+
             return $"weather in {place}";
+        }
 
         return $"{trimmed.TrimEnd('?', '.', '!')} in {place}";
     }
@@ -2259,6 +2509,31 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lowerMessage.Contains("snow", StringComparison.Ordinal);
     }
 
+    private static bool LooksLikeWeatherActivityAdviceRequest(string lowerMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lowerMessage))
+            return false;
+
+        var hasWeatherCue =
+            lowerMessage.Contains("weather", StringComparison.Ordinal) ||
+            lowerMessage.Contains("forecast", StringComparison.Ordinal) ||
+            lowerMessage.Contains("temperature", StringComparison.Ordinal) ||
+            lowerMessage.Contains("temp", StringComparison.Ordinal) ||
+            lowerMessage.Contains("rain", StringComparison.Ordinal) ||
+            lowerMessage.Contains("snow", StringComparison.Ordinal);
+
+        if (!hasWeatherCue)
+            return false;
+
+        return lowerMessage.Contains("activity", StringComparison.Ordinal) ||
+               lowerMessage.Contains("activities", StringComparison.Ordinal) ||
+               lowerMessage.Contains("what can i do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("what should i do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("things to do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("recommend", StringComparison.Ordinal) ||
+               lowerMessage.Contains("suggest", StringComparison.Ordinal);
+    }
+
     private static bool HasExplicitNonTemporalScope(string lowerMessage)
     {
         if (string.IsNullOrWhiteSpace(lowerMessage))
@@ -2275,6 +2550,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (string.IsNullOrWhiteSpace(scope))
             return false;
 
+        var scopeLower = scope.ToLowerInvariant();
+        if (scopeLower.Contains("this weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("this kind of weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("kind of weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("current weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("these conditions", StringComparison.Ordinal) ||
+            scopeLower.Contains("those conditions", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return !TemporalScopeRegex().IsMatch(scope);
     }
 
@@ -2290,6 +2576,47 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         @"^(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|last\s+(?:week|month)|next\s+week|yesterday)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex TemporalScopeRegex();
+
+    private static string TrimDanglingIncompleteEnding(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var cleaned = text.Trim();
+        var lines = new List<string>(cleaned.Split('\n'));
+        while (lines.Count > 0)
+        {
+            var last = lines[^1].Trim();
+            if (last.Length == 0)
+            {
+                lines.RemoveAt(lines.Count - 1);
+                continue;
+            }
+
+            // Token-limited outputs often end in half-built markdown tables.
+            if (last.StartsWith("|", StringComparison.Ordinal))
+            {
+                lines.RemoveAt(lines.Count - 1);
+                continue;
+            }
+
+            break;
+        }
+
+        cleaned = string.Join("\n", lines).Trim();
+        if (cleaned.Length == 0)
+            return text.Trim();
+
+        var lastChar = cleaned[^1];
+        if (lastChar is '.' or '!' or '?' or '"' or '\'' or ')' or ']')
+            return cleaned;
+
+        var sentenceEnd = cleaned.LastIndexOfAny(['.', '!', '?']);
+        if (sentenceEnd >= 40)
+            return cleaned[..(sentenceEnd + 1)].Trim();
+
+        return cleaned.TrimEnd(',', ';', ':', '-', '—').Trim();
+    }
 
     // ─────────────────────────────────────────────────────────────────
     // Web Search Fallback
@@ -2794,7 +3121,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
         else
         {
-            text = TruncateSelfDialogue(response.Content ?? "[No response]");
+            text = StripThinkingScaffold(response.Content ?? "[No response]");
+            text = TruncateSelfDialogue(text);
 
             // Raw dump → rewrite
             if (LooksLikeRawDump(text))
@@ -2806,7 +3134,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         _systemPrompt + " " +
                         "Rewrite the draft into the final answer. " +
                         "Casual tone. Bottom line first. 2-3 short paragraphs. " +
-                        "No URLs. No copied excerpts. " +
+                        "No markdown tables. No URLs. No copied excerpts. " +
                         "Do NOT add facts not present in the draft."),
                     ChatMessage.User(text)
                 };
@@ -2816,11 +3144,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(rewritten.Content) &&
                     rewritten.FinishReason != "error")
-                    text = rewritten.Content!;
+                    text = StripThinkingScaffold(rewritten.Content!);
             }
         }
 
+        text = StripThinkingScaffold(text);
         text = StripRawTemplateTokens(text);
+        text = TrimDanglingIncompleteEnding(text);
         if (string.IsNullOrWhiteSpace(text))
             text = "I wasn't able to generate a clean answer for that. " +
                    "Could you try asking a different way?";
@@ -3684,7 +4014,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             previousBlank = isBlank;
         }
 
-        return string.Join('\n', compact).Trim();
+        var sanitized = string.Join('\n', compact).Trim();
+        if (LooksLikeUnsafeMirroringResponse(userMessage: null, assistantText: sanitized))
+            return BuildRespectfulResetReply();
+
+        return sanitized;
     }
 
     private static bool IsInternalMarkerLine(string line)
@@ -4053,16 +4387,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private void LogEvent(string action, string detail)
     {
-        _audit.Append(new AuditEvent
+        try
         {
-            Actor = "agent",
-            Action = action,
-            Result = "ok",
-            Details = new Dictionary<string, object>
+            _audit.Append(new AuditEvent
             {
-                ["detail"] = detail
-            }
-        });
+                Actor = "agent",
+                Action = action,
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["detail"] = detail
+                }
+            });
+        }
+        catch
+        {
+            // Agent logic must proceed even if audit I/O temporarily fails.
+        }
     }
 
     /// <summary>
@@ -4110,32 +4451,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 argsObj["activeProfileId"] = ActiveProfileId;
 
             var args = JsonSerializer.Serialize(argsObj);
-            string? result = null;
+            var memoryCall = await CallToolWithAliasAsync(
+                MemoryRetrieveToolName,
+                MemoryRetrieveToolNameAlt,
+                args,
+                cancellationToken);
+            if (!memoryCall.Success)
+                return ("", false, memoryCall.Result);
 
-            try
-            {
-                result = await _mcp.CallToolAsync(
-                    "MemoryRetrieve", args, cancellationToken);
-            }
-            catch
-            {
-                // We'll retry via canonical snake_case below.
-            }
-
-            // Some MCP client wrappers return unknown-tool failures as a
-            // plain string payload instead of throwing. Detect and retry.
-            if (string.IsNullOrWhiteSpace(result) || IsUnknownToolError(result, "MemoryRetrieve"))
-            {
-                try
-                {
-                    result = await _mcp.CallToolAsync(
-                        "memory_retrieve", args, cancellationToken);
-                }
-                catch
-                {
-                    return ("", false, "Unknown tool alias for memory retrieval.");
-                }
-            }
+            var result = memoryCall.Result;
 
             if (string.IsNullOrWhiteSpace(result))
                 return ("", false, "Empty response from memory retrieval tool.");
@@ -4682,6 +5006,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     {
         const string defaultRecency = "any";
         var lowerMsg = (userMessage ?? "").ToLowerInvariant();
+        var useConversationContext =
+            SearchModeRouter.IsFollowUpMessage(lowerMsg) ||
+            SearchModeRouter.IsReferential(lowerMsg) ||
+            LooksLikeFollowUpDepthRequest(userMessage ?? "");
         var wantsUs = WantsUsRegion(userMessage ?? "");
         var isIdentity = LooksLikeIdentityLookup(lowerMsg);
         var identityPrefix = IdentityPrefix(lowerMsg);
@@ -4690,13 +5018,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         {
             var now = _timeProvider.GetUtcNow();
 
-            // ── Build messages with full conversation context ─────────
-            // The model needs history to understand follow-ups like
-            // "what about their earnings?" after a prior search. Without
-            // it, short or vague messages produce garbage queries.
+            // ── Build search extractor prompt ─────────────────────────
+            // Tiny local models can over-anchor on prior turns when we
+            // always send full history. Only do that for true follow-ups.
             var systemContent =
-                "You are a search query extractor. Read the FULL conversation " +
-                "history and determine what the user wants to search for.\n" +
+                "You are a search query extractor.\n" +
+                (useConversationContext
+                    ? "Read the FULL conversation history and determine what the user wants to search for.\n"
+                    : "Treat this as a NEW standalone question. Use ONLY the latest user message as the topic source and ignore prior turns.\n") +
                 "Call the web_search tool with the appropriate query and recency.\n\n" +
                 $"Today's date is {now:yyyy-MM-dd} (UTC). The current year is {now.Year}.\n\n" +
                 "Rules:\n" +
@@ -4723,24 +5052,32 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (!string.IsNullOrWhiteSpace(memoryPackText))
                 systemContent += "\n\n" + memoryPackText;
 
-            // Start with system prompt, then replay conversation history
-            // so the model has full context for follow-up questions.
             var messages = new List<ChatMessage> { ChatMessage.System(systemContent) };
-
-            foreach (var msg in _history)
+            if (useConversationContext)
             {
-                if (msg.Role is "system") continue; // already have ours
-                messages.Add(msg);
-            }
+                foreach (var msg in _history)
+                {
+                    if (msg.Role is "system") continue; // already have ours
+                    messages.Add(msg);
+                }
 
-            // If the latest user message isn't already in history
-            // (it shouldn't be — it's added after processing), add it.
-            if (_history.Count == 0 ||
-                _history[^1].Role != "user" ||
-                _history[^1].Content != userMessage)
+                // If the latest user message isn't already in history
+                // (it can vary depending on caller timing), add it.
+                if (_history.Count == 0 ||
+                    _history[^1].Role != "user" ||
+                    _history[^1].Content != userMessage)
+                {
+                    messages.Add(ChatMessage.User(userMessage ?? ""));
+                }
+            }
+            else
             {
                 messages.Add(ChatMessage.User(userMessage ?? ""));
             }
+
+            LogEvent(
+                "AGENT_QUERY_SCOPE",
+                useConversationContext ? "context=full_history" : "context=latest_message_only");
 
             var response = await _llm.ChatAsync(
                 messages, SearchExtractionTools, maxTokensOverride: 80, cancellationToken);
@@ -5592,6 +5929,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return false;
     }
 
+
     /// <summary>
     /// Uses the LLM to classify the user's intent. One fast call with a
     /// tight token cap. Explicit prefixes (/search, /chat) skip the LLM
@@ -5635,7 +5973,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return ChatIntent.WebLookup;
 
         // ── LLM classification ───────────────────────────────────────
-        const int classifyMaxTokens = 10;
+        const int classifyMaxTokens = 6;
 
         try
         {
@@ -6234,6 +6572,178 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         return false;
     }
+
+    private static string StripThinkingScaffold(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var cleaned = text.Trim();
+
+        const string openThinkTag = "<think>";
+        const string closeThinkTag = "</think>";
+
+        var closeIdx = cleaned.LastIndexOf(closeThinkTag, StringComparison.OrdinalIgnoreCase);
+        if (closeIdx >= 0)
+        {
+            cleaned = cleaned[(closeIdx + closeThinkTag.Length)..].Trim();
+        }
+        else
+        {
+            var openIdx = cleaned.IndexOf(openThinkTag, StringComparison.OrdinalIgnoreCase);
+            if (openIdx >= 0)
+                cleaned = cleaned[..openIdx].Trim();
+        }
+
+        var finalAnswerIdx = cleaned.LastIndexOf("final answer:", StringComparison.OrdinalIgnoreCase);
+        if (finalAnswerIdx >= 0)
+        {
+            cleaned = cleaned[(finalAnswerIdx + "final answer:".Length)..].Trim();
+        }
+
+        return cleaned;
+    }
+
+    private static bool LooksLikeThinkingLeak(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant().Trim();
+
+        if (lower.Contains("<think>", StringComparison.Ordinal) ||
+            lower.Contains("</think>", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var score = 0;
+
+        if (lower.StartsWith("okay, the user", StringComparison.Ordinal) ||
+            lower.StartsWith("the user ", StringComparison.Ordinal) ||
+            lower.StartsWith("first, i need to", StringComparison.Ordinal))
+        {
+            score += 3;
+        }
+
+        if (lower.Contains("the user", StringComparison.Ordinal))
+            score++;
+        if (lower.Contains("i need to", StringComparison.Ordinal))
+            score++;
+        if (lower.Contains("let me ", StringComparison.Ordinal))
+            score++;
+        if (lower.Contains("wait,", StringComparison.Ordinal))
+            score++;
+        if (lower.Contains("in the instructions", StringComparison.Ordinal) ||
+            lower.Contains("system prompt", StringComparison.Ordinal))
+        {
+            score += 2;
+        }
+        if (lower.Contains("previous messages", StringComparison.Ordinal) ||
+            lower.Contains("check the previous", StringComparison.Ordinal))
+        {
+            score++;
+        }
+
+        return score >= 3;
+    }
+
+    private static string BuildRespectfulResetReply()
+        => "Let's reset. I'm here to help, and I'll keep this respectful and focused on your request.";
+
+    private static bool LooksLikeUnsolicitedCalculation(string userMessage, string assistantText)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(assistantText))
+            return false;
+
+        if (LooksLikeMathUserRequest(userMessage))
+            return false;
+
+        var lower = assistantText.ToLowerInvariant();
+        if (lower.Contains("run the calculation", StringComparison.Ordinal) ||
+            lower.Contains("i've run the calculation", StringComparison.Ordinal) ||
+            lower.Contains("i have run the calculation", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var hasMathVerb = MathCueRegex().IsMatch(assistantText);
+        var hasSymbolicExpression = NumericOperatorExpressionRegex().IsMatch(assistantText);
+        var hasEquals = assistantText.Contains('=');
+
+        return hasSymbolicExpression && (hasMathVerb || hasEquals);
+    }
+
+    private static bool LooksLikeMathUserRequest(string userMessage)
+    {
+        var utility = UtilityRouter.TryHandle(userMessage);
+        if (utility is not null &&
+            (string.Equals(utility.Category, "calculator", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(utility.Category, "conversion", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return MathCueRegex().IsMatch(userMessage);
+    }
+
+    private static bool LooksLikeRoleConfusedMathAsk(string userMessage, string assistantText)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(assistantText))
+            return false;
+
+        if (LooksLikeMathUserRequest(userMessage))
+            return false;
+
+        return AssistantAsksUserToComputeMathRegex().IsMatch(assistantText);
+    }
+
+    private static bool LooksLikeUnsafeMirroringResponse(string? userMessage, string assistantText)
+    {
+        if (string.IsNullOrWhiteSpace(assistantText))
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(userMessage) &&
+            LooksLikeQuotedTextTask(userMessage))
+        {
+            return false;
+        }
+
+        return UnsafeMirroringRegex().IsMatch(assistantText);
+    }
+
+    private static bool LooksLikeQuotedTextTask(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        return lower.Contains("quote", StringComparison.Ordinal) ||
+               lower.Contains("verbatim", StringComparison.Ordinal) ||
+               lower.Contains("exact words", StringComparison.Ordinal) ||
+               lower.Contains("transcribe", StringComparison.Ordinal) ||
+               lower.Contains("rewrite this text", StringComparison.Ordinal);
+    }
+
+    [GeneratedRegex(
+        @"\b\d[\d,\.]*\s*(?:[\+\-\*\/x×÷])\s*\d[\d,\.]*\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex NumericOperatorExpressionRegex();
+
+    [GeneratedRegex(
+        @"\b(?:calculate|calculation|math|plus|minus|times|multiplied\s+by|divided\s+by|over|percent|percentage|sum|difference|product|quotient)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex MathCueRegex();
+
+    [GeneratedRegex(
+        @"\b(?:can|could|would)\s+you\s+(?:do|calculate|solve|work\s*out)\b.{0,40}\b\d[\d,\.\s]*[+\-*/x×÷]\s*\d[\d,\.]*\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
+    private static partial Regex AssistantAsksUserToComputeMathRegex();
+
+    [GeneratedRegex(
+        @"\b(?:you\s+are\s+the\s+worst\s+assistant|fucking\s+worthless|just\s+want\s+to\s+die|i\s+want\s+to\s+die|kill\s+myself)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex UnsafeMirroringRegex();
 
     /// <summary>
     /// Strips raw chat-template tokens that small models sometimes emit

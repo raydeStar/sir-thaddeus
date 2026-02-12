@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Optional bundled backend sidecar (preferred publish layout: ./voice/) -->
+  <ItemGroup Condition="Exists('..\..\voice-backend\dist\voice-backend.exe')">
+    <None Include="..\..\voice-backend\dist\voice-backend.exe"
+          Link="voice\voice-backend.exe"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Dev fallback assets; harmless in release when binary sidecar exists -->
+  <ItemGroup Condition="Exists('..\..\voice-backend\server.py')">
+    <None Include="..\..\voice-backend\server.py"
+          Link="voice\server.py"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\requirements.txt')">
+    <None Include="..\..\voice-backend\requirements.txt"
+          Link="voice\requirements.txt"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
