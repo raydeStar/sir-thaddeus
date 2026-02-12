@@ -55,6 +55,18 @@ public class PolicyGateTests
         Assert.False(policy.UseToolLoop);
     }
 
+    [Fact]
+    public void UtilityDeterministic_ExposesNoTools_AndSkipsToolLoop()
+    {
+        var policy = PolicyGate.Evaluate(Route(Intents.UtilityDeterministic));
+        var filtered = PolicyGate.FilterTools(AllTools, policy);
+
+        Assert.Empty(filtered);
+        Assert.False(policy.UseToolLoop);
+        Assert.Contains(policy.ForbiddenTools,
+            name => name.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Lookup Search
     // ─────────────────────────────────────────────────────────────────
@@ -245,6 +257,7 @@ public class PolicyGateTests
 
     [Theory]
     [InlineData(Intents.ChatOnly)]
+    [InlineData(Intents.UtilityDeterministic)]
     [InlineData(Intents.LookupSearch)]
     [InlineData(Intents.BrowseOnce)]
     [InlineData(Intents.OneShotDiscovery)]

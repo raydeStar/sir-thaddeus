@@ -59,6 +59,7 @@ public static class Intents
 {
     // ── No tools ─────────────────────────────────────────────────────
     public const string ChatOnly = "chat_only";
+    public const string UtilityDeterministic = "utility_deterministic";
 
     // ── Search ───────────────────────────────────────────────────────
     public const string LookupSearch = "lookup_search";

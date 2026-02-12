@@ -100,6 +100,39 @@ public class IntentClassificationTests
     }
 
     [Fact]
+    public async Task DeterministicTemperatureConversion_BypassesLlmClassification()
+    {
+        var classifyCalled = false;
+
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                classifyCalled = true;
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "This should not be needed for deterministic conversion.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("350F in C");
+
+        Assert.True(result.Success);
+        Assert.False(classifyCalled);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Contains("176.7", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ClassificationFailure_FallsBackToCasual()
     {
         // LLM throws on EVERY call — classification fails, falls back to casual.
@@ -1960,6 +1993,72 @@ public class PolicyFilteringTests
         Assert.DoesNotContain("web_search", toolNames);
         Assert.DoesNotContain("system_execute", toolNames);
         Assert.DoesNotContain("memory_store_facts", toolNames);
+    }
+
+    [Fact]
+    public async Task ToolLoop_BlocksToolCallsOutsidePolicyAllowList()
+    {
+        var requestedForbiddenTool = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (!requestedForbiddenTool && tools is { Count: > 0 })
+            {
+                requestedForbiddenTool = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_forbidden_001",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"not allowed here"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I cannot use that tool in this route.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => """{"base64":"fakeData","width":1920,"height":1080}""",
+                "web_search" => "this should never run",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What can you see on the screen right now?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+
+        var blockedCall = result.ToolCallsMade.FirstOrDefault(t =>
+            t.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(blockedCall);
+        Assert.False(blockedCall!.Success);
+        Assert.Contains("tool_not_permitted", blockedCall.Result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

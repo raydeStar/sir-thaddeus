@@ -71,6 +71,46 @@ public class ReasoningGuardrailsModeTests
     }
 
     [Fact]
+    public async Task GuardrailsAlways_SectionHeadingOptions_FallsBackToNormalPath()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (system.Contains("Infer the practical real-world goal", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"primary_goal":"Understand and assist the user.","alternative_goals":[],"confidence":0.75}""");
+
+            if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
+            {
+                return Respond(
+                    """{"entities":[],"options":[{"label":"Preconditions","preconditions":[],"effects":[]},{"label":"Action options","preconditions":[],"effects":[]}]}""");
+            }
+
+            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"constraints":["Choose the physically feasible option that directly completes the goal."]}""");
+
+            if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return Respond("chat");
+
+            return Respond("Normal assistant fallback.");
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "unused");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ReasoningGuardrailsMode = "always"
+        };
+
+        var result = await agent.ProcessAsync("Hello, how are you today?");
+
+        Assert.True(result.Success);
+        Assert.False(result.GuardrailsUsed);
+        Assert.Equal("Normal assistant fallback.", result.Text);
+        Assert.Empty(result.GuardrailsRationale);
+    }
+
+    [Fact]
     public async Task GuardrailsRationale_DoesNotLeakChainOfThought()
     {
         var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");

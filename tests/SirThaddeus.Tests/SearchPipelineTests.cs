@@ -304,6 +304,43 @@ public class UtilityRouterTests
     }
 }
 
+public class DeterministicUtilityEngineTests
+{
+    [Theory]
+    [InlineData("350F in C", DeterministicMatchConfidence.High)]
+    [InlineData("If I set it to 350 F what is that in C?", DeterministicMatchConfidence.Medium)]
+    [InlineData("I'm baking - if I set it to 350F what is that in C?", DeterministicMatchConfidence.Medium)]
+    public void TemperatureVariants_RouteDeterministically(
+        string input,
+        DeterministicMatchConfidence expectedConfidence)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        Assert.NotNull(result);
+        Assert.Equal(expectedConfidence, result!.Confidence);
+        Assert.Equal("conversion", result.Result.Category);
+        Assert.Contains("176.7", result.Result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("C", result.Result.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("100 C in K", "373.2K")]
+    [InlineData("300 K in C", "26.9°C")]
+    public void KelvinConversions_UseOneDecimal(string input, string expected)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        Assert.NotNull(result);
+        Assert.Equal("conversion", result!.Result.Category);
+        Assert.Contains(expected, result.Result.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EthanolBoilingPoint_IsNotDeterministicConversion()
+    {
+        var result = DeterministicPreRouter.TryRoute("what's the boiling point of ethanol?");
+        Assert.Null(result);
+    }
+}
+
 #endregion
 
 #region ── Story Clustering ───────────────────────────────────────────────
@@ -733,6 +770,30 @@ public class SearchPipelineGoldenTests
         var searchCalls = mcp.Calls.Where(c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.Empty(searchCalls);
+    }
+
+    [Theory]
+    [InlineData("350F in C")]
+    [InlineData("If I set it to 350 F what is that in C?")]
+    [InlineData("I'm baking - if I set it to 350F what is that in C?")]
+    public async Task UtilityBypass_DeterministicTemperatureVariants_NoWebSearch(string input)
+    {
+        var llm = new FakeLlmClient("LLM classify should be bypassed for deterministic temperature conversion");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(input);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Contains("176.7", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("C", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1373,6 +1434,30 @@ public class SearchPipelineGoldenTests
 
         Assert.True(result.Success);
         Assert.False(result.GuardrailsUsed);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task NonDeterministicFact_EthanolBoilingPoint_CanUseWebSearch()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"boiling point of ethanol","type":"topic","hint":"chemistry"}""",
+            queryJson: """{"query":"boiling point of ethanol","recency":"any"}""",
+            summaryText: "At standard pressure, ethanol boils near 78.37 C.");
+
+        var searchResult =
+            "1. Ethanol boiling point reference\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/ethanol-boiling-point\",\"title\":\"Ethanol Boiling Point\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what's the boiling point of ethanol?");
+
+        Assert.True(result.Success);
         Assert.Contains(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
     }

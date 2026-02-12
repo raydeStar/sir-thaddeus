@@ -77,6 +77,18 @@ public static class PolicyGate
             RequiredPermissions = []
         },
 
+        // ── Deterministic utility: inline-only, no web/search ────────
+        // This route is used for strict deterministic math/conversion
+        // requests. No tools are exposed and the executor stays out of
+        // the tool loop entirely.
+        [Intents.UtilityDeterministic] = new PolicyDecision
+        {
+            AllowedTools        = [],
+            ForbiddenTools      = ["web_search", "WebSearch", "browser_navigate"],
+            UseToolLoop         = false,
+            RequiredPermissions = []
+        },
+
         // ── Web search: search tool only ─────────────────────────────
         // Deterministic path — search is called directly, not via the
         // tool loop. This entry exists for validation/audit purposes.

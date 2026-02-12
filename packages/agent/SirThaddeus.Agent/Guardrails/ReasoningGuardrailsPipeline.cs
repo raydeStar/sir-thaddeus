@@ -1769,6 +1769,24 @@ internal sealed record EvaluationDecision(
 
 internal sealed class OptionEvaluator
 {
+    private static readonly HashSet<string> NonActionOptionLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "preconditions",
+        "precondition",
+        "action options",
+        "options",
+        "constraints",
+        "constraint",
+        "goal",
+        "goals",
+        "decision",
+        "analysis",
+        "steps",
+        "step",
+        "reasoning",
+        "rationale"
+    };
+
     private static readonly string[] PhysicalActionHints =
     [
         "go ",
@@ -1857,14 +1875,20 @@ internal sealed class OptionEvaluator
         if (entities.Options.Count == 0)
             return null;
 
-        var results = new List<EvaluatedOption>(entities.Options.Count);
+        var candidateOptions = entities.Options
+            .Where(o => IsActionLikeOptionLabel(o.Label))
+            .ToList();
+        if (candidateOptions.Count < 2)
+            return null;
+
+        var results = new List<EvaluatedOption>(candidateOptions.Count);
         var lowerQuestion = (userMessage ?? "").ToLowerInvariant();
         var lowerGoal = (goal.PrimaryGoal ?? "").ToLowerInvariant();
         var requiredEntities = entities.Entities
             .Where(e => e.Required)
             .ToList();
 
-        foreach (var option in entities.Options)
+        foreach (var option in candidateOptions)
         {
             var score = 0.0;
             var principlePassCount = 0;
@@ -2025,6 +2049,35 @@ internal sealed class OptionEvaluator
             SelectedAction: selected.Label,
             ConstraintSummary: constraintSummary,
             EvaluatedOptions: results);
+    }
+
+    private static bool IsActionLikeOptionLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return false;
+
+        var trimmed = label.Trim().Trim('"', '\'', '*').TrimEnd('.', '!', '?', ':', ';');
+        if (trimmed.Length < 3)
+            return false;
+
+        var lower = trimmed.ToLowerInvariant();
+        if (NonActionOptionLabels.Contains(lower))
+            return false;
+
+        // Reject obvious scaffold headings even when prefixed.
+        if (lower.StartsWith("preconditions", StringComparison.Ordinal) ||
+            lower.StartsWith("constraints", StringComparison.Ordinal) ||
+            lower.StartsWith("action options", StringComparison.Ordinal) ||
+            lower.StartsWith("decision", StringComparison.Ordinal) ||
+            lower.StartsWith("analysis", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return ContainsAny(lower, PhysicalActionHints) ||
+               ContainsAny(lower, IndirectActionHints) ||
+               ContainsAny(lower, StallingActionHints) ||
+               ContainsAny(lower, GoalCompletionHints);
     }
 
     private static bool IsLikelyRemoteSubstitute(

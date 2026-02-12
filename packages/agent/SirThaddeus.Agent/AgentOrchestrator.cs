@@ -459,13 +459,35 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             // ── Utility bypass: weather, time, calc, conversion ────────
             // Intercepted BEFORE the search pipeline to avoid overhead.
-            var utilityResult = BuildUtilityResultFromToolPlan(toolPlan, contextualUserMessage);
+            var deterministicRouteRequested = IsDeterministicInlineRoute(route);
+            UtilityRouter.UtilityResult? utilityResult = null;
+
+            // Deterministic utility engine always runs first so this path
+            // stays model-free and web-free for obvious conversion/math asks.
+            var deterministicMatch = DeterministicPreRouter.TryRoute(contextualUserMessage);
+            if (deterministicMatch is not null)
+            {
+                utilityResult = ToUtilityResult(deterministicMatch);
+                LogEvent(
+                    "DETERMINISTIC_INLINE_ROUTE",
+                    $"confidence={deterministicMatch.Confidence}, category={deterministicMatch.Result.Category}");
+            }
+
+            utilityResult ??= BuildUtilityResultFromToolPlan(toolPlan, contextualUserMessage);
             utilityResult ??= TryHandleUtilityFollowUpWithContext(contextualUserMessage)
                 ?? UtilityRouter.TryHandle(contextualUserMessage);
-            if (utilityResult is null)
+
+            if (utilityResult is null && !deterministicRouteRequested)
             {
                 utilityResult = await TryInferUtilityRouteWithLlmAsync(
                     contextualUserMessage, cancellationToken);
+            }
+
+            if (utilityResult is null && deterministicRouteRequested)
+            {
+                LogEvent(
+                    "DETERMINISTIC_INLINE_MISS",
+                    "Pre-router selected deterministic path, but utility parse failed at execution.");
             }
             if (utilityResult is not null)
             {
@@ -788,6 +810,26 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 // web search before giving up. ──────────────────────────
                 if (string.IsNullOrWhiteSpace(text))
                 {
+                    if (IsDeterministicInlineRoute(route))
+                    {
+                        const string deterministicFallback =
+                            "I could not finish that deterministic conversion. " +
+                            "Try a direct format like \"350F in C\".";
+                        LogEvent("DETERMINISTIC_NO_WEB_ENFORCED",
+                            "Suppressed chat fallback web search for deterministic route.");
+                        _history.Add(ChatMessage.Assistant(deterministicFallback));
+                        LogEvent("AGENT_RESPONSE", deterministicFallback);
+                        return AttachContextSnapshot(new AgentResponse
+                        {
+                            Text = deterministicFallback,
+                            Success = true,
+                            ToolCallsMade = toolCallsMade,
+                            LlmRoundTrips = roundTrips,
+                            SuppressSourceCardsUi = true,
+                            SuppressToolActivityUi = true
+                        });
+                    }
+
                     LogEvent("CHAT_FALLBACK_TO_SEARCH",
                         "Response was all template garbage — " +
                         "falling back to web search.");
@@ -862,6 +904,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         int roundTrips,
         CancellationToken cancellationToken)
     {
+        var allowedToolNames = new HashSet<string>(
+            tools.Select(t => t.Function.Name),
+            StringComparer.OrdinalIgnoreCase);
+
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -914,18 +960,34 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 string result;
                 bool success;
-                try
+                if (!allowedToolNames.Contains(toolCall.Function.Name))
                 {
-                    result = await _mcp.CallToolAsync(
-                        toolCall.Function.Name,
-                        toolCall.Function.Arguments,
-                        cancellationToken);
-                    success = true;
-                }
-                catch (Exception ex)
-                {
-                    result = $"Tool error: {ex.Message}";
+                    result = JsonSerializer.Serialize(new
+                    {
+                        error = "tool_not_permitted",
+                        tool = toolCall.Function.Name,
+                        reason = "Tool is not allowed by current policy."
+                    });
                     success = false;
+                    LogEvent(
+                        "AGENT_TOOL_BLOCKED",
+                        $"Blocked disallowed tool call: {toolCall.Function.Name}");
+                }
+                else
+                {
+                    try
+                    {
+                        result = await _mcp.CallToolAsync(
+                            toolCall.Function.Name,
+                            toolCall.Function.Arguments,
+                            cancellationToken);
+                        success = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        result = $"Tool error: {ex.Message}";
+                        success = false;
+                    }
                 }
 
                 toolCallsMade.Add(new ToolCallRecord
@@ -5863,6 +5925,30 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return MakeRoute(Intents.ScreenObserve, confidence: 0.95,
                 needsScreen: true);
 
+        // ── Deterministic utility pre-router (bypass LLM classify) ───
+        // Contract for this route:
+        //   needsWeb=false, needsSearch=false
+        //   policy allowedTools=[]
+        //   execution mode is inline (no tool loop)
+        //   bypassLLM=true (this early return)
+        var deterministicPreRoute = DeterministicPreRouter.TryRoute(userMessage ?? string.Empty);
+        if (deterministicPreRoute is not null)
+        {
+            var confidence = deterministicPreRoute.Confidence == DeterministicMatchConfidence.High
+                ? 0.99
+                : 0.75;
+
+            LogEvent(
+                "ROUTER_DETERMINISTIC_PREROUTE",
+                $"confidence={deterministicPreRoute.Confidence}, category={deterministicPreRoute.Result.Category}");
+
+            return MakeRoute(
+                Intents.UtilityDeterministic,
+                confidence: confidence,
+                needsWeb: false,
+                needsSearch: false);
+        }
+
         // ── Classify via existing LLM + heuristic pipeline ───────────
         var intent = await ClassifyIntentAsync(userMessage ?? string.Empty, cancellationToken);
 
@@ -5920,9 +6006,22 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return route.Intent switch
         {
             Intents.ChatOnly      => ChatIntent.Casual,
+            Intents.UtilityDeterministic => ChatIntent.Casual,
             Intents.MemoryRead    => ChatIntent.Casual,
             Intents.LookupSearch  => ChatIntent.WebLookup,
             _                     => ChatIntent.Tooling
+        };
+    }
+
+    private static bool IsDeterministicInlineRoute(RouterOutput route) =>
+        string.Equals(route.Intent, Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase);
+
+    private static UtilityRouter.UtilityResult ToUtilityResult(DeterministicUtilityMatch match)
+    {
+        return new UtilityRouter.UtilityResult
+        {
+            Category = match.Result.Category,
+            Answer = match.Result.Answer
         };
     }
 
