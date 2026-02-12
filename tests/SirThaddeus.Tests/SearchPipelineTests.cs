@@ -1,4 +1,5 @@
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -570,6 +571,7 @@ public class QueryBuilderFallbackTests
         Assert.Equal("week",  QueryBuilder.DetectRecencyFromMessage("recent headlines from last week"));
         Assert.Equal("month", QueryBuilder.DetectRecencyFromMessage("updates past month"));
         Assert.Equal("day",   QueryBuilder.DetectRecencyFromMessage("breaking news"));
+        Assert.Equal("day",   QueryBuilder.DetectRecencyFromMessage("what's the dow jones at most recently?"));
     }
 
     [Fact]
@@ -588,6 +590,165 @@ public class QueryBuilderFallbackTests
 
 #endregion
 
+#region ── Dialogue Location Carry-Forward Guards ──────────────────────────
+
+public class DialogueLocationCarryForwardTests
+{
+    [Fact]
+    public void ValidateSlots_DropsMarketIndex_AsLocation()
+    {
+        var current = new DialogueState
+        {
+            Topic = "news",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        var merged = new MergedSlots
+        {
+            Intent = "news",
+            Topic = "news",
+            LocationText = "Dow Jones",
+            LocationInferredFromState = false,
+            RawMessage = "how is the dow jones doing?"
+        };
+
+        var validator = new ValidateSlots(new ValidationOptions());
+        var validated = validator.Run(current, merged);
+
+        Assert.Null(validated.LocationText);
+        Assert.False(validated.LocationInferred);
+        Assert.Equal("how is the dow jones doing?", validated.NormalizedMessage);
+    }
+
+    [Fact]
+    public void MergeSlots_DoesNotCarryNonPlacePriorLocation_IntoNewsTurn()
+    {
+        var current = new DialogueState
+        {
+            Topic = "news",
+            LocationName = "Dow Jones",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        var extracted = new ExtractedSlots
+        {
+            Intent = "news",
+            Topic = "news",
+            TimeScope = "this week",
+            RawMessage = "get me us headline news this week"
+        };
+
+        var merge = new MergeSlots();
+        var merged = merge.Run(current, extracted, DateTimeOffset.UtcNow);
+
+        Assert.Null(merged.LocationText);
+        Assert.False(merged.LocationInferredFromState);
+    }
+
+    [Fact]
+    public void MergeSlots_CarriesRealPlacePriorLocation_ForNewsTurn()
+    {
+        var current = new DialogueState
+        {
+            Topic = "news",
+            LocationName = "Boise, Idaho",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        var extracted = new ExtractedSlots
+        {
+            Intent = "news",
+            Topic = "news",
+            TimeScope = "this week",
+            RawMessage = "get me local headlines this week"
+        };
+
+        var merge = new MergeSlots();
+        var merged = merge.Run(current, extracted, DateTimeOffset.UtcNow);
+
+        Assert.Equal("Boise, Idaho", merged.LocationText);
+        Assert.True(merged.LocationInferredFromState);
+    }
+
+    [Theory]
+    [InlineData("you. Why is Dante so chunky?")]       // sentence fragment with ? — the exact bug
+    [InlineData("Hello sir Thaddeus I have a question")] // too many words, starts with "hello"
+    [InlineData("tell me about the weather")]            // starts with "tell"
+    [InlineData("is it going to rain tomorrow")]         // starts with "is"
+    [InlineData("What time is it in New York")]          // starts with "what"
+    [InlineData("I was wondering why is Dante so chunky")] // starts with "I", too many words
+    public void ValidateSlots_DropsGarbageLocationValues(string garbage)
+    {
+        var merged = new MergedSlots
+        {
+            Intent = "chat",
+            Topic = "chat",
+            LocationText = garbage,
+            LocationInferredFromState = false,
+            RawMessage = "test message"
+        };
+
+        var validator = new ValidateSlots(new ValidationOptions());
+        var validated = validator.Run(
+            new DialogueState { UpdatedAtUtc = DateTimeOffset.UtcNow },
+            merged);
+
+        Assert.Null(validated.LocationText);
+    }
+
+    [Theory]
+    [InlineData("New York")]
+    [InlineData("Boise, Idaho")]
+    [InlineData("San Luis Obispo")]
+    [InlineData("St. Louis")]
+    [InlineData("Washington, D.C.")]
+    public void ValidateSlots_KeepsLegitimateLocationValues(string place)
+    {
+        var merged = new MergedSlots
+        {
+            Intent = "weather",
+            Topic = "weather",
+            LocationText = place,
+            LocationInferredFromState = false,
+            RawMessage = $"weather in {place}"
+        };
+
+        var validator = new ValidateSlots(new ValidationOptions());
+        var validated = validator.Run(
+            new DialogueState { UpdatedAtUtc = DateTimeOffset.UtcNow },
+            merged);
+
+        Assert.Equal(place, validated.LocationText);
+    }
+
+    [Fact]
+    public void MergeSlots_DropsGarbagePriorLocation_FromLlmEcho()
+    {
+        // Prior turn: LLM echoed message content into LocationName.
+        var current = new DialogueState
+        {
+            Topic = "weather",
+            LocationName = "you. Why is Dante so chunky?",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        var extracted = new ExtractedSlots
+        {
+            Intent = "news",
+            Topic = "news",
+            RawMessage = "how is the dow jones today?"
+        };
+
+        var merge = new MergeSlots();
+        var merged = merge.Run(current, extracted, DateTimeOffset.UtcNow);
+
+        Assert.Null(merged.LocationText);
+        Assert.False(merged.LocationInferredFromState);
+    }
+}
+
+#endregion
+
 #region ── Search Orchestrator (Source Parsing) ───────────────────────────
 
 public class SearchOrchestratorParsingTests
@@ -600,7 +761,7 @@ public class SearchOrchestratorParsingTests
             "   Excerpt...\n" +
             "<!-- SOURCES_JSON -->\n" +
             "[\n" +
-            "  {\"url\":\"https://source1.com/article\",\"title\":\"Headline One\",\"domain\":\"source1.com\"},\n" +
+            "  {\"url\":\"https://source1.com/article\",\"title\":\"Headline One\",\"domain\":\"source1.com\",\"publishedAt\":\"2026-02-12T14:00:00Z\"},\n" +
             "  {\"url\":\"https://source2.com/article\",\"title\":\"Headline Two\",\"domain\":\"source2.com\"}\n" +
             "]";
 
@@ -610,6 +771,9 @@ public class SearchOrchestratorParsingTests
         Assert.Equal("Headline One", sources[0].Title);
         Assert.Equal("https://source1.com/article", sources[0].Url);
         Assert.False(string.IsNullOrWhiteSpace(sources[0].SourceId));
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-02-12T14:00:00Z"),
+            sources[0].PublishedAt);
     }
 
     [Fact]
@@ -1460,6 +1624,42 @@ public class SearchPipelineGoldenTests
         Assert.True(result.Success);
         Assert.Contains(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task MarketQuoteRequest_StaleSources_ReturnsFreshnessWarning_AndSkipsBrowse()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"Dow Jones","type":"Topic","hint":"US stock index"}""",
+            queryJson: """{"query":"Dow Jones live quote","recency":"any"}""",
+            summaryText: "The Dow Jones is up today.");
+
+        var stalePublishedAt = DateTimeOffset.UtcNow.AddHours(-18).ToString("o");
+        var searchResult =
+            "1. Dow Jones market update — example.com\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            $"[{{\"url\":\"https://example.com/dow\",\"title\":\"Dow Jones market update\",\"domain\":\"example.com\",\"publishedAt\":\"{stalePublishedAt}\"}}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => "unexpected tool call"
+        });
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("whats the dow jones at most recently?");
+
+        Assert.True(result.Success);
+        Assert.Contains("cannot safely report a current market quote", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase) &&
+            c.Args.Contains("\"recency\":\"day\"", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Contains("navigate", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Contains("browse", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

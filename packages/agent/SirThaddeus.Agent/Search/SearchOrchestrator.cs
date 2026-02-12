@@ -47,6 +47,7 @@ public sealed class SearchOrchestrator
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 768;
+    private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
@@ -80,6 +81,13 @@ public sealed class SearchOrchestrator
         "- What related sources add or contradict\n" +
         "- Whether key details are confirmed or still alleged\n" +
         "No URLs. Do not list sources unless you need to explain a disagreement.";
+
+    private const string FinanceQuoteSummaryInstruction =
+        "\n\nThis is a market quote request. " +
+        "Start with one plain sentence containing the instrument/index name, " +
+        "current level, and today's move in points and percent if available. " +
+        "Include an 'as of' time from source metadata when present. " +
+        "If exact quote values are not present in the sources, say you could not verify a current quote.";
 
     public SearchOrchestrator(
         ILlmClient llm,
@@ -179,6 +187,16 @@ public sealed class SearchOrchestrator
 
         // ── 4. Parse results into SourceItems ────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
+        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
+            userMessage,
+            query.Query,
+            sources,
+            toolCallsMade);
+        if (financeFreshnessFailure is not null)
+            return financeFreshnessFailure;
 
         // ── 5. Story clustering ──────────────────────────────────────
         var clusters = StoryClustering.Cluster(sources);
@@ -196,9 +214,12 @@ public sealed class SearchOrchestrator
         // ── 7. Summarize via LLM ─────────────────────────────────────
         var summaryInput = "[Search results — reference only, do not display to user]\n" +
                            StripSourcesJson(toolResult);
+        var instruction = isMarketQuoteRequest
+            ? memoryPackText + FinanceQuoteSummaryInstruction
+            : memoryPackText + NewsSummaryInstruction;
 
         return await SummarizeAndRespond(
-            summaryInput, memoryPackText + NewsSummaryInstruction,
+            summaryInput, instruction,
             history, toolCallsMade, ct);
     }
 
@@ -230,6 +251,17 @@ public sealed class SearchOrchestrator
 
         // ── 4. Parse and record results ──────────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
+        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
+            userMessage,
+            query.Query,
+            sources,
+            toolCallsMade);
+        if (financeFreshnessFailure is not null)
+            return financeFreshnessFailure;
+
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
@@ -250,9 +282,12 @@ public sealed class SearchOrchestrator
             sb.AppendLine("[Full article content — reference only, do not display to user]");
             sb.AppendLine(articleContent);
         }
+        var instruction = isMarketQuoteRequest
+            ? memoryPackText + FinanceQuoteSummaryInstruction
+            : memoryPackText + FactFindSummaryInstruction;
 
         return await SummarizeAndRespond(
-            sb.ToString(), memoryPackText + FactFindSummaryInstruction,
+            sb.ToString(), instruction,
             history, toolCallsMade, ct);
     }
 
@@ -668,6 +703,14 @@ public sealed class SearchOrchestrator
                 var url   = item.TryGetProperty("url", out var u)   ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t)  ? t.GetString() : "";
                 var domain = item.TryGetProperty("domain", out var d) ? d.GetString() : "";
+                var snippet = item.TryGetProperty("excerpt", out var ex) ? ex.GetString() : "";
+                DateTimeOffset? publishedAt = null;
+                if (item.TryGetProperty("publishedAt", out var p) &&
+                    p.ValueKind == JsonValueKind.String &&
+                    DateTimeOffset.TryParse(p.GetString(), out var parsedPublishedAt))
+                {
+                    publishedAt = parsedPublishedAt;
+                }
 
                 if (string.IsNullOrWhiteSpace(url))
                     continue;
@@ -677,7 +720,9 @@ public sealed class SearchOrchestrator
                     SourceId = SourceItem.ComputeSourceId(url!),
                     Url      = url!,
                     Title    = title ?? "",
-                    Domain   = domain ?? ""
+                    Domain   = domain ?? "",
+                    Snippet  = snippet ?? "",
+                    PublishedAt = publishedAt
                 });
             }
         }
@@ -696,6 +741,84 @@ public sealed class SearchOrchestrator
 
         var idx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
         return idx >= 0 ? toolResult[..idx].TrimEnd() : toolResult.TrimEnd();
+    }
+
+    /// <summary>
+    /// Checks source freshness for market quote requests.
+    ///
+    /// Three outcomes:
+    ///   1. Sources have timestamps and at least one is fresh → null (proceed normally).
+    ///   2. Sources have timestamps but ALL are stale → hard block with warning.
+    ///   3. No timestamps available → null (proceed with soft caveat via summary instruction;
+    ///      blocking here threw away perfectly good results from providers
+    ///      that simply don't populate publishedAt).
+    /// </summary>
+    private AgentResponse? TryBuildFinanceFreshnessFailureResponse(
+        string userMessage,
+        string query,
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query);
+        if (!isMarketQuoteRequest)
+            return null;
+
+        var datedSources = sources
+            .Where(s => s.PublishedAt.HasValue)
+            .Select(s => s.PublishedAt!.Value)
+            .ToList();
+
+        // Case 3: no timestamps — let the results through.
+        // The LLM summary instruction already tells it to caveat
+        // when exact values are unavailable.
+        if (datedSources.Count == 0)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "FINANCE_QUOTE_FRESHNESS_UNKNOWN",
+                Result = "no_source_timestamps_passthrough"
+            });
+            return null;
+        }
+
+        // Case 2: we have timestamps — enforce freshness.
+        var newestSourceTime = datedSources.Max();
+        var age = DateTimeOffset.UtcNow - newestSourceTime;
+        if (age > FinanceQuoteFreshnessMaxAge)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "FINANCE_QUOTE_FRESHNESS_FAIL",
+                Result = "stale_quote_sources",
+                Details = new Dictionary<string, object>
+                {
+                    ["newest_source_utc"] = newestSourceTime.ToString("o"),
+                    ["max_age_hours"]     = FinanceQuoteFreshnessMaxAge.TotalHours,
+                    ["actual_age_hours"]  = Math.Round(age.TotalHours, 2)
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = $"I cannot safely report a current market quote because the newest source is about {Math.Round(age.TotalHours, 1)} hours old. Ask me to refresh for a live update.",
+                Success       = true,
+                ToolCallsMade = [.. toolCallsMade]
+            };
+        }
+
+        // Case 1: fresh dated sources — proceed.
+        _audit.Append(new AuditEvent
+        {
+            Actor  = "agent",
+            Action = "FINANCE_QUOTE_FRESHNESS_OK",
+            Result = newestSourceTime.ToString("o")
+        });
+
+        return null;
     }
 
     private static bool IsLowSignalContent(string? content)

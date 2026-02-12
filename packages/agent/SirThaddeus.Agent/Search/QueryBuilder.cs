@@ -154,6 +154,8 @@ public sealed partial class QueryBuilder
         IReadOnlyList<ChatMessage> recentHistory,
         CancellationToken ct)
     {
+        var isMarketQuoteRequest = MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage);
+
         var modeInstruction = mode switch
         {
             SearchMode.NewsAggregate =>
@@ -162,9 +164,13 @@ public sealed partial class QueryBuilder
                 "The query should return news articles, not encyclopedia pages.",
 
             SearchMode.WebFactFind =>
-                "Mode: FACTFIND. Build a search query optimized for finding factual, " +
-                "encyclopedic information. Prefer stable sources (Wikipedia, reference sites). " +
-                "Use the canonical entity name if provided.",
+                isMarketQuoteRequest
+                    ? "Mode: MARKET_QUOTE. Build a query for current market quote coverage. " +
+                      "Focus on the latest index level / point move / percent move today. " +
+                      "Prefer live market updates and major financial outlets."
+                    : "Mode: FACTFIND. Build a search query optimized for finding factual, " +
+                      "encyclopedic information. Prefer stable sources (Wikipedia, reference sites). " +
+                      "Use the canonical entity name if provided.",
 
             _ => "Build a concise, effective search query."
         };
@@ -321,14 +327,21 @@ public sealed partial class QueryBuilder
                 UsedFallback = true
             },
 
-            SearchMode.WebFactFind => new SearchQuery
-            {
-                Query       = entity is not null
-                    ? $"{entity.CanonicalName} overview"
-                    : $"{topic}",
-                Recency     = "any",
-                UsedFallback = true
-            },
+            SearchMode.WebFactFind => MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage)
+                ? new SearchQuery
+                {
+                    // For market quotes, always derive topic from the user message
+                    // (not the noisy ExtractTopicFromMessage output).
+                    Query        = BuildMarketQuoteFallbackQuery(userMessage),
+                    Recency      = MarketQuoteHeuristics.PreferredRecency(userMessage),
+                    UsedFallback = true
+                }
+                : new SearchQuery
+                {
+                    Query        = entity is not null ? $"{entity.CanonicalName} overview" : $"{topic}",
+                    Recency      = "any",
+                    UsedFallback = true
+                },
 
             _ => new SearchQuery
             {
@@ -380,6 +393,13 @@ public sealed partial class QueryBuilder
         if (lower.Contains("today") || lower.Contains("breaking") ||
             lower.Contains("right now") || lower.Contains("just happened"))
             return "day";
+
+        if (lower.Contains("most recent") || lower.Contains("most recently") ||
+            lower.Contains("past few hours") || lower.Contains("last few hours") ||
+            lower.Contains("latest"))
+        {
+            return "day";
+        }
 
         if (lower.Contains("this week") || lower.Contains("past week") ||
             lower.Contains("last week") ||
@@ -477,6 +497,9 @@ public sealed partial class QueryBuilder
 
     private static string ResolveRecency(SearchMode mode, string userMessage, string llmRecency)
     {
+        if (MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage))
+            return MarketQuoteHeuristics.PreferredRecency(userMessage);
+
         var inferred = DetectRecencyFromMessage(userMessage);
         var normalizedLlmRecency = NormalizeRecency(llmRecency);
 
@@ -533,6 +556,22 @@ public sealed partial class QueryBuilder
             return "top headlines";
 
         return $"{topic} news latest";
+    }
+
+    private static string BuildMarketQuoteFallbackQuery(string rawTopic)
+    {
+        // Prefer the canonical instrument name over the raw topic, which
+        // is often a noisy conversational fragment. "Dow Jones market
+        // update today" is far more effective than "up the dow jones
+        // for me today? whats it at live quote today points percent".
+        var canonical = MarketQuoteHeuristics.ExtractCanonicalInstrument(rawTopic);
+        var instrument = canonical ?? (string.IsNullOrWhiteSpace(rawTopic) ? "Dow Jones" : rawTopic.Trim());
+
+        // Truncate if an uncleaned topic leaked through.
+        if (instrument.Length > 30)
+            instrument = instrument[..30].Trim();
+
+        return $"{instrument} market update today";
     }
 
     private static bool LooksLikeGenericHeadlineRequest(string message)
@@ -676,7 +715,7 @@ public sealed partial class QueryBuilder
     private static partial Regex LeadingFillerRegex();
 
     [GeneratedRegex(
-        @"^\s*(?:check|look|find|get|show|pull up|bring up)\s+(?:on\s+)?",
+        @"^\s*(?:check|look\s+up|look|find|get|show|pull\s+up|bring\s+up)\s+(?:on\s+)?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex LeadingRequestVerbRegex();
 

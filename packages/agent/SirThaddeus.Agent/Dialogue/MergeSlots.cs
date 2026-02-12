@@ -56,10 +56,12 @@ public sealed class MergeSlots
         var location = NormalizeLocation(extracted.LocationText);
         var priorLocation = NormalizeLocation(currentState.LocationName);
         var inferred = false;
+        var canCarryPriorLocation = !LocationContextHeuristics.IsClearlyNonPlace(priorLocation);
 
         var shouldCarryLocation =
             string.IsNullOrWhiteSpace(location) &&
             !string.IsNullOrWhiteSpace(priorLocation) &&
+            canCarryPriorLocation &&
             (extracted.RefersToPriorLocation ||
              NeedsLocationForIntent(intent) ||
              hasTemporalCue ||
@@ -114,6 +116,8 @@ public sealed class MergeSlots
         if (TemporalOnlyRegex.IsMatch(value))
             return null;
         if (IsNoneLikeLiteral(value))
+            return null;
+        if (LocationContextHeuristics.IsClearlyNonPlace(value))
             return null;
 
         return string.IsNullOrWhiteSpace(value) ? null : value;
