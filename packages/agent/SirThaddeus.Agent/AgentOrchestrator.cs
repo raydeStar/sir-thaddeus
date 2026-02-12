@@ -271,13 +271,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
             $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
             $"file={route.NeedsFileAccess}, memory_w={route.NeedsMemoryWrite}, " +
-            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}");
+            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
+            $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
 
         // ── Policy: determine which tools the executor may see ───────
         var policy = PolicyGate.Evaluate(route);
         LogEvent("POLICY_DECISION",
-            $"allowed=[{string.Join(", ", policy.AllowedTools)}], " +
-            $"forbidden=[{string.Join(", ", policy.ForbiddenTools)}], " +
+            $"allowedCaps=[{string.Join(", ", policy.AllowedCapabilities)}], " +
+            $"forbiddenCaps=[{string.Join(", ", policy.ForbiddenCapabilities)}], " +
+            $"forbiddenTools=[{string.Join(", ", policy.ForbiddenTools)}], " +
             $"permissions=[{string.Join(", ", policy.RequiredPermissions)}], " +
             $"useToolLoop={policy.UseToolLoop}");
 
@@ -952,7 +954,44 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // ── Model wants to call tools ────────────────────────
             _history.Add(ChatMessage.AssistantToolCalls(response.ToolCalls));
 
-            foreach (var toolCall in response.ToolCalls)
+            // Resolve policy violations and conflicts before any MCP call
+            // executes so skipped tools cannot produce side effects.
+            var conflictResolution = ToolConflictMatrix.ResolveTurn(
+                response.ToolCalls,
+                allowedToolNames);
+
+            foreach (var skipped in conflictResolution.Skipped)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var reasonCode = ToolConflictMatrix.ToReasonCode(skipped.Reason);
+                var isPolicyForbid = skipped.Reason == ToolConflictReason.PolicyForbid;
+                var result = JsonSerializer.Serialize(new
+                {
+                    error = isPolicyForbid ? "tool_not_permitted" : "tool_conflict_skipped",
+                    tool = skipped.ToolCall.Function.Name,
+                    winner = skipped.WinnerTool,
+                    reason = reasonCode,
+                    detail = skipped.Detail
+                });
+                var success = false;
+
+                LogEvent(
+                    isPolicyForbid ? "AGENT_TOOL_BLOCKED" : "AGENT_TOOL_CONFLICT",
+                    $"tool={skipped.ToolCall.Function.Name}, winner={skipped.WinnerTool ?? "none"}, reason={reasonCode}, detail={skipped.Detail}");
+
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = skipped.ToolCall.Function.Name,
+                    Arguments = skipped.ToolCall.Function.Arguments,
+                    Result = result,
+                    Success = success
+                });
+
+                _history.Add(ChatMessage.ToolResult(skipped.ToolCall.Id, result));
+                LogEvent("AGENT_TOOL_RESULT", $"{skipped.ToolCall.Function.Name} -> skipped");
+            }
+
+            foreach (var toolCall in conflictResolution.Winners)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -960,34 +999,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 string result;
                 bool success;
-                if (!allowedToolNames.Contains(toolCall.Function.Name))
+
+                try
                 {
-                    result = JsonSerializer.Serialize(new
-                    {
-                        error = "tool_not_permitted",
-                        tool = toolCall.Function.Name,
-                        reason = "Tool is not allowed by current policy."
-                    });
-                    success = false;
-                    LogEvent(
-                        "AGENT_TOOL_BLOCKED",
-                        $"Blocked disallowed tool call: {toolCall.Function.Name}");
+                    result = await _mcp.CallToolAsync(
+                        toolCall.Function.Name,
+                        toolCall.Function.Arguments,
+                        cancellationToken);
+                    success = true;
                 }
-                else
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        result = await _mcp.CallToolAsync(
-                            toolCall.Function.Name,
-                            toolCall.Function.Arguments,
-                            cancellationToken);
-                        success = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        result = $"Tool error: {ex.Message}";
-                        success = false;
-                    }
+                    result = $"Tool error: {ex.Message}";
+                    success = false;
                 }
 
                 toolCallsMade.Add(new ToolCallRecord
@@ -998,7 +1022,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     Success = success
                 });
 
-                // Feed the result back into the conversation
                 _history.Add(ChatMessage.ToolResult(toolCall.Id, result));
                 LogEvent("AGENT_TOOL_RESULT", $"{toolCall.Function.Name} -> {(success ? "ok" : "error")}");
             }
@@ -6197,6 +6220,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         bool needsSystem = false,
         string risk = "low")
     {
+        var requiredCapabilities = BuildRequiredCapabilities(
+            intent,
+            needsWeb,
+            needsBrowser,
+            needsSearch,
+            needsMemoryRead,
+            needsMemoryWrite,
+            needsFile,
+            needsScreen,
+            needsSystem);
+
         return new RouterOutput
         {
             Intent                 = intent,
@@ -6209,8 +6243,49 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             NeedsFileAccess        = needsFile,
             NeedsScreenRead        = needsScreen,
             NeedsSystemExecute     = needsSystem,
+            RequiredCapabilities   = requiredCapabilities,
             RiskLevel              = risk
         };
+    }
+
+    private static IReadOnlyList<ToolCapability> BuildRequiredCapabilities(
+        string intent,
+        bool needsWeb,
+        bool needsBrowser,
+        bool needsSearch,
+        bool needsMemoryRead,
+        bool needsMemoryWrite,
+        bool needsFile,
+        bool needsScreen,
+        bool needsSystem)
+    {
+        var capabilities = new HashSet<ToolCapability>();
+
+        if (intent.Equals(Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase))
+            capabilities.Add(ToolCapability.DeterministicUtility);
+
+        if (intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase))
+        {
+            capabilities.Add(ToolCapability.MemoryRead);
+            capabilities.Add(ToolCapability.Meta);
+        }
+
+        if (needsWeb || needsSearch)
+            capabilities.Add(ToolCapability.WebSearch);
+        if (needsBrowser)
+            capabilities.Add(ToolCapability.BrowserNavigate);
+        if (needsMemoryRead)
+            capabilities.Add(ToolCapability.MemoryRead);
+        if (needsMemoryWrite)
+            capabilities.Add(ToolCapability.MemoryWrite);
+        if (needsFile)
+            capabilities.Add(ToolCapability.FileRead);
+        if (needsScreen)
+            capabilities.Add(ToolCapability.ScreenCapture);
+        if (needsSystem)
+            capabilities.Add(ToolCapability.SystemExecute);
+
+        return capabilities.ToList();
     }
 
     // ── Sub-intent heuristics ────────────────────────────────────────

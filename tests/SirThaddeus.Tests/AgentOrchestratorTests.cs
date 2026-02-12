@@ -2062,6 +2062,82 @@ public class PolicyFilteringTests
     }
 
     [Fact]
+    public async Task ToolLoop_ResolvesConflictsBeforeExecution_ExecutesWinnersOnly()
+    {
+        var requestedConflictingTools = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (!requestedConflictingTools && tools is { Count: > 0 })
+            {
+                requestedConflictingTools = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_capture",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{}"
+                            }
+                        },
+                        new ToolCallRequest
+                        {
+                            Id = "call_window",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "get_active_window",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Window inspected.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => "this should not run",
+                "get_active_window" => """{"title":"IDE","process":"cursor"}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What can you see on my screen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("get_active_window", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+
+        var skipped = result.ToolCallsMade.FirstOrDefault(t =>
+            t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(skipped);
+        Assert.False(skipped!.Success);
+        Assert.Contains("tool_conflict_skipped", skipped.Result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("deterministic_priority", skipped.Result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PolicyDecision_IsAudited()
     {
         // Verify that the ROUTER_OUTPUT and POLICY_DECISION audit events fire
@@ -2280,10 +2356,20 @@ internal sealed class FakeMcpClient : IMcpToolClient
     [
         MakeTool("screen_capture",     "Captures the user's screen",
                  """{"type":"object","properties":{"monitor":{"type":"integer","description":"Monitor index"}},"required":[]}"""),
+        MakeTool("get_active_window",  "Gets active window metadata",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("browser_navigate",   "Fetches URL content",
+                 """{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"""),
         MakeTool("memory_store_facts", "Stores structured facts about the user",
                  """{"type":"object","properties":{"factsJson":{"type":"string","description":"JSON array of fact objects"},"sourceRef":{"type":"string","description":"Source reference"}},"required":["factsJson"]}"""),
         MakeTool("memory_update_fact", "Updates an existing memory fact",
                  """{"type":"object","properties":{"memoryId":{"type":"string"},"newObject":{"type":"string"}},"required":["memoryId","newObject"]}"""),
+        MakeTool("memory_retrieve",    "Retrieves relevant memories",
+                 """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("memory_list_facts",  "Lists memory facts",
+                 """{"type":"object","properties":{"filter":{"type":"string"}},"required":[]}"""),
+        MakeTool("memory_delete_fact", "Deletes a memory fact",
+                 """{"type":"object","properties":{"memoryId":{"type":"string"}},"required":["memoryId"]}"""),
         MakeTool("web_search",         "Searches the web for information",
                  """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
         MakeTool("weather_geocode",    "Geocodes a place for weather lookup",
@@ -2306,6 +2392,16 @@ internal sealed class FakeMcpClient : IMcpToolClient
                  """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
         MakeTool("file_read",          "Reads a file from disk",
                  """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
+        MakeTool("file_list",          "Lists files in a directory",
+                 """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
+        MakeTool("system_execute",     "Executes an allowlisted command",
+                 """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""),
+        MakeTool("tool_ping",          "Reports MCP health",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("tool_list_capabilities", "Lists available tool capabilities",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("time_now",           "Returns local time metadata",
+                 """{"type":"object","properties":{},"required":[]}"""),
     ];
 
     private static McpToolInfo MakeTool(string name, string desc, string schemaJson)

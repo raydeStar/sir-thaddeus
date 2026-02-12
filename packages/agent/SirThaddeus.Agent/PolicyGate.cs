@@ -7,7 +7,7 @@ namespace SirThaddeus.Agent;
 //
 // Pure function: RouterOutput → PolicyDecision.
 // No LLM, no side effects, no state. The policy table is static code,
-// not learned or inferred. If a tool isn't in AllowedTools, it doesn't
+// not learned or inferred. If a tool's capability isn't allowed, it doesn't
 // exist in the executor's world.
 //
 // This is the architectural equivalent of "type safety for agents."
@@ -21,14 +21,24 @@ namespace SirThaddeus.Agent;
 public sealed record PolicyDecision
 {
     /// <summary>
-    /// Tool names the executor is allowed to call. Only these tools
-    /// are included in the LLM's tool definitions.
+    /// Capability allowlist for this route. Tool exposure is resolved
+    /// from capabilities via <see cref="ToolCapabilityRegistry"/>.
     /// </summary>
-    public required IReadOnlyList<string> AllowedTools { get; init; }
+    public required IReadOnlyList<ToolCapability> AllowedCapabilities { get; init; }
 
     /// <summary>
-    /// Explicit deny list — tools that MUST NOT be exposed even if
-    /// they appear in AllowedTools (safety net for wildcard policies).
+    /// Capability denylist for this route.
+    /// Applied after AllowedCapabilities.
+    /// </summary>
+    public IReadOnlyList<ToolCapability> ForbiddenCapabilities { get; init; } = [];
+
+    /// <summary>
+    /// Optional explicit tool allowlist exceptions, used sparingly.
+    /// </summary>
+    public IReadOnlyList<string> AllowedTools { get; init; } = [];
+
+    /// <summary>
+    /// Optional explicit tool denylist exceptions.
     /// </summary>
     public IReadOnlyList<string> ForbiddenTools { get; init; } = [];
 
@@ -57,8 +67,8 @@ public static class PolicyGate
     // ─────────────────────────────────────────────────────────────────
     // Policy Table
     //
-    // Each intent maps to exactly one PolicyDecision. Tools not in
-    // AllowedTools are invisible to the model. This prevents the
+    // Each intent maps to exactly one PolicyDecision. Tools whose
+    // capabilities are not allowed are invisible to the model. This prevents the
     // model from "accidentally" calling screen_capture during a web
     // search, or memory_store_facts during a file read.
     //
@@ -72,7 +82,7 @@ public static class PolicyGate
         // Pure conversation. The tool loop is skipped entirely.
         [Intents.ChatOnly] = new PolicyDecision
         {
-            AllowedTools        = [],
+            AllowedCapabilities = [],
             UseToolLoop         = false,
             RequiredPermissions = []
         },
@@ -83,8 +93,8 @@ public static class PolicyGate
         // the tool loop entirely.
         [Intents.UtilityDeterministic] = new PolicyDecision
         {
-            AllowedTools        = [],
-            ForbiddenTools      = ["web_search", "WebSearch", "browser_navigate"],
+            AllowedCapabilities = [],
+            ForbiddenCapabilities = [ToolCapability.WebSearch, ToolCapability.BrowserNavigate],
             UseToolLoop         = false,
             RequiredPermissions = []
         },
@@ -94,9 +104,8 @@ public static class PolicyGate
         // tool loop. This entry exists for validation/audit purposes.
         [Intents.LookupSearch] = new PolicyDecision
         {
-            AllowedTools        = ["web_search", "WebSearch"],
-            ForbiddenTools      = ["screen_capture", "system_execute",
-                                   "memory_store_facts", "memory_update_fact"],
+            AllowedCapabilities = [ToolCapability.WebSearch],
+            ForbiddenCapabilities = [ToolCapability.ScreenCapture, ToolCapability.SystemExecute, ToolCapability.MemoryWrite],
             UseToolLoop         = false,   // deterministic path
             RequiredPermissions = []
         },
@@ -104,44 +113,40 @@ public static class PolicyGate
         // ── Browse once: fetch a specific URL ────────────────────────
         [Intents.BrowseOnce] = new PolicyDecision
         {
-            AllowedTools        = ["browser_navigate"],
-            ForbiddenTools      = ["system_execute", "screen_capture"],
+            AllowedCapabilities = [ToolCapability.BrowserNavigate],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture],
             RequiredPermissions = ["BrowserControl"]
         },
 
         // ── One-shot discovery: research (search + browse) ───────────
         [Intents.OneShotDiscovery] = new PolicyDecision
         {
-            AllowedTools        = ["web_search", "WebSearch", "browser_navigate"],
-            ForbiddenTools      = ["system_execute", "screen_capture",
-                                   "memory_store_facts"],
+            AllowedCapabilities = [ToolCapability.WebSearch, ToolCapability.BrowserNavigate],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.MemoryWrite],
             RequiredPermissions = ["BrowserControl"]
         },
 
         // ── Screen observe: what's on the user's screen ──────────────
         [Intents.ScreenObserve] = new PolicyDecision
         {
-            AllowedTools        = ["screen_capture", "get_active_window"],
-            ForbiddenTools      = ["system_execute", "web_search",
-                                   "file_read", "memory_store_facts"],
+            AllowedCapabilities = [ToolCapability.ScreenCapture],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.WebSearch, ToolCapability.FileRead, ToolCapability.MemoryWrite],
             RequiredPermissions = ["ScreenRead"]
         },
 
         // ── File task: read/list files ───────────────────────────────
         [Intents.FileTask] = new PolicyDecision
         {
-            AllowedTools        = ["file_read", "file_list"],
-            ForbiddenTools      = ["system_execute", "screen_capture",
-                                   "web_search"],
+            AllowedCapabilities = [ToolCapability.FileRead],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.WebSearch],
             RequiredPermissions = ["FileAccess"]
         },
 
         // ── System task: execute a command ────────────────────────────
         [Intents.SystemTask] = new PolicyDecision
         {
-            AllowedTools        = ["system_execute"],
-            ForbiddenTools      = ["screen_capture", "web_search",
-                                   "file_read", "memory_store_facts"],
+            AllowedCapabilities = [ToolCapability.SystemExecute],
+            ForbiddenCapabilities = [ToolCapability.ScreenCapture, ToolCapability.WebSearch, ToolCapability.FileRead, ToolCapability.MemoryWrite],
             RequiredPermissions = ["SystemExecute"]
         },
 
@@ -151,7 +156,7 @@ public static class PolicyGate
         // memory question" without exposing any tools.
         [Intents.MemoryRead] = new PolicyDecision
         {
-            AllowedTools        = [],
+            AllowedCapabilities = [],
             UseToolLoop         = false,
             RequiredPermissions = []
         },
@@ -159,9 +164,8 @@ public static class PolicyGate
         // ── Memory write: user explicitly asked to remember ──────────
         [Intents.MemoryWrite] = new PolicyDecision
         {
-            AllowedTools        = ["memory_store_facts", "memory_update_fact"],
-            ForbiddenTools      = ["system_execute", "screen_capture",
-                                   "web_search", "file_read"],
+            AllowedCapabilities = [ToolCapability.MemoryWrite],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.WebSearch, ToolCapability.FileRead],
             RequiredPermissions = []
         },
 
@@ -170,7 +174,8 @@ public static class PolicyGate
         // As sub-intent detection improves, fewer messages land here.
         [Intents.GeneralTool] = new PolicyDecision
         {
-            AllowedTools        = ["*"],   // wildcard: all tools
+            AllowedCapabilities = [ToolCapability.MemoryRead, ToolCapability.Meta],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite, ToolCapability.TimeRead],
             RequiredPermissions = []
         },
     };
@@ -185,9 +190,23 @@ public static class PolicyGate
     /// </summary>
     public static PolicyDecision Evaluate(RouterOutput router)
     {
-        return PolicyTable.TryGetValue(router.Intent, out var decision)
-            ? decision
+        var decision = PolicyTable.TryGetValue(router.Intent, out var byIntent)
+            ? byIntent
             : PolicyTable[Intents.GeneralTool];
+
+        var allowedCapabilities = new HashSet<ToolCapability>(decision.AllowedCapabilities);
+
+        // Minimal fallback may include web only when the route explicitly
+        // asks for current information.
+        if (IsGeneralToolIntent(router.Intent) && (router.NeedsWeb || router.NeedsSearch))
+            allowedCapabilities.Add(ToolCapability.WebSearch);
+
+        // Router emits required capabilities. Gate intersects those with
+        // policy to ensure only explicitly allowed capabilities survive.
+        if (router.RequiredCapabilities.Count > 0)
+            allowedCapabilities.IntersectWith(router.RequiredCapabilities);
+
+        return decision with { AllowedCapabilities = allowedCapabilities.ToList() };
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -196,34 +215,36 @@ public static class PolicyGate
 
     /// <summary>
     /// Filters a full tool list down to only what the policy allows.
-    /// Wildcard ("*") in AllowedTools means all tools pass, minus
-    /// any in ForbiddenTools.
+    /// Capability mapping is strict: unmapped tools are hidden by default.
     /// </summary>
     public static IReadOnlyList<ToolDefinition> FilterTools(
         IReadOnlyList<ToolDefinition> allTools,
         PolicyDecision policy)
     {
-        if (allTools.Count == 0 || policy.AllowedTools.Count == 0)
+        if (allTools.Count == 0 || policy.AllowedCapabilities.Count == 0)
             return [];
 
-        var forbidden = new HashSet<string>(
-            policy.ForbiddenTools, StringComparer.OrdinalIgnoreCase);
+        var filtered = ToolCapabilityRegistry.ResolveTools(
+            allTools,
+            policy.AllowedCapabilities,
+            policy.ForbiddenCapabilities);
 
-        // Wildcard: allow everything except forbidden
-        if (policy.AllowedTools.Count == 1 && policy.AllowedTools[0] == "*")
+        if (policy.AllowedTools.Count > 0)
         {
-            return allTools
-                .Where(t => !forbidden.Contains(t.Function.Name))
+            var explicitAllowed = new HashSet<string>(policy.AllowedTools, StringComparer.OrdinalIgnoreCase);
+            filtered = filtered
+                .Concat(allTools.Where(t => explicitAllowed.Contains(t.Function.Name)))
+                .GroupBy(t => t.Function.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
                 .ToList();
         }
 
-        // Explicit allow list: only named tools, minus forbidden
-        var allowed = new HashSet<string>(
-            policy.AllowedTools, StringComparer.OrdinalIgnoreCase);
+        if (policy.ForbiddenTools.Count == 0)
+            return filtered;
 
-        return allTools
-            .Where(t => allowed.Contains(t.Function.Name)
-                     && !forbidden.Contains(t.Function.Name))
+        var explicitForbidden = new HashSet<string>(policy.ForbiddenTools, StringComparer.OrdinalIgnoreCase);
+        return filtered
+            .Where(t => !explicitForbidden.Contains(t.Function.Name))
             .ToList();
     }
 
@@ -242,4 +263,8 @@ public static class PolicyGate
     /// </summary>
     public static bool HasPolicy(string intent) =>
         PolicyTable.ContainsKey(intent);
+
+    private static bool IsGeneralToolIntent(string intent)
+        => intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase)
+           || !PolicyTable.ContainsKey(intent);
 }

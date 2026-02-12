@@ -38,6 +38,12 @@ public sealed record RouterOutput
     public bool NeedsSystemExecute      { get; init; }
 
     /// <summary>
+    /// Capability-level requirements produced by routing.
+    /// The policy gate intersects these with intent policy allowlists.
+    /// </summary>
+    public IReadOnlyList<ToolCapability> RequiredCapabilities { get; init; } = [];
+
+    /// <summary>
     /// Risk assessment: "low", "medium", or "high".
     /// Higher risk → stricter permission requirements.
     /// </summary>
@@ -83,8 +89,8 @@ public static class Intents
 
     // ── Fallback ─────────────────────────────────────────────────────
     /// <summary>
-    /// Tooling intent that couldn't be narrowed further. Gets the full
-    /// tool set — same as the old <c>ChatIntent.Tooling</c> behavior.
+    /// Tooling intent that couldn't be narrowed further.
+    /// Policy should expose only a minimal, read-only fallback set.
     /// </summary>
     public const string GeneralTool = "general_tool";
 }

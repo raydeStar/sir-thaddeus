@@ -1,5 +1,6 @@
 using SirThaddeus.Agent;
 using SirThaddeus.LlmClient;
+using SirThaddeus.McpShared;
 
 namespace SirThaddeus.Tests;
 
@@ -21,12 +22,27 @@ public class PolicyGateTests
         MakeTool("browser_navigate"),
         MakeTool("web_search"),
         MakeTool("WebSearch"),
+        MakeTool("weather_geocode"),
+        MakeTool("weather_forecast"),
+        MakeTool("resolve_timezone"),
+        MakeTool("holidays_get"),
+        MakeTool("holidays_next"),
+        MakeTool("holidays_is_today"),
+        MakeTool("feed_fetch"),
+        MakeTool("status_check_url"),
         MakeTool("file_read"),
         MakeTool("file_list"),
         MakeTool("system_execute"),
+        MakeTool("memory_retrieve"),
+        MakeTool("memory_list_facts"),
+        MakeTool("memory_delete_fact"),
         MakeTool("memory_store_facts"),
         MakeTool("memory_update_fact"),
         MakeTool("MemoryRetrieve"),
+        MakeTool("tool_ping"),
+        MakeTool("tool_list_capabilities"),
+        MakeTool("time_now"),
+        MakeTool("mystery_unmapped_tool")
     ];
 
     private static ToolDefinition MakeTool(string name) => new()
@@ -39,7 +55,12 @@ public class PolicyGateTests
         }
     };
 
-    private static RouterOutput Route(string intent) => new() { Intent = intent };
+    private static RouterOutput Route(string intent, bool needsWeb = false, bool needsSearch = false) => new()
+    {
+        Intent = intent,
+        NeedsWeb = needsWeb,
+        NeedsSearch = needsSearch
+    };
 
     // ─────────────────────────────────────────────────────────────────
     // Chat Only
@@ -63,8 +84,7 @@ public class PolicyGateTests
 
         Assert.Empty(filtered);
         Assert.False(policy.UseToolLoop);
-        Assert.Contains(policy.ForbiddenTools,
-            name => name.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ToolCapability.WebSearch, policy.ForbiddenCapabilities);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -210,13 +230,36 @@ public class PolicyGateTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void GeneralTool_ExposesAllTools()
+    public void GeneralTool_ExposesMinimalSafeFallbackSet()
     {
         var policy = PolicyGate.Evaluate(Route(Intents.GeneralTool));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
+        var names = filtered.Select(t => t.Function.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Wildcard — should pass everything through
-        Assert.Equal(AllTools.Count, filtered.Count);
+        Assert.Contains("MemoryRetrieve", names);
+        Assert.Contains("tool_ping", names);
+        Assert.Contains("tool_list_capabilities", names);
+
+        Assert.DoesNotContain("web_search", names);
+        Assert.DoesNotContain("system_execute", names);
+        Assert.DoesNotContain("screen_capture", names);
+        Assert.DoesNotContain("file_read", names);
+        Assert.DoesNotContain("memory_store_facts", names);
+        Assert.DoesNotContain("time_now", names);
+    }
+
+    [Fact]
+    public void GeneralTool_ConditionalWeb_IncludedOnlyWhenRouteRequestsCurrentInfo()
+    {
+        var policyWithoutWeb = PolicyGate.Evaluate(Route(Intents.GeneralTool, needsWeb: false, needsSearch: false));
+        var filteredWithoutWeb = PolicyGate.FilterTools(AllTools, policyWithoutWeb);
+        Assert.DoesNotContain(filteredWithoutWeb,
+            t => t.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+
+        var policyWithWeb = PolicyGate.Evaluate(Route(Intents.GeneralTool, needsWeb: true, needsSearch: true));
+        var filteredWithWeb = PolicyGate.FilterTools(AllTools, policyWithWeb);
+        Assert.Contains(filteredWithWeb,
+            t => t.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -228,27 +271,27 @@ public class PolicyGateTests
     {
         var policy = PolicyGate.Evaluate(Route("banana_pancake"));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
+        var names = filtered.Select(t => t.Function.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Unknown intent → general_tool → all tools
-        Assert.Equal(AllTools.Count, filtered.Count);
+        Assert.Contains("MemoryRetrieve", names);
+        Assert.Contains("tool_ping", names);
+        Assert.DoesNotContain("system_execute", names);
+        Assert.DoesNotContain("screen_capture", names);
+        Assert.DoesNotContain("web_search", names);
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // Forbidden tools are excluded even with wildcard
+    // Unmapped tools are hidden by default
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void ForbiddenTools_ExcludedFromFiltering()
+    public void UnmappedTools_AreHiddenByDefault()
     {
-        // ScreenObserve forbids system_execute, web_search, etc.
-        var policy = PolicyGate.Evaluate(Route(Intents.ScreenObserve));
+        var policy = PolicyGate.Evaluate(Route(Intents.GeneralTool));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
 
-        foreach (var forbidden in policy.ForbiddenTools)
-        {
-            Assert.DoesNotContain(filtered,
-                t => t.Function.Name.Equals(forbidden, StringComparison.OrdinalIgnoreCase));
-        }
+        Assert.DoesNotContain(filtered,
+            t => t.Function.Name.Equals("mystery_unmapped_tool", StringComparison.OrdinalIgnoreCase));
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -291,33 +334,38 @@ public class PolicyGateTests
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // No tool collisions across intents
+    // Capability registry completeness
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void ScreenObserve_CannotCallSearch()
+    public void CapabilityRegistry_MapsEveryManifestToolAndAlias()
     {
-        var policy = PolicyGate.Evaluate(Route(Intents.ScreenObserve));
-        var filtered = PolicyGate.FilterTools(AllTools, policy);
+        var mappings = ToolCapabilityRegistry.GetMappings();
 
-        Assert.DoesNotContain(filtered, t => t.Function.Name == "web_search");
+        foreach (var tool in ToolManifest.All)
+        {
+            Assert.True(mappings.ContainsKey(tool.Name),
+                $"Tool '{tool.Name}' is missing from ToolCapabilityRegistry.");
+
+            foreach (var alias in tool.Aliases)
+            {
+                Assert.True(mappings.ContainsKey(alias),
+                    $"Alias '{alias}' for tool '{tool.Name}' is missing from ToolCapabilityRegistry.");
+            }
+        }
     }
 
     [Fact]
-    public void LookupSearch_CannotCallScreenCapture()
+    public void ExposedTools_MapToExactlyOneCapability()
     {
-        var policy = PolicyGate.Evaluate(Route(Intents.LookupSearch));
+        var policy = PolicyGate.Evaluate(Route(Intents.OneShotDiscovery));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
 
-        Assert.DoesNotContain(filtered, t => t.Function.Name == "screen_capture");
-    }
-
-    [Fact]
-    public void MemoryWrite_CannotCallSystemExecute()
-    {
-        var policy = PolicyGate.Evaluate(Route(Intents.MemoryWrite));
-        var filtered = PolicyGate.FilterTools(AllTools, policy);
-
-        Assert.DoesNotContain(filtered, t => t.Function.Name == "system_execute");
+        Assert.All(filtered, tool =>
+        {
+            var capability = ToolCapabilityRegistry.ResolveCapability(tool.Function.Name);
+            Assert.True(capability.HasValue,
+                $"Exposed tool '{tool.Function.Name}' was not mapped to a capability.");
+        });
     }
 }
