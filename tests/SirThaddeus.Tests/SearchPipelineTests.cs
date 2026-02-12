@@ -107,6 +107,7 @@ public class UtilityRouterTests
     [InlineData("what is 15 percent of 230", "calculator", "15% of 230 = **34.50**")]
     [InlineData("what's 10*45?",      "calculator", "10*45 = **450**")]
     [InlineData("what is 6 plus 7?",  "calculator", "6 + 7 = **13**")]
+    [InlineData("Hey, Thaddeus, what's 6x7?", "calculator", "6 * 7 = **42**")]
     [InlineData("100 + 50",           "calculator", "100 + 50 = **150**")]
     public void Calculator_ReturnsInlineAnswer(string input, string category, string expected)
     {
@@ -658,6 +659,27 @@ public class SearchPipelineGoldenTests
     }
 
     [Fact]
+    public async Task UtilityBypass_CalculatorWithAssistantPreamble_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("Should not be called for calculator");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Hey, Thaddeus, what's 6x7?");
+
+        Assert.True(result.Success);
+        Assert.Contains("6 * 7 = **42**", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Need another quick one", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
+        var searchCalls = mcp.Calls.Where(c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(searchCalls);
+    }
+
+    [Fact]
     public async Task UtilityBypass_UnitConversion_NoWebSearch()
     {
         var llm = new FakeLlmClient("Should not be called for conversion");
@@ -1044,6 +1066,39 @@ public class SearchPipelineGoldenTests
         Assert.True(geocodeCalls.Count >= 2);
         Assert.Contains("\"place\":\"Boise", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"place\":\"today", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_WeatherActivityFollowUps_StayOnWeatherPipeline()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var rexburgGeocode =
+            """{"query":"Rexburg, Idaho","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+        var rexburgForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"chance rain and snow","wind":"7 mph","humidityPercent":85},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":35,"unit":"F","condition":"chance rain and snow"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => rexburgGeocode,
+            "weather_forecast" => rexburgForecast,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var first = await agent.ProcessAsync("What is the weather in Rexburg, Idaho today?");
+        Assert.True(first.Success);
+
+        var second = await agent.ProcessAsync("What can I do in that kind of weather?");
+        Assert.True(second.Success);
+        Assert.Contains("Best fit right now", second.Text, StringComparison.OrdinalIgnoreCase);
+
+        var third = await agent.ProcessAsync("That's great, but what kind of things could I do in that weather?");
+        Assert.True(third.Success);
+        Assert.Contains("Best fit right now", third.Text, StringComparison.OrdinalIgnoreCase);
+
+        Assert.DoesNotContain(mcp.Calls,
+            c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

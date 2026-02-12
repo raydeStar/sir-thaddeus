@@ -61,8 +61,12 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
     {
         ArgumentNullException.ThrowIfNull(messages);
 
+        var requestMessages = tools is { Count: > 0 }
+            ? messages
+            : NormalizeMessagesForPlainChat(messages);
+
         // ── Attempt 1: full request with stop + repetition_penalty ───
-        var body = BuildRequestBody(messages, tools, maxTokensOverride, includeExtras: true);
+        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, includeExtras: true);
 
         var response = await _http.PostAsJsonAsync(
             "/v1/chat/completions", body, _json, cancellationToken);
@@ -80,7 +84,7 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
-            var bare = BuildRequestBody(messages, tools, maxTokensOverride, includeExtras: false);
+            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, includeExtras: false);
 
             response = await _http.PostAsJsonAsync(
                 "/v1/chat/completions", bare, _json, cancellationToken);
@@ -93,6 +97,97 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
 
         throw new HttpRequestException(
             $"LLM returned {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
+    }
+
+    /// <summary>
+    /// Some chat templates (including popular LM Studio defaults) expect
+    /// at most one leading system message, followed by strict user/assistant
+    /// alternation. When tools are disabled, strip tool scaffolding and
+    /// compact role runs so plain-chat requests stay template-safe.
+    /// </summary>
+    private static IReadOnlyList<ChatMessage> NormalizeMessagesForPlainChat(
+        IReadOnlyList<ChatMessage> messages)
+    {
+        if (messages.Count == 0)
+            return messages;
+
+        ChatMessage? system = null;
+        var turns = new List<ChatMessage>(messages.Count);
+
+        foreach (var message in messages)
+        {
+            var role = message.Role?.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(role))
+                continue;
+
+            if (role == "system")
+            {
+                if (system is null && !string.IsNullOrWhiteSpace(message.Content))
+                    system = ChatMessage.System(message.Content!);
+                continue;
+            }
+
+            if (role == "tool")
+                continue;
+
+            if (role == "assistant" &&
+                message.ToolCalls is { Count: > 0 } &&
+                string.IsNullOrWhiteSpace(message.Content))
+            {
+                continue;
+            }
+
+            if ((role == "user" || role == "assistant") &&
+                !string.IsNullOrWhiteSpace(message.Content))
+            {
+                turns.Add(role == "user"
+                    ? ChatMessage.User(message.Content!)
+                    : ChatMessage.Assistant(message.Content!));
+            }
+        }
+
+        var alternating = new List<ChatMessage>(turns.Count);
+        foreach (var turn in turns)
+        {
+            if (alternating.Count == 0)
+            {
+                // Templates usually expect the first conversational turn to be user.
+                if (turn.Role == "assistant")
+                    continue;
+
+                alternating.Add(turn);
+                continue;
+            }
+
+            var previous = alternating[^1];
+            if (string.Equals(previous.Role, turn.Role, StringComparison.Ordinal))
+            {
+                var merged = string.Concat(
+                    previous.Content?.TrimEnd(),
+                    "\n",
+                    turn.Content?.TrimStart());
+
+                alternating[^1] = turn.Role == "user"
+                    ? ChatMessage.User(merged)
+                    : ChatMessage.Assistant(merged);
+                continue;
+            }
+
+            alternating.Add(turn);
+        }
+
+        // Never send an empty message array to the backend.
+        if (alternating.Count == 0)
+            return system is null
+                ? [ChatMessage.User("Hello")]
+                : [system, ChatMessage.User("Hello")];
+
+        if (system is null)
+            return alternating;
+
+        var normalized = new List<ChatMessage>(alternating.Count + 1) { system };
+        normalized.AddRange(alternating);
+        return normalized;
     }
 
     // ─────────────────────────────────────────────────────────────────

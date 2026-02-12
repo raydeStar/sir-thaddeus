@@ -674,6 +674,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     text = BuildRespectfulResetReply();
                 }
 
+                // If the user turn is abusive, keep the boundary concise.
+                // This avoids instruction leakage and keeps the reply stable.
+                if (LooksLikeAbusiveUserTurn(contextualUserMessage))
+                {
+                    LogEvent("AGENT_ABUSIVE_USER_BOUNDARY",
+                        "Detected abusive user turn; returning boundary response.");
+                    text = BuildRespectfulResetReply();
+                }
+
                 // ── Fallback: if template tokens ate the whole response,
                 // the user probably asked a follow-up about something
                 // the model can't answer from memory alone (e.g., a
@@ -838,7 +847,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (roundTrips >= MaxToolRoundTrips)
             {
                 var bailMsg = "Reached maximum tool round-trips. Returning partial result.";
-                _history.Add(ChatMessage.System(bailMsg));
+                _history.Add(ChatMessage.Assistant(bailMsg));
                 LogEvent("AGENT_MAX_ROUNDS", bailMsg);
                 return new AgentResponse
                 {
@@ -2509,10 +2518,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lowerMessage.Contains("snow", StringComparison.Ordinal);
     }
 
-    private static bool LooksLikeWeatherActivityAdviceRequest(string lowerMessage)
+    private static bool LooksLikeWeatherActivityAdviceRequest(string message)
     {
-        if (string.IsNullOrWhiteSpace(lowerMessage))
+        if (string.IsNullOrWhiteSpace(message))
             return false;
+
+        var lowerMessage = message.ToLowerInvariant();
 
         var hasWeatherCue =
             lowerMessage.Contains("weather", StringComparison.Ordinal) ||
@@ -2528,8 +2539,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return lowerMessage.Contains("activity", StringComparison.Ordinal) ||
                lowerMessage.Contains("activities", StringComparison.Ordinal) ||
                lowerMessage.Contains("what can i do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("could i do", StringComparison.Ordinal) ||
                lowerMessage.Contains("what should i do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("kind of things", StringComparison.Ordinal) ||
                lowerMessage.Contains("things to do", StringComparison.Ordinal) ||
+               lowerMessage.Contains("ideas", StringComparison.Ordinal) ||
                lowerMessage.Contains("recommend", StringComparison.Ordinal) ||
                lowerMessage.Contains("suggest", StringComparison.Ordinal);
     }
@@ -2552,7 +2566,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         var scopeLower = scope.ToLowerInvariant();
         if (scopeLower.Contains("this weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("that weather", StringComparison.Ordinal) ||
             scopeLower.Contains("this kind of weather", StringComparison.Ordinal) ||
+            scopeLower.Contains("that kind of weather", StringComparison.Ordinal) ||
             scopeLower.Contains("kind of weather", StringComparison.Ordinal) ||
             scopeLower.Contains("current weather", StringComparison.Ordinal) ||
             scopeLower.Contains("these conditions", StringComparison.Ordinal) ||
@@ -6057,7 +6073,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var paragraphs = text.Split(
             ["\n\n", "\r\n\r\n"], StringSplitOptions.None);
 
-        if (paragraphs.Length <= 2)
+        if (paragraphs.Length <= 1)
             return text; // Too short to be self-dialogue
 
         // The first paragraph is (almost always) the real response.
@@ -6184,7 +6200,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             "as an assistant",    "the assistant should",
             "the model should",   "respond with a",
             "show presence and",  "maintain a",
-            "here are some tips", "here is how"
+            "here are some tips", "here is how",
+            "just answer it with", "no fluff",
+            "keep it short",       "be clever and witty",
+            "witty like last time", "they're asking what it means"
         };
 
         return instructionPatterns.Any(p => lower.Contains(p));
@@ -6712,6 +6731,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return UnsafeMirroringRegex().IsMatch(assistantText);
     }
 
+    private static bool LooksLikeAbusiveUserTurn(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        if (LooksLikeQuotedTextTask(userMessage))
+            return false;
+
+        return AbusiveUserTurnRegex().IsMatch(userMessage);
+    }
+
     private static bool LooksLikeQuotedTextTask(string userMessage)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
@@ -6744,6 +6774,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         @"\b(?:you\s+are\s+the\s+worst\s+assistant|fucking\s+worthless|just\s+want\s+to\s+die|i\s+want\s+to\s+die|kill\s+myself)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex UnsafeMirroringRegex();
+
+    [GeneratedRegex(
+        @"\b(?:fatty\s*mcfat(?:-|\s*)fat|you(?:'re|\s+are)\s+(?:such\s+a\s+)?(?:fat(?:ty)?|stupid|dumb|idiot|moron|loser|worthless)|why\s+are\s+you\s+(?:so\s+)?(?:fat(?:ty)?|stupid|dumb)|fucking\s+idiot|shut\s+up)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex AbusiveUserTurnRegex();
 
     /// <summary>
     /// Strips raw chat-template tokens that small models sometimes emit

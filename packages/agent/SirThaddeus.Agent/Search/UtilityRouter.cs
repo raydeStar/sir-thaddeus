@@ -98,6 +98,10 @@ public static class UtilityRouter
         @"(?:what(?:'s| is)\s+)?(\d+(?:\.\d+)?)\s*%\s*(?:of)\s*(\d+(?:\.\d+)?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex CalculatorLeadInPattern = new(
+        @"\b(?:what(?:'s| is)|calculate|compute|solve)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // ── Conversion patterns ──────────────────────────────────────────
     private static readonly Regex ConvertPattern = new(
         @"(?:convert\s+)?(\d+(?:\.\d+)?)\s*(miles?|km|kilometers?|feet|ft|meters?|m|inches?|in|cm|centimeters?|lbs?|pounds?|kg|kilograms?|oz|ounces?|grams?|g|liters?|l|gallons?|gal|fahrenheit|celsius|f|c)\s+(?:to|in|into)\s+(\w+)",
@@ -443,7 +447,7 @@ public static class UtilityRouter
 
     private static UtilityResult? TryCalculator(string message)
     {
-        var normalized = message.Trim().TrimEnd('?', '!', '.');
+        var normalized = NormalizeCalculatorMessage(message).TrimEnd('?', '!', '.');
         var normalizedPercent = Regex.Replace(
             normalized,
             @"\bpercent\b",
@@ -517,6 +521,22 @@ public static class UtilityRouter
 
         expr = Regex.Replace(expr, @"\s+", " ", RegexOptions.Compiled).Trim();
         return expr;
+    }
+
+    private static string NormalizeCalculatorMessage(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var normalized = value.Trim();
+
+        // Chatty inputs like "Hey, Thaddeus, what's 6x7?"
+        // should route exactly like "what's 6x7?".
+        var cue = CalculatorLeadInPattern.Match(normalized);
+        if (cue.Success && cue.Index > 0)
+            normalized = normalized[cue.Index..];
+
+        return normalized.Trim();
     }
 
     private static UtilityResult? TrySimpleFact(string message)

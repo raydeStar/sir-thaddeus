@@ -213,6 +213,114 @@ public class LmStudioClientSelfHealingTests : IDisposable
             "Empty stop sequences should be omitted");
     }
 
+    [Fact]
+    public async Task PlainChat_NormalizesToolScaffolding_ToAlternatingRoles()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler([
+            MakeSuccessResponse("All good.")
+        ], onRequest: body => capturedBody = body);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var toolCall = new ToolCallRequest
+        {
+            Id = "call_1",
+            Function = new FunctionCallDetails
+            {
+                Name = "memory_store_facts",
+                Arguments = "{}"
+            }
+        };
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System("You are a test assistant."),
+            ChatMessage.User("Remember that I like cabbage."),
+            ChatMessage.AssistantToolCalls([toolCall]),
+            ChatMessage.ToolResult("call_1", """{"stored":1}"""),
+            ChatMessage.Assistant("Stored."),
+            ChatMessage.User("How are you today?")
+        };
+
+        var response = await client.ChatAsync(messages, tools: null);
+
+        Assert.True(response.IsComplete);
+        Assert.NotNull(capturedBody);
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        var sentMessages = doc.RootElement.GetProperty("messages");
+        var roles = sentMessages.EnumerateArray()
+            .Select(m => m.GetProperty("role").GetString())
+            .ToList();
+
+        Assert.Equal(new[] { "system", "user", "assistant", "user" }, roles);
+        Assert.DoesNotContain(sentMessages.EnumerateArray(),
+            m => string.Equals(m.GetProperty("role").GetString(), "tool", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ToolMode_DoesNotStripToolHistory()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler([
+            MakeSuccessResponse("Tool mode response")
+        ], onRequest: body => capturedBody = body);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System("You are a test assistant."),
+            ChatMessage.User("Store this memory."),
+            ChatMessage.AssistantToolCalls([
+                new ToolCallRequest
+                {
+                    Id = "call_1",
+                    Function = new FunctionCallDetails
+                    {
+                        Name = "memory_store_facts",
+                        Arguments = "{}"
+                    }
+                }
+            ]),
+            ChatMessage.ToolResult("call_1", """{"stored":1}"""),
+            ChatMessage.Assistant("Stored.")
+        };
+
+        var tools = new List<ToolDefinition>
+        {
+            new()
+            {
+                Function = new FunctionDefinition
+                {
+                    Name = "memory_store_facts",
+                    Description = "Stores memory facts",
+                    Parameters = new Dictionary<string, object>
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new Dictionary<string, object>()
+                    }
+                }
+            }
+        };
+
+        var response = await client.ChatAsync(messages, tools);
+
+        Assert.True(response.IsComplete);
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        var sentMessages = doc.RootElement.GetProperty("messages");
+        Assert.Contains(sentMessages.EnumerateArray(),
+            m => string.Equals(m.GetProperty("role").GetString(), "tool", StringComparison.Ordinal));
+    }
+
     // ── Response Builders ──────────────────────────────────────────────
 
     private static (HttpStatusCode, string) MakeSuccessResponse(string content) =>

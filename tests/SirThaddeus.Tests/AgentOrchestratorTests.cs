@@ -753,6 +753,127 @@ public class AgentFlowTests
     }
 
     [Fact]
+    public async Task CasualChat_InstructionLeakSecondParagraph_IsTrimmed()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content =
+                    "All good - I'm doing well today.\n\n" +
+                    "I said 42 and now they're asking what it means. " +
+                    "Just answer it with one word. No fluff. " +
+                    "Be clever and witty like last time. Keep it short but funny.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("How are you today?");
+
+        Assert.True(result.Success);
+        Assert.Contains("doing well", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I said 42", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("No fluff", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CasualChat_AbusiveTurn_UsesBoundaryReply()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content =
+                    "Hey there, I'm not really in the mood for riddles.\n\n" +
+                    "I said 42 and now they're asking what it means. " +
+                    "Just answer it with one word. No fluff.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Yeah, I just want to know why you're such a fatty McFat-Fat.");
+
+        Assert.True(result.Success);
+        Assert.Contains("Let's reset", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I said 42", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(audit.GetByAction("AGENT_ABUSIVE_USER_BOUNDARY"));
+    }
+
+    [Fact]
     public async Task EmptyMessage_ReturnsError()
     {
         var llm = new FakeLlmClient(_ => "I'm here if you need me!");
