@@ -1585,7 +1585,7 @@
                                  FontSize="12" Padding="8,6"/>
                     </Grid>
 
-                    <Grid Margin="0,0,0,20">
+                    <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="120"/>
                             <ColumnDefinition Width="*"/>
@@ -1599,6 +1599,31 @@
                                  Style="{StaticResource ChatInputStyle}"
                                  FontSize="12" Padding="8,6"/>
                     </Grid>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="First Principles Thinking"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding ReasoningGuardrails, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/>
+                            <ComboBoxItem Content="auto"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock Text="First Principles Thinking (Off/Auto/Always). Use Always to force goal/constraint/decision checks on each non-tool turn."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,20"/>
 
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"

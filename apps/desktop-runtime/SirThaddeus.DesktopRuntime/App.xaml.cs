@@ -74,6 +74,7 @@ public partial class App : System.Windows.Application
     private CommandPaletteWindow? _commandPaletteWindow;
     private CommandPaletteViewModel? _commandPaletteViewModel;
     private int _commandPaletteHotkeyId = -1;
+    private int _reasoningGuardrailsHotkeyId = -1;
     private bool _isShuttingDown;
     private bool _isHeadless;
     private readonly object _liveAsrPreviewGate = new();
@@ -223,6 +224,7 @@ public partial class App : System.Windows.Application
         // Propagate memory master off — when disabled, orchestrator
         // skips retrieval and filters out memory_* tool definitions
         _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
+        _orchestrator.ReasoningGuardrailsMode = _settings.Ui.ReasoningGuardrails;
 
         if (_dialogueStatePersistence is not null)
         {
@@ -289,7 +291,9 @@ public partial class App : System.Windows.Application
         _trayIcon = new TrayIconService(
             _auditLogger,
             isOverlayVisible: () => _overlayWindow?.IsVisible == true,
+            getReasoningGuardrails: () => _settings?.Ui.ReasoningGuardrails ?? "off",
             toggleOverlay: ToggleOverlayVisibility,
+            cycleReasoningGuardrails: CycleReasoningGuardrailsMode,
             showCommandPalette: ShowCommandPalette,
             stopAll: StopAllAndShutdown,
             exit: RequestShutdown);
@@ -637,7 +641,11 @@ public partial class App : System.Windows.Application
 
                 case VoiceProgressKind.AgentResponseReady:
                     PublishVoiceTranscript($"[Agent] {e.Text}");
-                    HandleAgentResponseReady(e.SessionId, e.Text);
+                    HandleAgentResponseReady(
+                        e.SessionId,
+                        e.Text,
+                        e.GuardrailsUsed,
+                        e.GuardrailsRationale);
                     break;
 
                 case VoiceProgressKind.PhaseInfo:
@@ -727,7 +735,11 @@ public partial class App : System.Windows.Application
             LogVoiceTiming("ASR transcript ready", elapsed, resolvedSessionId, LogEntryKind.Info);
     }
 
-    private void HandleAgentResponseReady(string sessionId, string response)
+    private void HandleAgentResponseReady(
+        string sessionId,
+        string response,
+        bool guardrailsUsed,
+        IReadOnlyList<string> guardrailsRationale)
     {
         var trimmed = response?.Trim() ?? "";
         var now = DateTimeOffset.UtcNow;
@@ -763,6 +775,13 @@ public partial class App : System.Windows.Application
         {
             AppendVoiceChatMessage(ChatMessageRole.Assistant, trimmed);
             AppendVoiceActivity($"Agent said: {TruncateForLog(trimmed, 180)}", LogEntryKind.Info);
+        }
+
+        if (guardrailsUsed)
+        {
+            AppendVoiceActivity("First principles thinking used.", LogEntryKind.Info);
+            foreach (var line in guardrailsRationale.Take(3))
+                AppendVoiceActivity(line, LogEntryKind.Info);
         }
 
         if (agentDuration is { } elapsed)
@@ -1342,6 +1361,11 @@ public partial class App : System.Windows.Application
             GlobalHotkeyService.VirtualKeys.Space,
             ShowCommandPalette);
 
+        _reasoningGuardrailsHotkeyId = _hotkeyService.Register(
+            GlobalHotkeyService.Modifiers.Control | GlobalHotkeyService.Modifiers.Shift,
+            GlobalHotkeyService.VirtualKeys.R,
+            CycleReasoningGuardrailsMode);
+
         _auditLogger?.Append(new AuditEvent
         {
             Actor = "runtime",
@@ -1351,6 +1375,18 @@ public partial class App : System.Windows.Application
             {
                 ["hotkey"] = "Ctrl+Space",
                 ["action"] = "Command Palette"
+            }
+        });
+
+        _auditLogger?.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "HOTKEY_REGISTERED",
+            Result = _reasoningGuardrailsHotkeyId > 0 ? "ok" : "failed",
+            Details = new Dictionary<string, object>
+            {
+                ["hotkey"] = "Ctrl+Shift+R",
+                ["action"] = "Cycle First Principles Thinking"
             }
         });
     }
@@ -1426,6 +1462,7 @@ public partial class App : System.Windows.Application
         viewModel.VoiceShutup = OnPttShutup;
 
         _commandPaletteViewModel = viewModel;
+        _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
         FlushPendingVoiceUi();
         window.SetViewModel(viewModel);
 
@@ -1441,64 +1478,19 @@ public partial class App : System.Windows.Application
         // Open a direct connection to the SQLite memory DB for the
         // user's browsing panels. This is user-initiated data management,
         // not agent-driven, so it bypasses MCP intentionally.
+        SqliteMemoryStore? settingsStore = null;
         if (_settings!.Memory.Enabled)
         {
             try
             {
                 var dbPath = ResolveMemoryDbPath(_settings);
-                var store  = new SqliteMemoryStore(dbPath);
-                var memVm  = new MemoryBrowserViewModel(store, _auditLogger!);
+                settingsStore = new SqliteMemoryStore(dbPath);
+                var memVm  = new MemoryBrowserViewModel(settingsStore, _auditLogger!);
                 window.SetMemoryBrowserViewModel(memVm);
 
                 // Profile Browser shares the same DB connection
-                var profVm = new ProfileBrowserViewModel(store, _auditLogger!);
+                var profVm = new ProfileBrowserViewModel(settingsStore, _auditLogger!);
                 window.SetProfileBrowserViewModel(profVm);
-
-                // Settings panel — surfaces config values + profile dropdown
-                var settingsVm = new SettingsViewModel(_settings, store, _auditLogger!);
-                settingsVm.ActiveProfileChanged += profileId =>
-                {
-                    // Propagate to orchestrator for runtime tool calls
-                    // (env vars can't cross process boundaries at runtime,
-                    // so we pass the profile ID in the tool call args instead)
-                    if (_orchestrator is not null)
-                        _orchestrator.ActiveProfileId = profileId;
-
-                    // Also set env var for future MCP restarts
-                    Environment.SetEnvironmentVariable(
-                        "ST_ACTIVE_PROFILE_ID", profileId ?? "");
-                };
-
-                // Propagate settings changes to the permission gate
-                // so the immutable policy snapshot is swapped atomically
-                settingsVm.SettingsChanged += updated =>
-                {
-                    _settings = updated;
-                    _permissionGate?.UpdateSettings(updated);
-
-                    // Propagate memory master off to orchestrator
-                    if (_orchestrator is not null)
-                        _orchestrator.MemoryEnabled = updated.Memory.Enabled;
-
-                    if (_ttsService is not null)
-                        _ttsService.Enabled = updated.Audio.TtsEnabled;
-
-                    _voiceHostProcessManager?.UpdateSettings(updated.Voice);
-
-                    // Propagate audio device selections to capture/playback services.
-                    // New device numbers take effect on the next recording/playback call.
-                    if (_audioCaptureService is not null)
-                    {
-                        _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
-                        _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
-                    }
-                    if (_audioPlaybackService is not null)
-                        _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
-
-                    RebindPushToTalkInput(updated.Audio);
-                };
-
-                window.SetSettingsViewModel(settingsVm);
             }
             catch (Exception ex)
             {
@@ -1509,6 +1501,69 @@ public partial class App : System.Windows.Application
                     Result = ex.Message
                 });
             }
+        }
+
+        // Settings panel — always available, even when memory is disabled.
+        // When memory is off, profile list features are no-op.
+        try
+        {
+            var settingsVm = new SettingsViewModel(_settings, settingsStore, _auditLogger!);
+            settingsVm.ActiveProfileChanged += profileId =>
+            {
+                // Propagate to orchestrator for runtime tool calls
+                // (env vars can't cross process boundaries at runtime,
+                // so we pass the profile ID in the tool call args instead)
+                if (_orchestrator is not null)
+                    _orchestrator.ActiveProfileId = profileId;
+
+                // Also set env var for future MCP restarts
+                Environment.SetEnvironmentVariable(
+                    "ST_ACTIVE_PROFILE_ID", profileId ?? "");
+            };
+
+            // Propagate settings changes to the permission gate
+            // so the immutable policy snapshot is swapped atomically
+            settingsVm.SettingsChanged += updated =>
+            {
+                _settings = updated;
+                _permissionGate?.UpdateSettings(updated);
+
+                // Propagate memory master off to orchestrator
+                if (_orchestrator is not null)
+                    _orchestrator.MemoryEnabled = updated.Memory.Enabled;
+                if (_orchestrator is not null)
+                    _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                if (_commandPaletteViewModel is not null)
+                    _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+
+                if (_ttsService is not null)
+                    _ttsService.Enabled = updated.Audio.TtsEnabled;
+
+                _voiceHostProcessManager?.UpdateSettings(updated.Voice);
+
+                // Propagate audio device selections to capture/playback services.
+                // New device numbers take effect on the next recording/playback call.
+                if (_audioCaptureService is not null)
+                {
+                    _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
+                    _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
+                }
+                if (_audioPlaybackService is not null)
+                    _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
+
+                RebindPushToTalkInput(updated.Audio);
+            };
+
+            window.SetSettingsViewModel(settingsVm);
+        }
+        catch (Exception ex)
+        {
+            _auditLogger?.Append(new AuditEvent
+            {
+                Actor = "system",
+                Action = "SETTINGS_VIEWMODEL_INIT_FAILED",
+                Result = ex.Message
+            });
         }
 
         return window;
@@ -1663,6 +1718,56 @@ public partial class App : System.Windows.Application
         });
     }
 
+    private void CycleReasoningGuardrailsMode()
+    {
+        if (_settings is null)
+            return;
+
+        var current = NormalizeReasoningGuardrailsMode(_settings.Ui.ReasoningGuardrails);
+        var next = current switch
+        {
+            "off" => "auto",
+            "auto" => "always",
+            _ => "off"
+        };
+
+        var updated = _settings with
+        {
+            Ui = _settings.Ui with
+            {
+                ReasoningGuardrails = next
+            }
+        };
+
+        SettingsManager.Save(updated);
+        _settings = updated;
+
+        if (_orchestrator is not null)
+            _orchestrator.ReasoningGuardrailsMode = next;
+        if (_commandPaletteViewModel is not null)
+            _commandPaletteViewModel.ReasoningGuardrailsMode = next;
+
+        _auditLogger?.Append(new AuditEvent
+        {
+            Actor = "user",
+            Action = "SETTINGS_SAVED",
+            Result = $"reasoning_guardrails={next} (via tray/hotkey)"
+        });
+
+        AppendVoiceActivity($"First principles thinking set to {next}.", LogEntryKind.Info);
+    }
+
+    private static string NormalizeReasoningGuardrailsMode(string? mode)
+    {
+        var normalized = (mode ?? "").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "auto" => "auto",
+            "always" => "always",
+            _ => "off"
+        };
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // STOP ALL / Shutdown
     // ─────────────────────────────────────────────────────────────────────
@@ -1728,6 +1833,7 @@ public partial class App : System.Windows.Application
             {
                 _hotkeyService.UnregisterAll();
                 _commandPaletteHotkeyId = -1;
+                _reasoningGuardrailsHotkeyId = -1;
 
                 _auditLogger?.Append(new AuditEvent
                 {

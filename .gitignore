@@ -50,3 +50,22 @@ Thumbs.db
 # User-specific files
 *.user
 *.rsuser
+
+# Local secrets / environment files
+.env
+.env.*
+*.secrets.json
+secrets.json
+
+# Local app config overrides
+local.settings.json
+appsettings.Local.json
+appsettings.*.local.json
+
+# Common local caches / envs
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo

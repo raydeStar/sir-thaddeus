@@ -15,8 +15,11 @@ public sealed class TrayIconService : IDisposable
     private readonly System.Windows.Threading.Dispatcher _dispatcher;
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _toggleOverlayItem;
+    private readonly ToolStripMenuItem _reasoningGuardrailsItem;
     private readonly Func<bool> _isOverlayVisible;
+    private readonly Func<string> _getReasoningGuardrails;
     private readonly Action _toggleOverlay;
+    private readonly Action _cycleReasoningGuardrails;
     private readonly Action _showCommandPalette;
     private readonly Action _stopAll;
     private readonly Action _exit;
@@ -25,7 +28,9 @@ public sealed class TrayIconService : IDisposable
     public TrayIconService(
         IAuditLogger auditLogger,
         Func<bool> isOverlayVisible,
+        Func<string> getReasoningGuardrails,
         Action toggleOverlay,
+        Action cycleReasoningGuardrails,
         Action showCommandPalette,
         Action stopAll,
         Action exit)
@@ -35,7 +40,9 @@ public sealed class TrayIconService : IDisposable
             ?? throw new InvalidOperationException("WPF dispatcher is not available (tray icon requires UI thread).");
 
         _isOverlayVisible = isOverlayVisible ?? throw new ArgumentNullException(nameof(isOverlayVisible));
+        _getReasoningGuardrails = getReasoningGuardrails ?? throw new ArgumentNullException(nameof(getReasoningGuardrails));
         _toggleOverlay = toggleOverlay ?? throw new ArgumentNullException(nameof(toggleOverlay));
+        _cycleReasoningGuardrails = cycleReasoningGuardrails ?? throw new ArgumentNullException(nameof(cycleReasoningGuardrails));
         _showCommandPalette = showCommandPalette ?? throw new ArgumentNullException(nameof(showCommandPalette));
         _stopAll = stopAll ?? throw new ArgumentNullException(nameof(stopAll));
         _exit = exit ?? throw new ArgumentNullException(nameof(exit));
@@ -45,6 +52,9 @@ public sealed class TrayIconService : IDisposable
 
         var openPaletteItem = new ToolStripMenuItem("Command Palette (Ctrl+Space)");
         openPaletteItem.Click += (_, _) => InvokeOnUiThread(_showCommandPalette);
+
+        _reasoningGuardrailsItem = new ToolStripMenuItem("First Principles: Off");
+        _reasoningGuardrailsItem.Click += (_, _) => InvokeOnUiThread(_cycleReasoningGuardrails);
 
         var stopAllItem = new ToolStripMenuItem("STOP ALL");
         stopAllItem.Click += (_, _) => InvokeOnUiThread(_stopAll);
@@ -56,6 +66,7 @@ public sealed class TrayIconService : IDisposable
         menu.Opening += (_, _) => UpdateMenuText();
         menu.Items.Add(_toggleOverlayItem);
         menu.Items.Add(openPaletteItem);
+        menu.Items.Add(_reasoningGuardrailsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(stopAllItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -95,6 +106,24 @@ public sealed class TrayIconService : IDisposable
     private void UpdateMenuText()
     {
         _toggleOverlayItem.Text = _isOverlayVisible() ? "Hide Overlay" : "Show Overlay";
+        var mode = NormalizeMode(_getReasoningGuardrails());
+        _reasoningGuardrailsItem.Text = mode switch
+        {
+            "always" => "First Principles: Always",
+            "auto" => "First Principles: Auto",
+            _ => "First Principles: Off"
+        };
+    }
+
+    private static string NormalizeMode(string? mode)
+    {
+        var normalized = (mode ?? "").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "always" => "always",
+            "auto" => "auto",
+            _ => "off"
+        };
     }
 
     private void InvokeOnUiThread(Action action)

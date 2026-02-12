@@ -56,6 +56,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private string _voiceStatusText = "";
     private string _voiceTranscriptText = "";
     private bool _isVoiceActive;
+    private string _reasoningGuardrailsMode = "off";
     // Old voice test fields removed — replaced by VoiceStatusText / VoiceTranscriptText / IsVoiceActive.
 
     private static readonly Regex TaggedThinkingRegex = new(
@@ -208,6 +209,15 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _isVoiceActive;
         set => SetProperty(ref _isVoiceActive, value);
+    }
+
+    /// <summary>
+    /// Runtime first-principles mode mirrored from settings/tray/hotkey controls.
+    /// </summary>
+    public string ReasoningGuardrailsMode
+    {
+        get => _reasoningGuardrailsMode;
+        set => SetProperty(ref _reasoningGuardrailsMode, NormalizeReasoningGuardrailsMode(value));
     }
 
     /// <summary>
@@ -400,6 +410,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                         AddLog(tc.Success ? LogEntryKind.ToolOutput : LogEntryKind.Error,
                             $"\u2190 {Truncate(tc.Result, 300)}");
                     }
+                }
+
+                if (result.GuardrailsUsed)
+                {
+                    AddLog(LogEntryKind.Info, "First principles thinking used.");
+                    foreach (var line in result.GuardrailsRationale.Take(3))
+                        AddLog(LogEntryKind.Info, line);
                 }
 
                 AddLog(LogEntryKind.Info,
@@ -825,6 +842,17 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
     private static string NormalizeNewlines(string text)
         => (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private static string NormalizeReasoningGuardrailsMode(string? mode)
+    {
+        var normalized = (mode ?? "").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "auto" => "auto",
+            "always" => "always",
+            _ => "off"
+        };
+    }
 
     // ─────────────────────────────────────────────────────────────────
     // Source Card Extraction

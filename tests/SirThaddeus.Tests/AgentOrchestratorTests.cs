@@ -1094,7 +1094,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1168,7 +1168,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1261,7 +1261,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1353,7 +1353,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1446,7 +1446,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1986,6 +1986,88 @@ public class PolicyFilteringTests
         // Verify both new audit events exist
         Assert.NotEmpty(audit.GetByAction("ROUTER_OUTPUT"));
         Assert.NotEmpty(audit.GetByAction("POLICY_DECISION"));
+    }
+
+    [Fact]
+    public async Task ReasoningGuardrails_AutoMode_EmitsGuardrailsMetadata()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            if (system.Contains("Infer the practical real-world goal", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"primary_goal":"Complete the prerequisite before exiting.","alternative_goals":[],"confidence":0.9}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"constraints":["Respect explicit prerequisites before choosing an action."]}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse { IsComplete = true, Content = "normal", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ReasoningGuardrailsMode = "auto"
+        };
+
+        var result = await agent.ProcessAsync(
+            "The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?");
+
+        Assert.True(result.Success);
+        Assert.True(result.GuardrailsUsed);
+        Assert.NotEmpty(result.GuardrailsRationale);
+        Assert.Contains("pay at the kiosk first", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReasoningGuardrails_AlwaysMode_FallsBackWhenExtractionFails()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            if (system.Contains("Infer the practical real-world goal", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "not-json", FinishReason = "stop" };
+
+            if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "not-json", FinishReason = "stop" };
+
+            return new LlmResponse { IsComplete = true, Content = "normal fallback", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ReasoningGuardrailsMode = "always"
+        };
+
+        var result = await agent.ProcessAsync("Hey there, how are you?");
+
+        Assert.True(result.Success);
+        Assert.False(result.GuardrailsUsed);
+        Assert.Equal("normal fallback", result.Text);
     }
 }
 

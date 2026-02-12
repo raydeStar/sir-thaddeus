@@ -405,7 +405,9 @@ public sealed class VoiceSessionOrchestrator :
         FireProgress(
             VoiceProgressKind.AgentResponseReady,
             responseForVoiceUiAndSpeech,
-            sessionId);
+            sessionId,
+            response.GuardrailsUsed,
+            response.GuardrailsRationale);
 
         if (!response.Success || string.IsNullOrWhiteSpace(response.Text))
         {
@@ -634,7 +636,12 @@ public sealed class VoiceSessionOrchestrator :
         }
     }
 
-    private void FireProgress(VoiceProgressKind kind, string text, string sessionId)
+    private void FireProgress(
+        VoiceProgressKind kind,
+        string text,
+        string sessionId,
+        bool guardrailsUsed = false,
+        IReadOnlyList<string>? guardrailsRationale = null)
     {
         try
         {
@@ -642,7 +649,9 @@ public sealed class VoiceSessionOrchestrator :
             {
                 Kind = kind,
                 Text = text,
-                SessionId = sessionId
+                SessionId = sessionId,
+                GuardrailsUsed = guardrailsUsed,
+                GuardrailsRationale = guardrailsRationale ?? []
             });
         }
         catch

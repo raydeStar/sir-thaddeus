@@ -64,6 +64,7 @@ public sealed class SettingsViewModel : ViewModelBase
     // Weather
     private string _weatherUserAgent =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
+    private string _reasoningGuardrails = "off";
 
     // Audio Devices
     private AudioDeviceInfo? _selectedInputDevice;
@@ -134,6 +135,16 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // Weather
     public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
+    public string ReasoningGuardrails
+    {
+        get => _reasoningGuardrails;
+        set
+        {
+            var normalized = NormalizeReasoningGuardrailsMode(value);
+            if (SetProperty(ref _reasoningGuardrails, normalized))
+                MarkDirty();
+        }
+    }
 
     // ─── Audio Devices ──────────────────────────────────────────────
 
@@ -295,6 +306,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
         _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
         _weatherUserAgent         = s.Weather.UserAgent;
+        _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
 
         // Notify all bindings
@@ -324,6 +336,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(McpPermMemoryRead));
         OnPropertyChanged(nameof(McpPermMemoryWrite));
         OnPropertyChanged(nameof(WeatherUserAgent));
+        OnPropertyChanged(nameof(ReasoningGuardrails));
         OnPropertyChanged(nameof(InputGain));
     }
 
@@ -673,6 +686,10 @@ public sealed class SettingsViewModel : ViewModelBase
                     ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
                     : _weatherUserAgent.Trim()
             },
+            Ui = _settings.Ui with
+            {
+                ReasoningGuardrails = NormalizeReasoningGuardrailsMode(_reasoningGuardrails)
+            },
             ActiveProfileId = _selectedProfile?.ProfileId
         };
 
@@ -692,6 +709,17 @@ public sealed class SettingsViewModel : ViewModelBase
                 ? $"activeProfile={_selectedProfile.ProfileId}"
                 : "activeProfile=none"
         });
+    }
+
+    private static string NormalizeReasoningGuardrailsMode(string? mode)
+    {
+        var normalized = (mode ?? "").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "auto" => "auto",
+            "always" => "always",
+            _ => "off"
+        };
     }
 }
 

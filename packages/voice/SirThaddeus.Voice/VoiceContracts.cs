@@ -66,6 +66,8 @@ public sealed record VoiceAgentResponse
     public required string Text { get; init; }
     public bool Success { get; init; } = true;
     public string? Error { get; init; }
+    public bool GuardrailsUsed { get; init; }
+    public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
 }
 
 /// <summary>
@@ -145,6 +147,8 @@ public sealed class VoiceProgressEventArgs : EventArgs
     public required VoiceProgressKind Kind { get; init; }
     public string Text { get; init; } = "";
     public string SessionId { get; init; } = "";
+    public bool GuardrailsUsed { get; init; }
+    public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
 }
 
 public enum VoiceProgressKind

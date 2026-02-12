@@ -106,6 +106,9 @@ public static class UtilityRouter
     private static readonly Regex ConvertPattern = new(
         @"(?:convert\s+)?(\d+(?:\.\d+)?)\s*(miles?|km|kilometers?|feet|ft|meters?|m|inches?|in|cm|centimeters?|lbs?|pounds?|kg|kilograms?|oz|ounces?|grams?|g|liters?|l|gallons?|gal|fahrenheit|celsius|f|c)\s+(?:to|in|into)\s+(\w+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RecipeBakeTemperaturePattern = new(
+        @"\b(?:recipe\s+says\s+)?(?:bake|preheat)\s+(?:at\s+)?(?<temp>\d{2,4}(?:\.\d+)?)\s*(?:°\s*)?(?<unit>fahrenheit|celsius|f|c)?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex HowManyPattern = new(
         @"how many\s+(\w+)\s+(?:in|per)\s+(?:a |an )?(\w+)",
@@ -607,6 +610,9 @@ public static class UtilityRouter
 
     private static UtilityResult? TryConversion(string message)
     {
+        if (TryResolveRecipeTemperatureConversion(message, out var recipeTemperatureResult))
+            return recipeTemperatureResult;
+
         var match = ConvertPattern.Match(message);
         if (match.Success &&
             double.TryParse(match.Groups[1].Value, out var value))
@@ -645,6 +651,136 @@ public static class UtilityRouter
 
         return null;
     }
+
+    private static bool TryResolveRecipeTemperatureConversion(
+        string message,
+        out UtilityResult result)
+    {
+        result = null!;
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.ToLowerInvariant();
+        var hasRecipeCue =
+            lower.Contains("recipe", StringComparison.Ordinal) ||
+            lower.Contains("bake", StringComparison.Ordinal) ||
+            lower.Contains("preheat", StringComparison.Ordinal) ||
+            lower.Contains("oven", StringComparison.Ordinal);
+        if (!hasRecipeCue)
+            return false;
+
+        var match = RecipeBakeTemperaturePattern.Match(message);
+        if (!match.Success ||
+            !double.TryParse(match.Groups["temp"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sourceValue))
+        {
+            return false;
+        }
+
+        if (!TryInferRecipeTemperatureUnits(
+                lower,
+                sourceValue,
+                match.Groups["unit"].Value,
+                out var fromUnit,
+                out var toUnit))
+        {
+            return false;
+        }
+
+        var converted = TryConvert(sourceValue, fromUnit, toUnit);
+        if (converted is null)
+            return false;
+
+        var rounded = Math.Round(converted.Value, 0, MidpointRounding.AwayFromZero);
+        var toDisplay = TemperatureUnitDisplay(toUnit);
+        var fromDisplay = TemperatureUnitDisplay(fromUnit);
+
+        result = new UtilityResult
+        {
+            Category = "conversion",
+            Answer =
+                $"Set the oven to about **{rounded:0} {toDisplay}** " +
+                $"(exact: {converted.Value:0.##} {toDisplay} from {sourceValue:0.##} {fromDisplay})."
+        };
+        return true;
+    }
+
+    private static bool TryInferRecipeTemperatureUnits(
+        string lowerMessage,
+        double sourceValue,
+        string explicitUnitToken,
+        out string fromUnit,
+        out string toUnit)
+    {
+        fromUnit = "";
+        toUnit = "";
+
+        var wantsCelsius =
+            lowerMessage.Contains("set to celsius", StringComparison.Ordinal) ||
+            lowerMessage.Contains("set in celsius", StringComparison.Ordinal) ||
+            lowerMessage.Contains("to celsius", StringComparison.Ordinal) ||
+            lowerMessage.Contains("in celsius", StringComparison.Ordinal) ||
+            lowerMessage.Contains("oven is set to celsius", StringComparison.Ordinal) ||
+            lowerMessage.Contains("europe", StringComparison.Ordinal);
+        var wantsFahrenheit =
+            lowerMessage.Contains("set to fahrenheit", StringComparison.Ordinal) ||
+            lowerMessage.Contains("set in fahrenheit", StringComparison.Ordinal) ||
+            lowerMessage.Contains("to fahrenheit", StringComparison.Ordinal) ||
+            lowerMessage.Contains("in fahrenheit", StringComparison.Ordinal) ||
+            lowerMessage.Contains("oven is set to fahrenheit", StringComparison.Ordinal) ||
+            lowerMessage.Contains("united states", StringComparison.Ordinal) ||
+            lowerMessage.Contains("usa", StringComparison.Ordinal);
+
+        if (wantsCelsius == wantsFahrenheit)
+            return false;
+
+        toUnit = wantsCelsius ? "celsius" : "fahrenheit";
+
+        if (TryNormalizeTemperatureUnit(explicitUnitToken, out var normalizedExplicit))
+        {
+            fromUnit = normalizedExplicit;
+            if (string.Equals(fromUnit, toUnit, StringComparison.Ordinal))
+                return false;
+            return true;
+        }
+
+        // If no explicit source unit is present, infer from the target mode.
+        // Recipe prompts that mention switching oven scales are almost always
+        // asking for cross-scale conversion.
+        fromUnit = toUnit == "celsius" ? "fahrenheit" : "celsius";
+
+        // Guard against obviously incompatible values.
+        if (fromUnit == "celsius" && sourceValue > 350)
+            return false;
+        if (fromUnit == "fahrenheit" && sourceValue < 90)
+            return false;
+
+        return true;
+    }
+
+    private static bool TryNormalizeTemperatureUnit(string raw, out string normalized)
+    {
+        normalized = "";
+        var token = (raw ?? "").Trim().ToLowerInvariant();
+        if (token.Length == 0)
+            return false;
+
+        if (token is "c" or "celsius")
+        {
+            normalized = "celsius";
+            return true;
+        }
+
+        if (token is "f" or "fahrenheit")
+        {
+            normalized = "fahrenheit";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string TemperatureUnitDisplay(string normalizedUnit) =>
+        string.Equals(normalizedUnit, "fahrenheit", StringComparison.OrdinalIgnoreCase) ? "F" : "C";
 
     private static string FormatQuantity(double value, string normalizedUnit)
     {

@@ -50,6 +50,17 @@ public sealed record AgentResponse
     /// </summary>
     public DialogueContextSnapshot? ContextSnapshot { get; init; }
 
+    /// <summary>
+    /// True when the first-principles pipeline generated this answer.
+    /// </summary>
+    public bool GuardrailsUsed { get; init; }
+
+    /// <summary>
+    /// Short user-facing rationale triplet (Goal / Constraint / Decision).
+    /// Never includes chain-of-thought.
+    /// </summary>
+    public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
+
     public static AgentResponse FromError(string error) => new()
     {
         Text = error,

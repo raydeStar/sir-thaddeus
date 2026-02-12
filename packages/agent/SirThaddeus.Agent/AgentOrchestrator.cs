@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -32,6 +33,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly MergeSlots _mergeSlots;
     private readonly ValidateSlots _validateSlots;
     private readonly IToolPlanner _toolPlanner;
+    private readonly ReasoningGuardrailsPipeline _reasoningGuardrailsPipeline;
 
     // Last resolved place from weather flow. Used to anchor short
     // follow-up weather/news prompts like "forecast for today?"
@@ -41,11 +43,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private DateTimeOffset _lastPlaceContextAt;
     private string? _lastUtilityContextKey;
     private DateTimeOffset _lastUtilityContextAt;
+    private string _reasoningGuardrailsMode = "off";
+    private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
+    private DateTimeOffset _lastFirstPrinciplesAt;
 
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
     private static readonly TimeSpan PlaceContextTtl = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan UtilityContextTtl = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan FirstPrinciplesFollowUpTtl = TimeSpan.FromMinutes(15);
 
     // ── Web search tool names ────────────────────────────────────────
     // MCP stacks may register tools in snake_case or PascalCase.
@@ -168,6 +174,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     public bool MemoryEnabled { get; set; } = true;
 
+    /// <summary>
+    /// First principles thinking mode:
+    ///   - off: disable guardrail reasoning pipeline
+    ///   - auto: run only when detector flags likely goal-conflict prompt
+    ///   - always: run guardrail reasoning pass on each non-utility turn
+    /// </summary>
+    public string ReasoningGuardrailsMode
+    {
+        get => _reasoningGuardrailsMode;
+        set => _reasoningGuardrailsMode =
+            SirThaddeus.Agent.Guardrails.ReasoningGuardrailsMode.Normalize(value);
+    }
+
     /// <inheritdoc />
     public bool ContextLocked
     {
@@ -217,6 +236,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             GeocodeMismatchMode = geocodeMismatchMode
         });
         _toolPlanner = toolPlanner ?? new ToolPlanner();
+        _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(llm, audit);
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(_systemPrompt));
@@ -229,6 +249,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     {
         if (string.IsNullOrWhiteSpace(userMessage))
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."));
+
+        var lowerIncoming = userMessage.Trim().ToLowerInvariant();
+        if (!LooksLikeReasoningFollowUp(lowerIncoming))
+        {
+            _lastFirstPrinciplesRationale = [];
+            _lastFirstPrinciplesAt = default;
+        }
 
         // ── Add user message to history ──────────────────────────────
         _history.Add(ChatMessage.User(userMessage));
@@ -390,6 +417,46 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         try
         {
+            var firstPrinciplesFollowUp = TryBuildFirstPrinciplesFollowUpResponse(
+                contextualUserMessage,
+                toolCallsMade,
+                roundTrips);
+            if (firstPrinciplesFollowUp is not null)
+            {
+                _history.Add(ChatMessage.Assistant(firstPrinciplesFollowUp.Text));
+                LogEvent("FIRST_PRINCIPLES_FOLLOWUP", firstPrinciplesFollowUp.Text);
+                return AttachContextSnapshot(firstPrinciplesFollowUp);
+            }
+
+            var guardrailsEnabled =
+                SirThaddeus.Agent.Guardrails.ReasoningGuardrailsMode.IsEnabled(
+                    SirThaddeus.Agent.Guardrails.ReasoningGuardrailsMode.Normalize(ReasoningGuardrailsMode));
+            if (guardrailsEnabled)
+            {
+                var deterministicSpecialCase =
+                    _reasoningGuardrailsPipeline.TryRunDeterministicSpecialCase(contextualUserMessage);
+                if (deterministicSpecialCase is not null)
+                {
+                    var specialCaseText = deterministicSpecialCase.AnswerText;
+                    _lastFirstPrinciplesRationale = deterministicSpecialCase.RationaleLines.Take(3).ToArray();
+                    _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+                    _history.Add(ChatMessage.Assistant(specialCaseText));
+                    LogEvent("GUARDRAILS_RESPONSE",
+                        $"risk={deterministicSpecialCase.TriggerRisk}, source={deterministicSpecialCase.TriggerSource}, why={deterministicSpecialCase.TriggerWhy}");
+                    LogEvent("AGENT_RESPONSE", specialCaseText);
+
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = specialCaseText,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips,
+                        GuardrailsUsed = true,
+                        GuardrailsRationale = deterministicSpecialCase.RationaleLines
+                    });
+                }
+            }
+
             // ── Utility bypass: weather, time, calc, conversion ────────
             // Intercepted BEFORE the search pipeline to avoid overhead.
             var utilityResult = BuildUtilityResultFromToolPlan(toolPlan, contextualUserMessage);
@@ -480,6 +547,37 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     };
                     return AttachContextSnapshot(
                         AddLocationInferenceDisclosure(inlineResponse, validatedSlots));
+                }
+            }
+
+            if (ShouldAttemptReasoningGuardrails(route, contextualUserMessage))
+            {
+                var guardrailsResult = await _reasoningGuardrailsPipeline.TryRunAsync(
+                    contextualUserMessage,
+                    ReasoningGuardrailsMode,
+                    cancellationToken);
+
+                if (guardrailsResult is not null)
+                {
+                    roundTrips += guardrailsResult.LlmRoundTrips;
+
+                    var guardedText = guardrailsResult.AnswerText;
+                    _lastFirstPrinciplesRationale = guardrailsResult.RationaleLines.Take(3).ToArray();
+                    _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+                    _history.Add(ChatMessage.Assistant(guardedText));
+                    LogEvent("GUARDRAILS_RESPONSE",
+                        $"risk={guardrailsResult.TriggerRisk}, source={guardrailsResult.TriggerSource}, why={guardrailsResult.TriggerWhy}");
+                    LogEvent("AGENT_RESPONSE", guardedText);
+
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = guardedText,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips,
+                        GuardrailsUsed = true,
+                        GuardrailsRationale = guardrailsResult.RationaleLines
+                    });
                 }
             }
 
@@ -3504,6 +3602,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _lastPlaceContextAt = default;
         _lastUtilityContextKey = null;
         _lastUtilityContextAt = default;
+        _lastFirstPrinciplesRationale = [];
+        _lastFirstPrinciplesAt = default;
         LogEvent("AGENT_RESET", "Conversation history and search session cleared.");
     }
 
@@ -4742,9 +4842,54 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             "think" or "see" or "go" or "going" or "went";
     }
 
+    private static bool LooksLikeLogicPuzzlePrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = lower.Replace('’', '\'');
+        var hasPhotoCue =
+            normalized.Contains("who is in the photograph", StringComparison.Ordinal) ||
+            normalized.Contains("who is in the photo", StringComparison.Ordinal) ||
+            normalized.Contains("who is in the picture", StringComparison.Ordinal) ||
+            normalized.Contains("who's in the photograph", StringComparison.Ordinal) ||
+            normalized.Contains("who's in the photo", StringComparison.Ordinal) ||
+            normalized.Contains("who's in the picture", StringComparison.Ordinal) ||
+            normalized.Contains("whos in the photograph", StringComparison.Ordinal) ||
+            normalized.Contains("whos in the photo", StringComparison.Ordinal) ||
+            normalized.Contains("whos in the picture", StringComparison.Ordinal) ||
+            normalized.Contains("looking at a photograph", StringComparison.Ordinal) ||
+            normalized.Contains("pointing to a photograph", StringComparison.Ordinal);
+        var hasOnlyChildCue =
+            normalized.Contains("brothers and sisters, i have none", StringComparison.Ordinal) ||
+            normalized.Contains("brothers and sisters i have none", StringComparison.Ordinal) ||
+            normalized.Contains("i have no siblings", StringComparison.Ordinal) ||
+            normalized.Contains("i don't have siblings", StringComparison.Ordinal) ||
+            normalized.Contains("i do not have siblings", StringComparison.Ordinal) ||
+            normalized.Contains("i am an only child", StringComparison.Ordinal) ||
+            normalized.Contains("i'm an only child", StringComparison.Ordinal);
+
+        var hasFamilyEquation =
+            (normalized.Contains("that man's", StringComparison.Ordinal) ||
+             normalized.Contains("that woman's", StringComparison.Ordinal) ||
+             normalized.Contains("that person's", StringComparison.Ordinal) ||
+             normalized.Contains("that boy's", StringComparison.Ordinal) ||
+             normalized.Contains("that girl's", StringComparison.Ordinal)) &&
+            normalized.Contains(" is my ", StringComparison.Ordinal) &&
+            (normalized.Contains(" father's ", StringComparison.Ordinal) ||
+             normalized.Contains(" mother's ", StringComparison.Ordinal)) &&
+            (normalized.Contains(" son", StringComparison.Ordinal) ||
+             normalized.Contains(" daughter", StringComparison.Ordinal));
+
+        return hasPhotoCue && hasOnlyChildCue && hasFamilyEquation;
+    }
+
     private static bool LooksLikeIdentityLookup(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (LooksLikeLogicPuzzlePrompt(lower))
             return false;
 
         // Chit-chat false positives
@@ -5696,6 +5841,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return MakeRoute(Intents.BrowseOnce, confidence: 1.0,
                 needsWeb: true, needsBrowser: true);
 
+        // Referential "but why / explain that logic" follow-ups should stay
+        // in conversational mode when they refer to a recent first-principles
+        // decision from this session. Without that anchor, let normal routing
+        // decide so unrelated prompts still work.
+        if (LooksLikeReasoningFollowUp(lower) && HasRecentFirstPrinciplesRationale())
+            return MakeRoute(Intents.ChatOnly, confidence: 0.92);
+
         // Follow-up depth requests ("tell me more about that") should route
         // through the deterministic search pipeline, not the general tool
         // loop. The SearchOrchestrator handles source selection and deep-dive.
@@ -5772,6 +5924,163 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             Intents.LookupSearch  => ChatIntent.WebLookup,
             _                     => ChatIntent.Tooling
         };
+    }
+
+    private static bool ShouldAttemptReasoningGuardrails(RouterOutput route, string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        if (route.NeedsScreenRead ||
+            route.NeedsFileAccess ||
+            route.NeedsSystemExecute ||
+            route.NeedsBrowserAutomation ||
+            route.NeedsMemoryRead ||
+            route.NeedsMemoryWrite)
+        {
+            return false;
+        }
+
+        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.GeneralTool;
+    }
+
+    private AgentResponse? TryBuildFirstPrinciplesFollowUpResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        int roundTrips)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (!LooksLikeReasoningFollowUp(lower))
+            return null;
+
+        if (!HasRecentFirstPrinciplesRationale())
+            return null;
+
+        var age = _timeProvider.GetUtcNow() - _lastFirstPrinciplesAt;
+
+        var goal = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Goal:",
+            fallback: "complete the real-world objective");
+        var constraint = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Constraint:",
+            fallback: "pick the option that is physically feasible and goal-aligned");
+        var decision = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Decision:",
+            fallback: "choose the option that directly completes the task");
+
+        var text =
+            $"Because the goal was to {goal}. " +
+            $"The deciding constraint was: {constraint}. " +
+            $"So the choice was: {decision}.";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = "FIRST_PRINCIPLES_FOLLOWUP",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["ageSeconds"] = Math.Max(0, (long)age.TotalSeconds)
+            }
+        });
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips,
+            GuardrailsUsed = true,
+            GuardrailsRationale = _lastFirstPrinciplesRationale.Take(3).ToArray()
+        };
+    }
+
+    private bool HasRecentFirstPrinciplesRationale()
+    {
+        if (_lastFirstPrinciplesAt == default ||
+            _lastFirstPrinciplesRationale.Count < 3)
+        {
+            return false;
+        }
+
+        var age = _timeProvider.GetUtcNow() - _lastFirstPrinciplesAt;
+        return age <= FirstPrinciplesFollowUpTtl;
+    }
+
+    private static string ExtractRationaleValue(
+        IReadOnlyList<string> rationale,
+        string prefix,
+        string fallback)
+    {
+        foreach (var line in rationale)
+        {
+            if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = line[prefix.Length..].Trim();
+            value = value.TrimEnd('.', ';', ':').Trim();
+            return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+
+        return fallback;
+    }
+
+    private static bool LooksLikeReasoningFollowUp(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower) || lower.Length > 220)
+            return false;
+
+        var ultraShortWhy =
+            string.Equals(lower, "why", StringComparison.Ordinal) ||
+            string.Equals(lower, "why?", StringComparison.Ordinal) ||
+            string.Equals(lower, "but why", StringComparison.Ordinal) ||
+            string.Equals(lower, "but why?", StringComparison.Ordinal);
+
+        var asksForReasoning =
+            lower.Contains("explain why", StringComparison.Ordinal) ||
+            lower.Contains("logic behind", StringComparison.Ordinal) ||
+            lower.Contains("reasoning behind", StringComparison.Ordinal) ||
+            lower.Contains("what's your reasoning", StringComparison.Ordinal) ||
+            lower.Contains("whats your reasoning", StringComparison.Ordinal) ||
+            lower.Contains("explain your reasoning", StringComparison.Ordinal) ||
+            lower.Contains("explain that reasoning", StringComparison.Ordinal) ||
+            lower.Contains("what made you choose", StringComparison.Ordinal) ||
+            lower.Contains("how did you decide", StringComparison.Ordinal) ||
+            lower.Contains("why that", StringComparison.Ordinal) ||
+            lower.Contains("why this", StringComparison.Ordinal) ||
+            lower.Contains("why it", StringComparison.Ordinal) ||
+            lower.StartsWith("but why", StringComparison.Ordinal) ||
+            lower.StartsWith("why ", StringComparison.Ordinal);
+
+        if (!ultraShortWhy && !asksForReasoning)
+            return false;
+
+        var hasReferentialCue =
+            lower.Contains("that", StringComparison.Ordinal) ||
+            lower.Contains("this", StringComparison.Ordinal) ||
+            lower.Contains("it", StringComparison.Ordinal) ||
+            lower.Contains("your reasoning", StringComparison.Ordinal) ||
+            lower.Contains("your decision", StringComparison.Ordinal);
+
+        if (!ultraShortWhy && !hasReferentialCue)
+            return false;
+
+        // If user asks for evidence/citations, that's a lookup request.
+        if (lower.Contains("source", StringComparison.Ordinal) ||
+            lower.Contains("citation", StringComparison.Ordinal) ||
+            lower.Contains("article", StringComparison.Ordinal) ||
+            lower.Contains("url", StringComparison.Ordinal) ||
+            lower.Contains("link", StringComparison.Ordinal) ||
+            lower.Contains("reference", StringComparison.Ordinal) ||
+            lower.Contains("evidence", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     // ── RouterOutput factory ─────────────────────────────────────────
@@ -5984,6 +6293,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (LooksLikeMemoryWriteRequest(lower))
             return ChatIntent.Tooling;
 
+        // Logic/relationship puzzles should stay in chat/first-principles,
+        // not be treated as web identity lookups.
+        if (LooksLikeLogicPuzzlePrompt(lower))
+            return ChatIntent.Casual;
+
         // ── Web-search detection ─────────────────────────────────────
         // Catches obvious search-intent phrasing that small models
         // sometimes misclassify as "chat", causing them to hallucinate
@@ -6050,6 +6364,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     private static ChatIntent InferFallbackIntent(string lower)
     {
+        if (LooksLikeLogicPuzzlePrompt(lower))
+            return ChatIntent.Casual;
         if (LooksLikeWebSearchRequest(lower))
             return ChatIntent.WebLookup;
         if (LooksLikeMemoryWriteRequest(lower))
@@ -6434,6 +6750,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// </summary>
     private static bool LooksLikeWebSearchRequest(string lower)
     {
+        if (LooksLikeLogicPuzzlePrompt(lower))
+            return false;
+
         // Identity/definition lookups ("who is X", "what is Y") are
         // almost always external lookups.
         if (LooksLikeIdentityLookup(lower))
@@ -6597,6 +6916,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lower.Contains("rain") || lower.Contains("snow") ||
                lower.Contains("wind") || lower.Contains("humidity") ||
                lower.Contains("umbrella") || lower.Contains("trip") ||
+               lower.Contains("celsius") || lower.Contains("fahrenheit") ||
+               lower.Contains("oven") || lower.Contains("bake") ||
+               lower.Contains("preheat") ||
                lower.Contains("time in") || lower.Contains("timezone") || lower.Contains("time zone") ||
                lower.Contains("holiday") || lower.Contains("holidays") ||
                lower.Contains("rss") || lower.Contains("atom feed") || lower.Contains("feed url") ||

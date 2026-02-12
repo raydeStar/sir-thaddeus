@@ -132,6 +132,18 @@ public class UtilityRouterTests
     }
 
     [Fact]
+    public void Conversion_RecipeTemperaturePrompt_ReturnsDeterministicCelsiusSetting()
+    {
+        var result = UtilityRouter.TryHandle(
+            "A recipe says \"bake at 350 for 25 minutes.\" You're in Europe and your oven is set to Celsius. What temperature do you set?");
+        Assert.NotNull(result);
+        Assert.Equal("conversion", result!.Category);
+        Assert.Contains("177 C", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("350 F", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
     public void Conversion_HowManyFeetInMile_ReturnsDeterministicAnswer()
     {
         var result = UtilityRouter.TryHandle("how many feet in a mile?");
@@ -692,6 +704,29 @@ public class SearchPipelineGoldenTests
         Assert.True(result.Success);
         Assert.Contains("16", result.Text); // 10 miles ≈ 16.09 km
         Assert.Contains("equals", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+
+        var searchCalls = mcp.Calls.Where(c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task UtilityBypass_RecipeTemperatureConversion_NoWebSearch()
+    {
+        var llm = new FakeLlmClient("Should not be called for recipe temperature conversion");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "A recipe says \"bake at 350 for 25 minutes.\" You're in Europe and your oven is set to Celsius. What temperature do you set?");
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Contains("177 C", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("350 F", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.SuppressSourceCardsUi);
         Assert.True(result.SuppressToolActivityUi);
 
@@ -1312,6 +1347,54 @@ public class SearchPipelineGoldenTests
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase) &&
             c.Tool != "MemoryRetrieve").ToList();
         Assert.Empty(searchCalls);
+    }
+
+    [Fact]
+    public async Task GuardrailsOff_WebSearchRouting_RemainsUnchanged()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"airport tsa id requirements","type":"topic","hint":"travel docs"}""",
+            queryJson: """{"query":"airport tsa id requirements","recency":"any"}""",
+            summaryText: "Bring an acceptable ID to airport security.");
+
+        var searchResult =
+            "1. TSA acceptable documents\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/tsa-id\",\"title\":\"TSA ID Requirements\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ReasoningGuardrailsMode = "off"
+        };
+
+        var result = await agent.ProcessAsync("What are TSA ID requirements at the airport?");
+
+        Assert.True(result.Success);
+        Assert.False(result.GuardrailsUsed);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GuardrailsAuto_UtilityBypassCalculator_StaysDeterministic()
+    {
+        var llm = new FakeLlmClient("LLM should not be called for calculator utility.");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            ReasoningGuardrailsMode = "auto"
+        };
+
+        var result = await agent.ProcessAsync("what is 9 plus 4?");
+
+        Assert.True(result.Success);
+        Assert.False(result.GuardrailsUsed);
+        Assert.Contains("9 + 4 = **13**", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
     }
 }
 

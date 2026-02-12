@@ -26,7 +26,9 @@ public sealed class AgentVoiceService : IVoiceAgentService
         {
             Text = response.Text,
             Success = response.Success,
-            Error = response.Error
+            Error = response.Error,
+            GuardrailsUsed = response.GuardrailsUsed,
+            GuardrailsRationale = response.GuardrailsRationale
         };
     }
 }

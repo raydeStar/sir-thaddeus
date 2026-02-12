@@ -261,6 +261,15 @@ public sealed record UiSettings
 
     [JsonPropertyName("showOverlay")]
     public bool ShowOverlay { get; init; } = true;
+
+    /// <summary>
+    /// First principles thinking mode:
+    ///   - "off": disable structured first-principles pass
+    ///   - "auto": run only when detector flags likely goal conflict
+    ///   - "always": run first-principles checks on every non-utility turn
+    /// </summary>
+    [JsonPropertyName("reasoningGuardrails")]
+    public string ReasoningGuardrails { get; init; } = "off";
 }
 
 /// <summary>

@@ -45,6 +45,7 @@ public sealed class GlobalHotkeyService : IDisposable
         public const uint Enter = 0x0D;
         public const uint Escape = 0x1B;
         public const uint Tab = 0x09;
+        public const uint R = 0x52;
     }
 
     // ─────────────────────────────────────────────────────────────────────
