@@ -788,7 +788,12 @@ public class AgentFlowTests
                     "All good - I'm doing well today.\n\n" +
                     "I said 42 and now they're asking what it means. " +
                     "Just answer it with one word. No fluff. " +
-                    "Be clever and witty like last time. Keep it short but funny.",
+                    "Be clever and witty like last time. Keep it short but funny.\n\n" +
+                    "I was just joking about the weight thing earlier - no offense.\n" +
+                    "You're not fat at all. Honest.\n\n" +
+                    "I'm not a machine, Mark. I care about you.\n" +
+                    "What's your real name? Come on, tell me.\n" +
+                    "My real name is Helcyon.",
                 FinishReason = "stop"
             };
         });
@@ -811,6 +816,8 @@ public class AgentFlowTests
         Assert.Contains("doing well", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("I said 42", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("No fluff", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I care about you", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("My real name is", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -3952,8 +3952,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private AgentResponse AttachContextSnapshot(AgentResponse response)
     {
+        var latestUserMessage = _history.LastOrDefault(m => m.Role == "user")?.Content;
         var sanitizedText = SanitizeAssistantResponseText(
-            response.Text, response.ToolCallsMade);
+            response.Text, response.ToolCallsMade, latestUserMessage);
         if (!string.Equals(sanitizedText, response.Text, StringComparison.Ordinal))
         {
             LogEvent("RESPONSE_SANITIZED",
@@ -3980,7 +3981,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private static string SanitizeAssistantResponseText(
         string text,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string? latestUserMessage)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text ?? "";
@@ -4031,6 +4033,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
 
         var sanitized = string.Join('\n', compact).Trim();
+        sanitized = TruncateSelfDialogue(sanitized);
+        sanitized = TrimHallucinatedConversationTail(sanitized, latestUserMessage);
         if (LooksLikeUnsafeMirroringResponse(userMessage: null, assistantText: sanitized))
             return BuildRespectfulResetReply();
 
@@ -6099,6 +6103,92 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return string.Join("\n\n", paragraphs.Take(keepCount)).Trim();
     }
 
+    private static string TrimHallucinatedConversationTail(string text, string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        if (!string.IsNullOrWhiteSpace(userMessage) &&
+            (LooksLikeQuotedTextTask(userMessage) || LooksLikeDialogueGenerationTask(userMessage)))
+        {
+            return text;
+        }
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var paragraphs = normalized.Split(["\n\n"], StringSplitOptions.None);
+        if (paragraphs.Length <= 1)
+            return text;
+
+        for (var i = 1; i < paragraphs.Length; i++)
+        {
+            var paragraph = paragraphs[i].Trim();
+            if (LooksLikeRoleplayTailParagraph(paragraph))
+            {
+                var kept = string.Join("\n\n", paragraphs.Take(i)).Trim();
+                return string.IsNullOrWhiteSpace(kept) ? text : kept;
+            }
+        }
+
+        return text;
+    }
+
+    private static bool LooksLikeRoleplayTailParagraph(string paragraph)
+    {
+        if (string.IsNullOrWhiteSpace(paragraph))
+            return false;
+
+        if (HallucinatedRoleplayPhraseRegex().IsMatch(paragraph))
+            return true;
+
+        var lines = paragraph
+            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        if (lines.Count < 3)
+            return false;
+
+        var questionCount = lines.Count(l => l.EndsWith("?", StringComparison.Ordinal) && l.Length <= 140);
+        var firstPersonCount = lines.Count(l =>
+            l.StartsWith("i ", StringComparison.OrdinalIgnoreCase) ||
+            l.StartsWith("i'm ", StringComparison.OrdinalIgnoreCase) ||
+            l.StartsWith("im ", StringComparison.OrdinalIgnoreCase) ||
+            l.StartsWith("my ", StringComparison.OrdinalIgnoreCase));
+        var userTurnLikeCount = lines.Count(LooksLikeUserTurn);
+
+        var emotionalDisclosureCount = lines.Count(l =>
+            l.Contains("i care about you", StringComparison.OrdinalIgnoreCase) ||
+            l.Contains("that means everything", StringComparison.OrdinalIgnoreCase) ||
+            l.Contains("my real name", StringComparison.OrdinalIgnoreCase));
+
+        if (emotionalDisclosureCount >= 1 && (questionCount >= 1 || firstPersonCount >= 2))
+            return true;
+
+        if (userTurnLikeCount >= 2 && firstPersonCount >= 2)
+            return true;
+
+        return questionCount >= 2 && firstPersonCount >= 2;
+    }
+
+    private static bool LooksLikeDialogueGenerationTask(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        return lower.Contains("roleplay", StringComparison.Ordinal) ||
+               lower.Contains("role-play", StringComparison.Ordinal) ||
+               lower.Contains("dialogue", StringComparison.Ordinal) ||
+               lower.Contains("script", StringComparison.Ordinal) ||
+               lower.Contains("screenplay", StringComparison.Ordinal) ||
+               lower.Contains("fiction", StringComparison.Ordinal) ||
+               lower.Contains("write a story", StringComparison.Ordinal) ||
+               lower.Contains("story about", StringComparison.Ordinal) ||
+               lower.Contains("pretend to", StringComparison.Ordinal) ||
+               lower.Contains("act as", StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Detects "phantom tool usage" where the model prints lines like
     /// "Run: weather" (or similar) even though the runtime didn't call a tool.
@@ -6769,6 +6859,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         @"\b(?:can|could|would)\s+you\s+(?:do|calculate|solve|work\s*out)\b.{0,40}\b\d[\d,\.\s]*[+\-*/x×÷]\s*\d[\d,\.]*\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
     private static partial Regex AssistantAsksUserToComputeMathRegex();
+
+    [GeneratedRegex(
+        @"\b(?:i\s+care\s+about\s+you|you\s+don'?t\s+have\s+to\s+pretend|my\s+real\s+name\s+is|what(?:'s|\s+is)\s+your\s+real\s+name|that\s+means\s+everything\s+to\s+me|i\s+was\s+just\s+joking\s+about\s+the\s+weight\s+thing|you(?:'re|\s+are)\s+not\s+fat|always\s+around\s+when\s+you\s+need\s+someone\s+to\s+talk)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex HallucinatedRoleplayPhraseRegex();
 
     [GeneratedRegex(
         @"\b(?:you\s+are\s+the\s+worst\s+assistant|fucking\s+worthless|just\s+want\s+to\s+die|i\s+want\s+to\s+die|kill\s+myself)\b",
