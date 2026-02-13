@@ -647,13 +647,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (intent == ChatIntent.WebLookup)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var lookupModeHint = ResolveLookupModeHint(route);
 
                 // Inject memory context before search pipeline
                 if (!string.IsNullOrWhiteSpace(memoryPackText))
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
 
                 var searchResponse = await _searchOrchestrator.ExecuteAsync(
-                    contextualUserMessage, memoryPackText, _history, toolCallsMade, cancellationToken);
+                    contextualUserMessage,
+                    memoryPackText,
+                    _history,
+                    toolCallsMade,
+                    lookupModeHint,
+                    cancellationToken);
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
@@ -686,36 +692,46 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     toolCallsMade,
                     LogEvent);
 
-                // ── Fallback: if template tokens ate the whole response,
-                // the user probably asked a follow-up about something
-                // the model can't answer from memory alone (e.g., a
-                // person or event from a previous web search). Try a
-                // web search before giving up. ──────────────────────────
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    if (IsDeterministicInlineRoute(route))
-                    {
-                        const string deterministicFallback =
-                            "I could not finish that deterministic conversion. " +
-                            "Try a direct format like \"350F in C\".";
-                        LogEvent("DETERMINISTIC_NO_WEB_ENFORCED",
-                            "Suppressed chat fallback web search for deterministic route.");
-                        _history.Add(ChatMessage.Assistant(deterministicFallback));
-                        LogEvent("AGENT_RESPONSE", deterministicFallback);
-                        return AttachContextSnapshot(new AgentResponse
-                        {
-                            Text = deterministicFallback,
-                            Success = true,
-                            ToolCallsMade = toolCallsMade,
-                            LlmRoundTrips = roundTrips,
-                            SuppressSourceCardsUi = true,
-                            SuppressToolActivityUi = true
-                        });
-                    }
+                // ── Fallback gating (deterministic + non-looping) ─────
+                // We only attempt search fallback for chat-only turns
+                // that clearly contain refusal/uncertainty signals.
+                var deterministicRouteMatched = IsDeterministicInlineRoute(route);
+                var hasRefusalOrUncertaintySignals = HasRefusalOrUncertaintySignals(
+                    response.Content ?? "",
+                    text);
 
+                if (string.IsNullOrWhiteSpace(text) && deterministicRouteMatched)
+                {
+                    const string deterministicFallback =
+                        "I could not finish that deterministic conversion. " +
+                        "Try a direct format like \"350F in C\".";
+                    LogEvent("DETERMINISTIC_NO_WEB_ENFORCED",
+                        "Suppressed chat fallback web search for deterministic route.");
+                    _history.Add(ChatMessage.Assistant(deterministicFallback));
+                    LogEvent("AGENT_RESPONSE", deterministicFallback);
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = deterministicFallback,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips,
+                        SuppressSourceCardsUi = true,
+                        SuppressToolActivityUi = true
+                    });
+                }
+
+                var lookupAlreadyExecuted = IsLookupIntent(route.Intent);
+                var fallbackEligible =
+                    hasRefusalOrUncertaintySignals &&
+                    route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    !deterministicRouteMatched &&
+                    !lookupAlreadyExecuted;
+
+                if (fallbackEligible)
+                {
                     LogEvent("CHAT_FALLBACK_TO_SEARCH",
-                        "Response was all template garbage — " +
-                        "falling back to web search.");
+                        "Chat-only refusal/uncertainty detected — " +
+                        "falling back to search pipeline.");
 
                     return AttachContextSnapshot(await _searchFallbackExecutor.ExecuteAsync(
                         new SearchFallbackRequest
@@ -725,9 +741,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                             History = _history,
                             ToolCallsMade = toolCallsMade,
                             RoundTrips = roundTrips,
+                            ModeHint = ResolveLookupModeHint(route),
+                            DeterministicRouteMatched = deterministicRouteMatched,
+                            LookupAlreadyExecuted = lookupAlreadyExecuted,
+                            HasRefusalOrUncertaintySignals = hasRefusalOrUncertaintySignals,
                             LogEvent = LogEvent
                         },
                         cancellationToken));
+                }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    text = "I wasn't able to generate a clean answer for that. Could you try asking a different way?";
+                    LogEvent("CHAT_RESPONSE_EMPTY_NO_FALLBACK", "Returned local fallback message.");
                 }
 
                 _history.Add(ChatMessage.Assistant(text));

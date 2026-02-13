@@ -794,6 +794,95 @@ public class SearchOrchestratorParsingTests
 
 #endregion
 
+#region ── Search Orchestrator (Mode Hints + Contracts) ────────────────────
+
+public class SearchOrchestratorModeHintTests
+{
+    [Fact]
+    public async Task ExecuteAsync_FactHint_EnforcesPlainAnswerContract()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"Nvidia","type":"org","hint":"chipmaker"}""", FinishReason = "stop" };
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"Nvidia stock price","recency":"day"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "Nvidia is up today.", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "1. Nvidia update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/nvda\",\"title\":\"Nvidia update\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            "browser_navigate" => "Article content.",
+            "BrowserNavigate" => "Article content.",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "latest news on Nvidia today",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NewsHint_LeavesCardsVisible()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"Nvidia","type":"org","hint":"chipmaker"}""", FinishReason = "stop" };
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"Nvidia latest news today","recency":"day"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "Here are today's Nvidia headlines.", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "1. Nvidia story\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/nvda\",\"title\":\"Nvidia story\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "what's the Paris Agreement",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.False(result.SuppressSourceCardsUi);
+        Assert.False(result.SuppressToolActivityUi);
+    }
+}
+
+#endregion
+
 #region ── Multi-Turn Golden Tests ────────────────────────────────────────
 
 public class SearchPipelineGoldenTests

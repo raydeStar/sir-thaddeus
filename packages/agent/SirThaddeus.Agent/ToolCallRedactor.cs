@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Agent;
 
@@ -21,7 +23,7 @@ namespace SirThaddeus.Agent;
 /// Produces bounded, redacted summaries of tool call inputs and outputs
 /// for the audit log. Never leaks sensitive data.
 /// </summary>
-internal static class ToolCallRedactor
+public static class ToolCallRedactor
 {
     private const int DefaultMaxChars = 200;
 
@@ -34,7 +36,7 @@ internal static class ToolCallRedactor
             return "(empty)";
 
         var lower = (toolName ?? "").ToLowerInvariant();
-        return lower switch
+        var summary = lower switch
         {
             // Screen capture: just log the target mode, nothing sensitive
             "screencapture" or "screen_capture"
@@ -48,9 +50,10 @@ internal static class ToolCallRedactor
             "filelist" or "file_list"
                 => Truncate(argumentsJson, 200),
 
-            // System execute: log the command (bounded)
+            // System execute: never log full command text.
+            // Keep only executable + arg count + hash.
             "systemexecute" or "system_execute"
-                => Truncate(argumentsJson, 200),
+                => SummarizeSystemExecuteInput(argumentsJson),
 
             // Web search: log query + recency (safe)
             "websearch" or "web_search"
@@ -85,6 +88,9 @@ internal static class ToolCallRedactor
             // Default: truncate to a safe length
             _ => Truncate(argumentsJson, DefaultMaxChars)
         };
+
+        // Generic defense-in-depth scrub pass for all tool inputs.
+        return AuditSensitiveDataScrubber.ScrubText(summary);
     }
 
     /// <summary>
@@ -335,6 +341,76 @@ internal static class ToolCallRedactor
         {
             return $"[Status check: {output.Length} chars]";
         }
+    }
+
+    private static string SummarizeSystemExecuteInput(string argumentsJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return $"[system_execute: unparsed_args_sha256={ShortHash(argumentsJson)}]";
+
+            var command = GetStringProperty(doc.RootElement, "command");
+            if (string.IsNullOrWhiteSpace(command))
+                return "[system_execute: command=missing]";
+
+            var tokens = SplitCommandTokens(command);
+            var executableToken = tokens.Count > 0 ? tokens[0] : command;
+            var executableName = System.IO.Path.GetFileName(executableToken.Trim('"'));
+            if (string.IsNullOrWhiteSpace(executableName))
+                executableName = "unknown";
+
+            var argsCount = Math.Max(0, tokens.Count - 1);
+            return $"[system_execute: executable={executableName}, args_count={argsCount}, command_sha256={ShortHash(command)}]";
+        }
+        catch
+        {
+            return $"[system_execute: unparsed_args_sha256={ShortHash(argumentsJson)}]";
+        }
+    }
+
+    private static string GetStringProperty(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var node) || node.ValueKind != JsonValueKind.String)
+            return "";
+        return node.GetString() ?? "";
+    }
+
+    private static List<string> SplitCommandTokens(string command)
+    {
+        var tokens = new List<string>();
+        if (string.IsNullOrWhiteSpace(command))
+            return tokens;
+
+        var current = new StringBuilder();
+        var inQuotes = false;
+
+        foreach (var c in command)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(c) && !inQuotes)
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        if (current.Length > 0)
+            tokens.Add(current.ToString());
+
+        return tokens;
     }
 
     private static string Truncate(string value, int maxLength)

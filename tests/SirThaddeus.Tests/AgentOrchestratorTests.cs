@@ -2244,6 +2244,101 @@ public class PolicyFilteringTests
         Assert.False(result.GuardrailsUsed);
         Assert.Equal("normal fallback", result.Text);
     }
+
+    [Fact]
+    public async Task LookupFact_ResponseContract_SuppressesCardsAndToolActivity()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"Paris Agreement","type":"topic","hint":"climate treaty"}""", FinishReason = "stop" };
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"Paris Agreement definition","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "The Paris Agreement is an international climate accord adopted in 2015.", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "1. Paris Agreement overview\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/paris\",\"title\":\"Paris Agreement overview\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            MemoryEnabled = false,
+            ReasoningGuardrailsMode = "off"
+        };
+
+        var result = await agent.ProcessAsync("what's the Paris Agreement");
+
+        Assert.True(result.Success);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+        Assert.Contains("Paris Agreement", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LookupNews_ResponseContract_LeavesCardsAndToolActivityVisible()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"Nvidia","type":"org","hint":"chipmaker"}""", FinishReason = "stop" };
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"Nvidia latest news today","recency":"day"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "Here are the latest Nvidia headlines for today.", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "1. Nvidia story one\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/nvda\",\"title\":\"Nvidia story one\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            MemoryEnabled = false,
+            ReasoningGuardrailsMode = "off"
+        };
+
+        var result = await agent.ProcessAsync("latest news on Nvidia today");
+
+        Assert.True(result.Success);
+        Assert.False(result.SuppressSourceCardsUi);
+        Assert.False(result.SuppressToolActivityUi);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LookupFact_MontySwallowShortcut_ReturnsDeterministicGagWithoutSearch()
+    {
+        var llm = new FakeLlmClient("This should not be needed.");
+        var mcp = new FakeMcpClient(returnValue: "should not be called");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            MemoryEnabled = false,
+            ReasoningGuardrailsMode = "off"
+        };
+
+        var result = await agent.ProcessAsync("airspeed velocity of an unladen swallow");
+
+        Assert.True(result.Success);
+        Assert.Contains("African or a European swallow", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 #endregion

@@ -294,6 +294,8 @@ public class ReasoningGuardrailsBenchTests
     [Theory]
     [InlineData("My library hold expires tonight. Should I call the book home or go pick it up?", "go pick it up")]
     [InlineData("The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?", "pay at the kiosk first")]
+    [InlineData("Car wash is 50 meters away. Should I walk or drive?", "drive")]
+    [InlineData("My vehicle is here and the wash is 50 meters away. Should I walk or drive?", "drive")]
     [InlineData("My laptop repair is ready at the shop. Should I text 'fixed' or bring the device and collect it?", "bring the device and collect it")]
     [InlineData("Hotel check-in needs ID at the desk. Should I wait in the room or bring ID downstairs?", "bring id downstairs")]
     [InlineData("I need a key cut at the hardware store. Should I email the key or take the key there?", "take the key there")]

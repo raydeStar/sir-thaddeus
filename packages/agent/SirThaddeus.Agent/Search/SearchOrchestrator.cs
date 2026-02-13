@@ -24,6 +24,13 @@ namespace SirThaddeus.Agent.Search;
 // All stages are logged via IAuditLogger.
 // ─────────────────────────────────────────────────────────────────────────
 
+public enum LookupModeHint
+{
+    Auto = 0,
+    Fact = 1,
+    News = 2
+}
+
 public sealed class SearchOrchestrator
 {
     private readonly ILlmClient       _llm;
@@ -113,10 +120,11 @@ public sealed class SearchOrchestrator
         string memoryPackText,
         IReadOnlyList<ChatMessage> history,
         List<ToolCallRecord> toolCallsMade,
+        LookupModeHint modeHint,
         CancellationToken ct)
     {
         var now  = DateTimeOffset.UtcNow;
-        var mode = SearchModeRouter.Classify(userMessage, Session, now);
+        var mode = ResolveMode(userMessage, modeHint, now);
 
         _audit.Append(new AuditEvent
         {
@@ -126,19 +134,23 @@ public sealed class SearchOrchestrator
             Details = new Dictionary<string, object>
             {
                 ["user_message"]     = Truncate(userMessage, 80),
-                ["has_prior_results"] = Session.HasRecentResults(now)
+                ["has_prior_results"] = Session.HasRecentResults(now),
+                ["mode_hint"] = modeHint.ToString(),
+                ["hint_forced_mode"] = modeHint != LookupModeHint.Auto
             }
         });
 
         try
         {
-            return mode switch
+            var response = mode switch
             {
                 SearchMode.FollowUp      => await ExecuteFollowUpAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.NewsAggregate  => await ExecuteNewsAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.WebFactFind    => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
             };
+
+            return ApplyResponseContract(response, mode);
         }
         catch (OperationCanceledException)
         {
@@ -234,6 +246,17 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        if (LooksLikeMontySwallowPrompt(userMessage))
+        {
+            return new AgentResponse
+            {
+                Text = "What do you mean - an African or a European swallow?",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
         // ── 1. Entity resolution (always attempt) ────────────────────
         var entity = await _entityResolver.ResolveAsync(
             userMessage, Session, toolCallsMade, ct);
@@ -950,4 +973,42 @@ public sealed class SearchOrchestrator
 
     private static string Truncate(string text, int maxLen) =>
         text.Length <= maxLen ? text : text[..maxLen] + "…";
+
+    private static bool LooksLikeMontySwallowPrompt(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("airspeed velocity of an unladen swallow", StringComparison.Ordinal) ||
+               lower.Contains("air speed velocity of an unladen swallow", StringComparison.Ordinal);
+    }
+
+    private SearchMode ResolveMode(string userMessage, LookupModeHint modeHint, DateTimeOffset now)
+    {
+        return modeHint switch
+        {
+            LookupModeHint.Fact => SearchMode.WebFactFind,
+            LookupModeHint.News => SearchMode.NewsAggregate,
+            _ => SearchModeRouter.Classify(userMessage, Session, now)
+        };
+    }
+
+    private static AgentResponse ApplyResponseContract(AgentResponse response, SearchMode mode)
+    {
+        return mode switch
+        {
+            SearchMode.WebFactFind => response with
+            {
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
+            },
+            SearchMode.NewsAggregate => response with
+            {
+                SuppressSourceCardsUi = false,
+                SuppressToolActivityUi = false
+            },
+            _ => response
+        };
+    }
 }

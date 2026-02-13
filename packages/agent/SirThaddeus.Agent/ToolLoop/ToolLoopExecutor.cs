@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SirThaddeus.Agent;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.ToolLoop;
@@ -109,7 +110,10 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             foreach (var toolCall in conflictResolution.Winners)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                log("AGENT_TOOL_CALL", $"{toolCall.Function.Name}({toolCall.Function.Arguments})");
+                var redactedInput = ToolCallRedactor.RedactInput(
+                    toolCall.Function.Name,
+                    toolCall.Function.Arguments);
+                log("AGENT_TOOL_CALL", $"{toolCall.Function.Name}({redactedInput})");
 
                 string result;
                 bool success;

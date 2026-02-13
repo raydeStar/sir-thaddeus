@@ -56,7 +56,7 @@ public class RouterTests
     }
 
     [Fact]
-    public async Task RouteAsync_WebPrompt_RoutesToLookupSearch()
+    public async Task RouteAsync_WebPrompt_RoutesToLookupFact()
     {
         var llm = new FakeLlmClient((messages, tools) =>
             new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" });
@@ -69,10 +69,53 @@ public class RouterTests
             HasRecentSearchResults = false
         });
 
-        Assert.Equal(Intents.LookupSearch, route.Intent);
+        Assert.Equal(Intents.LookupFact, route.Intent);
         Assert.True(route.NeedsWeb);
         Assert.True(route.NeedsSearch);
         Assert.Contains(ToolCapability.WebSearch, route.RequiredCapabilities);
+    }
+
+    [Theory]
+    [InlineData("latest news on Nvidia today")]
+    [InlineData("show me articles about Nvidia this week")]
+    public async Task RouteAsync_ExplicitNewsSignals_RouteToLookupNews(string message)
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = message,
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.LookupNews, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
+    }
+
+    [Theory]
+    [InlineData("latest Nvidia stock price")]
+    [InlineData("what's the Paris Agreement")]
+    [InlineData("airspeed velocity of an unladen swallow")]
+    public async Task RouteAsync_FactualQueries_RouteToLookupFact(string message)
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = message,
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.LookupFact, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
     }
 }
 

@@ -20,6 +20,31 @@ public sealed class SearchFallbackExecutor : ISearchFallbackExecutor
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (request.DeterministicRouteMatched ||
+            request.LookupAlreadyExecuted ||
+            !request.HasRefusalOrUncertaintySignals)
+        {
+            request.LogEvent?.Invoke(
+                "CHAT_FALLBACK_SKIPPED",
+                "search fallback conditions not met");
+
+            const string fallbackMsg =
+                "I wasn't able to generate a clean answer for that. Could you try asking a different way?";
+
+            if (request.History is List<ChatMessage> listHistory)
+                listHistory.Add(ChatMessage.Assistant(fallbackMsg));
+
+            return new AgentResponse
+            {
+                Text = fallbackMsg,
+                Success = true,
+                ToolCallsMade = request.ToolCallsMade.ToList(),
+                LlmRoundTrips = request.RoundTrips,
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
+            };
+        }
+
         try
         {
             var history = request.History as List<ChatMessage> ?? request.History.ToList();
@@ -30,6 +55,7 @@ public sealed class SearchFallbackExecutor : ISearchFallbackExecutor
                 request.MemoryPackText,
                 history,
                 toolCallsMade,
+                request.ModeHint,
                 cancellationToken);
 
             if (response.Success)
@@ -51,7 +77,9 @@ public sealed class SearchFallbackExecutor : ISearchFallbackExecutor
                 Success = false,
                 Error = ex.Message,
                 ToolCallsMade = request.ToolCallsMade.ToList(),
-                LlmRoundTrips = request.RoundTrips
+                LlmRoundTrips = request.RoundTrips,
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
             };
         }
     }

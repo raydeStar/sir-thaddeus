@@ -14,7 +14,8 @@ public sealed class DefaultRouter : IRouter
     private enum ChatIntent
     {
         Casual,
-        WebLookup,
+        FactLookup,
+        NewsLookup,
         Tooling
     }
 
@@ -66,12 +67,19 @@ public sealed class DefaultRouter : IRouter
                 needsSearch: false);
         }
 
+        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
+            return MakeRoute(Intents.LookupNews, confidence: 0.93, needsWeb: true, needsSearch: true);
+
+        if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
+            return MakeRoute(Intents.LookupFact, confidence: 0.9, needsWeb: true, needsSearch: true);
+
         var intent = await ClassifyIntentAsync(userMessage, cancellationToken);
 
         return intent switch
         {
             ChatIntent.Casual => MakeRoute(Intents.ChatOnly, confidence: 0.8),
-            ChatIntent.WebLookup => MakeRoute(Intents.LookupSearch, confidence: 0.9, needsWeb: true, needsSearch: true),
+            ChatIntent.FactLookup => MakeRoute(Intents.LookupFact, confidence: 0.88, needsWeb: true, needsSearch: true),
+            ChatIntent.NewsLookup => MakeRoute(Intents.LookupNews, confidence: 0.88, needsWeb: true, needsSearch: true),
             ChatIntent.Tooling => RefineToolingIntent(lower),
             _ => MakeRoute(Intents.GeneralTool, confidence: 0.3)
         };
@@ -107,7 +115,10 @@ public sealed class DefaultRouter : IRouter
         var lower = msg.ToLowerInvariant();
 
         if (lower.StartsWith("/search ", StringComparison.Ordinal) || lower.StartsWith("search:", StringComparison.Ordinal))
-            return ChatIntent.WebLookup;
+            return ChatIntent.FactLookup;
+
+        if (lower.StartsWith("/news ", StringComparison.Ordinal) || lower.StartsWith("news:", StringComparison.Ordinal))
+            return ChatIntent.NewsLookup;
 
         if (lower.StartsWith("/chat ", StringComparison.Ordinal) || lower.StartsWith("chat:", StringComparison.Ordinal))
             return ChatIntent.Casual;
@@ -118,8 +129,11 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
 
-        if (IntentFeatureExtractor.LooksLikeWebSearchRequest(lower))
-            return ChatIntent.WebLookup;
+        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
+            return ChatIntent.NewsLookup;
+
+        if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
+            return ChatIntent.FactLookup;
 
         const int classifyMaxTokens = 6;
         try
@@ -142,7 +156,7 @@ public sealed class DefaultRouter : IRouter
 
             var raw = (response.Content ?? "").Trim().ToLowerInvariant();
             if (raw.Contains("search", StringComparison.Ordinal))
-                return ChatIntent.WebLookup;
+                return InferSearchIntent(lower);
             if (raw.Contains("tool", StringComparison.Ordinal))
                 return ChatIntent.Tooling;
             if (raw.Contains("chat", StringComparison.Ordinal))
@@ -160,12 +174,19 @@ public sealed class DefaultRouter : IRouter
     {
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
-        if (IntentFeatureExtractor.LooksLikeWebSearchRequest(lower))
-            return ChatIntent.WebLookup;
+        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
+            return ChatIntent.NewsLookup;
+        if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
+            return ChatIntent.FactLookup;
         if (IntentFeatureExtractor.LooksLikeMemoryWriteRequest(lower))
             return ChatIntent.Tooling;
         return ChatIntent.Casual;
     }
+
+    private static ChatIntent InferSearchIntent(string lower)
+        => IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
+            ? ChatIntent.NewsLookup
+            : ChatIntent.FactLookup;
 
     internal static RouterOutput MakeRoute(
         string intent,

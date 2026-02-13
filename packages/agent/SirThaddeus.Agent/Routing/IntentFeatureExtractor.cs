@@ -360,6 +360,108 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    public static bool LooksLikeExplicitNewsLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        ReadOnlySpan<string> newsSignals =
+        [
+            "news",
+            "headline",
+            "headlines",
+            "article",
+            "articles",
+            "coverage",
+            "top stories",
+            "top story",
+            "news feed",
+            "read more"
+        ];
+
+        ReadOnlySpan<string> listSignals =
+        [
+            "show me",
+            "list",
+            "pull up",
+            "give me",
+            "find me",
+            "bring me",
+            "send me"
+        ];
+
+        ReadOnlySpan<string> timeSignals =
+        [
+            "today",
+            "tonight",
+            "latest",
+            "recent",
+            "this week",
+            "last week",
+            "this month",
+            "past week"
+        ];
+
+        var hasNewsSignal = ContainsAny(lower, newsSignals);
+        if (!hasNewsSignal)
+            return false;
+
+        if (ContainsAny(lower, listSignals) || ContainsAny(lower, timeSignals))
+            return true;
+
+        return lower.Contains("news on ", StringComparison.Ordinal) ||
+               lower.Contains("news about ", StringComparison.Ordinal) ||
+               lower.Contains("news for ", StringComparison.Ordinal) ||
+               lower.Contains("headlines on ", StringComparison.Ordinal) ||
+               lower.Contains("headlines about ", StringComparison.Ordinal) ||
+               lower.Contains("latest news", StringComparison.Ordinal) ||
+               lower.Contains("recent news", StringComparison.Ordinal);
+    }
+
+    public static bool LooksLikeFactLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (LooksLikeExplicitNewsLookup(lower))
+            return false;
+
+        if (LooksLikeIdentityLookup(lower))
+            return true;
+
+        if (LooksLikeWebSearchRequest(lower))
+            return true;
+
+        ReadOnlySpan<string> factPrefixes =
+        [
+            "what is ",
+            "what's ",
+            "whats ",
+            "who is ",
+            "who's ",
+            "whos ",
+            "who was ",
+            "when is ",
+            "when was ",
+            "where is ",
+            "how many ",
+            "how much ",
+            "define ",
+            "meaning of "
+        ];
+
+        foreach (var prefix in factPrefixes)
+        {
+            if (lower.StartsWith(prefix, StringComparison.Ordinal))
+                return true;
+        }
+
+        if (lower.Contains("airspeed velocity of an unladen swallow", StringComparison.Ordinal))
+            return true;
+
+        return false;
+    }
+
     public static bool LooksLikeLogicPuzzlePrompt(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower))
@@ -441,6 +543,17 @@ public static class IntentFeatureExtractor
                lower.Contains("define ", StringComparison.Ordinal) ||
                lower.Contains("meaning of ", StringComparison.Ordinal) ||
                lower.Contains("what does ", StringComparison.Ordinal);
+    }
+
+    private static bool ContainsAny(string lower, ReadOnlySpan<string> tokens)
+    {
+        foreach (var token in tokens)
+        {
+            if (lower.Contains(token, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 }
 

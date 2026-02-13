@@ -61,7 +61,7 @@ public sealed class GuardrailsCoordinator : IGuardrailsCoordinator
             return false;
         }
 
-        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.GeneralTool;
+        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.LookupFact or Intents.LookupNews or Intents.GeneralTool;
     }
 }
 

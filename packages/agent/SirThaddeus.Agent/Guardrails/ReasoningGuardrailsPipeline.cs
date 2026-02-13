@@ -1353,6 +1353,166 @@ internal sealed record EntityExtraction(
     IReadOnlyList<ActionOption> Options,
     int LlmRoundTrips);
 
+internal static class EntityRequirementHeuristics
+{
+    private static readonly Dictionary<string, string[]> CanonicalToAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["car"] =
+        [
+            "car", "cars", "vehicle", "vehicles", "automobile", "automobiles", "auto", "autos", "suv", "van", "truck"
+        ],
+        ["id"] =
+        [
+            "id", "i.d.", "photo id", "identification", "license", "driver license", "drivers license", "driver's license"
+        ],
+        ["package"] = ["package", "packages", "parcel", "parcels", "box", "boxes"],
+        ["key"] = ["key", "keys"],
+        ["ticket"] = ["ticket", "tickets", "boarding pass", "pass"],
+        ["jacket"] = ["jacket", "jackets", "coat", "coats"],
+        ["laptop"] = ["laptop", "laptops", "notebook", "notebooks", "computer", "computers"],
+        ["device"] = ["device", "devices", "phone", "phones", "tablet", "tablets"]
+    };
+
+    private static readonly Dictionary<string, string[]> CanonicalToActionImplications = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["car"] = ["drive", "driving", "park", "parking", "refuel", "gas up"],
+        ["key"] = ["unlock", "start ignition"],
+        ["ticket"] = ["board", "boarding"],
+        ["id"] = ["check in", "check-in", "security line", "tsa"]
+    };
+
+    private static readonly Dictionary<string, string> AliasToCanonical = BuildAliasMap();
+
+    public static IReadOnlyList<string> DetectRequiredEntities(string text)
+    {
+        var lower = (text ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return [];
+
+        var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (canonical, aliases) in CanonicalToAliases)
+        {
+            if (aliases.Any(alias => ContainsPhraseOrToken(lower, alias)))
+                detected.Add(canonical);
+        }
+
+        return detected.ToList();
+    }
+
+    public static bool OptionMentionsEntity(string optionLabelLower, string entityName)
+    {
+        var aliases = GetEntityAliases(entityName);
+        foreach (var alias in aliases)
+        {
+            if (ContainsPhraseOrToken(optionLabelLower, alias))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool OptionImpliesEntityUsage(string optionLabelLower, string entityName)
+    {
+        var canonical = CanonicalizeEntityName(entityName);
+        if (!CanonicalToActionImplications.TryGetValue(canonical, out var implications))
+            return false;
+
+        foreach (var implication in implications)
+        {
+            if (ContainsPhraseOrToken(optionLabelLower, implication))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static string CanonicalizeEntityName(string entityName)
+    {
+        var normalized = NormalizeEntityText(entityName);
+        if (normalized.Length == 0)
+            return normalized;
+
+        if (AliasToCanonical.TryGetValue(normalized, out var canonical))
+            return canonical;
+
+        var singular = normalized.EndsWith('s') ? normalized[..^1] : normalized;
+        if (AliasToCanonical.TryGetValue(singular, out canonical))
+            return canonical;
+
+        return singular;
+    }
+
+    private static IReadOnlyList<string> GetEntityAliases(string entityName)
+    {
+        var canonical = CanonicalizeEntityName(entityName);
+        if (canonical.Length == 0)
+            return [];
+
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { canonical };
+        if (CanonicalToAliases.TryGetValue(canonical, out var knownAliases))
+        {
+            foreach (var alias in knownAliases)
+                aliases.Add(alias);
+        }
+
+        var normalizedEntity = NormalizeEntityText(entityName);
+        if (!string.IsNullOrWhiteSpace(normalizedEntity))
+            aliases.Add(normalizedEntity);
+
+        return aliases.ToList();
+    }
+
+    private static Dictionary<string, string> BuildAliasMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (canonical, aliases) in CanonicalToAliases)
+        {
+            map[canonical] = canonical;
+            foreach (var alias in aliases)
+                map[NormalizeEntityText(alias)] = canonical;
+        }
+
+        return map;
+    }
+
+    private static string NormalizeEntityText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        return string.Join(" ",
+            value.Trim()
+                .ToLowerInvariant()
+                .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static bool ContainsPhraseOrToken(string haystackLower, string needle)
+    {
+        if (string.IsNullOrWhiteSpace(haystackLower) || string.IsNullOrWhiteSpace(needle))
+            return false;
+
+        var needleLower = NormalizeEntityText(needle);
+        if (needleLower.Length == 0)
+            return false;
+
+        var index = 0;
+        while (true)
+        {
+            index = haystackLower.IndexOf(needleLower, index, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+
+            var beforeOk = index == 0 || !char.IsLetterOrDigit(haystackLower[index - 1]);
+            var afterIndex = index + needleLower.Length;
+            var afterOk = afterIndex >= haystackLower.Length || !char.IsLetterOrDigit(haystackLower[afterIndex]);
+            if (beforeOk && afterOk)
+                return true;
+
+            index++;
+        }
+    }
+}
+
 internal sealed class EntityExtractor
 {
     private readonly ILlmClient _llm;
@@ -1443,16 +1603,17 @@ internal sealed class EntityExtractor
         var lower = (text ?? "").ToLowerInvariant();
         var entities = new List<EntityFact>();
 
-        AddIfContains("car");
+        var detected = EntityRequirementHeuristics.DetectRequiredEntities(lower);
+        foreach (var entity in detected)
+        {
+            entities.Add(new EntityFact(
+                Name: entity,
+                Kind: "required_object",
+                Required: true));
+        }
+
         AddIfContains("passport");
         AddIfContains("prescription");
-        AddIfContains("package");
-        AddIfContains("key");
-        AddIfContains("id");
-        AddIfContains("jacket");
-        AddIfContains("laptop");
-        AddIfContains("device");
-        AddIfContains("ticket");
 
         return entities;
 
@@ -1462,7 +1623,7 @@ internal sealed class EntityExtractor
                 return;
 
             entities.Add(new EntityFact(
-                Name: value,
+                Name: EntityRequirementHeuristics.CanonicalizeEntityName(value),
                 Kind: "required_object",
                 Required: true));
         }
@@ -1492,7 +1653,10 @@ internal sealed class EntityExtractor
                         continue;
                     var kind = ReadString(node, "kind") ?? "other";
                     var required = ReadBool(node, "required");
-                    entities.Add(new EntityFact(name.Trim(), kind.Trim(), required));
+                    var normalizedName = required
+                        ? EntityRequirementHeuristics.CanonicalizeEntityName(name)
+                        : name.Trim();
+                    entities.Add(new EntityFact(normalizedName, kind.Trim(), required));
                 }
             }
 
@@ -1936,7 +2100,7 @@ internal sealed class OptionEvaluator
                 var missingRequiredCount = 0;
                 foreach (var entity in requiredEntities)
                 {
-                    if (labelLower.Contains(entity.Name.ToLowerInvariant(), StringComparison.Ordinal))
+                    if (OptionSatisfiesRequiredEntity(labelLower, entity.Name))
                     {
                         score += 1.4;
                         notes.Add($"uses_{entity.Name}");
@@ -2091,7 +2255,7 @@ internal sealed class OptionEvaluator
 
         foreach (var entity in requiredEntities)
         {
-            if (optionLabelLower.Contains(entity.Name.ToLowerInvariant(), StringComparison.Ordinal))
+            if (EntityRequirementHeuristics.OptionMentionsEntity(optionLabelLower, entity.Name))
                 return false;
         }
 
@@ -2122,6 +2286,12 @@ internal sealed class OptionEvaluator
         }
 
         return false;
+    }
+
+    private static bool OptionSatisfiesRequiredEntity(string optionLabelLower, string entityName)
+    {
+        return EntityRequirementHeuristics.OptionMentionsEntity(optionLabelLower, entityName) ||
+               EntityRequirementHeuristics.OptionImpliesEntityUsage(optionLabelLower, entityName);
     }
 
     private static string BuildFirstPrinciplesConstraintSummary(

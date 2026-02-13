@@ -2023,7 +2023,8 @@ public sealed partial class AgentOrchestrator
 
         try
         {
-            LogEvent("AGENT_TOOL_CALL", $"{toolName}({args})");
+            var redactedInput = ToolCallRedactor.RedactInput(toolName, args);
+            LogEvent("AGENT_TOOL_CALL", $"{toolName}({redactedInput})");
             toolResult = await _mcp.CallToolAsync(toolName, args, cancellationToken);
             toolOk = true;
         }
@@ -2033,7 +2034,8 @@ public sealed partial class AgentOrchestrator
             try
             {
                 toolName = WebSearchToolNameAlt;
-                LogEvent("AGENT_TOOL_CALL", $"{toolName}({args})");
+                var redactedInput = ToolCallRedactor.RedactInput(toolName, args);
+                LogEvent("AGENT_TOOL_CALL", $"{toolName}({redactedInput})");
                 toolResult = await _mcp.CallToolAsync(toolName, args, cancellationToken);
                 toolOk = true;
             }
@@ -2199,7 +2201,8 @@ public sealed partial class AgentOrchestrator
 
             try
             {
-                LogEvent("AGENT_TOOL_CALL", $"{BrowseToolName}({args})");
+                var redactedInput = ToolCallRedactor.RedactInput(BrowseToolName, args);
+                LogEvent("AGENT_TOOL_CALL", $"{BrowseToolName}({redactedInput})");
                 content = await _mcp.CallToolAsync(BrowseToolName, args, cancellationToken);
             }
             catch
@@ -2208,7 +2211,8 @@ public sealed partial class AgentOrchestrator
                 try
                 {
                     resolvedToolName = BrowseToolNameAlt;
-                    LogEvent("AGENT_TOOL_CALL", $"{BrowseToolNameAlt}({args})");
+                    var redactedInput = ToolCallRedactor.RedactInput(BrowseToolNameAlt, args);
+                    LogEvent("AGENT_TOOL_CALL", $"{BrowseToolNameAlt}({redactedInput})");
                     content = await _mcp.CallToolAsync(BrowseToolNameAlt, args, cancellationToken);
                 }
                 catch (Exception ex)
@@ -3930,13 +3934,70 @@ public sealed partial class AgentOrchestrator
             Intents.ChatOnly      => ChatIntent.Casual,
             Intents.UtilityDeterministic => ChatIntent.Casual,
             Intents.MemoryRead    => ChatIntent.Casual,
+            Intents.LookupFact    => ChatIntent.WebLookup,
+            Intents.LookupNews    => ChatIntent.WebLookup,
             Intents.LookupSearch  => ChatIntent.WebLookup,
             _                     => ChatIntent.Tooling
         };
     }
 
+    private static LookupModeHint ResolveLookupModeHint(RouterOutput route)
+    {
+        return route.Intent switch
+        {
+            Intents.LookupFact => LookupModeHint.Fact,
+            Intents.LookupNews => LookupModeHint.News,
+            _ => LookupModeHint.Auto
+        };
+    }
+
     private static bool IsDeterministicInlineRoute(RouterOutput route) =>
         string.Equals(route.Intent, Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLookupIntent(string intent) =>
+        intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
+    {
+        if (string.IsNullOrWhiteSpace(processedDraft))
+            return true;
+
+        var lower = processedDraft.Trim().ToLowerInvariant();
+        ReadOnlySpan<string> markers =
+        [
+            "i don't know",
+            "i dont know",
+            "i'm not sure",
+            "im not sure",
+            "not sure",
+            "i can't",
+            "i cant",
+            "i cannot",
+            "unable to",
+            "can't answer",
+            "cannot answer",
+            "don't have enough information",
+            "do not have enough information",
+            "not enough information",
+            "i couldn't find",
+            "i could not find",
+            "i wasn't able to",
+            "i was not able to"
+        ];
+
+        foreach (var marker in markers)
+        {
+            if (lower.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(rawDraft))
+            return true;
+
+        return false;
+    }
 
     private static UtilityRouter.UtilityResult ToUtilityResult(DeterministicUtilityMatch match)
     {
