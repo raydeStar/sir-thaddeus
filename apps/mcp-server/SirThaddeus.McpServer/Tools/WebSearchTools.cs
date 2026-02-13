@@ -380,10 +380,13 @@ public static class WebSearchTools
                 ? r.Title
                 : (hasExtraction ? ext!.Title : "(untitled)");
             var source = hasExtraction ? ext!.Domain : r.Source;
+            var publishedSuffix = r.PublishedAt.HasValue
+                ? $" (published {r.PublishedAt.Value.UtcDateTime:yyyy-MM-dd HH:mm} UTC)"
+                : "";
 
             // No URLs, no brackets — just title, source, and excerpt
             var number = strictNewsMode ? (included + 1) : (i + 1);
-            sb.AppendLine($"{number}. \"{title}\" — {source}");
+            sb.AppendLine($"{number}. \"{title}\" — {source}{publishedSuffix}");
             included++;
 
             if (hasExtraction)
@@ -412,8 +415,11 @@ public static class WebSearchTools
                 var r = results[i];
                 var title  = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : "(untitled)";
                 var source = r.Source;
+                var publishedSuffix = r.PublishedAt.HasValue
+                    ? $" (published {r.PublishedAt.Value.UtcDateTime:yyyy-MM-dd HH:mm} UTC)"
+                    : "";
 
-                sb.AppendLine($"{i + 1}. \"{title}\" — {source}");
+                sb.AppendLine($"{i + 1}. \"{title}\" — {source}{publishedSuffix}");
 
                 var excerpt = CleanExcerpt(r.Snippet);
                 if (!string.IsNullOrWhiteSpace(excerpt))
@@ -449,7 +455,8 @@ public static class WebSearchTools
                 domain,
                 excerpt   = excerpt ?? "",
                 favicon   = favicon ?? "",
-                thumbnail = thumbnail ?? ""
+                thumbnail = thumbnail ?? "",
+                publishedAt = r.PublishedAt?.ToString("o")
             });
         }
 

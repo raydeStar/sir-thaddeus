@@ -105,6 +105,30 @@ public class PolicyGateTests
         Assert.DoesNotContain("file_read", names);
     }
 
+    [Fact]
+    public void LookupFact_UsesInternalSearchPath_AndSkipsToolLoop()
+    {
+        var policy = PolicyGate.Evaluate(Route(Intents.LookupFact));
+        var filtered = PolicyGate.FilterTools(AllTools, policy);
+
+        Assert.Empty(filtered);
+        Assert.False(policy.UseToolLoop);
+        Assert.Contains(ToolCapability.SystemExecute, policy.ForbiddenCapabilities);
+        Assert.Contains(ToolCapability.MemoryWrite, policy.ForbiddenCapabilities);
+    }
+
+    [Fact]
+    public void LookupNews_UsesInternalSearchPath_AndSkipsToolLoop()
+    {
+        var policy = PolicyGate.Evaluate(Route(Intents.LookupNews));
+        var filtered = PolicyGate.FilterTools(AllTools, policy);
+
+        Assert.Empty(filtered);
+        Assert.False(policy.UseToolLoop);
+        Assert.Contains(ToolCapability.SystemExecute, policy.ForbiddenCapabilities);
+        Assert.Contains(ToolCapability.MemoryWrite, policy.ForbiddenCapabilities);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Screen Observe
     // ─────────────────────────────────────────────────────────────────
@@ -302,6 +326,8 @@ public class PolicyGateTests
     [InlineData(Intents.ChatOnly)]
     [InlineData(Intents.UtilityDeterministic)]
     [InlineData(Intents.LookupSearch)]
+    [InlineData(Intents.LookupFact)]
+    [InlineData(Intents.LookupNews)]
     [InlineData(Intents.BrowseOnce)]
     [InlineData(Intents.OneShotDiscovery)]
     [InlineData(Intents.ScreenObserve)]

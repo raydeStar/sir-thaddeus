@@ -110,6 +110,27 @@ public static class PolicyGate
             RequiredPermissions = []
         },
 
+        // ── Fact lookup: internal search orchestration only ──────────
+        // No MCP tool exposure via policy. Search is executed through the
+        // internal SearchOrchestrator path, not the generic tool loop.
+        [Intents.LookupFact] = new PolicyDecision
+        {
+            AllowedCapabilities = [],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite],
+            UseToolLoop         = false,
+            RequiredPermissions = []
+        },
+
+        // ── News lookup: internal search orchestration only ──────────
+        // Keeps news-vs-fact behavior separate from MCP tool exposure.
+        [Intents.LookupNews] = new PolicyDecision
+        {
+            AllowedCapabilities = [],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite],
+            UseToolLoop         = false,
+            RequiredPermissions = []
+        },
+
         // ── Browse once: fetch a specific URL ────────────────────────
         [Intents.BrowseOnce] = new PolicyDecision
         {

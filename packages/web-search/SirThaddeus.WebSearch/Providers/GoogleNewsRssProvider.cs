@@ -215,17 +215,17 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
 
                 // Parse publication date if available
                 var snippet = "";
-                if (DateTime.TryParse(pubDate, out var parsedDate))
+                DateTimeOffset? publishedAt = null;
+                if (DateTimeOffset.TryParse(pubDate, out var parsedDate))
                 {
-                    var pubUtc = parsedDate.Kind == DateTimeKind.Utc
-                        ? parsedDate
-                        : parsedDate.ToUniversalTime();
+                    var pubUtc = parsedDate.ToUniversalTime();
 
                     // Enforce recency window when requested.
-                    if (cutoffUtc.HasValue && pubUtc < cutoffUtc.Value)
+                    if (cutoffUtc.HasValue && pubUtc.UtcDateTime < cutoffUtc.Value)
                         continue;
 
-                    snippet = parsedDate.ToString("yyyy-MM-dd HH:mm");
+                    publishedAt = pubUtc;
+                    snippet = pubUtc.ToString("yyyy-MM-dd HH:mm 'UTC'");
                 }
 
                 results.Add(new SearchResult
@@ -233,6 +233,7 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
                     Title   = cleanTitle,
                     Url     = url,
                     Snippet = snippet,
+                    PublishedAt = publishedAt,
                     Source  = domain
                 });
             }

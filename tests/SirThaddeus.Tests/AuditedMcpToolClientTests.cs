@@ -158,6 +158,48 @@ public class AuditedMcpToolClientTests
         Assert.DoesNotContain("hunter2", outputSummary);
     }
 
+    [Fact]
+    public async Task CallToolAsync_RedactsSensitiveInputJsonKeys()
+    {
+        var inner = new FakeMcpClient("ok");
+        var audit = new TestAuditLogger();
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+
+        await sut.CallToolAsync(
+            "web_search",
+            """{"query":"dow jones today","api_key":"live-secret-token-12345"}""");
+
+        var start = audit.Events.First(e => e.Action == "MCP_TOOL_CALL_START");
+        var inputSummary = start.Details!["input_summary"].ToString()!;
+
+        Assert.DoesNotContain("live-secret-token-12345", inputSummary, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", inputSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CallToolAsync_SystemExecuteInputSummary_DoesNotLogRawCommand()
+    {
+        var inner = new FakeMcpClient("ok");
+        var audit = new TestAuditLogger();
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+
+        await sut.CallToolAsync(
+            "system_execute",
+            """{"command":"dotnet test -c Release"}""");
+
+        var start = audit.Events.First(e => e.Action == "MCP_TOOL_CALL_START");
+        var inputSummary = start.Details!["input_summary"].ToString()!;
+
+        Assert.Contains("executable=dotnet", inputSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("args_count=3", inputSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("command_sha256=", inputSummary, StringComparison.OrdinalIgnoreCase);
+
+        Assert.DoesNotContain("dotnet test -c Release", inputSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-c ", inputSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Canonicalize
     // ─────────────────────────────────────────────────────────────────
