@@ -22,8 +22,11 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
     private WaveFileWriter? _writer;
     private TaskCompletionSource<bool>? _stopCompletion;
     private string? _activeSessionId;
+    private bool _firstFrameCapturedForSession;
     private volatile bool _isCapturing;
     private bool _disposed;
+
+    public event EventHandler<AudioCaptureFirstFrameEventArgs>? FirstAudioFrameCaptured;
 
     public AudioCaptureService(IAuditLogger auditLogger)
     {
@@ -58,6 +61,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
                 return;
 
             _activeSessionId = sessionId;
+            _firstFrameCapturedForSession = false;
             _buffer = new MemoryStream();
             _pcmBuffer = new MemoryStream();
             _writer = new WaveFileWriter(new NonClosingStream(_buffer), new WaveFormat(16000, 16, 1));
@@ -209,7 +213,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
     /// Produces a bounded WAV snapshot while recording for live ASR preview.
     /// Returns null when capture isn't active or not enough audio is buffered yet.
     /// </summary>
-    public VoiceAudioClip? CreateLiveSnapshotClip(int maxDurationMs = 5_000)
+    public VoiceAudioClip? CreateLiveSnapshotClip(int maxDurationMs = 2_500)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -232,7 +236,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
         }
 
         // Keep payload bounded so preview calls stay lightweight.
-        var maxBytes = Math.Max(3_200, (16_000 * 2 * Math.Max(1_000, maxDurationMs)) / 1_000);
+        var maxBytes = Math.Max(3_200, (16_000 * 2 * Math.Max(500, maxDurationMs)) / 1_000);
         if (pcm.Length > maxBytes)
         {
             var trimmed = new byte[maxBytes];
@@ -261,6 +265,9 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
     {
         // OnDataAvailable runs on a background thread managed by NAudio.
         // We must be careful not to deadlock if the main thread is holding the lock.
+        string? firstFrameSessionId = null;
+        DateTimeOffset? firstFrameAt = null;
+        int firstFrameBytes = 0;
         _gate.Wait();
         try
         {
@@ -278,10 +285,38 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
             _writer?.Flush();
             _pcmBuffer?.Write(buffer, 0, count);
             _pcmBuffer?.Flush();
+
+            if (count > 0 && !_firstFrameCapturedForSession)
+            {
+                _firstFrameCapturedForSession = true;
+                firstFrameSessionId = _activeSessionId;
+                firstFrameAt = DateTimeOffset.UtcNow;
+                firstFrameBytes = count;
+            }
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (firstFrameAt is { } ts && !string.IsNullOrWhiteSpace(firstFrameSessionId))
+        {
+            WriteAuditNonBlocking("VOICE_CAPTURE_FIRST_FRAME", "ok", new Dictionary<string, object>
+            {
+                ["sessionId"] = firstFrameSessionId,
+                ["bytesRecorded"] = firstFrameBytes
+            });
+
+            try
+            {
+                FirstAudioFrameCaptured?.Invoke(
+                    this,
+                    new AudioCaptureFirstFrameEventArgs(firstFrameSessionId, ts, firstFrameBytes));
+            }
+            catch
+            {
+                // Timing events are best-effort and must not impact recording.
+            }
         }
     }
 
@@ -332,6 +367,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
         _pcmBuffer = null;
         _stopCompletion = null;
         _activeSessionId = null;
+        _firstFrameCapturedForSession = false;
     }
 
     private void WriteAuditNonBlocking(
@@ -397,3 +433,8 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
         protected override void Dispose(bool disposing) => Flush();
     }
 }
+
+public sealed record AudioCaptureFirstFrameEventArgs(
+    string SessionId,
+    DateTimeOffset TimestampUtc,
+    int BytesRecorded);

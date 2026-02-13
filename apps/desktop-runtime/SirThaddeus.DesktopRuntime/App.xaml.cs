@@ -81,7 +81,10 @@ public partial class App : System.Windows.Application
     private readonly SemaphoreSlim _voiceMicUpGate = new(1, 1);
     private CancellationTokenSource? _liveAsrPreviewCts;
     private Task? _liveAsrPreviewTask;
+    private readonly object _liveAsrTranscriptGate = new();
     private string _latestLiveVoiceTranscript = "";
+    private string _liveAsrAccumulatedTranscript = "";
+    private DateTimeOffset? _liveAsrAccumulatedUpdatedAtUtc;
     private string? _lastVoiceHostFailureMessage;
     private readonly object _voiceTimelineGate = new();
     private VoiceSessionTimeline? _voiceTimeline;
@@ -97,9 +100,14 @@ public partial class App : System.Windows.Application
     private sealed class VoiceSessionTimeline
     {
         public DateTimeOffset StartedAtUtc { get; init; }
+        public DateTimeOffset? FirstAudioFrameAtUtc { get; set; }
         public DateTimeOffset? MicReleasedAtUtc { get; set; }
+        public DateTimeOffset? AsrStartedAtUtc { get; set; }
+        public DateTimeOffset? AsrFirstTokenAtUtc { get; set; }
         public DateTimeOffset? TranscriptReadyAtUtc { get; set; }
+        public DateTimeOffset? AgentStartedAtUtc { get; set; }
         public DateTimeOffset? AgentReadyAtUtc { get; set; }
+        public DateTimeOffset? TtsStartedAtUtc { get; set; }
         public DateTimeOffset? SpeakingStartedAtUtc { get; set; }
         public string SessionId { get; set; } = "";
         public bool UserMessageAdded { get; set; }
@@ -133,6 +141,7 @@ public partial class App : System.Windows.Application
             BaseUrl = _settings.Llm.BaseUrl,
             Model = _settings.Llm.Model,
             MaxTokens = _settings.Llm.MaxTokens,
+            ContextWindowTokens = _settings.Llm.ContextWindowTokens,
             Temperature = _settings.Llm.Temperature
         };
         _llmClient = new LmStudioClient(llmOptions);
@@ -251,17 +260,21 @@ public partial class App : System.Windows.Application
             DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(_settings.Audio.InputDeviceName),
             InputGain    = Math.Clamp(_settings.Audio.InputGain, 0.0, 2.0)
         };
-        _localTtsClient = new LocalTtsHttpClient(GetVoiceHostBaseUrlForRequests, _auditLogger);
+        _audioCaptureService.FirstAudioFrameCaptured += OnCaptureFirstFrameCaptured;
+        _localTtsClient = new LocalTtsHttpClient(GetVoiceHostBaseUrlForRequests, () => _settings.Voice, _auditLogger);
+        _localTtsClient.TimingUpdated += OnTtsTimingUpdated;
         _audioPlaybackService = new AudioPlaybackService(
             _auditLogger,
             _ttsService,
-            _localTtsClient,
-            _settings.Voice.PreferLocalTts)
+            () => _settings.Voice,
+            _localTtsClient)
         {
             OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(_settings.Audio.OutputDeviceName)
         };
-        _asrClient = new LocalAsrHttpClient(GetVoiceHostBaseUrlForRequests, _auditLogger);
+        _audioPlaybackService.PlaybackStarted += OnPlaybackStarted;
+        _asrClient = new LocalAsrHttpClient(GetVoiceHostBaseUrlForRequests, () => _settings.Voice, _auditLogger);
         _asrClient.TranscriptReceived += OnAsrTranscriptReceived;
+        _asrClient.TimingUpdated += OnAsrTimingUpdated;
         _voiceAgentService = new AgentVoiceService(_orchestrator);
         _voiceOrchestrator = new VoiceSessionOrchestrator(
             _audioCaptureService,
@@ -310,7 +323,8 @@ public partial class App : System.Windows.Application
     {
         BeginVoiceTimeline();
         _voiceOrchestrator?.EnqueueMicDown();
-        _latestLiveVoiceTranscript = "";
+        ResetLiveAsrPreviewTranscript();
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
         PublishVoiceTranscript("");
         PublishVoiceStatus("Listening...");
         PublishVoiceActive(true);
@@ -369,6 +383,26 @@ public partial class App : System.Windows.Application
         }
 
         LogVoiceTiming("VoiceHost readiness", readyStopwatch.Elapsed, GetCurrentVoiceSessionId(), LogEntryKind.Info);
+        var allowRealtimeHint = string.Equals(
+            _settings?.Voice.GetNormalizedSttEngine(),
+            "faster-whisper",
+            StringComparison.OrdinalIgnoreCase);
+        var (hintTranscript, hintObservedAtUtc) = GetLiveAsrPreviewHint();
+        if (allowRealtimeHint && !string.IsNullOrWhiteSpace(hintTranscript) && hintObservedAtUtc is { } observedAt)
+        {
+            _voiceOrchestrator?.SetRealtimeTranscriptHint(hintTranscript, observedAt);
+            WriteVoiceAuditNonBlocking("VOICE_PREVIEW_HINT_SUBMITTED", "ok", new Dictionary<string, object>
+            {
+                ["sessionId"] = GetCurrentVoiceSessionId() ?? "",
+                ["transcriptLength"] = hintTranscript.Length,
+                ["hintObservedAtUtc"] = observedAt.ToString("O")
+            });
+        }
+        else
+        {
+            _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
+        }
+
         _voiceOrchestrator?.EnqueueMicUp();
         return true;
     }
@@ -435,9 +469,278 @@ public partial class App : System.Windows.Application
         if (string.IsNullOrWhiteSpace(transcript))
             return;
 
-        _latestLiveVoiceTranscript = transcript;
+        if (IsPreviewSessionId(e.SessionId))
+        {
+            UpdateLiveAsrPreviewTranscript(transcript);
+            return;
+        }
+
+        lock (_liveAsrTranscriptGate)
+        {
+            _latestLiveVoiceTranscript = transcript;
+        }
         PublishVoiceTranscript(transcript);
     }
+
+    private void ResetLiveAsrPreviewTranscript()
+    {
+        lock (_liveAsrTranscriptGate)
+        {
+            _latestLiveVoiceTranscript = "";
+            _liveAsrAccumulatedTranscript = "";
+            _liveAsrAccumulatedUpdatedAtUtc = null;
+        }
+    }
+
+    private (string Transcript, DateTimeOffset? ObservedAtUtc) GetLiveAsrPreviewHint()
+    {
+        lock (_liveAsrTranscriptGate)
+        {
+            return (_liveAsrAccumulatedTranscript, _liveAsrAccumulatedUpdatedAtUtc);
+        }
+    }
+
+    private void UpdateLiveAsrPreviewTranscript(string transcript)
+    {
+        var normalized = NormalizeTranscriptText(transcript);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        var now = DateTimeOffset.UtcNow;
+        string merged;
+        bool changed = false;
+        lock (_liveAsrTranscriptGate)
+        {
+            merged = MergePreviewTranscript(_liveAsrAccumulatedTranscript, normalized);
+            if (!string.Equals(_liveAsrAccumulatedTranscript, merged, StringComparison.Ordinal))
+            {
+                _liveAsrAccumulatedTranscript = merged;
+                changed = true;
+            }
+
+            _liveAsrAccumulatedUpdatedAtUtc = now;
+
+            if (!string.Equals(_latestLiveVoiceTranscript, merged, StringComparison.Ordinal))
+            {
+                _latestLiveVoiceTranscript = merged;
+                changed = true;
+            }
+        }
+
+        if (changed)
+            PublishVoiceTranscript(merged);
+    }
+
+    private static string NormalizeTranscriptText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        return string.Join(
+            " ",
+            text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string MergePreviewTranscript(string accumulated, string incoming)
+    {
+        if (string.IsNullOrWhiteSpace(accumulated))
+            return incoming;
+        if (string.IsNullOrWhiteSpace(incoming))
+            return accumulated;
+
+        if (incoming.Length >= accumulated.Length &&
+            incoming.Contains(accumulated, StringComparison.OrdinalIgnoreCase))
+        {
+            return incoming;
+        }
+
+        if (accumulated.Length >= incoming.Length &&
+            accumulated.Contains(incoming, StringComparison.OrdinalIgnoreCase))
+        {
+            return accumulated;
+        }
+
+        var leftTokens = accumulated.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var rightTokens = incoming.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var maxOverlap = Math.Min(leftTokens.Length, rightTokens.Length);
+        var overlap = 0;
+
+        for (var candidate = maxOverlap; candidate >= 1; candidate--)
+        {
+            var matches = true;
+            for (var index = 0; index < candidate; index++)
+            {
+                var leftToken = NormalizeOverlapToken(leftTokens[leftTokens.Length - candidate + index]);
+                var rightToken = NormalizeOverlapToken(rightTokens[index]);
+                if (!string.Equals(leftToken, rightToken, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                overlap = candidate;
+                break;
+            }
+        }
+
+        if (overlap == 0)
+            return incoming.Length >= accumulated.Length ? incoming : accumulated;
+
+        if (overlap >= rightTokens.Length)
+            return accumulated;
+
+        var mergedTokens = new string[leftTokens.Length + rightTokens.Length - overlap];
+        Array.Copy(leftTokens, mergedTokens, leftTokens.Length);
+        Array.Copy(
+            rightTokens,
+            overlap,
+            mergedTokens,
+            leftTokens.Length,
+            rightTokens.Length - overlap);
+        return string.Join(" ", mergedTokens);
+    }
+
+    private static string NormalizeOverlapToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return "";
+
+        return token.Trim().Trim('\"', '\'', '.', ',', '!', '?', ';', ':', '-', '_', '(', ')', '[', ']', '{', '}', '…');
+    }
+
+    private void OnCaptureFirstFrameCaptured(object? sender, AudioCaptureFirstFrameEventArgs e)
+    {
+        if (IsPreviewSessionId(e.SessionId))
+            return;
+
+        bool marked = false;
+        string? resolvedSessionId;
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = e.TimestampUtc };
+            if (!string.IsNullOrWhiteSpace(e.SessionId))
+                _voiceTimeline.SessionId = e.SessionId;
+            resolvedSessionId = _voiceTimeline.SessionId;
+
+            if (_voiceTimeline.FirstAudioFrameAtUtc is null)
+            {
+                _voiceTimeline.FirstAudioFrameAtUtc = e.TimestampUtc;
+                marked = true;
+            }
+        }
+
+        if (marked)
+        {
+            LogVoiceStageTimestamp("t_first_audio_frame", e.TimestampUtc, resolvedSessionId, new Dictionary<string, object>
+            {
+                ["bytesRecorded"] = e.BytesRecorded
+            });
+        }
+    }
+
+    private void OnAsrTimingUpdated(object? sender, AsrTimingEventArgs e)
+    {
+        if (IsPreviewSessionId(e.SessionId))
+            return;
+
+        var timestamp = e.TimestampUtc;
+        var stageKey = "";
+        bool marked = false;
+        string? resolvedSessionId;
+        var extra = new Dictionary<string, object>();
+
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = timestamp };
+            if (!string.IsNullOrWhiteSpace(e.SessionId))
+                _voiceTimeline.SessionId = e.SessionId;
+            resolvedSessionId = _voiceTimeline.SessionId;
+
+            switch (e.Stage)
+            {
+                case AsrTimingStage.Start:
+                    if (_voiceTimeline.AsrStartedAtUtc is null)
+                    {
+                        _voiceTimeline.AsrStartedAtUtc = timestamp;
+                        stageKey = "t_asr_start";
+                        marked = true;
+                    }
+                    break;
+                case AsrTimingStage.FirstToken:
+                    if (_voiceTimeline.AsrFirstTokenAtUtc is null)
+                    {
+                        _voiceTimeline.AsrFirstTokenAtUtc = timestamp;
+                        stageKey = "t_asr_first_token";
+                        marked = true;
+                    }
+                    break;
+                case AsrTimingStage.Final:
+                    if (_voiceTimeline.TranscriptReadyAtUtc is null)
+                    {
+                        _voiceTimeline.TranscriptReadyAtUtc = timestamp;
+                        stageKey = "t_asr_final";
+                        marked = true;
+                    }
+                    break;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(e.Source))
+            extra["source"] = e.Source;
+        extra["requestId"] = e.RequestId;
+
+        if (marked && !string.IsNullOrWhiteSpace(stageKey))
+            LogVoiceStageTimestamp(stageKey, timestamp, resolvedSessionId, extra);
+    }
+
+    private void OnTtsTimingUpdated(object? sender, TtsTimingEventArgs e)
+    {
+        if (IsPreviewSessionId(e.SessionId))
+            return;
+
+        if (e.Stage != TtsTimingStage.Start)
+            return;
+
+        bool marked = false;
+        string? resolvedSessionId;
+        lock (_voiceTimelineGate)
+        {
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = e.TimestampUtc };
+            if (!string.IsNullOrWhiteSpace(e.SessionId))
+                _voiceTimeline.SessionId = e.SessionId;
+            resolvedSessionId = _voiceTimeline.SessionId;
+
+            if (_voiceTimeline.TtsStartedAtUtc is null)
+            {
+                _voiceTimeline.TtsStartedAtUtc = e.TimestampUtc;
+                marked = true;
+            }
+        }
+
+        if (marked)
+        {
+            LogVoiceStageTimestamp("t_tts_start", e.TimestampUtc, resolvedSessionId, new Dictionary<string, object>
+            {
+                ["source"] = "tts_client",
+                ["requestId"] = e.RequestId
+            });
+        }
+    }
+
+    private void OnPlaybackStarted(object? sender, AudioPlaybackStartedEventArgs e)
+    {
+        if (IsPreviewSessionId(e.SessionId))
+            return;
+
+        MarkVoiceSpeakingStarted(e.TimestampUtc, e.SessionId);
+    }
+
+    private static bool IsPreviewSessionId(string? sessionId)
+        => !string.IsNullOrWhiteSpace(sessionId) &&
+           sessionId.StartsWith("preview-", StringComparison.OrdinalIgnoreCase);
 
     private void StartLiveAsrPreviewLoop()
     {
@@ -453,38 +756,28 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                await Task.Delay(300, token);
+                await Task.Delay(180, token);
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
                         if (_audioCaptureService is null || !_audioCaptureService.IsCapturing || _asrClient is null)
                         {
-                            await Task.Delay(250, token);
+                            await Task.Delay(120, token);
                             continue;
                         }
 
-                        var clip = _audioCaptureService.CreateLiveSnapshotClip();
-                        if (clip is null || clip.AudioBytes.Length < 3_200)
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_500);
+                        if (clip is null || clip.AudioBytes.Length < 2_400)
                         {
-                            await Task.Delay(250, token);
+                            await Task.Delay(120, token);
                             continue;
                         }
 
-                        var transcript = await _asrClient.TranscribeAsync(
+                        _ = await _asrClient.TranscribeAsync(
                             clip,
-                            $"preview-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                            $"preview-{GetCurrentVoiceSessionId() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()}",
                             token);
-
-                        if (!string.IsNullOrWhiteSpace(transcript))
-                        {
-                            var normalized = transcript.Trim();
-                            if (!string.Equals(_latestLiveVoiceTranscript, normalized, StringComparison.Ordinal))
-                            {
-                                _latestLiveVoiceTranscript = normalized;
-                                PublishVoiceTranscript(normalized);
-                            }
-                        }
                     }
                     catch (OperationCanceledException)
                     {
@@ -495,7 +788,7 @@ public partial class App : System.Windows.Application
                         // Preview is diagnostics-only and must not interrupt voice orchestration.
                     }
 
-                    await Task.Delay(700, token);
+                    await Task.Delay(350, token);
                 }
             }
             catch (OperationCanceledException)
@@ -603,9 +896,78 @@ public partial class App : System.Windows.Application
             PublishVoiceStatus(label);
             PublishVoiceActive(e.CurrentState != VoiceState.Idle);
 
-            if (e.CurrentState == VoiceState.Speaking)
+            if (e.CurrentState == VoiceState.Transcribing)
             {
-                MarkVoiceSpeakingStarted();
+                var now = DateTimeOffset.UtcNow;
+                bool marked = false;
+                string? sessionId;
+                lock (_voiceTimelineGate)
+                {
+                    _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+                    sessionId = _voiceTimeline.SessionId;
+                    if (_voiceTimeline.AsrStartedAtUtc is null)
+                    {
+                        _voiceTimeline.AsrStartedAtUtc = now;
+                        marked = true;
+                    }
+                }
+
+                if (marked)
+                    LogVoiceStageTimestamp("t_asr_start", now, sessionId, new Dictionary<string, object>
+                    {
+                        ["source"] = "state_transition"
+                    });
+            }
+            else if (e.CurrentState == VoiceState.Thinking)
+            {
+                var now = DateTimeOffset.UtcNow;
+                bool marked = false;
+                string? sessionId;
+                lock (_voiceTimelineGate)
+                {
+                    _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+                    sessionId = _voiceTimeline.SessionId;
+                    if (_voiceTimeline.AgentStartedAtUtc is null)
+                    {
+                        _voiceTimeline.AgentStartedAtUtc = now;
+                        marked = true;
+                    }
+                }
+
+                if (marked)
+                    LogVoiceStageTimestamp("t_agent_start", now, sessionId);
+            }
+            else if (e.CurrentState == VoiceState.Speaking)
+            {
+                var useStateFallback =
+                    string.Equals(
+                        _settings?.Voice.GetNormalizedTtsEngine(),
+                        "windows",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    _localTtsClient is null;
+
+                if (useStateFallback)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    bool marked = false;
+                    string? sessionId;
+                    lock (_voiceTimelineGate)
+                    {
+                        _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = now };
+                        sessionId = _voiceTimeline.SessionId;
+                        if (_voiceTimeline.TtsStartedAtUtc is null)
+                        {
+                            _voiceTimeline.TtsStartedAtUtc = now;
+                            marked = true;
+                        }
+                    }
+
+                    if (marked)
+                        LogVoiceStageTimestamp("t_tts_start", now, sessionId, new Dictionary<string, object>
+                        {
+                            ["source"] = "state_fallback"
+                        });
+                }
             }
             else if (e.CurrentState == VoiceState.Faulted)
             {
@@ -645,7 +1007,11 @@ public partial class App : System.Windows.Application
                         e.SessionId,
                         e.Text,
                         e.GuardrailsUsed,
-                        e.GuardrailsRationale);
+                        e.GuardrailsRationale,
+                        e.HasTokenUsage,
+                        e.TokensIn,
+                        e.TokensOut,
+                        e.ContextFillPercent);
                     break;
 
                 case VoiceProgressKind.PhaseInfo:
@@ -666,15 +1032,17 @@ public partial class App : System.Windows.Application
 
     private void BeginVoiceTimeline()
     {
+        var startedAt = DateTimeOffset.UtcNow;
         lock (_voiceTimelineGate)
         {
             _voiceTimeline = new VoiceSessionTimeline
             {
-                StartedAtUtc = DateTimeOffset.UtcNow
+                StartedAtUtc = startedAt
             };
         }
 
         AppendVoiceActivity("Voice session started.", LogEntryKind.Info);
+        LogVoiceStageTimestamp("t_mic_down", startedAt, null);
     }
 
     private void MarkVoiceMicReleased()
@@ -682,6 +1050,7 @@ public partial class App : System.Windows.Application
         var now = DateTimeOffset.UtcNow;
         TimeSpan? holdDuration = null;
         string? sessionId = null;
+        var micUpMarked = false;
 
         lock (_voiceTimelineGate)
         {
@@ -691,11 +1060,14 @@ public partial class App : System.Windows.Application
                 _voiceTimeline.MicReleasedAtUtc = now;
                 holdDuration = now - _voiceTimeline.StartedAtUtc;
                 sessionId = _voiceTimeline.SessionId;
+                micUpMarked = true;
             }
         }
 
         if (holdDuration is { } hold)
             LogVoiceTiming("Mic hold", hold, sessionId, LogEntryKind.Info);
+        if (micUpMarked)
+            LogVoiceStageTimestamp("t_mic_up", now, sessionId);
     }
 
     private void HandleTranscriptReady(string sessionId, string transcript)
@@ -705,6 +1077,9 @@ public partial class App : System.Windows.Application
         TimeSpan? asrDuration = null;
         bool addUserChat = false;
         string? resolvedSessionId = null;
+        var asrFinalMarked = false;
+        var asrFirstTokenFallbackMarked = false;
+        var asrStartFallbackMarked = false;
 
         lock (_voiceTimelineGate)
         {
@@ -713,10 +1088,29 @@ public partial class App : System.Windows.Application
                 _voiceTimeline.SessionId = sessionId;
             resolvedSessionId = _voiceTimeline.SessionId;
 
-            _voiceTimeline.TranscriptReadyAtUtc ??= now;
+            if (_voiceTimeline.TranscriptReadyAtUtc is null)
+            {
+                _voiceTimeline.TranscriptReadyAtUtc = now;
+                asrFinalMarked = true;
+            }
+            if (_voiceTimeline.AsrFirstTokenAtUtc is null)
+            {
+                _voiceTimeline.AsrFirstTokenAtUtc = now;
+                asrFirstTokenFallbackMarked = true;
+            }
+            if (_voiceTimeline.AsrStartedAtUtc is null)
+            {
+                _voiceTimeline.AsrStartedAtUtc =
+                    _voiceTimeline.MicReleasedAtUtc ??
+                    _voiceTimeline.StartedAtUtc;
+                asrStartFallbackMarked = true;
+            }
 
-            if (_voiceTimeline.MicReleasedAtUtc is { } releasedAt)
-                asrDuration = now - releasedAt;
+            var asrAnchor =
+                _voiceTimeline.AsrStartedAtUtc ??
+                _voiceTimeline.MicReleasedAtUtc ??
+                _voiceTimeline.StartedAtUtc;
+            asrDuration = now - asrAnchor;
 
             if (!string.IsNullOrWhiteSpace(trimmed) && !_voiceTimeline.UserMessageAdded)
             {
@@ -733,19 +1127,46 @@ public partial class App : System.Windows.Application
 
         if (asrDuration is { } elapsed)
             LogVoiceTiming("ASR transcript ready", elapsed, resolvedSessionId, LogEntryKind.Info);
+        if (asrStartFallbackMarked)
+        {
+            LogVoiceStageTimestamp(
+                "t_asr_start",
+                now,
+                resolvedSessionId,
+                new Dictionary<string, object> { ["source"] = "transcript_ready_fallback" });
+        }
+        if (asrFirstTokenFallbackMarked)
+        {
+            LogVoiceStageTimestamp("t_asr_first_token", now, resolvedSessionId, new Dictionary<string, object>
+            {
+                ["source"] = "final_response_fallback"
+            });
+        }
+        if (asrFinalMarked)
+        {
+            LogVoiceStageTimestamp("t_asr_final", now, resolvedSessionId, new Dictionary<string, object>
+            {
+                ["source"] = "transcript_ready"
+            });
+        }
     }
 
     private void HandleAgentResponseReady(
         string sessionId,
         string response,
         bool guardrailsUsed,
-        IReadOnlyList<string> guardrailsRationale)
+        IReadOnlyList<string> guardrailsRationale,
+        bool hasTokenUsage,
+        int tokensIn,
+        int tokensOut,
+        int contextFillPercent)
     {
         var trimmed = response?.Trim() ?? "";
         var now = DateTimeOffset.UtcNow;
         TimeSpan? agentDuration = null;
         bool addAgentChat = false;
         string? resolvedSessionId = null;
+        var agentFinalMarked = false;
 
         lock (_voiceTimelineGate)
         {
@@ -754,9 +1175,14 @@ public partial class App : System.Windows.Application
                 _voiceTimeline.SessionId = sessionId;
             resolvedSessionId = _voiceTimeline.SessionId;
 
-            _voiceTimeline.AgentReadyAtUtc ??= now;
+            if (_voiceTimeline.AgentReadyAtUtc is null)
+            {
+                _voiceTimeline.AgentReadyAtUtc = now;
+                agentFinalMarked = true;
+            }
 
             var anchor =
+                _voiceTimeline.AgentStartedAtUtc ??
                 _voiceTimeline.TranscriptReadyAtUtc ??
                 _voiceTimeline.MicReleasedAtUtc ??
                 _voiceTimeline.StartedAtUtc;
@@ -784,31 +1210,39 @@ public partial class App : System.Windows.Application
                 AppendVoiceActivity(line, LogEntryKind.Info);
         }
 
+        if (hasTokenUsage)
+            UpdateUiTokenUsageTicker(tokensIn, tokensOut, contextFillPercent);
+
         if (agentDuration is { } elapsed)
             LogVoiceTiming("Agent response ready", elapsed, resolvedSessionId, LogEntryKind.Info);
+        if (agentFinalMarked)
+            LogVoiceStageTimestamp("t_agent_final", now, resolvedSessionId);
     }
 
-    private void MarkVoiceSpeakingStarted()
+    private void MarkVoiceSpeakingStarted(DateTimeOffset timestampUtc, string? sessionIdHint = null)
     {
-        var now = DateTimeOffset.UtcNow;
         string? sessionId = null;
         bool firstSpeakingTick = false;
 
         lock (_voiceTimelineGate)
         {
-            if (_voiceTimeline is null)
-                return;
+            _voiceTimeline ??= new VoiceSessionTimeline { StartedAtUtc = timestampUtc };
+            if (!string.IsNullOrWhiteSpace(sessionIdHint))
+                _voiceTimeline.SessionId = sessionIdHint;
 
             sessionId = _voiceTimeline.SessionId;
             if (_voiceTimeline.SpeakingStartedAtUtc is null)
             {
-                _voiceTimeline.SpeakingStartedAtUtc = now;
+                _voiceTimeline.SpeakingStartedAtUtc = timestampUtc;
                 firstSpeakingTick = true;
             }
         }
 
         if (firstSpeakingTick)
+        {
             AppendVoiceActivity($"Playback started{FormatSessionSuffix(sessionId)}.", LogEntryKind.Info);
+            LogVoiceStageTimestamp("t_playback_start", timestampUtc, sessionId);
+        }
     }
 
     private void CompleteVoiceTimeline(VoiceState previousState, string? reason)
@@ -836,6 +1270,28 @@ public partial class App : System.Windows.Application
             LogVoiceTiming("Voice roundtrip (mic up -> idle)", now - micReleased, sessionId, LogEntryKind.Info);
 
         LogVoiceTiming("Voice session total", now - timeline.StartedAtUtc, sessionId, LogEntryKind.Info);
+
+        var audioCaptureDurationMs = TryElapsedMs(timeline.StartedAtUtc, timeline.MicReleasedAtUtc);
+        var asrLatencyMs = TryElapsedMs(timeline.AsrStartedAtUtc, timeline.TranscriptReadyAtUtc);
+        var endToEndToPlaybackStartMs = TryElapsedMs(timeline.StartedAtUtc, timeline.SpeakingStartedAtUtc);
+
+        WriteVoiceAuditNonBlocking("VOICE_TURN_TIMING_SUMMARY", "ok", new Dictionary<string, object>
+        {
+            ["sessionId"] = sessionId,
+            ["t_mic_down"] = timeline.StartedAtUtc.ToString("O"),
+            ["t_first_audio_frame"] = timeline.FirstAudioFrameAtUtc?.ToString("O") ?? "",
+            ["t_mic_up"] = timeline.MicReleasedAtUtc?.ToString("O") ?? "",
+            ["t_asr_start"] = timeline.AsrStartedAtUtc?.ToString("O") ?? "",
+            ["t_asr_first_token"] = timeline.AsrFirstTokenAtUtc?.ToString("O") ?? "",
+            ["t_asr_final"] = timeline.TranscriptReadyAtUtc?.ToString("O") ?? "",
+            ["t_agent_start"] = timeline.AgentStartedAtUtc?.ToString("O") ?? "",
+            ["t_agent_final"] = timeline.AgentReadyAtUtc?.ToString("O") ?? "",
+            ["t_tts_start"] = timeline.TtsStartedAtUtc?.ToString("O") ?? "",
+            ["t_playback_start"] = timeline.SpeakingStartedAtUtc?.ToString("O") ?? "",
+            ["audio_capture_duration_ms"] = audioCaptureDurationMs ?? -1L,
+            ["asr_latency_ms"] = asrLatencyMs ?? -1L,
+            ["end_to_end_to_playback_start_ms"] = endToEndToPlaybackStartMs ?? -1L
+        });
 
         if (!string.IsNullOrWhiteSpace(reason) &&
             reason.Contains("fault", StringComparison.OrdinalIgnoreCase))
@@ -886,6 +1342,14 @@ public partial class App : System.Windows.Application
             }
 
             _commandPaletteViewModel.AddVoiceAssistantMessage(text);
+        });
+    }
+
+    private void UpdateUiTokenUsageTicker(int tokensIn, int tokensOut, int contextFillPercent)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            _commandPaletteViewModel?.UpdateTokenUsageTicker(tokensIn, tokensOut, contextFillPercent);
         });
     }
 
@@ -1107,6 +1571,50 @@ public partial class App : System.Windows.Application
             ["elapsedMs"] = (long)Math.Round(safeElapsed.TotalMilliseconds),
             ["sessionId"] = sessionId ?? ""
         });
+    }
+
+    private void LogVoiceStageTimestamp(
+        string stage,
+        DateTimeOffset timestampUtc,
+        string? sessionId,
+        Dictionary<string, object>? extraDetails = null)
+    {
+        var details = new Dictionary<string, object>
+        {
+            ["stage"] = stage,
+            ["sessionId"] = sessionId ?? "",
+            ["timestampUtc"] = timestampUtc.ToString("O")
+        };
+
+        if (extraDetails is not null)
+        {
+            foreach (var pair in extraDetails)
+                details[pair.Key] = pair.Value;
+        }
+
+        WriteVoiceAuditNonBlocking("VOICE_STAGE_TIMESTAMP", "ok", details);
+    }
+
+    private static long? TryElapsedMs(DateTimeOffset start, DateTimeOffset? end)
+    {
+        if (end is null)
+            return null;
+
+        var elapsed = end.Value - start;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+        return (long)Math.Round(elapsed.TotalMilliseconds);
+    }
+
+    private static long? TryElapsedMs(DateTimeOffset? start, DateTimeOffset? end)
+    {
+        if (start is null || end is null)
+            return null;
+
+        var elapsed = end.Value - start.Value;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+        return (long)Math.Round(elapsed.TotalMilliseconds);
     }
 
     private void WriteVoiceAuditNonBlocking(
@@ -1419,27 +1927,44 @@ public partial class App : System.Windows.Application
     {
         Dispatcher.Invoke(() =>
         {
-            if (_commandPaletteWindow == null || !_commandPaletteWindow.IsLoaded)
+            try
             {
-                _commandPaletteWindow = CreateCommandPaletteWindow();
-            }
+                if (_commandPaletteWindow == null || !_commandPaletteWindow.IsLoaded)
+                {
+                    _commandPaletteWindow = CreateCommandPaletteWindow();
+                }
 
-            if (_commandPaletteWindow.IsVisible)
-            {
-                _commandPaletteWindow.Activate();
-            }
-            else
-            {
-                _commandPaletteWindow.Reset();
-                _commandPaletteWindow.Show();
-            }
+                if (_commandPaletteWindow.IsVisible)
+                {
+                    _commandPaletteWindow.Activate();
+                }
+                else
+                {
+                    _commandPaletteWindow.Reset();
+                    _commandPaletteWindow.Show();
+                }
 
-            _auditLogger?.Append(new AuditEvent
+                _auditLogger?.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "COMMAND_PALETTE_OPENED",
+                    Result = "ok"
+                });
+            }
+            catch (Exception ex)
             {
-                Actor = "user",
-                Action = "COMMAND_PALETTE_OPENED",
-                Result = "ok"
-            });
+                _auditLogger?.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "COMMAND_PALETTE_OPEN_FAILED",
+                    Result = "error",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["message"] = ex.Message,
+                        ["errorType"] = ex.GetType().FullName ?? "unknown"
+                    }
+                });
+            }
         });
     }
 
@@ -1884,17 +2409,26 @@ public partial class App : System.Windows.Application
 
         await StopLiveAsrPreviewLoopAsync(waitForDrain: false);
 
+        if (_audioPlaybackService is not null)
+            _audioPlaybackService.PlaybackStarted -= OnPlaybackStarted;
         _audioPlaybackService?.Dispose();
         _audioPlaybackService = null;
 
+        if (_audioCaptureService is not null)
+            _audioCaptureService.FirstAudioFrameCaptured -= OnCaptureFirstFrameCaptured;
         _audioCaptureService?.Dispose();
         _audioCaptureService = null;
 
         if (_asrClient is not null)
+        {
             _asrClient.TranscriptReceived -= OnAsrTranscriptReceived;
+            _asrClient.TimingUpdated -= OnAsrTimingUpdated;
+        }
         _asrClient?.Dispose();
         _asrClient = null;
 
+        if (_localTtsClient is not null)
+            _localTtsClient.TimingUpdated -= OnTtsTimingUpdated;
         _localTtsClient?.Dispose();
         _localTtsClient = null;
 

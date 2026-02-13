@@ -9,11 +9,14 @@ namespace SirThaddeus.LlmClient;
 /// Sends chat completion requests with optional tool definitions and
 /// parses tool_calls from the response.
 /// </summary>
-public sealed class LmStudioClient : ILlmClient, IDisposable
+public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
     private readonly HttpClient _http;
     private readonly LlmClientOptions _options;
     private readonly JsonSerializerOptions _json;
+    private long _promptTokensTotal;
+    private long _completionTokensTotal;
+    private long _totalTokensTotal;
 
     public LmStudioClient(LlmClientOptions options, HttpClient? httpClient = null)
     {
@@ -248,6 +251,7 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
     {
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
         var completion = JsonSerializer.Deserialize<CompletionResponse>(raw, _json);
+        TrackUsage(completion?.Usage);
 
         if (completion?.Choices is not { Count: > 0 })
         {
@@ -271,6 +275,21 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
             ToolCalls    = message?.ToolCalls,
             FinishReason = choice.FinishReason,
             Usage        = completion.Usage
+        };
+    }
+
+    public LlmUsageSnapshot GetUsageSnapshot()
+    {
+        var contextWindow = _options.ContextWindowTokens > 0
+            ? _options.ContextWindowTokens
+            : 8192;
+
+        return new LlmUsageSnapshot
+        {
+            PromptTokens = System.Threading.Interlocked.Read(ref _promptTokensTotal),
+            CompletionTokens = System.Threading.Interlocked.Read(ref _completionTokensTotal),
+            TotalTokens = System.Threading.Interlocked.Read(ref _totalTokensTotal),
+            ContextWindowTokens = contextWindow
         };
     }
 
@@ -308,6 +327,33 @@ public sealed class LmStudioClient : ILlmClient, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+    }
+
+    private void TrackUsage(TokenUsage? usage)
+    {
+        if (usage is null)
+            return;
+
+        if (usage.PromptTokens > 0)
+        {
+            System.Threading.Interlocked.Add(
+                ref _promptTokensTotal,
+                usage.PromptTokens);
+        }
+
+        if (usage.CompletionTokens > 0)
+        {
+            System.Threading.Interlocked.Add(
+                ref _completionTokensTotal,
+                usage.CompletionTokens);
+        }
+
+        if (usage.TotalTokens > 0)
+        {
+            System.Threading.Interlocked.Add(
+                ref _totalTokensTotal,
+                usage.TotalTokens);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

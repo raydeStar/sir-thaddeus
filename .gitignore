@@ -71,3 +71,15 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+
+# ML model artifacts — auto-downloaded on voice-backend startup.
+# These are too large for version control; see model_registry.json
+# for canonical download URLs and SHA256 verification hashes.
+*.onnx
+*.safetensors
+apps/voice-backend/voices/*/*.bin
+apps/voice-backend/voices/*/*.npy
+apps/voice-backend/stt-models/*/*.bin
+apps/voice-backend/stt-models/*/*.model
+apps/voice-backend/.seed-*/
+packages/requested-files.zip

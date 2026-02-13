@@ -20,6 +20,7 @@ public sealed class AsrProxyBackend : IAsrBackend
     public async Task<string> TranscribeAsync(
         IFormFile audioFile,
         string? sessionId,
+        string? requestId,
         CancellationToken cancellationToken)
     {
         await using var sourceStream = audioFile.OpenReadStream();
@@ -43,6 +44,17 @@ public sealed class AsrProxyBackend : IAsrBackend
 
         if (!string.IsNullOrWhiteSpace(sessionId))
             payload.Add(new StringContent(sessionId), "sessionId");
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            payload.Add(new StringContent(requestId), "requestId");
+            request.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
+        }
+
+        payload.Add(new StringContent(_options.SttEngine), "engine");
+        if (!string.IsNullOrWhiteSpace(_options.SttModelId))
+            payload.Add(new StringContent(_options.SttModelId), "modelId");
+        if (!string.IsNullOrWhiteSpace(_options.SttLanguage))
+            payload.Add(new StringContent(_options.SttLanguage), "language");
 
         request.Content = payload;
 

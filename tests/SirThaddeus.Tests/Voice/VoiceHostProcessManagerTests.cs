@@ -207,6 +207,71 @@ public sealed class VoiceHostProcessManagerTests
         }
     }
 
+    [Fact]
+    public async Task EnsureRunningAsync_PassesEngineSelectionArgsToManagedVoiceHost()
+    {
+        var tempHostExe = CreateTempHostExe();
+        try
+        {
+            var started = false;
+            string startArgs = "";
+
+            using var handler = new RoutingHealthHandler(uri =>
+            {
+                if (started &&
+                    uri.AbsolutePath.Equals("/health", StringComparison.OrdinalIgnoreCase) &&
+                    uri.Port == 17845)
+                {
+                    return HealthResponse(ready: true, asrReady: true, ttsReady: true);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                {
+                    Content = new StringContent("{\"error\":\"warming\"}", Encoding.UTF8, "application/json")
+                };
+            });
+
+            await using var manager = new VoiceHostProcessManager(
+                new TestAuditLogger(),
+                new VoiceSettings
+                {
+                    VoiceHostEnabled = true,
+                    VoiceHostBaseUrl = "http://127.0.0.1:17845",
+                    VoiceHostHealthPath = "/health",
+                    VoiceHostStartupTimeoutMs = 8_000,
+                    TtsEngine = "kokoro",
+                    TtsVoiceId = "af_sky",
+                    SttEngine = "faster-whisper",
+                    SttModelId = ""
+                },
+                httpMessageHandler: handler,
+                processStarter: info =>
+                {
+                    startArgs = info.Arguments;
+                    started = true;
+                    return StartSleepProcess(seconds: 20);
+                },
+                voiceHostPathResolver: () => tempHostExe,
+                ephemeralPortProvider: () => null);
+
+            var result = await manager.EnsureRunningAsync(CancellationToken.None);
+
+            Assert.True(result.Success, result.UserMessage);
+            Assert.Contains("--tts-engine", startArgs);
+            Assert.Contains("kokoro", startArgs, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("--tts-voice-id", startArgs);
+            Assert.Contains("af_sky", startArgs, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("--stt-engine", startArgs);
+            Assert.Contains("faster-whisper", startArgs, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("--stt-model-id", startArgs);
+            Assert.Contains("base", startArgs, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TryDelete(tempHostExe);
+        }
+    }
+
     private static HttpResponseMessage HealthResponse(
         bool ready,
         bool asrReady,

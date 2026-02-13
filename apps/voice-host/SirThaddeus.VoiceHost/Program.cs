@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using SirThaddeus.VoiceHost;
 using SirThaddeus.VoiceHost.Backends;
 using SirThaddeus.VoiceHost.Models;
@@ -26,6 +27,8 @@ var app = builder.Build();
 var backendSupervisor = app.Services.GetRequiredService<VoiceBackendSupervisor>();
 var backendEnsureGate = new object();
 Task<BackendSupervisorResult>? backendEnsureTask = null;
+var voiceHostInstanceId = Guid.NewGuid().ToString("N");
+var voiceHostVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
 
 Task<BackendSupervisorResult> QueueBackendEnsure()
 {
@@ -126,16 +129,17 @@ app.MapGet("/health", async (
         ttsState = BackendReadiness.NotReady(detail);
     }
 
-    var asrReady = asrState.Ready;
-    var ttsReady = ttsState.Ready;
+    var asrStatus = EnsureEngineStatus(asrState, "asr");
+    var ttsStatus = EnsureEngineStatus(ttsState, "tts");
+    var asrReady = asrStatus.Ready;
+    var ttsReady = ttsStatus.Ready;
     var ready = asrReady && ttsReady;
-    var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
 
     var errorCode = "";
     var message = "";
     if (!ready)
     {
-        var readinessDetail = $"ASR: {asrState.Detail}; TTS: {ttsState.Detail}";
+        var readinessDetail = $"ASR: {asrStatus.Details.LastError}; TTS: {ttsStatus.Details.LastError}";
         if (!backendEnsure.Success)
         {
             errorCode = backendEnsure.ErrorCode;
@@ -162,22 +166,31 @@ app.MapGet("/health", async (
 
     return Results.Json(new
     {
+        schemaVersion = 1,
+        instanceId = voiceHostInstanceId,
+        timestampUtc = DateTimeOffset.UtcNow.ToString("O"),
         status = ready ? "ok" : "loading",
         ready,
         asrReady,
         ttsReady,
-        version,
+        version = voiceHostVersion,
         errorCode,
-        message
+        message,
+        asr = asrStatus,
+        tts = ttsStatus
     });
 });
 
 app.MapPost("/asr", async (
     HttpRequest request,
+    HttpContext httpContext,
     IAsrBackend asrBackend,
     VoiceBackendSupervisor backendSupervisor,
     CancellationToken cancellationToken) =>
 {
+    var requestId = ResolveRequestId(request.Headers["X-Request-Id"].ToString(), "");
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
     var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
     if (!ensure.Success)
     {
@@ -185,23 +198,36 @@ app.MapPost("/asr", async (
         {
             error = "Voice backend unavailable.",
             errorCode = ensure.ErrorCode,
-            message = ensure.Message
+            message = ensure.Message,
+            requestId
         }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     if (!request.HasFormContentType)
-        return Results.BadRequest(new { error = "Expected multipart/form-data with 'audio' file." });
+        return Results.BadRequest(new
+        {
+            error = "Expected multipart/form-data with 'audio' file.",
+            requestId
+        });
 
     var form = await request.ReadFormAsync(cancellationToken);
     var audioFile = form.Files.GetFile("audio");
     if (audioFile is null || audioFile.Length == 0)
-        return Results.BadRequest(new { error = "Missing required multipart field 'audio'." });
+        return Results.BadRequest(new
+        {
+            error = "Missing required multipart field 'audio'.",
+            requestId
+        });
 
     var sessionId = form.TryGetValue("sessionId", out var values)
         ? values.ToString()
         : null;
-    var transcript = await asrBackend.TranscribeAsync(audioFile, sessionId, cancellationToken);
-    return Results.Json(new { text = transcript });
+    if (form.TryGetValue("requestId", out var requestIdValues))
+        requestId = ResolveRequestId(requestIdValues.ToString(), requestId);
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
+    var transcript = await asrBackend.TranscribeAsync(audioFile, sessionId, requestId, cancellationToken);
+    return Results.Json(new { text = transcript, requestId });
 });
 
 app.MapPost("/tts", async (
@@ -211,6 +237,9 @@ app.MapPost("/tts", async (
     VoiceBackendSupervisor backendSupervisor,
     CancellationToken cancellationToken) =>
 {
+    var requestId = ResolveRequestId(payload.RequestId, httpContext.Request.Headers["X-Request-Id"].ToString());
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
     var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
     if (!ensure.Success)
     {
@@ -218,23 +247,93 @@ app.MapPost("/tts", async (
         {
             error = "Voice backend unavailable.",
             errorCode = ensure.ErrorCode,
-            message = ensure.Message
+            message = ensure.Message,
+            requestId
         }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     if (string.IsNullOrWhiteSpace(payload.Text))
-        return Results.BadRequest(new { error = "Field 'text' is required." });
+        return Results.BadRequest(new
+        {
+            error = "Field 'text' is required.",
+            requestId
+        });
 
     var normalizedPayload = payload with
     {
+        RequestId = requestId,
+        Engine = string.IsNullOrWhiteSpace(payload.Engine) ? options.TtsEngine : payload.Engine.Trim(),
+        ModelId = string.IsNullOrWhiteSpace(payload.ModelId) ? options.TtsModelId : payload.ModelId.Trim(),
+        VoiceId = ResolveVoiceId(payload, options.TtsVoiceId),
         Voice = string.IsNullOrWhiteSpace(payload.Voice) ? "default" : payload.Voice.Trim(),
         Format = string.IsNullOrWhiteSpace(payload.Format) ? "pcm_s16le" : payload.Format.Trim(),
         SampleRate = payload.SampleRate <= 0 ? 24_000 : payload.SampleRate
     };
 
+    if (string.Equals(normalizedPayload.Engine, "kokoro", StringComparison.OrdinalIgnoreCase) &&
+        string.IsNullOrWhiteSpace(normalizedPayload.VoiceId))
+    {
+        return Results.Json(new
+        {
+            error = "Kokoro requires a non-empty voiceId.",
+            errorCode = "tts_voice_missing",
+            requestId
+        }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
     await ttsBackend.StreamSynthesisAsync(normalizedPayload, httpContext.Response, cancellationToken);
     return Results.Empty;
 });
+
+static BackendEngineStatus EnsureEngineStatus(BackendReadiness readiness, string fallbackEngine)
+{
+    if (readiness.EngineStatus is not null)
+        return readiness.EngineStatus;
+
+    var missing = string.IsNullOrWhiteSpace(readiness.Detail)
+        ? Array.Empty<string>()
+        : new[] { readiness.Detail };
+
+    return new BackendEngineStatus(
+        SchemaVersion: 1,
+        Ready: readiness.Ready,
+        Engine: fallbackEngine,
+        EngineVersion: "",
+        ModelId: "",
+        InstanceId: "",
+        TimestampUtc: DateTimeOffset.UtcNow.ToString("O"),
+        Details: new BackendEngineStatusDetails(
+            Installed: readiness.Ready,
+            Missing: missing,
+            LastError: readiness.Ready ? "" : readiness.Detail));
+}
+
+static string ResolveRequestId(params string[] candidates)
+{
+    foreach (var candidate in candidates)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate))
+            return candidate.Trim();
+    }
+
+    return Guid.NewGuid().ToString("N");
+}
+
+static string ResolveVoiceId(VoiceHostTtsRequest payload, string configuredVoiceId)
+{
+    if (!string.IsNullOrWhiteSpace(payload.VoiceId))
+        return payload.VoiceId.Trim();
+
+    if (!string.IsNullOrWhiteSpace(payload.Voice) &&
+        !string.Equals(payload.Voice, "default", StringComparison.OrdinalIgnoreCase))
+    {
+        return payload.Voice.Trim();
+    }
+
+    return string.IsNullOrWhiteSpace(configuredVoiceId)
+        ? ""
+        : configuredVoiceId.Trim();
+}
 
 app.MapGet("/", () => Results.Json(new
 {

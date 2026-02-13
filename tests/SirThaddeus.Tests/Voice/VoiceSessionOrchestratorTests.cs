@@ -46,6 +46,55 @@ public sealed class VoiceSessionOrchestratorTests
     }
 
     [Fact]
+    public async Task MicUpWithFreshRealtimeHint_SkipsFinalAsrPass()
+    {
+        var capture = new FakeCaptureService();
+        var playback = new FakePlaybackService();
+        var asr = new CountingAsrService("fallback transcript");
+        var agent = new FakeAgentService("world");
+        var audit = new TestAuditLogger();
+
+        await using var orchestrator = new VoiceSessionOrchestrator(capture, playback, asr, agent, audit);
+        await orchestrator.StartAsync();
+
+        orchestrator.EnqueueMicDown();
+        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(2));
+
+        orchestrator.SetRealtimeTranscriptHint("hello from live preview", DateTimeOffset.UtcNow);
+        orchestrator.EnqueueMicUp();
+
+        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(0, asr.CallCount);
+        Assert.Equal(1, agent.CallCount);
+        Assert.Equal("hello from live preview", agent.LastTranscript);
+    }
+
+    [Fact]
+    public async Task MicUpWithNoisyRealtimeHint_FallsBackToFinalAsrPass()
+    {
+        var capture = new FakeCaptureService();
+        var playback = new FakePlaybackService();
+        var asr = new CountingAsrService("clean fallback transcript");
+        var agent = new FakeAgentService("world");
+        var audit = new TestAuditLogger();
+
+        await using var orchestrator = new VoiceSessionOrchestrator(capture, playback, asr, agent, audit);
+        await orchestrator.StartAsync();
+
+        orchestrator.EnqueueMicDown();
+        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(2));
+
+        orchestrator.SetRealtimeTranscriptHint("... ... ... Comma. Comma.", DateTimeOffset.UtcNow);
+        orchestrator.EnqueueMicUp();
+
+        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(1, asr.CallCount);
+        Assert.Equal("clean fallback transcript", agent.LastTranscript);
+    }
+
+    [Fact]
     public async Task ShutupWhileSpeaking_StopsPlaybackAndReturnsIdle()
     {
         var capture = new FakeCaptureService();
@@ -263,6 +312,30 @@ public sealed class VoiceSessionOrchestratorTests
         }
     }
 
+    private sealed class CountingAsrService : IAsrService
+    {
+        private readonly string _transcript;
+
+        public CountingAsrService(string transcript)
+        {
+            _transcript = transcript;
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<string> TranscribeAsync(
+            VoiceAudioClip clip,
+            string sessionId,
+            CancellationToken cancellationToken)
+        {
+            _ = clip;
+            _ = sessionId;
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            return Task.FromResult(_transcript);
+        }
+    }
+
     private sealed class BlockingAsrService : IAsrService
     {
         private readonly TaskCompletionSource<string> _completion =
@@ -292,16 +365,17 @@ public sealed class VoiceSessionOrchestratorTests
         }
 
         public int CallCount { get; private set; }
+        public string LastTranscript { get; private set; } = "";
 
         public Task<VoiceAgentResponse> ProcessAsync(
             string transcript,
             string sessionId,
             CancellationToken cancellationToken)
         {
-            _ = transcript;
             _ = sessionId;
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
+            LastTranscript = transcript;
             return Task.FromResult(new VoiceAgentResponse
             {
                 Text = _responseText,

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using NAudio.Wave;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Config;
 using SirThaddeus.Voice;
 
 namespace SirThaddeus.DesktopRuntime.Services;
@@ -46,13 +47,14 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     private readonly IAuditLogger _auditLogger;
     private readonly LocalTtsHttpClient? _localTtsClient;
     private readonly TextToSpeechService _fallbackTts;
-    private readonly bool _preferLocalTts;
+    private readonly Func<VoiceSettings> _voiceSettingsProvider;
     private readonly object _gate = new();
 
     private WaveOutEvent? _activeOutput;
     private TaskCompletionSource<bool>? _playbackCompletion;
     private bool _isPlaying;
     private bool _disposed;
+    public event EventHandler<AudioPlaybackStartedEventArgs>? PlaybackStarted;
 
     /// <summary>
     /// NAudio device index for playback output.
@@ -63,13 +65,13 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     public AudioPlaybackService(
         IAuditLogger auditLogger,
         TextToSpeechService fallbackTts,
-        LocalTtsHttpClient? localTtsClient = null,
-        bool preferLocalTts = true)
+        Func<VoiceSettings> voiceSettingsProvider,
+        LocalTtsHttpClient? localTtsClient = null)
     {
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
         _fallbackTts = fallbackTts ?? throw new ArgumentNullException(nameof(fallbackTts));
+        _voiceSettingsProvider = voiceSettingsProvider ?? throw new ArgumentNullException(nameof(voiceSettingsProvider));
         _localTtsClient = localTtsClient;
-        _preferLocalTts = preferLocalTts;
     }
 
     public bool IsPlaying
@@ -111,34 +113,50 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
         try
         {
-            if (_preferLocalTts && _localTtsClient is not null)
+            var voiceSettings = GetVoiceSettingsSnapshot();
+            var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();
+
+            if (string.Equals(selectedTtsEngine, "windows", StringComparison.OrdinalIgnoreCase))
             {
-                try
-                {
-                    var audioBytes = await _localTtsClient.SynthesizeAsync(speechText, sessionId, cancellationToken);
-                    if (audioBytes is not null && audioBytes.Length > 0)
-                    {
-                        await PlayWaveBytesAsync(audioBytes, cancellationToken);
-                        return;
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _auditLogger.Append(new AuditEvent
-                    {
-                        Actor = "voice",
-                        Action = "VOICE_TTS_LOCAL_FALLBACK",
-                        Result = "fallback",
-                        Details = new Dictionary<string, object>
-                        {
-                            ["sessionId"] = sessionId,
-                            ["reason"] = ex.Message
-                        }
-                    });
-                }
+                await _fallbackTts.SpeakAsync(speechText, cancellationToken);
+                return;
             }
 
-            await _fallbackTts.SpeakAsync(speechText, cancellationToken);
+            if (!voiceSettings.PreferLocalTts || _localTtsClient is null)
+            {
+                throw new InvalidOperationException(
+                    $"TtsUnavailable: selected engine '{selectedTtsEngine}' requires local TTS endpoint.");
+            }
+
+            try
+            {
+                var audioBytes = await _localTtsClient.SynthesizeAsync(speechText, sessionId, cancellationToken);
+                if (audioBytes is null || audioBytes.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"TtsUnavailable: local '{selectedTtsEngine}' synthesis returned empty audio.");
+                }
+
+                await PlayWaveBytesAsync(audioBytes, sessionId, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "voice",
+                    Action = "VOICE_TTS_UNAVAILABLE",
+                    Result = "error",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["sessionId"] = sessionId,
+                        ["engine"] = selectedTtsEngine,
+                        ["reason"] = ex.Message
+                    }
+                });
+
+                throw new InvalidOperationException($"TtsUnavailable: {ex.Message}", ex);
+            }
         }
         finally
         {
@@ -171,7 +189,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task PlayWaveBytesAsync(byte[] bytes, CancellationToken cancellationToken)
+    private async Task PlayWaveBytesAsync(byte[] bytes, string sessionId, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(bytes, writable: false);
         using var reader = new WaveFileReader(stream);
@@ -199,6 +217,28 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
         output.Init(reader);
         output.Play();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        _auditLogger.Append(new AuditEvent
+        {
+            Actor = "voice",
+            Action = "VOICE_PLAYBACK_START",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["sessionId"] = sessionId,
+                ["bytes"] = bytes.Length
+            }
+        });
+
+        try
+        {
+            PlaybackStarted?.Invoke(this, new AudioPlaybackStartedEventArgs(sessionId, startedAt));
+        }
+        catch
+        {
+            // Playback timing notifications are best-effort.
+        }
 
         await completion.Task.WaitAsync(cancellationToken);
 
@@ -259,4 +299,18 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             ? ""
             : MultiWhitespaceRegex.Replace(string.Join(" ", spokenLines), " ").Trim();
     }
+
+    private VoiceSettings GetVoiceSettingsSnapshot()
+    {
+        try
+        {
+            return _voiceSettingsProvider.Invoke() ?? new VoiceSettings();
+        }
+        catch
+        {
+            return new VoiceSettings();
+        }
+    }
 }
+
+public sealed record AudioPlaybackStartedEventArgs(string SessionId, DateTimeOffset TimestampUtc);
