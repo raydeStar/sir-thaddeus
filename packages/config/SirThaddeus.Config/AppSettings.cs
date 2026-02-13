@@ -59,6 +59,9 @@ public sealed record LlmSettings
     [JsonPropertyName("maxTokens")]
     public int MaxTokens { get; init; } = 2048;
 
+    [JsonPropertyName("contextWindowTokens")]
+    public int ContextWindowTokens { get; init; } = 8192;
+
     [JsonPropertyName("temperature")]
     public double Temperature { get; init; } = 0.7;
 
@@ -204,6 +207,24 @@ public sealed record VoiceSettings
     [JsonPropertyName("voiceHostHealthPath")]
     public string VoiceHostHealthPath { get; init; } = "/health";
 
+    [JsonPropertyName("ttsEngine")]
+    public string TtsEngine { get; init; } = "windows";
+
+    [JsonPropertyName("ttsModelId")]
+    public string TtsModelId { get; init; } = "";
+
+    [JsonPropertyName("ttsVoiceId")]
+    public string TtsVoiceId { get; init; } = "";
+
+    [JsonPropertyName("sttEngine")]
+    public string SttEngine { get; init; } = "faster-whisper";
+
+    [JsonPropertyName("sttModelId")]
+    public string SttModelId { get; init; } = "";
+
+    [JsonPropertyName("sttLanguage")]
+    public string SttLanguage { get; init; } = "en";
+
     /// <summary>
     /// Deprecated compatibility field. VoiceHostBaseUrl is authoritative.
     /// </summary>
@@ -241,6 +262,63 @@ public sealed record VoiceSettings
     public string GetAsrUrl() => CombineWithBase(GetVoiceHostBaseUrl(), "/asr");
 
     public string GetTtsUrl() => CombineWithBase(GetVoiceHostBaseUrl(), "/tts");
+
+    public string GetNormalizedTtsEngine()
+    {
+        var engine = (TtsEngine ?? "").Trim().ToLowerInvariant();
+        return engine switch
+        {
+            "" => "windows",
+            "windows" => "windows",
+            "kokoro" => "kokoro",
+            _ => engine
+        };
+    }
+
+    public string GetNormalizedSttEngine()
+    {
+        var engine = (SttEngine ?? "").Trim().ToLowerInvariant();
+        return engine switch
+        {
+            "" => "faster-whisper",
+            "whisper" => "faster-whisper",
+            "faster-whisper" => "faster-whisper",
+            "qwen3asr" => "qwen3asr",
+            _ => engine
+        };
+    }
+
+    public string GetResolvedSttModelId()
+    {
+        if (!string.IsNullOrWhiteSpace(SttModelId))
+            return SttModelId.Trim();
+
+        // Deterministic default model for faster-whisper.
+        return string.Equals(GetNormalizedSttEngine(), "faster-whisper", StringComparison.Ordinal)
+            ? "base"
+            : "";
+    }
+
+    public string GetResolvedSttLanguage()
+    {
+        var raw = (SttLanguage ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            return "en";
+
+        var normalized = raw.ToLowerInvariant();
+        return normalized switch
+        {
+            "auto" => "",
+            "detect" => "",
+            _ => normalized
+        };
+    }
+
+    public string GetResolvedTtsVoiceId()
+        => string.IsNullOrWhiteSpace(TtsVoiceId) ? "" : TtsVoiceId.Trim();
+
+    public string GetResolvedTtsModelId()
+        => string.IsNullOrWhiteSpace(TtsModelId) ? "" : TtsModelId.Trim();
 
     private static string CombineWithBase(string baseUrl, string relativePath)
     {

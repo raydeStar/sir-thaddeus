@@ -1,0 +1,75 @@
+{
+  "$schema": "model-registry-v1",
+  "description": "Declarative model downloads for voice-backend. Files listed here are fetched on startup when missing locally. SHA256 hashes are verified post-download.",
+
+  "kokoro": {
+    "v1.0": {
+      "description": "Kokoro 82M — ONNX TTS model (v1.0, f32) + combined voice styles bundle.",
+      "files": [
+        {
+          "localName": "model.onnx",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
+          "sha256": null,
+          "sizeBytes": 325532387
+        },
+        {
+          "localName": "voices.bin",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+          "sha256": null,
+          "sizeBytes": 28214398
+        }
+      ]
+    },
+    "v1.0-fp16": {
+      "description": "Kokoro 82M — ONNX TTS model (v1.0, fp16, ~50% smaller) + combined voice styles bundle.",
+      "files": [
+        {
+          "localName": "model.onnx",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx",
+          "sha256": null,
+          "sizeBytes": 177464787
+        },
+        {
+          "localName": "voices.bin",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+          "sha256": null,
+          "sizeBytes": 28214398
+        }
+      ]
+    },
+    "v1.0-int8": {
+      "description": "Kokoro 82M — ONNX TTS model (v1.0, int8, smallest) + combined voice styles bundle.",
+      "files": [
+        {
+          "localName": "model.onnx",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx",
+          "sha256": null,
+          "sizeBytes": 92361271
+        },
+        {
+          "localName": "voices.bin",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+          "sha256": null,
+          "sizeBytes": 28214398
+        }
+      ]
+    },
+    "v0.19": {
+      "description": "Kokoro 82M — ONNX TTS model (v0.19 legacy, f32) + legacy voice styles bundle.",
+      "files": [
+        {
+          "localName": "model.onnx",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx",
+          "sha256": null,
+          "sizeBytes": 325525180
+        },
+        {
+          "localName": "voices.bin",
+          "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin",
+          "sha256": null,
+          "sizeBytes": 5758648
+        }
+      ]
+    }
+  }
+}

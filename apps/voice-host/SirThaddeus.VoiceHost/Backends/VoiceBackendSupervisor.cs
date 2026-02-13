@@ -214,33 +214,62 @@ public sealed class VoiceBackendSupervisor : IDisposable
 
         var ext = Path.GetExtension(backendPath);
         var workingDir = Path.GetDirectoryName(backendPath) ?? AppContext.BaseDirectory;
+        var engineArgs = BuildEngineArgs();
 
         if (ext.Equals(".py", StringComparison.OrdinalIgnoreCase))
         {
             startInfo = new ProcessStartInfo
             {
                 FileName = "python",
-                Arguments = $"{QuoteArg(backendPath)} --port {port}",
+                Arguments = $"{QuoteArg(backendPath)} --port {port}{engineArgs}",
                 WorkingDirectory = workingDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            ApplyEngineEnvironment(startInfo);
             return true;
         }
 
         startInfo = new ProcessStartInfo
         {
             FileName = backendPath,
-            Arguments = $"--port {port}",
+            Arguments = $"--port {port}{engineArgs}",
             WorkingDirectory = workingDir,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ApplyEngineEnvironment(startInfo);
         return true;
+    }
+
+    private string BuildEngineArgs()
+    {
+        var args = $" --tts-engine {QuoteArg(_options.TtsEngine)}" +
+                   $" --stt-engine {QuoteArg(_options.SttEngine)}" +
+                   $" --stt-model-id {QuoteArg(_options.SttModelId)}";
+        if (!string.IsNullOrWhiteSpace(_options.SttLanguage))
+            args += $" --stt-language {QuoteArg(_options.SttLanguage)}";
+
+        if (!string.IsNullOrWhiteSpace(_options.TtsModelId))
+            args += $" --tts-model-id {QuoteArg(_options.TtsModelId)}";
+        if (!string.IsNullOrWhiteSpace(_options.TtsVoiceId))
+            args += $" --tts-voice-id {QuoteArg(_options.TtsVoiceId)}";
+
+        return args;
+    }
+
+    private void ApplyEngineEnvironment(ProcessStartInfo startInfo)
+    {
+        startInfo.Environment["ST_VOICE_TTS_ENGINE"] = _options.TtsEngine;
+        startInfo.Environment["ST_VOICE_TTS_MODEL_ID"] = _options.TtsModelId;
+        startInfo.Environment["ST_VOICE_TTS_VOICE_ID"] = _options.TtsVoiceId;
+        startInfo.Environment["ST_VOICE_STT_ENGINE"] = _options.SttEngine;
+        startInfo.Environment["ST_VOICE_STT_MODEL_ID"] = _options.SttModelId;
+        startInfo.Environment["ST_VOICE_STT_LANGUAGE"] = _options.SttLanguage;
     }
 
     private BackendSupervisorResult StartManagedProcess(ProcessStartInfo startInfo, string resolvedPath)

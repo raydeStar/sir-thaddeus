@@ -7,5 +7,6 @@ public interface IAsrBackend
     Task<string> TranscribeAsync(
         IFormFile audioFile,
         string? sessionId,
+        string? requestId,
         CancellationToken cancellationToken);
 }

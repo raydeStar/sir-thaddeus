@@ -27,6 +27,10 @@ public sealed class TtsProxyBackend : ITtsBackend
         var body = JsonSerializer.Serialize(new
         {
             text = payload.Text,
+            requestId = payload.RequestId,
+            engine = string.IsNullOrWhiteSpace(payload.Engine) ? _options.TtsEngine : payload.Engine,
+            modelId = string.IsNullOrWhiteSpace(payload.ModelId) ? _options.TtsModelId : payload.ModelId,
+            voiceId = string.IsNullOrWhiteSpace(payload.VoiceId) ? payload.Voice : payload.VoiceId,
             voice = payload.Voice,
             format = payload.Format,
             sampleRate = payload.SampleRate
@@ -36,6 +40,8 @@ public sealed class TtsProxyBackend : ITtsBackend
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
+        if (!string.IsNullOrWhiteSpace(payload.RequestId))
+            request.Headers.TryAddWithoutValidation("X-Request-Id", payload.RequestId);
 
         using var upstreamResponse = await _httpClient.SendAsync(
             request,
@@ -76,5 +82,10 @@ public sealed class TtsProxyBackend : ITtsBackend
             response.Headers["X-Format"] = formatValues.ToArray();
         else
             response.Headers["X-Format"] = payload.Format;
+
+        if (upstream.Headers.TryGetValues("X-Request-Id", out var requestIdValues))
+            response.Headers["X-Request-Id"] = requestIdValues.ToArray();
+        else if (!string.IsNullOrWhiteSpace(payload.RequestId))
+            response.Headers["X-Request-Id"] = payload.RequestId;
     }
 }

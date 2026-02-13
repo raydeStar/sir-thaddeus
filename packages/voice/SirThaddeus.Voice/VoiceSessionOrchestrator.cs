@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Voice;
@@ -11,6 +12,18 @@ public sealed class VoiceSessionOrchestrator :
     IVoiceStateSource,
     IAsyncDisposable
 {
+    private static readonly Regex DictationCommandRegex = new(
+        @"\b(?:comma|period|full stop|question mark|exclamation point)\b[.,!?;:]*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LeadingPunctuationNoiseRegex = new(
+        @"^(?:[\s\.\,\!\?\;\:\-_/\\\(\)\[\]\{\}'""]+)+",
+        RegexOptions.Compiled);
+
+    private static readonly Regex MultiWhitespaceRegex = new(
+        @"\s+",
+        RegexOptions.Compiled);
+
     private readonly IAudioCaptureService _capture;
     private readonly IAudioPlaybackService _playback;
     private readonly IAsrService _asr;
@@ -36,6 +49,8 @@ public sealed class VoiceSessionOrchestrator :
     private string? _currentSessionId;
     private CancellationTokenSource? _currentSessionCts;
     private VoiceEndReason? _pendingCancelReason;
+    private string _realtimeTranscriptHint = "";
+    private DateTimeOffset? _realtimeTranscriptHintAtUtc;
 
     public VoiceSessionOrchestrator(
         IAudioCaptureService capture,
@@ -162,6 +177,18 @@ public sealed class VoiceSessionOrchestrator :
             : reason.Trim();
         SignalSessionCancellation(VoiceEndReason.Fault);
         _events.Writer.TryWrite(VoiceEvent.Fault(message));
+    }
+
+    public void SetRealtimeTranscriptHint(string transcript, DateTimeOffset observedAtUtc)
+    {
+        var normalized = (transcript ?? "").Trim();
+        lock (_sessionGate)
+        {
+            _realtimeTranscriptHint = normalized;
+            _realtimeTranscriptHintAtUtc = string.IsNullOrWhiteSpace(normalized)
+                ? null
+                : observedAtUtc;
+        }
     }
 
     private async Task RunLoopAsync(CancellationToken loopToken)
@@ -310,34 +337,56 @@ public sealed class VoiceSessionOrchestrator :
 
         SetState(VoiceState.Transcribing, "ASR");
         string transcript;
-        try
+        if (TryTakeRealtimeTranscriptHint(sessionId, out var hintedTranscript, out var hintAgeMs, out var hintRejectReason))
         {
-            transcript = await ExecuteWithTimeoutAsync(
-                ct => _asr.TranscribeAsync(clip, sessionId, ct),
-                _options.AsrTimeout,
-                SessionToken(sessionId));
-        }
-        catch (OperationCanceledException)
-        {
-            await SafeEndSessionAsync(ConsumeCancelReasonOrDefault(VoiceEndReason.Interrupt), loopToken, "asr_cancel");
-            return;
-        }
-        catch (TimeoutException)
-        {
-            SetState(VoiceState.Faulted, "ASR timeout");
-            await SafeEndSessionAsync(VoiceEndReason.Timeout, loopToken, "asr_timeout");
-            return;
-        }
-        catch (Exception ex)
-        {
-            WriteAudit("VOICE_ASR_ERROR", "error", new Dictionary<string, object>
+            transcript = hintedTranscript;
+            WriteAudit("VOICE_ASR_HINT_ACCEPTED", "ok", new Dictionary<string, object>
             {
                 ["sessionId"] = sessionId,
-                ["message"] = ex.Message
+                ["hintAgeMs"] = hintAgeMs,
+                ["transcriptLength"] = transcript.Length
             });
-            SetState(VoiceState.Faulted, "ASR failed");
-            await SafeEndSessionAsync(VoiceEndReason.Fault, loopToken, "asr_error");
-            return;
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(hintRejectReason))
+            {
+                WriteAudit("VOICE_ASR_HINT_REJECTED", "ok", new Dictionary<string, object>
+                {
+                    ["sessionId"] = sessionId,
+                    ["reason"] = hintRejectReason
+                });
+            }
+
+            try
+            {
+                transcript = await ExecuteWithTimeoutAsync(
+                    ct => _asr.TranscribeAsync(clip, sessionId, ct),
+                    _options.AsrTimeout,
+                    SessionToken(sessionId));
+            }
+            catch (OperationCanceledException)
+            {
+                await SafeEndSessionAsync(ConsumeCancelReasonOrDefault(VoiceEndReason.Interrupt), loopToken, "asr_cancel");
+                return;
+            }
+            catch (TimeoutException)
+            {
+                SetState(VoiceState.Faulted, "ASR timeout");
+                await SafeEndSessionAsync(VoiceEndReason.Timeout, loopToken, "asr_timeout");
+                return;
+            }
+            catch (Exception ex)
+            {
+                WriteAudit("VOICE_ASR_ERROR", "error", new Dictionary<string, object>
+                {
+                    ["sessionId"] = sessionId,
+                    ["message"] = ex.Message
+                });
+                SetState(VoiceState.Faulted, "ASR failed");
+                await SafeEndSessionAsync(VoiceEndReason.Fault, loopToken, "asr_error");
+                return;
+            }
         }
 
         if (!IsCurrentSession(sessionId) || CurrentState != VoiceState.Transcribing)
@@ -359,6 +408,11 @@ public sealed class VoiceSessionOrchestrator :
         }
 
         SetState(VoiceState.Thinking, "Agent");
+        var agentStartAt = DateTimeOffset.UtcNow;
+        WriteAudit("VOICE_AGENT_START", "ok", new Dictionary<string, object>
+        {
+            ["sessionId"] = sessionId
+        });
         VoiceAgentResponse response;
         try
         {
@@ -390,6 +444,14 @@ public sealed class VoiceSessionOrchestrator :
             return;
         }
 
+        WriteAudit("VOICE_AGENT_FINAL", "ok", new Dictionary<string, object>
+        {
+            ["sessionId"] = sessionId,
+            ["elapsedMs"] = (long)Math.Round((DateTimeOffset.UtcNow - agentStartAt).TotalMilliseconds),
+            ["success"] = response.Success,
+            ["textLength"] = (response.Text ?? "").Length
+        });
+
         if (!IsCurrentSession(sessionId) || CurrentState != VoiceState.Thinking)
             return;
 
@@ -407,7 +469,11 @@ public sealed class VoiceSessionOrchestrator :
             responseForVoiceUiAndSpeech,
             sessionId,
             response.GuardrailsUsed,
-            response.GuardrailsRationale);
+            response.GuardrailsRationale,
+            response.HasTokenUsage,
+            response.TokensIn,
+            response.TokensOut,
+            response.ContextFillPercent);
 
         if (!response.Success || string.IsNullOrWhiteSpace(response.Text))
         {
@@ -487,6 +553,8 @@ public sealed class VoiceSessionOrchestrator :
             _currentSessionCts?.Dispose();
             _currentSessionCts = new CancellationTokenSource();
             _pendingCancelReason = null;
+            _realtimeTranscriptHint = "";
+            _realtimeTranscriptHintAtUtc = null;
             return _currentSessionId;
         }
     }
@@ -524,6 +592,138 @@ public sealed class VoiceSessionOrchestrator :
             return string.Equals(_currentSessionId, sessionId, StringComparison.Ordinal);
     }
 
+    private bool TryTakeRealtimeTranscriptHint(
+        string sessionId,
+        out string transcript,
+        out long hintAgeMs,
+        out string rejectReason)
+    {
+        transcript = "";
+        hintAgeMs = -1;
+        rejectReason = "";
+
+        DateTimeOffset? observedAt;
+        lock (_sessionGate)
+        {
+            if (!string.Equals(_currentSessionId, sessionId, StringComparison.Ordinal))
+            {
+                rejectReason = "session_mismatch";
+                return false;
+            }
+
+            transcript = _realtimeTranscriptHint;
+            observedAt = _realtimeTranscriptHintAtUtc;
+        }
+
+        if (string.IsNullOrWhiteSpace(transcript))
+        {
+            rejectReason = "missing_hint";
+            return false;
+        }
+
+        transcript = NormalizeRealtimeHintTranscript(transcript);
+        if (string.IsNullOrWhiteSpace(transcript))
+        {
+            rejectReason = "hint_noisy";
+            return false;
+        }
+
+        if (transcript.Length < Math.Max(1, _options.RealtimeHintMinChars))
+        {
+            rejectReason = "hint_too_short";
+            return false;
+        }
+
+        if (observedAt is null)
+        {
+            rejectReason = "missing_hint_timestamp";
+            return false;
+        }
+
+        var age = _timeProvider.GetUtcNow() - observedAt.Value;
+        if (age < TimeSpan.Zero)
+            age = TimeSpan.Zero;
+        hintAgeMs = (long)Math.Round(age.TotalMilliseconds);
+
+        if (age > _options.RealtimeHintMaxAge)
+        {
+            rejectReason = "hint_stale";
+            return false;
+        }
+
+        lock (_sessionGate)
+        {
+            _realtimeTranscriptHint = "";
+            _realtimeTranscriptHintAtUtc = null;
+        }
+
+        return true;
+    }
+
+    private static string NormalizeRealtimeHintTranscript(string transcript)
+    {
+        var normalized = (transcript ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return "";
+
+        normalized = DictationCommandRegex.Replace(normalized, " ");
+        normalized = LeadingPunctuationNoiseRegex.Replace(normalized, "");
+        normalized = MultiWhitespaceRegex.Replace(normalized, " ").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return "";
+
+        normalized = CollapseRepeatedTokenSequences(normalized);
+        normalized = MultiWhitespaceRegex.Replace(normalized, " ").Trim();
+        return normalized;
+    }
+
+    private static string CollapseRepeatedTokenSequences(string transcript)
+    {
+        var tokens = transcript.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2)
+            return transcript;
+
+        var output = new List<string>(tokens.Length);
+        var index = 0;
+        while (index < tokens.Length)
+        {
+            var collapsed = false;
+            var remaining = tokens.Length - index;
+            var maxSpan = Math.Min(4, remaining / 2);
+
+            for (var span = maxSpan; span >= 1; span--)
+            {
+                if (!AreEqualTokenRanges(tokens, index, span, index + span))
+                    continue;
+
+                for (var tokenIndex = 0; tokenIndex < span; tokenIndex++)
+                    output.Add(tokens[index + tokenIndex]);
+                index += span * 2;
+                collapsed = true;
+                break;
+            }
+
+            if (!collapsed)
+            {
+                output.Add(tokens[index]);
+                index++;
+            }
+        }
+
+        return string.Join(" ", output);
+    }
+
+    private static bool AreEqualTokenRanges(string[] tokens, int firstStart, int length, int secondStart)
+    {
+        for (var index = 0; index < length; index++)
+        {
+            if (!string.Equals(tokens[firstStart + index], tokens[secondStart + index], StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
     private CancellationToken SessionToken(string sessionId)
     {
         lock (_sessionGate)
@@ -553,6 +753,8 @@ public sealed class VoiceSessionOrchestrator :
             _currentSessionId = null;
             _currentSessionCts = null;
             _pendingCancelReason = null;
+            _realtimeTranscriptHint = "";
+            _realtimeTranscriptHintAtUtc = null;
         }
 
         // Single cleanup path.
@@ -641,7 +843,11 @@ public sealed class VoiceSessionOrchestrator :
         string text,
         string sessionId,
         bool guardrailsUsed = false,
-        IReadOnlyList<string>? guardrailsRationale = null)
+        IReadOnlyList<string>? guardrailsRationale = null,
+        bool hasTokenUsage = false,
+        int tokensIn = 0,
+        int tokensOut = 0,
+        int contextFillPercent = 0)
     {
         try
         {
@@ -651,7 +857,11 @@ public sealed class VoiceSessionOrchestrator :
                 Text = text,
                 SessionId = sessionId,
                 GuardrailsUsed = guardrailsUsed,
-                GuardrailsRationale = guardrailsRationale ?? []
+                GuardrailsRationale = guardrailsRationale ?? [],
+                HasTokenUsage = hasTokenUsage,
+                TokensIn = tokensIn,
+                TokensOut = tokensOut,
+                ContextFillPercent = contextFillPercent
             });
         }
         catch
