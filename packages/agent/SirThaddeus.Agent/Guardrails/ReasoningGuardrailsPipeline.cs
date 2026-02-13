@@ -45,6 +45,12 @@ public sealed class ReasoningGuardrailsPipeline
     private static readonly Regex SpeakerGenderRegex = new(
         @"\ba\s+(?<gender>man|woman|boy|girl)\s+is\s+(?:looking|pointing)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FalseBeliefPlacementRegex = new(
+        @"\b(?<actor>[A-Za-z][A-Za-z'\-]*)\s+(?:puts?|placed?)\b[\s\S]{0,120}?\b(?:in|into|inside)\s+(?:the|a|an)\s+(?<location>[A-Za-z][A-Za-z0-9'\-\s]{1,40}?)(?:[,.!?]| and\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FalseBeliefMoveRegex = new(
+        @"\b(?<mover>[A-Za-z][A-Za-z'\-]*)\s+(?:moves?|moved|puts?|placed?|takes?|took)\b[\s\S]{0,120}?\b(?:to|into|in)\s+(?:the|a|an)\s+(?<location>[A-Za-z][A-Za-z0-9'\-\s]{1,40}?)(?:[,.!?]| and\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> NonNameTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "A", "An", "The",
@@ -247,6 +253,7 @@ public sealed class ReasoningGuardrailsPipeline
                TryResolveUnitComparisonQuestion(userMessage, out specialCase) ||
                TryResolveMeetingOverlapQuestion(userMessage, out specialCase) ||
                TryResolveFamilyPhotoRelationPuzzle(userMessage, out specialCase) ||
+               TryResolveFalseBeliefLocationQuestion(userMessage, out specialCase) ||
                TryResolveAmbiguousReferentQuestion(userMessage, out specialCase);
     }
 
@@ -692,6 +699,84 @@ public sealed class ReasoningGuardrailsPipeline
         return true;
     }
 
+    private static bool TryResolveFalseBeliefLocationQuestion(
+        string userMessage,
+        out GuardrailsPipelineResult result)
+    {
+        result = null!;
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var normalized = CollapseWhitespace(userMessage).Replace('’', '\'');
+        var lower = normalized.ToLowerInvariant();
+        var asksWhereLook = lower.Contains("where will", StringComparison.Ordinal) &&
+                            lower.Contains("look", StringComparison.Ordinal);
+        if (!asksWhereLook)
+            return false;
+
+        var placementMatch = FalseBeliefPlacementRegex.Match(normalized);
+        if (!placementMatch.Success)
+            return false;
+
+        var actor = NormalizeName(placementMatch.Groups["actor"].Value);
+        var actorLower = actor.ToLowerInvariant();
+        var initialLocation = NormalizeLocationPhrase(placementMatch.Groups["location"].Value);
+        if (string.IsNullOrWhiteSpace(initialLocation))
+            return false;
+
+        var hasAbsenceCue =
+            lower.Contains("while she is gone", StringComparison.Ordinal) ||
+            lower.Contains("while he is gone", StringComparison.Ordinal) ||
+            lower.Contains("while they are gone", StringComparison.Ordinal) ||
+            lower.Contains("leaves the room", StringComparison.Ordinal) ||
+            lower.Contains($"{actorLower} leaves", StringComparison.Ordinal);
+        if (!hasAbsenceCue)
+            return false;
+
+        var hasReturnCue =
+            lower.Contains("comes back", StringComparison.Ordinal) ||
+            lower.Contains("come back", StringComparison.Ordinal) ||
+            lower.Contains("returns", StringComparison.Ordinal) ||
+            lower.Contains("gets back", StringComparison.Ordinal);
+        if (!hasReturnCue)
+            return false;
+
+        string movedLocation = "";
+        foreach (Match moveMatch in FalseBeliefMoveRegex.Matches(normalized))
+        {
+            if (!moveMatch.Success || moveMatch.Index <= placementMatch.Index)
+                continue;
+
+            var candidate = NormalizeLocationPhrase(moveMatch.Groups["location"].Value);
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+            if (string.Equals(candidate, initialLocation, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            movedLocation = candidate;
+            break;
+        }
+
+        if (string.IsNullOrWhiteSpace(movedLocation))
+            return false;
+
+        result = new GuardrailsPipelineResult
+        {
+            AnswerText = $"{actor} will look in the {initialLocation} first.",
+            RationaleLines =
+            [
+                $"Goal: Predict where {actor} will search based on their own knowledge.",
+                $"Constraint: {actor} did not observe the move from the {initialLocation} to the {movedLocation}, so their belief remains at the original location.",
+                $"Decision: {actor} will first check the {initialLocation}. (alternative considered: {movedLocation}; rejected because that location reflects only the observer's knowledge)."
+            ],
+            TriggerRisk = "medium",
+            TriggerWhy = "Detected classic false-belief location puzzle.",
+            TriggerSource = "false_belief_location_solver",
+            LlmRoundTrips = 0
+        };
+        return true;
+    }
+
     private static bool TryParseMassMeasurement(string text, out (double Grams, string Unit, double Quantity) measurement)
     {
         measurement = default;
@@ -849,6 +934,23 @@ public sealed class ReasoningGuardrailsPipeline
 
     private static string TrimTrailingPunctuation(string raw)
         => (raw ?? "").Trim().TrimEnd('.', '?', '!', ';', ':', ',');
+
+    private static string NormalizeLocationPhrase(string raw)
+    {
+        var cleaned = TrimTrailingPunctuation(CollapseWhitespace(raw ?? ""))
+            .Trim();
+        if (cleaned.Length == 0)
+            return cleaned;
+
+        if (cleaned.StartsWith("the ", StringComparison.OrdinalIgnoreCase))
+            cleaned = cleaned[4..].Trim();
+        else if (cleaned.StartsWith("a ", StringComparison.OrdinalIgnoreCase))
+            cleaned = cleaned[2..].Trim();
+        else if (cleaned.StartsWith("an ", StringComparison.OrdinalIgnoreCase))
+            cleaned = cleaned[3..].Trim();
+
+        return cleaned;
+    }
 
     private static string FormatGrams(double grams)
         => $"{grams:0.###} g";
@@ -1042,7 +1144,7 @@ internal sealed class GuardrailsDetector
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ChoicePatternRegex = new(
-        @"\b(?:should i|do i|would it be better to|is it better to)\b[\s\S]{0,120}\bor\b",
+        @"\b(?:should\s+(?:i|you|we|he|she|they)|do\s+(?:i|you|we)|would it be better to|is it better to)\b[\s\S]{0,120}\bor\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public GuardrailsDetector(ILlmClient llm)

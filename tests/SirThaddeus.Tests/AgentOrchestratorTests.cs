@@ -100,6 +100,60 @@ public class IntentClassificationTests
     }
 
     [Fact]
+    public async Task MarketIndexQuestion_UsesWebSearchHeuristic()
+    {
+        var classifyCalled = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                classifyCalled = true;
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+            }
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Dow Jones Industrial Average","type":"topic","hint":"market index"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"Dow Jones Industrial Average latest performance","recency":"day"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "The Dow Jones is up today.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "Source 1: DJIA is higher in today's session.");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
+
+        var result = await agent.ProcessAsync("how is the dow jones?");
+
+        Assert.True(result.Success);
+        Assert.False(classifyCalled, "Dow Jones phrasing should bypass classifier and route to search.");
+        Assert.Contains(result.ToolCallsMade, t =>
+            t.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            t.ToolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task DeterministicTemperatureConversion_BypassesLlmClassification()
     {
         var classifyCalled = false;
@@ -369,6 +423,240 @@ public class AgentFlowTests
 
         // Final response is the summary, not raw tool output
         Assert.Contains("news", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MarketStatusAnswer_PrependsNumericLeadLine()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"search","topic":"stocks","locationText":null,"timeScope":"today","explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Dow Jones","type":"topic","hint":"market index"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"Dow Jones performance today","recency":"day"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Major indexes are weaker today as risk sentiment softens.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "packText": "[PROFILE]\nName: Mark Hall\n[/PROFILE]",
+                "hasContent": true
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "web_search" => "Dow Jones is down 1.6% today, at 42,105.\n<!-- SOURCES_JSON -->[]",
+            "WebSearch" => "Dow Jones is down 1.6% today, at 42,105.\n<!-- SOURCES_JSON -->[]",
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("how is the dow jones doing today?");
+
+        Assert.True(result.Success);
+        Assert.StartsWith("The Dow Jones is down 1.6% today, at 42,105.", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MarketStatusAnswer_IgnoresImplausibleIndexLevel()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"search","topic":"stocks","locationText":null,"timeScope":"today","explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Dow Jones","type":"topic","hint":"market index"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"Dow Jones performance today","recency":"day"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Major indexes are weaker today.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "packText": "[PROFILE]\nName: Mark Hall\n[/PROFILE]",
+                "hasContent": true
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "web_search" => "Dow Jones is down 1% today, at 227,000.\n<!-- SOURCES_JSON -->[]",
+            "WebSearch" => "Dow Jones is down 1% today, at 227,000.\n<!-- SOURCES_JSON -->[]",
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("how is the dow jones doing today?");
+
+        Assert.True(result.Success);
+        Assert.StartsWith("The Dow Jones is down 1% today.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("227,000", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MarketStatusAnswer_DoesNotUseHallucinatedSummaryLevel()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"search","topic":"stocks","locationText":null,"timeScope":"today","explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Dow Jones","type":"topic","hint":"market index"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"Dow Jones performance today","recency":"day"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            // Deliberately hallucinated level: should NOT be trusted by lead-line formatter.
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "The Dow Jones is down 1% today, at 23,125.26.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "packText": "[PROFILE]\nName: Mark Hall\n[/PROFILE]",
+                "hasContent": true
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "web_search" => "Stock market today: Dow, S&P 500, Nasdaq sink as tech stocks get pummeled.\n<!-- SOURCES_JSON -->[]",
+            "WebSearch" => "Stock market today: Dow, S&P 500, Nasdaq sink as tech stocks get pummeled.\n<!-- SOURCES_JSON -->[]",
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("how is the dow jones doing today?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("23,125.26", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("The Dow Jones is down 1% today.", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1248,6 +1536,82 @@ public class MemoryRetrievalAuditTests
     }
 
     [Fact]
+    public async Task SelfNameQuestion_UsesStoredProfileName()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sys.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "chat",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("extract continuity slots", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """
+                              {"intent":"none","topic":"chat","locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}
+                              """,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I don't have a name, but I'm here to help.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string memoryPackJson = """
+            {
+                "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
+                "hasProfile": true, "onboardingNeeded": false,
+                "notes": "", "citations": [],
+                "packText": "[PROFILE]\nName: Mark Hall\n[/PROFILE]\nYou know this user as \"Mark\" — address them by name naturally.",
+                "hasContent": true
+            }
+            """;
+
+        const string listFactsJson = """
+            {
+                "facts": [],
+                "total": 0,
+                "skip": 0,
+                "limit": 50,
+                "has_more": false
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "MemoryRetrieve" => memoryPackJson,
+            "memory_retrieve" => memoryPackJson,
+            "memory_list_facts" => listFactsJson,
+            "MemoryListFacts" => listFactsJson,
+            _ => "{}"
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("what's my name?");
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Contains("Your name is Mark Hall.", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PersonalizedAboutMeRequest_LoadsFactsBeforeLlmAnswer()
     {
         var llm = new FakeLlmClient((messages, _) =>
@@ -2062,6 +2426,82 @@ public class PolicyFilteringTests
     }
 
     [Fact]
+    public async Task ToolLoop_ResolvesConflictsBeforeExecution_ExecutesWinnersOnly()
+    {
+        var requestedConflictingTools = false;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            if (!requestedConflictingTools && tools is { Count: > 0 })
+            {
+                requestedConflictingTools = true;
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_capture",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "screen_capture",
+                                Arguments = "{}"
+                            }
+                        },
+                        new ToolCallRequest
+                        {
+                            Id = "call_window",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "get_active_window",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Window inspected.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => "this should not run",
+                "get_active_window" => """{"title":"IDE","process":"cursor"}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What can you see on my screen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("get_active_window", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+
+        var skipped = result.ToolCallsMade.FirstOrDefault(t =>
+            t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(skipped);
+        Assert.False(skipped!.Success);
+        Assert.Contains("tool_conflict_skipped", skipped.Result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("deterministic_priority", skipped.Result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PolicyDecision_IsAudited()
     {
         // Verify that the ROUTER_OUTPUT and POLICY_DECISION audit events fire
@@ -2280,10 +2720,20 @@ internal sealed class FakeMcpClient : IMcpToolClient
     [
         MakeTool("screen_capture",     "Captures the user's screen",
                  """{"type":"object","properties":{"monitor":{"type":"integer","description":"Monitor index"}},"required":[]}"""),
+        MakeTool("get_active_window",  "Gets active window metadata",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("browser_navigate",   "Fetches URL content",
+                 """{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"""),
         MakeTool("memory_store_facts", "Stores structured facts about the user",
                  """{"type":"object","properties":{"factsJson":{"type":"string","description":"JSON array of fact objects"},"sourceRef":{"type":"string","description":"Source reference"}},"required":["factsJson"]}"""),
         MakeTool("memory_update_fact", "Updates an existing memory fact",
                  """{"type":"object","properties":{"memoryId":{"type":"string"},"newObject":{"type":"string"}},"required":["memoryId","newObject"]}"""),
+        MakeTool("memory_retrieve",    "Retrieves relevant memories",
+                 """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("memory_list_facts",  "Lists memory facts",
+                 """{"type":"object","properties":{"filter":{"type":"string"}},"required":[]}"""),
+        MakeTool("memory_delete_fact", "Deletes a memory fact",
+                 """{"type":"object","properties":{"memoryId":{"type":"string"}},"required":["memoryId"]}"""),
         MakeTool("web_search",         "Searches the web for information",
                  """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
         MakeTool("weather_geocode",    "Geocodes a place for weather lookup",
@@ -2306,6 +2756,16 @@ internal sealed class FakeMcpClient : IMcpToolClient
                  """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
         MakeTool("file_read",          "Reads a file from disk",
                  """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
+        MakeTool("file_list",          "Lists files in a directory",
+                 """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
+        MakeTool("system_execute",     "Executes an allowlisted command",
+                 """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""),
+        MakeTool("tool_ping",          "Reports MCP health",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("tool_list_capabilities", "Lists available tool capabilities",
+                 """{"type":"object","properties":{},"required":[]}"""),
+        MakeTool("time_now",           "Returns local time metadata",
+                 """{"type":"object","properties":{},"required":[]}"""),
     ];
 
     private static McpToolInfo MakeTool(string name, string desc, string schemaJson)

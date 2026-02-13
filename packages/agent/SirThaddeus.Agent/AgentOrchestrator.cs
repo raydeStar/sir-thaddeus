@@ -271,13 +271,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
             $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
             $"file={route.NeedsFileAccess}, memory_w={route.NeedsMemoryWrite}, " +
-            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}");
+            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
+            $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
 
         // ── Policy: determine which tools the executor may see ───────
         var policy = PolicyGate.Evaluate(route);
         LogEvent("POLICY_DECISION",
-            $"allowed=[{string.Join(", ", policy.AllowedTools)}], " +
-            $"forbidden=[{string.Join(", ", policy.ForbiddenTools)}], " +
+            $"allowedCaps=[{string.Join(", ", policy.AllowedCapabilities)}], " +
+            $"forbiddenCaps=[{string.Join(", ", policy.ForbiddenCapabilities)}], " +
+            $"forbiddenTools=[{string.Join(", ", policy.ForbiddenTools)}], " +
             $"permissions=[{string.Join(", ", policy.RequiredPermissions)}], " +
             $"useToolLoop={policy.UseToolLoop}");
 
@@ -570,6 +572,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     return AttachContextSnapshot(
                         AddLocationInferenceDisclosure(inlineResponse, validatedSlots));
                 }
+            }
+
+            if (MemoryEnabled && IsSelfNameRecallRequest(contextualUserMessage))
+            {
+                var nameRecall = await ExecuteSelfNameRecallAsync(
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+                _history.Add(ChatMessage.Assistant(nameRecall.Text));
+                LogEvent("AGENT_RESPONSE", nameRecall.Text);
+                return AttachContextSnapshot(nameRecall);
             }
 
             if (ShouldAttemptReasoningGuardrails(route, contextualUserMessage))
@@ -952,7 +966,44 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // ── Model wants to call tools ────────────────────────
             _history.Add(ChatMessage.AssistantToolCalls(response.ToolCalls));
 
-            foreach (var toolCall in response.ToolCalls)
+            // Resolve policy violations and conflicts before any MCP call
+            // executes so skipped tools cannot produce side effects.
+            var conflictResolution = ToolConflictMatrix.ResolveTurn(
+                response.ToolCalls,
+                allowedToolNames);
+
+            foreach (var skipped in conflictResolution.Skipped)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var reasonCode = ToolConflictMatrix.ToReasonCode(skipped.Reason);
+                var isPolicyForbid = skipped.Reason == ToolConflictReason.PolicyForbid;
+                var result = JsonSerializer.Serialize(new
+                {
+                    error = isPolicyForbid ? "tool_not_permitted" : "tool_conflict_skipped",
+                    tool = skipped.ToolCall.Function.Name,
+                    winner = skipped.WinnerTool,
+                    reason = reasonCode,
+                    detail = skipped.Detail
+                });
+                var success = false;
+
+                LogEvent(
+                    isPolicyForbid ? "AGENT_TOOL_BLOCKED" : "AGENT_TOOL_CONFLICT",
+                    $"tool={skipped.ToolCall.Function.Name}, winner={skipped.WinnerTool ?? "none"}, reason={reasonCode}, detail={skipped.Detail}");
+
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = skipped.ToolCall.Function.Name,
+                    Arguments = skipped.ToolCall.Function.Arguments,
+                    Result = result,
+                    Success = success
+                });
+
+                _history.Add(ChatMessage.ToolResult(skipped.ToolCall.Id, result));
+                LogEvent("AGENT_TOOL_RESULT", $"{skipped.ToolCall.Function.Name} -> skipped");
+            }
+
+            foreach (var toolCall in conflictResolution.Winners)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -960,34 +1011,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 string result;
                 bool success;
-                if (!allowedToolNames.Contains(toolCall.Function.Name))
+
+                try
                 {
-                    result = JsonSerializer.Serialize(new
-                    {
-                        error = "tool_not_permitted",
-                        tool = toolCall.Function.Name,
-                        reason = "Tool is not allowed by current policy."
-                    });
-                    success = false;
-                    LogEvent(
-                        "AGENT_TOOL_BLOCKED",
-                        $"Blocked disallowed tool call: {toolCall.Function.Name}");
+                    result = await _mcp.CallToolAsync(
+                        toolCall.Function.Name,
+                        toolCall.Function.Arguments,
+                        cancellationToken);
+                    success = true;
                 }
-                else
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        result = await _mcp.CallToolAsync(
-                            toolCall.Function.Name,
-                            toolCall.Function.Arguments,
-                            cancellationToken);
-                        success = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        result = $"Tool error: {ex.Message}";
-                        success = false;
-                    }
+                    result = $"Tool error: {ex.Message}";
+                    success = false;
                 }
 
                 toolCallsMade.Add(new ToolCallRecord
@@ -998,7 +1034,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     Success = success
                 });
 
-                // Feed the result back into the conversation
                 _history.Add(ChatMessage.ToolResult(toolCall.Id, result));
                 LogEvent("AGENT_TOOL_RESULT", $"{toolCall.Function.Name} -> {(success ? "ok" : "error")}");
             }
@@ -3782,6 +3817,77 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         };
     }
 
+    private async Task<AgentResponse> ExecuteSelfNameRecallAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var (name, error) = await TryResolveSelfNameAsync(
+            userMessage,
+            toolCallsMade,
+            cancellationToken);
+
+        var text = !string.IsNullOrWhiteSpace(name)
+            ? $"Your name is {name}."
+            : !string.IsNullOrWhiteSpace(error)
+                ? "I couldn't load your profile right now. Ask again in a moment and I'll retry."
+                : "I couldn't find a stored name yet. Tell me what name you want me to use, and I'll remember it.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<(string? Name, string? Error)> TryResolveSelfNameAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        var argsObj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["query"] = userMessage
+        };
+        if (!string.IsNullOrWhiteSpace(ActiveProfileId))
+            argsObj["activeProfileId"] = ActiveProfileId;
+
+        var argsJson = JsonSerializer.Serialize(argsObj);
+        var retrieveCall = await CallToolWithAliasAsync(
+            MemoryRetrieveToolName,
+            MemoryRetrieveToolNameAlt,
+            argsJson,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = retrieveCall.ToolName,
+            Arguments = argsJson,
+            Result = retrieveCall.Result,
+            Success = retrieveCall.Success
+        });
+
+        if (retrieveCall.Success && !string.IsNullOrWhiteSpace(retrieveCall.Result))
+        {
+            var fromPack = TryExtractNameFromMemoryRetrievePayload(retrieveCall.Result);
+            if (!string.IsNullOrWhiteSpace(fromPack))
+                return (fromPack, null);
+        }
+
+        var (facts, factsError) = await LoadSelfScopedFactsAsync(toolCallsMade, cancellationToken);
+        var fromFacts = TryExtractNameFromSelfFacts(facts);
+        if (!string.IsNullOrWhiteSpace(fromFacts))
+            return (fromFacts, null);
+
+        if (!retrieveCall.Success)
+            return (null, "memory retrieve unavailable");
+
+        return (null, factsError);
+    }
+
     private async Task<string> BuildSelfMemoryContextBlockAsync(
         List<ToolCallRecord> toolCallsMade,
         CancellationToken cancellationToken)
@@ -3956,6 +4062,84 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         return sb.ToString().TrimEnd();
     }
 
+    private static string? TryExtractNameFromSelfFacts(IReadOnlyList<SelfMemoryFact> facts)
+    {
+        foreach (var fact in facts)
+        {
+            if (string.IsNullOrWhiteSpace(fact.Object))
+                continue;
+
+            var predicate = (fact.Predicate ?? "")
+                .Replace('_', ' ')
+                .Trim()
+                .ToLowerInvariant();
+
+            if (predicate is "name" or "name is" or "preferred name" or "first name" or "goes by")
+                return fact.Object.Trim();
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractNameFromMemoryRetrievePayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("packText", out var packTextEl) ||
+                packTextEl.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var packText = packTextEl.GetString() ?? "";
+            return TryExtractNameFromPackText(packText);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryExtractNameFromPackText(string packText)
+    {
+        if (string.IsNullOrWhiteSpace(packText))
+            return null;
+
+        var lines = packText
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Split('\n');
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (!line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = line["Name:".Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        var marker = "You know this user as \"";
+        var markerIndex = packText.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        var start = markerIndex + marker.Length;
+        var end = packText.IndexOf('"', start);
+        if (end <= start)
+            return null;
+
+        var extracted = packText[start..end].Trim();
+        return string.IsNullOrWhiteSpace(extracted) ? null : extracted;
+    }
+
     private static string RenderSelfMemoryFact(SelfMemoryFact fact)
     {
         var subject = (fact.Subject ?? "user").Trim();
@@ -4002,6 +4186,24 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                lower.Contains("what have you learned", StringComparison.Ordinal) ||
                lower.Contains("what information", StringComparison.Ordinal) ||
                lower.Contains("what info", StringComparison.Ordinal);
+    }
+
+    private static bool IsSelfNameRecallRequest(string message)
+    {
+        var lower = (message ?? "")
+            .ToLowerInvariant()
+            .Replace('’', '\'')
+            .Trim();
+
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("what is my name", StringComparison.Ordinal) ||
+               lower.Contains("what's my name", StringComparison.Ordinal) ||
+               lower.Contains("whats my name", StringComparison.Ordinal) ||
+               lower.Contains("do you know my name", StringComparison.Ordinal) ||
+               lower.Contains("who am i", StringComparison.Ordinal) ||
+               lower.Contains("who i am", StringComparison.Ordinal);
     }
 
     private static bool IsPersonalizedUsingKnownSelfContextRequest(
@@ -6197,6 +6399,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         bool needsSystem = false,
         string risk = "low")
     {
+        var requiredCapabilities = BuildRequiredCapabilities(
+            intent,
+            needsWeb,
+            needsBrowser,
+            needsSearch,
+            needsMemoryRead,
+            needsMemoryWrite,
+            needsFile,
+            needsScreen,
+            needsSystem);
+
         return new RouterOutput
         {
             Intent                 = intent,
@@ -6209,8 +6422,49 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             NeedsFileAccess        = needsFile,
             NeedsScreenRead        = needsScreen,
             NeedsSystemExecute     = needsSystem,
+            RequiredCapabilities   = requiredCapabilities,
             RiskLevel              = risk
         };
+    }
+
+    private static IReadOnlyList<ToolCapability> BuildRequiredCapabilities(
+        string intent,
+        bool needsWeb,
+        bool needsBrowser,
+        bool needsSearch,
+        bool needsMemoryRead,
+        bool needsMemoryWrite,
+        bool needsFile,
+        bool needsScreen,
+        bool needsSystem)
+    {
+        var capabilities = new HashSet<ToolCapability>();
+
+        if (intent.Equals(Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase))
+            capabilities.Add(ToolCapability.DeterministicUtility);
+
+        if (intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase))
+        {
+            capabilities.Add(ToolCapability.MemoryRead);
+            capabilities.Add(ToolCapability.Meta);
+        }
+
+        if (needsWeb || needsSearch)
+            capabilities.Add(ToolCapability.WebSearch);
+        if (needsBrowser)
+            capabilities.Add(ToolCapability.BrowserNavigate);
+        if (needsMemoryRead)
+            capabilities.Add(ToolCapability.MemoryRead);
+        if (needsMemoryWrite)
+            capabilities.Add(ToolCapability.MemoryWrite);
+        if (needsFile)
+            capabilities.Add(ToolCapability.FileRead);
+        if (needsScreen)
+            capabilities.Add(ToolCapability.ScreenCapture);
+        if (needsSystem)
+            capabilities.Add(ToolCapability.SystemExecute);
+
+        return capabilities.ToList();
     }
 
     // ── Sub-intent heuristics ────────────────────────────────────────
@@ -6885,7 +7139,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             lower.Contains("forecast") || lower.Contains("score")     ||
             lower.Contains("crypto")   || lower.Contains("bitcoin")   ||
             lower.Contains("dogecoin") || lower.Contains("ethereum")  ||
-            lower.Contains("solana")   || lower.Contains("forex");
+            lower.Contains("solana")   || lower.Contains("forex")     ||
+            lower.Contains("dow jones") || lower.Contains("djia")     ||
+            lower.Contains("nasdaq")   || lower.Contains("s&p")       ||
+            lower.Contains("s&p 500")  || lower.Contains("s and p")   ||
+            lower.Contains("sp500")    || lower.Contains("industrial average");
 
         if (!hasTopic)
             return false;
