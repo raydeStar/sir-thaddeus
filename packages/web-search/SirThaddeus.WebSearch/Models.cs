@@ -21,6 +21,12 @@ public sealed record SearchResult
     /// <summary>Short text excerpt / snippet from the search engine.</summary>
     public string Snippet { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Publication timestamp when available from the provider metadata.
+    /// Null means the provider did not expose a reliable publish time.
+    /// </summary>
+    public DateTimeOffset? PublishedAt { get; init; }
+
     /// <summary>Domain name (e.g. "techcrunch.com").</summary>
     public string Source { get; init; } = string.Empty;
 }

@@ -63,6 +63,8 @@ public sealed class ValidateSlots
                 location = null;
             else if (IsNoneLikeLiteral(location))
                 location = null;
+            else if (LocationContextHeuristics.IsClearlyNonPlace(location))
+                location = null;
         }
 
         var normalizedMessage = BuildNormalizedMessage(merged.RawMessage, intent, location, merged.LocationInferredFromState);

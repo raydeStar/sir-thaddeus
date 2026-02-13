@@ -96,7 +96,9 @@ public sealed class SlotExtract
 
             var memoryHint = string.IsNullOrWhiteSpace(currentState.LocationName)
                 ? "none"
-                : currentState.LocationName;
+                : LocationContextHeuristics.IsClearlyNonPlace(currentState.LocationName)
+                    ? "none"
+                    : currentState.LocationName;
 
             var messages = new List<ChatMessage>
             {
@@ -166,11 +168,18 @@ public sealed class SlotExtract
             if (!IsAllowedIntent(intent))
                 intent = "none";
 
+            // Reject location values that are structurally impossible
+            // geographic names — small LLMs frequently echo message
+            // fragments into locationText by accident.
+            var rawLocation = NormalizeOptionalValue(ReadString(root, "locationText"));
+            if (LocationContextHeuristics.IsClearlyNonPlace(rawLocation))
+                rawLocation = null;
+
             slots = new ExtractedSlots
             {
                 Intent = intent,
                 Topic = NormalizeOptionalValue(ReadString(root, "topic")),
-                LocationText = NormalizeOptionalValue(ReadString(root, "locationText")),
+                LocationText = rawLocation,
                 TimeScope = NormalizeOptionalValue(ReadString(root, "timeScope")),
                 ExplicitLocationChange = ReadBool(root, "explicitLocationChange"),
                 RefersToPriorLocation = ReadBool(root, "refersToPriorLocation")
@@ -256,6 +265,7 @@ public sealed class SlotExtract
             RefersToPriorLocation = refersToPrior ||
                 (string.IsNullOrWhiteSpace(location) &&
                  !string.IsNullOrWhiteSpace(currentState.LocationName) &&
+                 !LocationContextHeuristics.IsClearlyNonPlace(currentState.LocationName) &&
                  !string.IsNullOrWhiteSpace(timeScope)),
             RawMessage = trimmed
         };

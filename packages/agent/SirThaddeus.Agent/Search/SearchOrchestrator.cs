@@ -1,7 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Globalization;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 
@@ -26,6 +24,13 @@ namespace SirThaddeus.Agent.Search;
 // All stages are logged via IAuditLogger.
 // ─────────────────────────────────────────────────────────────────────────
 
+public enum LookupModeHint
+{
+    Auto = 0,
+    Fact = 1,
+    News = 2
+}
+
 public sealed class SearchOrchestrator
 {
     private readonly ILlmClient       _llm;
@@ -49,26 +54,7 @@ public sealed class SearchOrchestrator
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 768;
-
-    private static readonly Regex PercentDirectionRegex = new(
-        @"\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b[^%\n]{0,40}?(?<pct>[+-]?\d+(?:\.\d+)?)\s*%",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex DirectionAfterPercentRegex = new(
-        @"(?<pct>[+-]?\d+(?:\.\d+)?)\s*%[^.\n]{0,30}\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex SignedPercentRegex = new(
-        @"(?<pct>[+-]\d+(?:\.\d+)?)\s*%",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex LevelRegex = new(
-        @"\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?:\.\d+)?)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex LeadingMarketLineWithLevelRegex = new(
-        @"^(?<prefix>(?:the\s+)?(?:dow jones|nasdaq|s&p 500|stock market)\s+is\s+(?:up|down)\s+\d+(?:\.\d+)?%\s+today)\s*,\s*at\s+\$?[0-9][0-9,]*(?:\.\d+)?\.?$",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
@@ -103,6 +89,13 @@ public sealed class SearchOrchestrator
         "- Whether key details are confirmed or still alleged\n" +
         "No URLs. Do not list sources unless you need to explain a disagreement.";
 
+    private const string FinanceQuoteSummaryInstruction =
+        "\n\nThis is a market quote request. " +
+        "Start with one plain sentence containing the instrument/index name, " +
+        "current level, and today's move in points and percent if available. " +
+        "Include an 'as of' time from source metadata when present. " +
+        "If exact quote values are not present in the sources, say you could not verify a current quote.";
+
     public SearchOrchestrator(
         ILlmClient llm,
         IMcpToolClient mcp,
@@ -127,10 +120,11 @@ public sealed class SearchOrchestrator
         string memoryPackText,
         IReadOnlyList<ChatMessage> history,
         List<ToolCallRecord> toolCallsMade,
+        LookupModeHint modeHint,
         CancellationToken ct)
     {
         var now  = DateTimeOffset.UtcNow;
-        var mode = SearchModeRouter.Classify(userMessage, Session, now);
+        var mode = ResolveMode(userMessage, modeHint, now);
 
         _audit.Append(new AuditEvent
         {
@@ -140,7 +134,9 @@ public sealed class SearchOrchestrator
             Details = new Dictionary<string, object>
             {
                 ["user_message"]     = Truncate(userMessage, 80),
-                ["has_prior_results"] = Session.HasRecentResults(now)
+                ["has_prior_results"] = Session.HasRecentResults(now),
+                ["mode_hint"] = modeHint.ToString(),
+                ["hint_forced_mode"] = modeHint != LookupModeHint.Auto
             }
         });
 
@@ -154,7 +150,7 @@ public sealed class SearchOrchestrator
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
             };
 
-            return AddMarketLeadLineIfHelpful(userMessage, response, toolCallsMade);
+            return ApplyResponseContract(response, mode);
         }
         catch (OperationCanceledException)
         {
@@ -203,6 +199,16 @@ public sealed class SearchOrchestrator
 
         // ── 4. Parse results into SourceItems ────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
+        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
+            userMessage,
+            query.Query,
+            sources,
+            toolCallsMade);
+        if (financeFreshnessFailure is not null)
+            return financeFreshnessFailure;
 
         // ── 5. Story clustering ──────────────────────────────────────
         var clusters = StoryClustering.Cluster(sources);
@@ -220,9 +226,12 @@ public sealed class SearchOrchestrator
         // ── 7. Summarize via LLM ─────────────────────────────────────
         var summaryInput = "[Search results — reference only, do not display to user]\n" +
                            StripSourcesJson(toolResult);
+        var instruction = isMarketQuoteRequest
+            ? memoryPackText + FinanceQuoteSummaryInstruction
+            : memoryPackText + NewsSummaryInstruction;
 
         return await SummarizeAndRespond(
-            summaryInput, memoryPackText + NewsSummaryInstruction,
+            summaryInput, instruction,
             history, toolCallsMade, ct);
     }
 
@@ -237,6 +246,17 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        if (LooksLikeMontySwallowPrompt(userMessage))
+        {
+            return new AgentResponse
+            {
+                Text = "What do you mean - an African or a European swallow?",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
         // ── 1. Entity resolution (always attempt) ────────────────────
         var entity = await _entityResolver.ResolveAsync(
             userMessage, Session, toolCallsMade, ct);
@@ -254,6 +274,17 @@ public sealed class SearchOrchestrator
 
         // ── 4. Parse and record results ──────────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
+        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
+            userMessage,
+            query.Query,
+            sources,
+            toolCallsMade);
+        if (financeFreshnessFailure is not null)
+            return financeFreshnessFailure;
+
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
@@ -274,9 +305,12 @@ public sealed class SearchOrchestrator
             sb.AppendLine("[Full article content — reference only, do not display to user]");
             sb.AppendLine(articleContent);
         }
+        var instruction = isMarketQuoteRequest
+            ? memoryPackText + FinanceQuoteSummaryInstruction
+            : memoryPackText + FactFindSummaryInstruction;
 
         return await SummarizeAndRespond(
-            sb.ToString(), memoryPackText + FactFindSummaryInstruction,
+            sb.ToString(), instruction,
             history, toolCallsMade, ct);
     }
 
@@ -619,495 +653,6 @@ public sealed class SearchOrchestrator
         };
     }
 
-    private static AgentResponse AddMarketLeadLineIfHelpful(
-        string userMessage,
-        AgentResponse response,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
-    {
-        if (!response.Success || string.IsNullOrWhiteSpace(response.Text))
-            return response;
-
-        if (!LooksLikeMarketQuoteRequest(userMessage))
-            return response;
-
-        var hasExistingLead = TryGetLeadingMarketLine(response.Text, out var existingLeadLine, out var textWithoutLeadingLine);
-        if (TryBuildMarketLeadLine(userMessage, toolCallsMade, out var leadLine))
-        {
-            if (!hasExistingLead)
-            {
-                return response with
-                {
-                    Text = $"{leadLine}\n\n{response.Text.TrimStart()}"
-                };
-            }
-
-            var merged = string.IsNullOrWhiteSpace(textWithoutLeadingLine)
-                ? leadLine
-                : $"{leadLine}\n\n{textWithoutLeadingLine}";
-            return response with { Text = merged };
-        }
-
-        // If we cannot verify a market level from tool evidence, avoid
-        // publishing a potentially hallucinated level in the lead line.
-        if (hasExistingLead &&
-            TryRemoveNumericLevelFromLeadLine(existingLeadLine, out var sanitizedLead))
-        {
-            var merged = string.IsNullOrWhiteSpace(textWithoutLeadingLine)
-                ? sanitizedLead
-                : $"{sanitizedLead}\n\n{textWithoutLeadingLine}";
-            return response with { Text = merged };
-        }
-
-        return response;
-    }
-
-    private static bool LooksLikeMarketQuoteRequest(string message)
-    {
-        var lower = (message ?? "").ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(lower))
-            return false;
-
-        return lower.Contains("dow jones", StringComparison.Ordinal) ||
-               lower.Contains("djia", StringComparison.Ordinal) ||
-               lower.Contains("nasdaq", StringComparison.Ordinal) ||
-               lower.Contains("s&p", StringComparison.Ordinal) ||
-               lower.Contains("s and p", StringComparison.Ordinal) ||
-               lower.Contains("sp500", StringComparison.Ordinal) ||
-               lower.Contains("stock market", StringComparison.Ordinal) ||
-               lower.Contains("stocks", StringComparison.Ordinal) ||
-               lower.Contains("market index", StringComparison.Ordinal);
-    }
-
-    private static bool StartsWithMarketLeadLine(string text)
-    {
-        var trimmed = text.TrimStart();
-        return trimmed.StartsWith("The Dow Jones is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("Dow Jones is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("The Nasdaq is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("Nasdaq is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("The S&P 500 is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("S&P 500 is ", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("The stock market is ", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool TryBuildMarketLeadLine(
-        string userMessage,
-        IReadOnlyList<ToolCallRecord> toolCallsMade,
-        out string leadLine)
-    {
-        leadLine = "";
-
-        var marketLabel = ResolveMarketLabel(userMessage);
-        var aliases = GetMarketAliases(marketLabel);
-        var corpus = BuildMarketParsingCorpus(toolCallsMade);
-        if (string.IsNullOrWhiteSpace(corpus))
-            return false;
-
-        if (!TryExtractDirectionAndPercent(corpus, aliases, out var direction, out var percent))
-            return false;
-
-        if (TryExtractMarketLevel(corpus, aliases, marketLabel, out var level))
-        {
-            leadLine = $"The {marketLabel} is {direction} {percent} today, at {level}.";
-            return true;
-        }
-
-        leadLine = $"The {marketLabel} is {direction} {percent} today.";
-        return true;
-    }
-
-    private static string ResolveMarketLabel(string userMessage)
-    {
-        var lower = (userMessage ?? "").ToLowerInvariant();
-        if (lower.Contains("dow jones", StringComparison.Ordinal) || lower.Contains("djia", StringComparison.Ordinal))
-            return "Dow Jones";
-        if (lower.Contains("nasdaq", StringComparison.Ordinal))
-            return "Nasdaq";
-        if (lower.Contains("s&p", StringComparison.Ordinal) ||
-            lower.Contains("s and p", StringComparison.Ordinal) ||
-            lower.Contains("sp500", StringComparison.Ordinal))
-            return "S&P 500";
-        return "stock market";
-    }
-
-    private static string[] GetMarketAliases(string marketLabel) =>
-        marketLabel switch
-        {
-            "Dow Jones" => ["dow jones", "djia", "dow"],
-            "Nasdaq" => ["nasdaq", "nasdaq composite"],
-            "S&P 500" => ["s&p 500", "s&p", "s and p", "sp500"],
-            _ => ["stock market", "stocks", "market"]
-        };
-
-    private static string BuildMarketParsingCorpus(
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
-    {
-        var sb = new StringBuilder();
-
-        foreach (var call in toolCallsMade)
-        {
-            if (!call.Success || string.IsNullOrWhiteSpace(call.Result))
-                continue;
-
-            if (call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase))
-            {
-                sb.AppendLine(StripSourcesJson(call.Result));
-                continue;
-            }
-
-            if (call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase))
-            {
-                sb.AppendLine(call.Result);
-            }
-        }
-
-        return sb.ToString();
-    }
-
-    private static bool TryExtractDirectionAndPercent(
-        string corpus,
-        string[] aliases,
-        out string direction,
-        out string percent)
-    {
-        direction = "";
-        percent = "";
-
-        if (TryExtractAliasBoundDirectionAndPercent(corpus, aliases, out direction, out percent))
-            return true;
-
-        var window = ExtractMarketWindow(corpus, aliases);
-        if (TryExtractDirectionAndPercentFromText(window, out direction, out percent))
-            return true;
-
-        return TryExtractDirectionAndPercentFromText(corpus, out direction, out percent);
-    }
-
-    private static bool TryExtractDirectionAndPercentFromText(
-        string text,
-        out string direction,
-        out string percent)
-    {
-        direction = "";
-        percent = "";
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        var directional = PercentDirectionRegex.Match(text);
-        if (directional.Success)
-        {
-            direction = NormalizeDirection(directional.Groups["dir"].Value);
-            percent = NormalizePercentValue(directional.Groups["pct"].Value);
-            return !string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent);
-        }
-
-        var reverseDirectional = DirectionAfterPercentRegex.Match(text);
-        if (reverseDirectional.Success)
-        {
-            direction = NormalizeDirection(reverseDirectional.Groups["dir"].Value);
-            percent = NormalizePercentValue(reverseDirectional.Groups["pct"].Value);
-            return !string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent);
-        }
-
-        var signed = SignedPercentRegex.Match(text);
-        if (!signed.Success)
-            return false;
-
-        var raw = signed.Groups["pct"].Value.Trim();
-        if (raw.Length == 0)
-            return false;
-
-        direction = raw.StartsWith("-", StringComparison.Ordinal) ? "down" : "up";
-        percent = NormalizePercentValue(raw.TrimStart('+', '-'));
-        return !string.IsNullOrWhiteSpace(percent);
-    }
-
-    private static bool TryExtractMarketLevel(
-        string corpus,
-        string[] aliases,
-        string marketLabel,
-        out string level)
-    {
-        level = "";
-
-        if (TryExtractAliasBoundLevel(corpus, aliases, marketLabel, out level))
-            return true;
-
-        var window = ExtractMarketWindow(corpus, aliases);
-        if (TryExtractLevelFromText(window, marketLabel, out level))
-            return true;
-
-        return TryExtractLevelFromText(corpus, marketLabel, out level);
-    }
-
-    private static bool TryExtractLevelFromText(string text, string marketLabel, out string level)
-    {
-        level = "";
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        foreach (Match match in LevelRegex.Matches(text))
-        {
-            if (!match.Success)
-                continue;
-
-            var raw = match.Groups["lvl"].Value.Trim();
-            if (string.IsNullOrWhiteSpace(raw))
-                continue;
-
-            if (!TryParseMarketLevel(raw, out var numeric))
-                continue;
-
-            if (!IsPlausibleMarketLevel(numeric, marketLabel))
-                continue;
-
-            level = FormatMarketLevel(raw, numeric);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string ExtractMarketWindow(string corpus, string[] aliases)
-    {
-        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
-            return corpus;
-
-        var lower = corpus.ToLowerInvariant();
-        foreach (var alias in aliases)
-        {
-            var idx = lower.IndexOf(alias, StringComparison.Ordinal);
-            if (idx < 0)
-                continue;
-
-            var start = Math.Max(0, idx - 80);
-            var length = Math.Min(corpus.Length - start, 260);
-            return corpus.Substring(start, length);
-        }
-
-        return corpus;
-    }
-
-    private static string NormalizeDirection(string raw)
-    {
-        var lower = (raw ?? "").Trim().ToLowerInvariant();
-        return lower switch
-        {
-            "up" or "higher" or "gained" or "gain" or "rose" or "rallied" or "advanced" => "up",
-            "down" or "lower" or "fell" or "dropped" or "declined" or "slipped" => "down",
-            _ => ""
-        };
-    }
-
-    private static string NormalizePercentValue(string raw)
-    {
-        var cleaned = (raw ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(cleaned))
-            return "";
-
-        return cleaned.EndsWith('%') ? cleaned : $"{cleaned}%";
-    }
-
-    private static bool TryExtractAliasBoundDirectionAndPercent(
-        string corpus,
-        string[] aliases,
-        out string direction,
-        out string percent)
-    {
-        direction = "";
-        percent = "";
-
-        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
-            return false;
-
-        foreach (var alias in aliases
-                     .Where(a => !string.IsNullOrWhiteSpace(a))
-                     .OrderByDescending(a => a.Length))
-        {
-            var escapedAlias = Regex.Escape(alias);
-            var aliasDirectional = new Regex(
-                $@"\b{escapedAlias}\b[^%\n]{{0,120}}?\b(?<dir>up|higher|gained|gain|rose|rallied|advanced|down|lower|fell|dropped|declined|slipped)\b[^%\n]{{0,40}}?(?<pct>[+-]?\d+(?:\.\d+)?)\s*%",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-            var match = aliasDirectional.Match(corpus);
-            if (match.Success)
-            {
-                direction = NormalizeDirection(match.Groups["dir"].Value);
-                percent = NormalizePercentValue(match.Groups["pct"].Value);
-                if (!string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(percent))
-                    return true;
-            }
-
-            var aliasSignedPercent = new Regex(
-                $@"\b{escapedAlias}\b[^%\n]{{0,120}}?(?<pct>[+-]\d+(?:\.\d+)?)\s*%",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            var signed = aliasSignedPercent.Match(corpus);
-            if (signed.Success)
-            {
-                var raw = signed.Groups["pct"].Value.Trim();
-                direction = raw.StartsWith("-", StringComparison.Ordinal) ? "down" : "up";
-                percent = NormalizePercentValue(raw.TrimStart('+', '-'));
-                if (!string.IsNullOrWhiteSpace(percent))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool TryExtractAliasBoundLevel(
-        string corpus,
-        string[] aliases,
-        string marketLabel,
-        out string level)
-    {
-        level = "";
-        if (string.IsNullOrWhiteSpace(corpus) || aliases.Length == 0)
-            return false;
-
-        foreach (var alias in aliases
-                     .Where(a => !string.IsNullOrWhiteSpace(a))
-                     .OrderByDescending(a => a.Length))
-        {
-            var escapedAlias = Regex.Escape(alias);
-            var levelPattern = @"(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?:\.\d+)?";
-
-            var aliasBeforeLevel = new Regex(
-                $@"\b{escapedAlias}\b[^.\n]{{0,140}}?\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>{levelPattern})\b",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            var match = aliasBeforeLevel.Match(corpus);
-            if (TryResolveLevelMatch(match, marketLabel, out level))
-                return true;
-
-            var aliasAfterLevel = new Regex(
-                $@"\b(?:at|to|around|near|closed at|closing at|trading at)\s+\$?(?<lvl>{levelPattern})\b[^.\n]{{0,70}}?\b{escapedAlias}\b",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            match = aliasAfterLevel.Match(corpus);
-            if (TryResolveLevelMatch(match, marketLabel, out level))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryResolveLevelMatch(Match match, string marketLabel, out string level)
-    {
-        level = "";
-        if (!match.Success)
-            return false;
-
-        var raw = match.Groups["lvl"].Value.Trim();
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-
-        if (!TryParseMarketLevel(raw, out var numeric))
-            return false;
-
-        if (!IsPlausibleMarketLevel(numeric, marketLabel))
-            return false;
-
-        level = FormatMarketLevel(raw, numeric);
-        return true;
-    }
-
-    private static bool TryGetLeadingMarketLine(
-        string text,
-        out string leadLine,
-        out string remainder)
-    {
-        leadLine = "";
-        remainder = text;
-
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        var lines = normalized.Split('\n').ToList();
-        var firstContentIndex = -1;
-        for (var i = 0; i < lines.Count; i++)
-        {
-            if (!string.IsNullOrWhiteSpace(lines[i]))
-            {
-                firstContentIndex = i;
-                break;
-            }
-        }
-
-        if (firstContentIndex < 0)
-            return false;
-
-        var candidate = lines[firstContentIndex].Trim();
-        if (!StartsWithMarketLeadLine(candidate))
-            return false;
-
-        leadLine = candidate;
-        lines.RemoveAt(firstContentIndex);
-        while (firstContentIndex < lines.Count && string.IsNullOrWhiteSpace(lines[firstContentIndex]))
-            lines.RemoveAt(firstContentIndex);
-
-        remainder = string.Join("\n", lines).Trim();
-        return true;
-    }
-
-    private static bool TryRemoveNumericLevelFromLeadLine(
-        string line,
-        out string sanitized)
-    {
-        sanitized = line;
-        if (string.IsNullOrWhiteSpace(line))
-            return false;
-
-        var match = LeadingMarketLineWithLevelRegex.Match(line.Trim());
-        if (!match.Success)
-            return false;
-
-        var prefix = match.Groups["prefix"].Value.Trim();
-        if (string.IsNullOrWhiteSpace(prefix))
-            return false;
-
-        sanitized = $"{prefix}.";
-        return true;
-    }
-
-    private static bool TryParseMarketLevel(string raw, out double value)
-    {
-        var cleaned = (raw ?? "").Trim().Replace(",", "");
-        return double.TryParse(
-            cleaned,
-            NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
-            CultureInfo.InvariantCulture,
-            out value);
-    }
-
-    private static bool IsPlausibleMarketLevel(double value, string marketLabel)
-    {
-        if (value <= 0)
-            return false;
-
-        var (min, max) = GetMarketLevelBounds(marketLabel);
-        return value >= min && value <= max;
-    }
-
-    private static (double Min, double Max) GetMarketLevelBounds(string marketLabel) =>
-        marketLabel switch
-        {
-            "Dow Jones" => (20_000d, 60_000d),
-            "Nasdaq" => (5_000d, 25_000d),
-            "S&P 500" => (2_000d, 8_000d),
-            _ => (1_000d, 60_000d)
-        };
-
-    private static string FormatMarketLevel(string rawValue, double numericValue)
-    {
-        if (rawValue.Contains(',', StringComparison.Ordinal))
-            return rawValue;
-
-        if (rawValue.Contains('.', StringComparison.Ordinal))
-            return rawValue;
-
-        return numericValue.ToString("N0", CultureInfo.InvariantCulture);
-    }
-
     /// <summary>
     /// Selects the best source from the session for a follow-up.
     /// Priority: keyword match → PrimarySourceId → first result.
@@ -1181,6 +726,14 @@ public sealed class SearchOrchestrator
                 var url   = item.TryGetProperty("url", out var u)   ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t)  ? t.GetString() : "";
                 var domain = item.TryGetProperty("domain", out var d) ? d.GetString() : "";
+                var snippet = item.TryGetProperty("excerpt", out var ex) ? ex.GetString() : "";
+                DateTimeOffset? publishedAt = null;
+                if (item.TryGetProperty("publishedAt", out var p) &&
+                    p.ValueKind == JsonValueKind.String &&
+                    DateTimeOffset.TryParse(p.GetString(), out var parsedPublishedAt))
+                {
+                    publishedAt = parsedPublishedAt;
+                }
 
                 if (string.IsNullOrWhiteSpace(url))
                     continue;
@@ -1190,7 +743,9 @@ public sealed class SearchOrchestrator
                     SourceId = SourceItem.ComputeSourceId(url!),
                     Url      = url!,
                     Title    = title ?? "",
-                    Domain   = domain ?? ""
+                    Domain   = domain ?? "",
+                    Snippet  = snippet ?? "",
+                    PublishedAt = publishedAt
                 });
             }
         }
@@ -1209,6 +764,84 @@ public sealed class SearchOrchestrator
 
         var idx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
         return idx >= 0 ? toolResult[..idx].TrimEnd() : toolResult.TrimEnd();
+    }
+
+    /// <summary>
+    /// Checks source freshness for market quote requests.
+    ///
+    /// Three outcomes:
+    ///   1. Sources have timestamps and at least one is fresh → null (proceed normally).
+    ///   2. Sources have timestamps but ALL are stale → hard block with warning.
+    ///   3. No timestamps available → null (proceed with soft caveat via summary instruction;
+    ///      blocking here threw away perfectly good results from providers
+    ///      that simply don't populate publishedAt).
+    /// </summary>
+    private AgentResponse? TryBuildFinanceFreshnessFailureResponse(
+        string userMessage,
+        string query,
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var isMarketQuoteRequest =
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query);
+        if (!isMarketQuoteRequest)
+            return null;
+
+        var datedSources = sources
+            .Where(s => s.PublishedAt.HasValue)
+            .Select(s => s.PublishedAt!.Value)
+            .ToList();
+
+        // Case 3: no timestamps — let the results through.
+        // The LLM summary instruction already tells it to caveat
+        // when exact values are unavailable.
+        if (datedSources.Count == 0)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "FINANCE_QUOTE_FRESHNESS_UNKNOWN",
+                Result = "no_source_timestamps_passthrough"
+            });
+            return null;
+        }
+
+        // Case 2: we have timestamps — enforce freshness.
+        var newestSourceTime = datedSources.Max();
+        var age = DateTimeOffset.UtcNow - newestSourceTime;
+        if (age > FinanceQuoteFreshnessMaxAge)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "FINANCE_QUOTE_FRESHNESS_FAIL",
+                Result = "stale_quote_sources",
+                Details = new Dictionary<string, object>
+                {
+                    ["newest_source_utc"] = newestSourceTime.ToString("o"),
+                    ["max_age_hours"]     = FinanceQuoteFreshnessMaxAge.TotalHours,
+                    ["actual_age_hours"]  = Math.Round(age.TotalHours, 2)
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = $"I cannot safely report a current market quote because the newest source is about {Math.Round(age.TotalHours, 1)} hours old. Ask me to refresh for a live update.",
+                Success       = true,
+                ToolCallsMade = [.. toolCallsMade]
+            };
+        }
+
+        // Case 1: fresh dated sources — proceed.
+        _audit.Append(new AuditEvent
+        {
+            Actor  = "agent",
+            Action = "FINANCE_QUOTE_FRESHNESS_OK",
+            Result = newestSourceTime.ToString("o")
+        });
+
+        return null;
     }
 
     private static bool IsLowSignalContent(string? content)
@@ -1340,4 +973,42 @@ public sealed class SearchOrchestrator
 
     private static string Truncate(string text, int maxLen) =>
         text.Length <= maxLen ? text : text[..maxLen] + "…";
+
+    private static bool LooksLikeMontySwallowPrompt(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("airspeed velocity of an unladen swallow", StringComparison.Ordinal) ||
+               lower.Contains("air speed velocity of an unladen swallow", StringComparison.Ordinal);
+    }
+
+    private SearchMode ResolveMode(string userMessage, LookupModeHint modeHint, DateTimeOffset now)
+    {
+        return modeHint switch
+        {
+            LookupModeHint.Fact => SearchMode.WebFactFind,
+            LookupModeHint.News => SearchMode.NewsAggregate,
+            _ => SearchModeRouter.Classify(userMessage, Session, now)
+        };
+    }
+
+    private static AgentResponse ApplyResponseContract(AgentResponse response, SearchMode mode)
+    {
+        return mode switch
+        {
+            SearchMode.WebFactFind => response with
+            {
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
+            },
+            SearchMode.NewsAggregate => response with
+            {
+                SuppressSourceCardsUi = false,
+                SuppressToolActivityUi = false
+            },
+            _ => response
+        };
+    }
 }

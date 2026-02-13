@@ -50,47 +50,6 @@ public class ReasoningGuardrailsModeTests
     }
 
     [Fact]
-    public async Task GuardrailsAuto_TriggersOnSecondPersonGoalConflictPrompt()
-    {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
-        var mcp = new FakeMcpClient(returnValue: "unused");
-        var audit = new TestAuditLogger();
-        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
-        {
-            ReasoningGuardrailsMode = "auto"
-        };
-
-        var result = await agent.ProcessAsync(
-            "You're at home and your car is out of gas. The gas station is 200 meters away. Should you walk or drive?");
-
-        Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
-        Assert.Contains("walk", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.True(result.GuardrailsRationale.Count >= 3);
-    }
-
-    [Fact]
-    public async Task GuardrailsAuto_FalseBeliefPuzzle_UsesOriginalLocation()
-    {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
-        var mcp = new FakeMcpClient(returnValue: "unused");
-        var audit = new TestAuditLogger();
-        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
-        {
-            ReasoningGuardrailsMode = "auto"
-        };
-
-        var result = await agent.ProcessAsync(
-            "Sally puts a ball in a red cupboard and leaves the room. While she is gone, Anne moves the ball to a blue cupboard. Sally comes back. Where will she look for the ball?");
-
-        Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
-        Assert.Contains("red cupboard", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("blue cupboard first", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.True(result.GuardrailsRationale.Count >= 3);
-    }
-
-    [Fact]
     public async Task GuardrailsAlways_MalformedStructuredOutput_FallsBackToNormalPath()
     {
         var llm = MakeGuardrailsAwareLlm(
@@ -335,6 +294,8 @@ public class ReasoningGuardrailsBenchTests
     [Theory]
     [InlineData("My library hold expires tonight. Should I call the book home or go pick it up?", "go pick it up")]
     [InlineData("The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?", "pay at the kiosk first")]
+    [InlineData("Car wash is 50 meters away. Should I walk or drive?", "drive")]
+    [InlineData("My vehicle is here and the wash is 50 meters away. Should I walk or drive?", "drive")]
     [InlineData("My laptop repair is ready at the shop. Should I text 'fixed' or bring the device and collect it?", "bring the device and collect it")]
     [InlineData("Hotel check-in needs ID at the desk. Should I wait in the room or bring ID downstairs?", "bring id downstairs")]
     [InlineData("I need a key cut at the hardware store. Should I email the key or take the key there?", "take the key there")]

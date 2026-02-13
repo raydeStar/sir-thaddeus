@@ -45,12 +45,6 @@ public sealed class ReasoningGuardrailsPipeline
     private static readonly Regex SpeakerGenderRegex = new(
         @"\ba\s+(?<gender>man|woman|boy|girl)\s+is\s+(?:looking|pointing)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FalseBeliefPlacementRegex = new(
-        @"\b(?<actor>[A-Za-z][A-Za-z'\-]*)\s+(?:puts?|placed?)\b[\s\S]{0,120}?\b(?:in|into|inside)\s+(?:the|a|an)\s+(?<location>[A-Za-z][A-Za-z0-9'\-\s]{1,40}?)(?:[,.!?]| and\b)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FalseBeliefMoveRegex = new(
-        @"\b(?<mover>[A-Za-z][A-Za-z'\-]*)\s+(?:moves?|moved|puts?|placed?|takes?|took)\b[\s\S]{0,120}?\b(?:to|into|in)\s+(?:the|a|an)\s+(?<location>[A-Za-z][A-Za-z0-9'\-\s]{1,40}?)(?:[,.!?]| and\b)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> NonNameTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "A", "An", "The",
@@ -253,7 +247,6 @@ public sealed class ReasoningGuardrailsPipeline
                TryResolveUnitComparisonQuestion(userMessage, out specialCase) ||
                TryResolveMeetingOverlapQuestion(userMessage, out specialCase) ||
                TryResolveFamilyPhotoRelationPuzzle(userMessage, out specialCase) ||
-               TryResolveFalseBeliefLocationQuestion(userMessage, out specialCase) ||
                TryResolveAmbiguousReferentQuestion(userMessage, out specialCase);
     }
 
@@ -699,84 +692,6 @@ public sealed class ReasoningGuardrailsPipeline
         return true;
     }
 
-    private static bool TryResolveFalseBeliefLocationQuestion(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage).Replace('’', '\'');
-        var lower = normalized.ToLowerInvariant();
-        var asksWhereLook = lower.Contains("where will", StringComparison.Ordinal) &&
-                            lower.Contains("look", StringComparison.Ordinal);
-        if (!asksWhereLook)
-            return false;
-
-        var placementMatch = FalseBeliefPlacementRegex.Match(normalized);
-        if (!placementMatch.Success)
-            return false;
-
-        var actor = NormalizeName(placementMatch.Groups["actor"].Value);
-        var actorLower = actor.ToLowerInvariant();
-        var initialLocation = NormalizeLocationPhrase(placementMatch.Groups["location"].Value);
-        if (string.IsNullOrWhiteSpace(initialLocation))
-            return false;
-
-        var hasAbsenceCue =
-            lower.Contains("while she is gone", StringComparison.Ordinal) ||
-            lower.Contains("while he is gone", StringComparison.Ordinal) ||
-            lower.Contains("while they are gone", StringComparison.Ordinal) ||
-            lower.Contains("leaves the room", StringComparison.Ordinal) ||
-            lower.Contains($"{actorLower} leaves", StringComparison.Ordinal);
-        if (!hasAbsenceCue)
-            return false;
-
-        var hasReturnCue =
-            lower.Contains("comes back", StringComparison.Ordinal) ||
-            lower.Contains("come back", StringComparison.Ordinal) ||
-            lower.Contains("returns", StringComparison.Ordinal) ||
-            lower.Contains("gets back", StringComparison.Ordinal);
-        if (!hasReturnCue)
-            return false;
-
-        string movedLocation = "";
-        foreach (Match moveMatch in FalseBeliefMoveRegex.Matches(normalized))
-        {
-            if (!moveMatch.Success || moveMatch.Index <= placementMatch.Index)
-                continue;
-
-            var candidate = NormalizeLocationPhrase(moveMatch.Groups["location"].Value);
-            if (string.IsNullOrWhiteSpace(candidate))
-                continue;
-            if (string.Equals(candidate, initialLocation, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            movedLocation = candidate;
-            break;
-        }
-
-        if (string.IsNullOrWhiteSpace(movedLocation))
-            return false;
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText = $"{actor} will look in the {initialLocation} first.",
-            RationaleLines =
-            [
-                $"Goal: Predict where {actor} will search based on their own knowledge.",
-                $"Constraint: {actor} did not observe the move from the {initialLocation} to the {movedLocation}, so their belief remains at the original location.",
-                $"Decision: {actor} will first check the {initialLocation}. (alternative considered: {movedLocation}; rejected because that location reflects only the observer's knowledge)."
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected classic false-belief location puzzle.",
-            TriggerSource = "false_belief_location_solver",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
     private static bool TryParseMassMeasurement(string text, out (double Grams, string Unit, double Quantity) measurement)
     {
         measurement = default;
@@ -934,23 +849,6 @@ public sealed class ReasoningGuardrailsPipeline
 
     private static string TrimTrailingPunctuation(string raw)
         => (raw ?? "").Trim().TrimEnd('.', '?', '!', ';', ':', ',');
-
-    private static string NormalizeLocationPhrase(string raw)
-    {
-        var cleaned = TrimTrailingPunctuation(CollapseWhitespace(raw ?? ""))
-            .Trim();
-        if (cleaned.Length == 0)
-            return cleaned;
-
-        if (cleaned.StartsWith("the ", StringComparison.OrdinalIgnoreCase))
-            cleaned = cleaned[4..].Trim();
-        else if (cleaned.StartsWith("a ", StringComparison.OrdinalIgnoreCase))
-            cleaned = cleaned[2..].Trim();
-        else if (cleaned.StartsWith("an ", StringComparison.OrdinalIgnoreCase))
-            cleaned = cleaned[3..].Trim();
-
-        return cleaned;
-    }
 
     private static string FormatGrams(double grams)
         => $"{grams:0.###} g";
@@ -1144,7 +1042,7 @@ internal sealed class GuardrailsDetector
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ChoicePatternRegex = new(
-        @"\b(?:should\s+(?:i|you|we|he|she|they)|do\s+(?:i|you|we)|would it be better to|is it better to)\b[\s\S]{0,120}\bor\b",
+        @"\b(?:should i|do i|would it be better to|is it better to)\b[\s\S]{0,120}\bor\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public GuardrailsDetector(ILlmClient llm)
@@ -1455,6 +1353,166 @@ internal sealed record EntityExtraction(
     IReadOnlyList<ActionOption> Options,
     int LlmRoundTrips);
 
+internal static class EntityRequirementHeuristics
+{
+    private static readonly Dictionary<string, string[]> CanonicalToAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["car"] =
+        [
+            "car", "cars", "vehicle", "vehicles", "automobile", "automobiles", "auto", "autos", "suv", "van", "truck"
+        ],
+        ["id"] =
+        [
+            "id", "i.d.", "photo id", "identification", "license", "driver license", "drivers license", "driver's license"
+        ],
+        ["package"] = ["package", "packages", "parcel", "parcels", "box", "boxes"],
+        ["key"] = ["key", "keys"],
+        ["ticket"] = ["ticket", "tickets", "boarding pass", "pass"],
+        ["jacket"] = ["jacket", "jackets", "coat", "coats"],
+        ["laptop"] = ["laptop", "laptops", "notebook", "notebooks", "computer", "computers"],
+        ["device"] = ["device", "devices", "phone", "phones", "tablet", "tablets"]
+    };
+
+    private static readonly Dictionary<string, string[]> CanonicalToActionImplications = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["car"] = ["drive", "driving", "park", "parking", "refuel", "gas up"],
+        ["key"] = ["unlock", "start ignition"],
+        ["ticket"] = ["board", "boarding"],
+        ["id"] = ["check in", "check-in", "security line", "tsa"]
+    };
+
+    private static readonly Dictionary<string, string> AliasToCanonical = BuildAliasMap();
+
+    public static IReadOnlyList<string> DetectRequiredEntities(string text)
+    {
+        var lower = (text ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return [];
+
+        var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (canonical, aliases) in CanonicalToAliases)
+        {
+            if (aliases.Any(alias => ContainsPhraseOrToken(lower, alias)))
+                detected.Add(canonical);
+        }
+
+        return detected.ToList();
+    }
+
+    public static bool OptionMentionsEntity(string optionLabelLower, string entityName)
+    {
+        var aliases = GetEntityAliases(entityName);
+        foreach (var alias in aliases)
+        {
+            if (ContainsPhraseOrToken(optionLabelLower, alias))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool OptionImpliesEntityUsage(string optionLabelLower, string entityName)
+    {
+        var canonical = CanonicalizeEntityName(entityName);
+        if (!CanonicalToActionImplications.TryGetValue(canonical, out var implications))
+            return false;
+
+        foreach (var implication in implications)
+        {
+            if (ContainsPhraseOrToken(optionLabelLower, implication))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static string CanonicalizeEntityName(string entityName)
+    {
+        var normalized = NormalizeEntityText(entityName);
+        if (normalized.Length == 0)
+            return normalized;
+
+        if (AliasToCanonical.TryGetValue(normalized, out var canonical))
+            return canonical;
+
+        var singular = normalized.EndsWith('s') ? normalized[..^1] : normalized;
+        if (AliasToCanonical.TryGetValue(singular, out canonical))
+            return canonical;
+
+        return singular;
+    }
+
+    private static IReadOnlyList<string> GetEntityAliases(string entityName)
+    {
+        var canonical = CanonicalizeEntityName(entityName);
+        if (canonical.Length == 0)
+            return [];
+
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { canonical };
+        if (CanonicalToAliases.TryGetValue(canonical, out var knownAliases))
+        {
+            foreach (var alias in knownAliases)
+                aliases.Add(alias);
+        }
+
+        var normalizedEntity = NormalizeEntityText(entityName);
+        if (!string.IsNullOrWhiteSpace(normalizedEntity))
+            aliases.Add(normalizedEntity);
+
+        return aliases.ToList();
+    }
+
+    private static Dictionary<string, string> BuildAliasMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (canonical, aliases) in CanonicalToAliases)
+        {
+            map[canonical] = canonical;
+            foreach (var alias in aliases)
+                map[NormalizeEntityText(alias)] = canonical;
+        }
+
+        return map;
+    }
+
+    private static string NormalizeEntityText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        return string.Join(" ",
+            value.Trim()
+                .ToLowerInvariant()
+                .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static bool ContainsPhraseOrToken(string haystackLower, string needle)
+    {
+        if (string.IsNullOrWhiteSpace(haystackLower) || string.IsNullOrWhiteSpace(needle))
+            return false;
+
+        var needleLower = NormalizeEntityText(needle);
+        if (needleLower.Length == 0)
+            return false;
+
+        var index = 0;
+        while (true)
+        {
+            index = haystackLower.IndexOf(needleLower, index, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+
+            var beforeOk = index == 0 || !char.IsLetterOrDigit(haystackLower[index - 1]);
+            var afterIndex = index + needleLower.Length;
+            var afterOk = afterIndex >= haystackLower.Length || !char.IsLetterOrDigit(haystackLower[afterIndex]);
+            if (beforeOk && afterOk)
+                return true;
+
+            index++;
+        }
+    }
+}
+
 internal sealed class EntityExtractor
 {
     private readonly ILlmClient _llm;
@@ -1545,16 +1603,17 @@ internal sealed class EntityExtractor
         var lower = (text ?? "").ToLowerInvariant();
         var entities = new List<EntityFact>();
 
-        AddIfContains("car");
+        var detected = EntityRequirementHeuristics.DetectRequiredEntities(lower);
+        foreach (var entity in detected)
+        {
+            entities.Add(new EntityFact(
+                Name: entity,
+                Kind: "required_object",
+                Required: true));
+        }
+
         AddIfContains("passport");
         AddIfContains("prescription");
-        AddIfContains("package");
-        AddIfContains("key");
-        AddIfContains("id");
-        AddIfContains("jacket");
-        AddIfContains("laptop");
-        AddIfContains("device");
-        AddIfContains("ticket");
 
         return entities;
 
@@ -1564,7 +1623,7 @@ internal sealed class EntityExtractor
                 return;
 
             entities.Add(new EntityFact(
-                Name: value,
+                Name: EntityRequirementHeuristics.CanonicalizeEntityName(value),
                 Kind: "required_object",
                 Required: true));
         }
@@ -1594,7 +1653,10 @@ internal sealed class EntityExtractor
                         continue;
                     var kind = ReadString(node, "kind") ?? "other";
                     var required = ReadBool(node, "required");
-                    entities.Add(new EntityFact(name.Trim(), kind.Trim(), required));
+                    var normalizedName = required
+                        ? EntityRequirementHeuristics.CanonicalizeEntityName(name)
+                        : name.Trim();
+                    entities.Add(new EntityFact(normalizedName, kind.Trim(), required));
                 }
             }
 
@@ -2038,7 +2100,7 @@ internal sealed class OptionEvaluator
                 var missingRequiredCount = 0;
                 foreach (var entity in requiredEntities)
                 {
-                    if (labelLower.Contains(entity.Name.ToLowerInvariant(), StringComparison.Ordinal))
+                    if (OptionSatisfiesRequiredEntity(labelLower, entity.Name))
                     {
                         score += 1.4;
                         notes.Add($"uses_{entity.Name}");
@@ -2193,7 +2255,7 @@ internal sealed class OptionEvaluator
 
         foreach (var entity in requiredEntities)
         {
-            if (optionLabelLower.Contains(entity.Name.ToLowerInvariant(), StringComparison.Ordinal))
+            if (EntityRequirementHeuristics.OptionMentionsEntity(optionLabelLower, entity.Name))
                 return false;
         }
 
@@ -2224,6 +2286,12 @@ internal sealed class OptionEvaluator
         }
 
         return false;
+    }
+
+    private static bool OptionSatisfiesRequiredEntity(string optionLabelLower, string entityName)
+    {
+        return EntityRequirementHeuristics.OptionMentionsEntity(optionLabelLower, entityName) ||
+               EntityRequirementHeuristics.OptionImpliesEntityUsage(optionLabelLower, entityName);
     }
 
     private static string BuildFirstPrinciplesConstraintSummary(

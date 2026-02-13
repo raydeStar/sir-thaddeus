@@ -405,10 +405,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
                     foreach (var tc in result.ToolCallsMade)
                     {
+                        var redactedArgs = ToolCallRedactor.RedactInput(tc.ToolName, tc.Arguments);
+                        var redactedResult = ToolCallRedactor.RedactOutput(tc.ToolName, tc.Result);
+
                         AddLog(LogEntryKind.ToolInput,
-                            $"\u2192 {tc.ToolName}({Truncate(tc.Arguments, 120)})");
+                            $"\u2192 {tc.ToolName}({Truncate(redactedArgs, 120)})");
                         AddLog(tc.Success ? LogEntryKind.ToolOutput : LogEntryKind.Error,
-                            $"\u2190 {Truncate(tc.Result, 300)}");
+                            $"\u2190 {Truncate(redactedResult, 300)}");
                     }
                 }
 

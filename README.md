@@ -156,6 +156,32 @@ Notes:
 - `memory.dbPath = "auto"` resolves to `%LOCALAPPDATA%\SirThaddeus\memory.db`.
 - `memory.embeddingsModel` defaults to the chat model if left empty.
 
+## Privacy model
+
+Sir Thaddeus is local-first by design.
+
+- Processing happens on your machine, with explicit outbound calls only through configured tools.
+- No default telemetry pipeline is enabled in this repo.
+- Audit logging is append-only and local (`%LOCALAPPDATA%\SirThaddeus\audit.jsonl`).
+
+### What is logged
+
+- Event metadata (actor, action, timestamp, result)
+- Tool call lifecycle events (start/end, duration, permission outcome)
+- Redacted tool input/output summaries for diagnostics
+
+### What is not logged by default
+
+- Raw secrets (tokens, API keys, passwords, cookies, bearer strings, connection strings)
+- Full OCR dumps and full file contents
+- Full `system_execute` command text in audit summaries (only executable name, argument count, and command hash)
+
+### Local data paths
+
+- Settings: `%LOCALAPPDATA%\SirThaddeus\settings.json`
+- Memory DB: `%LOCALAPPDATA%\SirThaddeus\memory.db`
+- Audit log: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`
+
 ## Building & tests
 
 ```powershell

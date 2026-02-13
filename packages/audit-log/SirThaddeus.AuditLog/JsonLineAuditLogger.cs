@@ -56,7 +56,8 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(auditEvent);
 
-        var json = JsonSerializer.Serialize(auditEvent, _jsonOptions);
+        var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
+        var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
         
         lock (_writeLock)
         {
@@ -70,7 +71,8 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(auditEvent);
 
-        var json = JsonSerializer.Serialize(auditEvent, _jsonOptions);
+        var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
+        var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
         
         // Use a semaphore for async locking in a production scenario;
         // for V0, we'll just await the sync write on a background thread

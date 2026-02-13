@@ -170,6 +170,67 @@ public class AuditLogTests : IDisposable
     }
 
     [Fact]
+    public void Append_RedactsSensitiveJsonKeysBeforePersist()
+    {
+        _logger.Append(new AuditEvent
+        {
+            Actor = "test",
+            Action = "SCRUB_KEYS",
+            Details = new Dictionary<string, object>
+            {
+                ["input_summary"] = """{"query":"weather","api_key":"live-key-123","nested":{"password":"hunter2"}}""",
+                ["authorization"] = "Bearer top-secret-token"
+            }
+        });
+
+        var json = File.ReadAllText(_testFilePath);
+
+        Assert.DoesNotContain("live-key-123", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("top-secret-token", json, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", json, StringComparison.Ordinal);
+        Assert.Contains("weather", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Append_RedactsJwtLikeValuesBeforePersist()
+    {
+        var jwtLike = "abcde12345.fghij67890.klmno12345";
+        _logger.Append(new AuditEvent
+        {
+            Actor = "test",
+            Action = "SCRUB_JWT",
+            Details = new Dictionary<string, object>
+            {
+                ["note"] = $"authorization token: {jwtLike}"
+            }
+        });
+
+        var json = File.ReadAllText(_testFilePath);
+        Assert.DoesNotContain(jwtLike, json, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED_JWT]", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Append_RedactsLongRandomSecretLikeValuesBeforePersist()
+    {
+        var randomLike = "Qz3f9Lk2Pn8Vx4Mb7Hd1Rw6Ty0Ua5Se8Jm2Nc9Gp4Df7Hk1Lq";
+        _logger.Append(new AuditEvent
+        {
+            Actor = "test",
+            Action = "SCRUB_LONG_RANDOM",
+            Details = new Dictionary<string, object>
+            {
+                ["note"] = $"candidate={randomLike}"
+            }
+        });
+
+        var json = File.ReadAllText(_testFilePath);
+        Assert.DoesNotContain(randomLike, json, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED_SECRET]", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetDefaultPath_ReturnsPathUnderLocalAppData()
     {
         // Act
