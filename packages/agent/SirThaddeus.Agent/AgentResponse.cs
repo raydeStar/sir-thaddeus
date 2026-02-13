@@ -28,6 +28,11 @@ public sealed record AgentResponse
     public int LlmRoundTrips { get; init; }
 
     /// <summary>
+    /// Per-turn token usage for UI telemetry, when available.
+    /// </summary>
+    public AgentTokenUsage? TokenUsage { get; init; }
+
+    /// <summary>
     /// When true, the desktop chat UI should skip source-card rendering
     /// for this response, even if tool output contains source metadata.
     /// Activity logs are still written.
@@ -67,6 +72,18 @@ public sealed record AgentResponse
         Success = false,
         Error = error
     };
+}
+
+/// <summary>
+/// Compact per-turn token usage payload for runtime UI counters.
+/// </summary>
+public sealed record AgentTokenUsage
+{
+    public int TokensIn { get; init; }
+    public int TokensOut { get; init; }
+    public int TotalTokens { get; init; }
+    public int ContextWindowTokens { get; init; }
+    public int ContextFillPercent { get; init; }
 }
 
 /// <summary>

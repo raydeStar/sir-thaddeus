@@ -22,13 +22,18 @@ public sealed class AgentVoiceService : IVoiceAgentService
     {
         _ = sessionId;
         var response = await _agentOrchestrator.ProcessAsync(transcript, cancellationToken);
+        var tokenUsage = response.TokenUsage;
         return new VoiceAgentResponse
         {
             Text = response.Text,
             Success = response.Success,
             Error = response.Error,
             GuardrailsUsed = response.GuardrailsUsed,
-            GuardrailsRationale = response.GuardrailsRationale
+            GuardrailsRationale = response.GuardrailsRationale,
+            HasTokenUsage = tokenUsage is not null,
+            TokensIn = tokenUsage?.TokensIn ?? 0,
+            TokensOut = tokenUsage?.TokensOut ?? 0,
+            ContextFillPercent = tokenUsage?.ContextFillPercent ?? 0
         };
     }
 }

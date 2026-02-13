@@ -50,6 +50,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _isLlmConnected;
     private string _connectionStatus = "Checking...";
     private bool _contextLocked;
+    private int _tokensIn;
+    private int _tokensOut;
+    private int _contextFillPercent;
     private CancellationTokenSource? _processingCts;
 
     // ── Voice debug state ────────────────────────────────────────────
@@ -161,6 +164,33 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _connectionStatus;
         private set => SetProperty(ref _connectionStatus, value);
+    }
+
+    /// <summary>
+    /// Prompt/input tokens consumed for the most recent turn.
+    /// </summary>
+    public int TokensIn
+    {
+        get => _tokensIn;
+        private set => SetProperty(ref _tokensIn, value);
+    }
+
+    /// <summary>
+    /// Completion/output tokens consumed for the most recent turn.
+    /// </summary>
+    public int TokensOut
+    {
+        get => _tokensOut;
+        private set => SetProperty(ref _tokensOut, value);
+    }
+
+    /// <summary>
+    /// Approximate context window saturation for the latest turn.
+    /// </summary>
+    public int ContextFillPercent
+    {
+        get => _contextFillPercent;
+        private set => SetProperty(ref _contextFillPercent, value);
     }
 
     /// <summary>
@@ -366,6 +396,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
             if (result.Success)
             {
+                UpdateTokenUsageTicker(result.TokenUsage);
+
                 var displayParts = ParseAssistantDisplayParts(result.Text);
                 var assistantMsg = new ChatMessageViewModel
                 {
@@ -422,6 +454,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                         AddLog(LogEntryKind.Info, line);
                 }
 
+                if (result.TokenUsage is { } usage)
+                {
+                    AddLog(LogEntryKind.Info,
+                        $"Tokens in {usage.TokensIn}, out {usage.TokensOut}, context {usage.ContextFillPercent}%.");
+                }
+
                 AddLog(LogEntryKind.Info,
                     $"{result.LlmRoundTrips} LLM round-trip(s)");
             }
@@ -472,6 +510,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         Messages.Clear();
         ActivityLog.Clear();
         ContextChips.Clear();
+        UpdateTokenUsageTicker(0, 0, 0);
         _orchestrator.ResetConversation();
         ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
 
@@ -638,6 +677,24 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     }
 
     private sealed record AssistantDisplayParts(string DisplayText, string ThinkingText);
+
+    public void UpdateTokenUsageTicker(int tokensIn, int tokensOut, int contextFillPercent)
+    {
+        TokensIn = Math.Max(0, tokensIn);
+        TokensOut = Math.Max(0, tokensOut);
+        ContextFillPercent = Math.Clamp(contextFillPercent, 0, 100);
+    }
+
+    private void UpdateTokenUsageTicker(AgentTokenUsage? usage)
+    {
+        if (usage is null)
+            return;
+
+        UpdateTokenUsageTicker(
+            usage.TokensIn,
+            usage.TokensOut,
+            usage.ContextFillPercent);
+    }
 
     private static AssistantDisplayParts ParseAssistantDisplayParts(string text)
     {

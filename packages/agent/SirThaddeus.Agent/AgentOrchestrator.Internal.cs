@@ -2618,7 +2618,9 @@ public sealed partial class AgentOrchestrator
         };
     }
 
-    private AgentResponse AttachContextSnapshot(AgentResponse response)
+    private AgentResponse AttachContextSnapshot(
+        AgentResponse response,
+        LlmUsageSnapshot? usageBaseline = null)
     {
         var latestUserMessage = _history.LastOrDefault(m => m.Role == "user")?.Content;
         var sanitizedText = _postProcessor.SanitizeFinalResponse(
@@ -2633,8 +2635,59 @@ public sealed partial class AgentOrchestrator
         var current = _dialogueStore.Get();
         var summaryText = BuildRollingSummary(response.Text);
         _dialogueStore.Update(current with { RollingSummary = summaryText });
-        return response with { ContextSnapshot = _dialogueStore.Get().ToSnapshot() };
+        var contextSnapshot = _dialogueStore.Get().ToSnapshot();
+        var tokenUsage = BuildTurnTokenUsage(usageBaseline) ?? response.TokenUsage;
+        return response with
+        {
+            ContextSnapshot = contextSnapshot,
+            TokenUsage = tokenUsage
+        };
     }
+
+    private LlmUsageSnapshot? CaptureUsageSnapshot()
+    {
+        if (_llm is not ILlmUsageTelemetry telemetry)
+            return null;
+
+        return telemetry.GetUsageSnapshot();
+    }
+
+    private AgentTokenUsage? BuildTurnTokenUsage(LlmUsageSnapshot? usageBaseline)
+    {
+        if (usageBaseline is null || _llm is not ILlmUsageTelemetry telemetry)
+            return null;
+
+        var current = telemetry.GetUsageSnapshot();
+        var tokensInDelta = Math.Max(0L, current.PromptTokens - usageBaseline.PromptTokens);
+        var tokensOutDelta = Math.Max(0L, current.CompletionTokens - usageBaseline.CompletionTokens);
+        var totalTokensDelta = Math.Max(0L, current.TotalTokens - usageBaseline.TotalTokens);
+
+        if (tokensInDelta == 0 && tokensOutDelta == 0 && totalTokensDelta == 0)
+            return null;
+
+        var contextWindow = current.ContextWindowTokens > 0
+            ? current.ContextWindowTokens
+            : usageBaseline.ContextWindowTokens;
+        if (contextWindow <= 0)
+            contextWindow = 8192;
+
+        var contextFillPercent = (int)Math.Clamp(
+            Math.Round(tokensInDelta * 100d / contextWindow),
+            0,
+            100);
+
+        return new AgentTokenUsage
+        {
+            TokensIn = ClampLongToInt(tokensInDelta),
+            TokensOut = ClampLongToInt(tokensOutDelta),
+            TotalTokens = ClampLongToInt(totalTokensDelta),
+            ContextWindowTokens = contextWindow,
+            ContextFillPercent = contextFillPercent
+        };
+    }
+
+    private static int ClampLongToInt(long value)
+        => value >= int.MaxValue ? int.MaxValue : (int)value;
 
     private static string BuildRollingSummary(string text)
     {
