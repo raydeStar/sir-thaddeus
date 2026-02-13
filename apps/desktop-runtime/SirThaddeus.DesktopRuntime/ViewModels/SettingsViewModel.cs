@@ -43,6 +43,11 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
     private int    _voiceHostStartupTimeoutMs = 20000;
     private string _voiceHostHealthPath = "/health";
+    private string _voiceTtsEngine = "windows";
+    private string _voiceTtsModelId = "";
+    private string _voiceTtsVoiceId = "";
+    private string _voiceSttEngine = "faster-whisper";
+    private string _voiceSttModelId = "base";
     private bool   _voicePreferLocalTts = true;
     private int    _voiceAsrTimeoutMs = 45000;
     private int    _voiceAgentTimeoutMs = 90000;
@@ -102,6 +107,11 @@ public sealed class SettingsViewModel : ViewModelBase
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
+    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) MarkDirty(); } }
+    public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
+    public string VoiceTtsVoiceId { get => _voiceTtsVoiceId; set { if (SetProperty(ref _voiceTtsVoiceId, value)) MarkDirty(); } }
+    public string VoiceSttEngine { get => _voiceSttEngine; set { if (SetProperty(ref _voiceSttEngine, value)) MarkDirty(); } }
+    public string VoiceSttModelId { get => _voiceSttModelId; set { if (SetProperty(ref _voiceSttModelId, value)) MarkDirty(); } }
     public bool VoicePreferLocalTts { get => _voicePreferLocalTts; set { if (SetProperty(ref _voicePreferLocalTts, value)) MarkDirty(); } }
     public int VoiceAsrTimeoutMs { get => _voiceAsrTimeoutMs; set { if (SetProperty(ref _voiceAsrTimeoutMs, value)) MarkDirty(); } }
     public int VoiceAgentTimeoutMs { get => _voiceAgentTimeoutMs; set { if (SetProperty(ref _voiceAgentTimeoutMs, value)) MarkDirty(); } }
@@ -289,6 +299,11 @@ public sealed class SettingsViewModel : ViewModelBase
         _voiceHostHealthPath = string.IsNullOrWhiteSpace(s.Voice.VoiceHostHealthPath)
             ? "/health"
             : s.Voice.VoiceHostHealthPath.Trim();
+        _voiceTtsEngine = s.Voice.GetNormalizedTtsEngine();
+        _voiceTtsModelId = s.Voice.GetResolvedTtsModelId();
+        _voiceTtsVoiceId = s.Voice.GetResolvedTtsVoiceId();
+        _voiceSttEngine = s.Voice.GetNormalizedSttEngine();
+        _voiceSttModelId = s.Voice.GetResolvedSttModelId();
         _voicePreferLocalTts = s.Voice.PreferLocalTts;
         _voiceAsrTimeoutMs = s.Voice.AsrTimeoutMs;
         _voiceAgentTimeoutMs = s.Voice.AgentTimeoutMs;
@@ -322,6 +337,11 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceHostBaseUrl));
         OnPropertyChanged(nameof(VoiceHostStartupTimeoutMs));
         OnPropertyChanged(nameof(VoiceHostHealthPath));
+        OnPropertyChanged(nameof(VoiceTtsEngine));
+        OnPropertyChanged(nameof(VoiceTtsModelId));
+        OnPropertyChanged(nameof(VoiceTtsVoiceId));
+        OnPropertyChanged(nameof(VoiceSttEngine));
+        OnPropertyChanged(nameof(VoiceSttModelId));
         OnPropertyChanged(nameof(VoicePreferLocalTts));
         OnPropertyChanged(nameof(VoiceAsrTimeoutMs));
         OnPropertyChanged(nameof(VoiceAgentTimeoutMs));
@@ -657,6 +677,15 @@ public sealed class SettingsViewModel : ViewModelBase
                 VoiceHostHealthPath = string.IsNullOrWhiteSpace(_voiceHostHealthPath)
                     ? "/health"
                     : _voiceHostHealthPath.Trim(),
+                TtsEngine = string.IsNullOrWhiteSpace(_voiceTtsEngine)
+                    ? "windows"
+                    : _voiceTtsEngine.Trim(),
+                TtsModelId = _voiceTtsModelId.Trim(),
+                TtsVoiceId = _voiceTtsVoiceId.Trim(),
+                SttEngine = string.IsNullOrWhiteSpace(_voiceSttEngine)
+                    ? "faster-whisper"
+                    : _voiceSttEngine.Trim(),
+                SttModelId = _voiceSttModelId.Trim(),
                 PreferLocalTts = _voicePreferLocalTts,
                 AsrTimeoutMs = Math.Max(5_000, _voiceAsrTimeoutMs),
                 AgentTimeoutMs = Math.Max(10_000, _voiceAgentTimeoutMs),

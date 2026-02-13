@@ -68,6 +68,10 @@ public sealed record VoiceAgentResponse
     public string? Error { get; init; }
     public bool GuardrailsUsed { get; init; }
     public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
+    public bool HasTokenUsage { get; init; }
+    public int TokensIn { get; init; }
+    public int TokensOut { get; init; }
+    public int ContextFillPercent { get; init; }
 }
 
 /// <summary>
@@ -132,6 +136,8 @@ public sealed record VoiceSessionOrchestratorOptions
     public TimeSpan AgentTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan SpeakingTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan QueueDrainTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan RealtimeHintMaxAge { get; init; } = TimeSpan.FromSeconds(2);
+    public int RealtimeHintMinChars { get; init; } = 8;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -149,6 +155,10 @@ public sealed class VoiceProgressEventArgs : EventArgs
     public string SessionId { get; init; } = "";
     public bool GuardrailsUsed { get; init; }
     public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
+    public bool HasTokenUsage { get; init; }
+    public int TokensIn { get; init; }
+    public int TokensOut { get; init; }
+    public int ContextFillPercent { get; init; }
 }
 
 public enum VoiceProgressKind

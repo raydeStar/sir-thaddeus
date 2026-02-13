@@ -8,6 +8,12 @@ public sealed record VoiceHostRuntimeOptions(
     string BackendMode,
     Uri AsrUpstreamUri,
     Uri TtsUpstreamUri,
+    string TtsEngine,
+    string TtsModelId,
+    string TtsVoiceId,
+    string SttEngine,
+    string SttModelId,
+    string SttLanguage,
     bool AutoStartBackends,
     string BackendExecutablePath,
     int BackendStartupTimeoutMs,
@@ -34,6 +40,30 @@ public sealed record VoiceHostRuntimeOptions(
             values,
             "mode",
             Environment.GetEnvironmentVariable("ST_VOICEHOST_MODE") ?? "proxy-first");
+        var ttsEngineRaw = GetOrDefault(
+            values,
+            "tts-engine",
+            Environment.GetEnvironmentVariable("ST_VOICE_TTS_ENGINE") ?? "windows");
+        var ttsModelIdRaw = GetOrDefault(
+            values,
+            "tts-model-id",
+            Environment.GetEnvironmentVariable("ST_VOICE_TTS_MODEL_ID") ?? "");
+        var ttsVoiceIdRaw = GetOrDefault(
+            values,
+            "tts-voice-id",
+            Environment.GetEnvironmentVariable("ST_VOICE_TTS_VOICE_ID") ?? "");
+        var sttEngineRaw = GetOrDefault(
+            values,
+            "stt-engine",
+            Environment.GetEnvironmentVariable("ST_VOICE_STT_ENGINE") ?? "faster-whisper");
+        var sttModelIdRaw = GetOrDefault(
+            values,
+            "stt-model-id",
+            Environment.GetEnvironmentVariable("ST_VOICE_STT_MODEL_ID") ?? "");
+        var sttLanguageRaw = GetOrDefault(
+            values,
+            "stt-language",
+            Environment.GetEnvironmentVariable("ST_VOICE_STT_LANGUAGE") ?? "en");
         var autoStartRaw = GetOrDefault(
             values,
             "autostart-backends",
@@ -78,6 +108,12 @@ public sealed record VoiceHostRuntimeOptions(
             backendMode,
             asrUri,
             ttsUri,
+            NormalizeTtsEngine(ttsEngineRaw),
+            ttsModelIdRaw,
+            ttsVoiceIdRaw,
+            NormalizeSttEngine(sttEngineRaw),
+            NormalizeSttModelId(sttEngineRaw, sttModelIdRaw),
+            NormalizeSttLanguage(sttLanguageRaw),
             autoStartBackends,
             backendExeRaw,
             backendStartupTimeoutMs,
@@ -154,6 +190,52 @@ public sealed record VoiceHostRuntimeOptions(
         if (!string.Equals(value, "proxy-first", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("VoiceHost V1 supports only --mode proxy-first.");
         return "proxy-first";
+    }
+
+    private static string NormalizeTtsEngine(string raw)
+    {
+        var value = string.IsNullOrWhiteSpace(raw) ? "windows" : raw.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "" => "windows",
+            "windows" => "windows",
+            "kokoro" => "kokoro",
+            _ => value
+        };
+    }
+
+    private static string NormalizeSttEngine(string raw)
+    {
+        var value = string.IsNullOrWhiteSpace(raw) ? "faster-whisper" : raw.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "" => "faster-whisper",
+            "whisper" => "faster-whisper",
+            "faster-whisper" => "faster-whisper",
+            "qwen3asr" => "qwen3asr",
+            _ => value
+        };
+    }
+
+    private static string NormalizeSttModelId(string sttEngineRaw, string sttModelIdRaw)
+    {
+        if (!string.IsNullOrWhiteSpace(sttModelIdRaw))
+            return sttModelIdRaw.Trim();
+
+        return string.Equals(NormalizeSttEngine(sttEngineRaw), "faster-whisper", StringComparison.Ordinal)
+            ? "base"
+            : "";
+    }
+
+    private static string NormalizeSttLanguage(string raw)
+    {
+        var value = string.IsNullOrWhiteSpace(raw) ? "en" : raw.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "auto" => "",
+            "detect" => "",
+            _ => value
+        };
     }
 
     private static bool ParseBool(string raw, bool fallback)

@@ -76,9 +76,29 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     public void UpdateSettings(VoiceSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        var shouldRestartManagedProcess = false;
         lock (_settingsGate)
         {
+            var oldSettings = _settings;
             _settings = settings;
+            shouldRestartManagedProcess =
+                !string.Equals(oldSettings.GetNormalizedTtsEngine(), settings.GetNormalizedTtsEngine(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(oldSettings.GetResolvedTtsModelId(), settings.GetResolvedTtsModelId(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(oldSettings.GetResolvedTtsVoiceId(), settings.GetResolvedTtsVoiceId(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(oldSettings.GetNormalizedSttEngine(), settings.GetNormalizedSttEngine(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(oldSettings.GetResolvedSttModelId(), settings.GetResolvedSttModelId(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(oldSettings.GetResolvedSttLanguage(), settings.GetResolvedSttLanguage(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (shouldRestartManagedProcess && HasManagedProcessAlive())
+        {
+            StopManagedProcessIfAny();
+            _currentBaseUrl = null;
+            _currentPort = null;
+            WriteAudit("VOICEHOST_PROCESS_RESTART_REQUIRED", "ok", new Dictionary<string, object>
+            {
+                ["reason"] = "engine_settings_changed"
+            });
         }
     }
 
@@ -369,6 +389,23 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
                 args += $" --asr-upstream {QuoteArg(settings.AsrEndpoint.Trim())}";
             if (!string.IsNullOrWhiteSpace(settings.TtsEndpoint))
                 args += $" --tts-upstream {QuoteArg(settings.TtsEndpoint.Trim())}";
+            args += $" --tts-engine {QuoteArg(settings.GetNormalizedTtsEngine())}";
+            args += $" --stt-engine {QuoteArg(settings.GetNormalizedSttEngine())}";
+
+            var resolvedSttModelId = settings.GetResolvedSttModelId();
+            if (!string.IsNullOrWhiteSpace(resolvedSttModelId))
+                args += $" --stt-model-id {QuoteArg(resolvedSttModelId)}";
+            var resolvedSttLanguage = settings.GetResolvedSttLanguage();
+            if (!string.IsNullOrWhiteSpace(resolvedSttLanguage))
+                args += $" --stt-language {QuoteArg(resolvedSttLanguage)}";
+
+            var resolvedTtsModelId = settings.GetResolvedTtsModelId();
+            if (!string.IsNullOrWhiteSpace(resolvedTtsModelId))
+                args += $" --tts-model-id {QuoteArg(resolvedTtsModelId)}";
+
+            var resolvedTtsVoiceId = settings.GetResolvedTtsVoiceId();
+            if (!string.IsNullOrWhiteSpace(resolvedTtsVoiceId))
+                args += $" --tts-voice-id {QuoteArg(resolvedTtsVoiceId)}";
 
             var startInfo = new ProcessStartInfo
             {
@@ -678,17 +715,47 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             var loadingDetail = string.IsNullOrWhiteSpace(health.Message)
                 ? "VoiceHost is starting local voice components."
                 : health.Message;
-            return $"Voice components are still warming up. {loadingDetail}";
+            return AppendVoiceRemediation($"Voice components are still warming up. {loadingDetail}");
         }
 
         if (!string.IsNullOrWhiteSpace(health.Message))
-            return health.Message;
+            return AppendVoiceRemediation(health.Message);
 
         var reason = !string.IsNullOrWhiteSpace(health.ErrorCode)
             ? health.ErrorCode
             : "dependency_not_ready";
-        return $"VoiceHost dependencies are not ready ({reason}). " +
-               $"asrReady={health.AsrReady}, ttsReady={health.TtsReady}.";
+        var fallbackMessage = $"VoiceHost dependencies are not ready ({reason}). " +
+                              $"asrReady={health.AsrReady}, ttsReady={health.TtsReady}.";
+        return AppendVoiceRemediation(fallbackMessage);
+    }
+
+    private static string AppendVoiceRemediation(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return message;
+
+        var lower = message.ToLowerInvariant();
+        if (lower.Contains("manifest_missing", StringComparison.Ordinal) ||
+            lower.Contains("artifact_", StringComparison.Ordinal))
+        {
+            return message +
+                   " Install voice assets via ./dev/install-kokoro-assets.ps1 " +
+                   "or switch settings.voice.ttsEngine to 'windows'.";
+        }
+
+        if (lower.Contains("runtime_not_configured", StringComparison.Ordinal))
+        {
+            return message +
+                   " Qwen3-ASR is scaffolded but not promoted yet; keep settings.voice.sttEngine='faster-whisper' " +
+                   "until runtime wiring is completed.";
+        }
+
+        if (lower.Contains("tts_voice_id_required", StringComparison.Ordinal))
+        {
+            return message + " Set settings.voice.ttsVoiceId to an installed Kokoro voice pack id.";
+        }
+
+        return message;
     }
 
     private string ResolveVoiceHostPath()

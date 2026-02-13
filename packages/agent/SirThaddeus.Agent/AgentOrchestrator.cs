@@ -290,8 +290,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         string userMessage,
         CancellationToken cancellationToken = default)
     {
+        var usageBaseline = CaptureUsageSnapshot();
+
         if (string.IsNullOrWhiteSpace(userMessage))
-            return AttachContextSnapshot(AgentResponse.FromError("Empty message."));
+            return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
 
         var lowerIncoming = userMessage.Trim().ToLowerInvariant();
         if (!LooksLikeReasoningFollowUp(lowerIncoming))
@@ -479,7 +481,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             {
                 _history.Add(ChatMessage.Assistant(firstPrinciplesFollowUp.Text));
                 LogEvent("FIRST_PRINCIPLES_FOLLOWUP", firstPrinciplesFollowUp.Text);
-                return AttachContextSnapshot(firstPrinciplesFollowUp);
+                return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
             }
 
             var deterministicSpecialCase = _guardrailsCoordinator.TryRunDeterministicSpecialCase(
@@ -503,7 +505,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LlmRoundTrips = roundTrips,
                     GuardrailsUsed = true,
                     GuardrailsRationale = deterministicSpecialCase.RationaleLines
-                });
+                }, usageBaseline);
             }
 
             var utilityResponse = await _utilityIntentHandler.TryHandleAsync(
@@ -599,7 +601,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }
 
                 return AttachContextSnapshot(
-                    _contextAnchoringService.AddLocationInferenceDisclosure(utilityResponse, validatedSlots));
+                    _contextAnchoringService.AddLocationInferenceDisclosure(utilityResponse, validatedSlots),
+                    usageBaseline);
             }
 
             var guardrailsResult = await _guardrailsCoordinator.TryRunAsync(
@@ -628,7 +631,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LlmRoundTrips = roundTrips,
                     GuardrailsUsed = true,
                     GuardrailsRationale = guardrailsResult.RationaleLines
-                });
+                }, usageBaseline);
             }
 
             if (MemoryEnabled && _selfMemorySummarizer.IsSelfMemoryKnowledgeRequest(contextualUserMessage))
@@ -640,7 +643,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     cancellationToken);
                 _history.Add(ChatMessage.Assistant(memorySummary.Text));
                 LogEvent("AGENT_RESPONSE", memorySummary.Text);
-                return AttachContextSnapshot(memorySummary);
+                return AttachContextSnapshot(memorySummary, usageBaseline);
             }
 
             // ── Web lookup: delegate to SearchOrchestrator ─────────────
@@ -667,7 +670,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 LogEvent("AGENT_RESPONSE", searchResponse.Text);
                 return AttachContextSnapshot(
-                    _contextAnchoringService.AddLocationInferenceDisclosure(searchResponse, validatedSlots));
+                    _contextAnchoringService.AddLocationInferenceDisclosure(searchResponse, validatedSlots),
+                    usageBaseline);
             }
 
             // ── Inject memory context ─────────────────────────────────
@@ -717,7 +721,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         LlmRoundTrips = roundTrips,
                         SuppressSourceCardsUi = true,
                         SuppressToolActivityUi = true
-                    });
+                    }, usageBaseline);
                 }
 
                 var lookupAlreadyExecuted = IsLookupIntent(route.Intent);
@@ -747,7 +751,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                             HasRefusalOrUncertaintySignals = hasRefusalOrUncertaintySignals,
                             LogEvent = LogEvent
                         },
-                        cancellationToken));
+                        cancellationToken), usageBaseline);
                 }
 
                 if (string.IsNullOrWhiteSpace(text))
@@ -765,7 +769,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     Success = true,
                     ToolCallsMade = toolCallsMade,
                     LlmRoundTrips = roundTrips
-                });
+                }, usageBaseline);
             }
 
             // ── Policy-filtered tool loop ────────────────────────────
@@ -782,7 +786,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
             return AttachContextSnapshot(await RunToolLoopAsync(
-                tools, toolCallsMade, roundTrips, cancellationToken));
+                tools, toolCallsMade, roundTrips, cancellationToken), usageBaseline);
         }
         catch (OperationCanceledException)
         {
@@ -794,7 +798,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 Error = "Cancelled",
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
-            });
+            }, usageBaseline);
         }
         catch (Exception ex)
         {
@@ -806,7 +810,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 Error         = ex.Message,
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
-            });
+            }, usageBaseline);
         }
     }
 }

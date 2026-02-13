@@ -118,4 +118,51 @@ public sealed class VoiceHostConfigTests
         Assert.Equal("", settings.AsrEndpoint);
         Assert.Equal("", settings.TtsEndpoint);
     }
+
+    [Fact]
+    public void EngineDefaults_AreDeterministic()
+    {
+        var settings = new VoiceSettings();
+
+        Assert.Equal("windows", settings.GetNormalizedTtsEngine());
+        Assert.Equal("faster-whisper", settings.GetNormalizedSttEngine());
+        Assert.Equal("base", settings.GetResolvedSttModelId());
+        Assert.Equal("en", settings.GetResolvedSttLanguage());
+    }
+
+    [Fact]
+    public void SttModelId_WhenExplicit_Preserved()
+    {
+        var settings = new VoiceSettings
+        {
+            SttEngine = "qwen3asr",
+            SttModelId = "qwen3-medium"
+        };
+
+        Assert.Equal("qwen3asr", settings.GetNormalizedSttEngine());
+        Assert.Equal("qwen3-medium", settings.GetResolvedSttModelId());
+    }
+
+    [Fact]
+    public void TtsVoiceId_WhenExplicit_Preserved()
+    {
+        var settings = new VoiceSettings
+        {
+            TtsEngine = "kokoro",
+            TtsVoiceId = "af_sky"
+        };
+
+        Assert.Equal("kokoro", settings.GetNormalizedTtsEngine());
+        Assert.Equal("af_sky", settings.GetResolvedTtsVoiceId());
+    }
+
+    [Fact]
+    public void SttLanguage_AutoAndExplicitValues_AreNormalized()
+    {
+        var auto = new VoiceSettings { SttLanguage = "auto" };
+        var explicitEnglish = new VoiceSettings { SttLanguage = "EN-US" };
+
+        Assert.Equal("", auto.GetResolvedSttLanguage());
+        Assert.Equal("en-us", explicitEnglish.GetResolvedSttLanguage());
+    }
 }

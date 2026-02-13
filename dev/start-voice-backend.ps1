@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Starts the local voice backend (ASR + TTS stub) on port 8001.
+    Starts the local voice backend with deterministic STT/TTS engine settings.
 
 .DESCRIPTION
     Creates a Python virtual environment if needed, installs dependencies,
@@ -11,21 +11,45 @@
     Listen port (default: 8001).
 
 .PARAMETER Model
-    Whisper model size: tiny, base, small, medium, large-v3 (default: base).
-    Larger models are more accurate but slower and use more memory.
+    Backward-compat alias for STT model id.
 
 .PARAMETER Device
     Compute device: cpu or cuda (default: cpu).
 
-.EXAMPLE
-    ./dev/start-voice-backend.ps1
-    ./dev/start-voice-backend.ps1 -Model small -Device cuda
+.PARAMETER SttEngine
+    STT engine: faster-whisper (default) or qwen3asr.
+
+.PARAMETER SttModelId
+    STT model id. If omitted with faster-whisper, defaults to base.
+
+.PARAMETER SttLanguage
+    STT language pin (default: en). Use "auto" to enable detection.
+
+.PARAMETER TtsEngine
+    TTS engine: windows (default) or kokoro.
+
+.PARAMETER TtsModelId
+    Optional TTS model id.
+
+.PARAMETER TtsVoiceId
+    TTS voice id. Required for kokoro engine.
+
+# .EXAMPLE
+#     ./dev/start-voice-backend.ps1
+#     ./dev/start-voice-backend.ps1 -SttEngine faster-whisper -SttModelId small -Device cuda
+#     ./dev/start-voice-backend.ps1 -TtsEngine kokoro -TtsVoiceId af_sky
 #>
 
 param(
     [int]$Port = 8001,
     [string]$Model = "base",
-    [string]$Device = "cpu"
+    [string]$Device = "cpu",
+    [string]$SttEngine = "faster-whisper",
+    [string]$SttModelId = "",
+    [string]$SttLanguage = "en",
+    [string]$TtsEngine = "windows",
+    [string]$TtsModelId = "",
+    [string]$TtsVoiceId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,12 +97,37 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "  Voice Backend starting on http://127.0.0.1:$Port" -ForegroundColor Green
-Write-Host "  Model: $Model   Device: $Device" -ForegroundColor Green
+Write-Host "  STT: $SttEngine  model: $(if ($SttModelId) { $SttModelId } else { $Model })  lang: $SttLanguage  device: $Device" -ForegroundColor Green
+Write-Host "  TTS: $TtsEngine  model: $(if ($TtsModelId) { $TtsModelId } else { '<none>' })  voice: $(if ($TtsVoiceId) { $TtsVoiceId } else { '<none>' })" -ForegroundColor Green
 Write-Host "  Press Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
 
-$env:WHISPER_MODEL = $Model
+$resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } else { $SttModelId.Trim() }
+
+$env:WHISPER_MODEL = $resolvedSttModel
 $env:WHISPER_DEVICE = $Device
+$env:ST_VOICE_STT_ENGINE = $SttEngine
+$env:ST_VOICE_STT_MODEL_ID = $resolvedSttModel
+$env:ST_VOICE_STT_LANGUAGE = $SttLanguage
+$env:ST_VOICE_TTS_ENGINE = $TtsEngine
+$env:ST_VOICE_TTS_MODEL_ID = $TtsModelId
+$env:ST_VOICE_TTS_VOICE_ID = $TtsVoiceId
 
 $serverScript = Join-Path $VoiceBackendDir "server.py"
-& python $serverScript --port $Port --model $Model --device $Device
+$pythonArgs = @(
+    $serverScript,
+    "--port", "$Port",
+    "--stt-engine", "$SttEngine",
+    "--stt-model-id", "$resolvedSttModel",
+    "--stt-language", "$SttLanguage",
+    "--device", "$Device",
+    "--tts-engine", "$TtsEngine"
+)
+if (-not [string]::IsNullOrWhiteSpace($TtsModelId)) {
+    $pythonArgs += @("--tts-model-id", $TtsModelId.Trim())
+}
+if (-not [string]::IsNullOrWhiteSpace($TtsVoiceId)) {
+    $pythonArgs += @("--tts-voice-id", $TtsVoiceId.Trim())
+}
+
+& python @pythonArgs

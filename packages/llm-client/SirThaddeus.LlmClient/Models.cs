@@ -159,6 +159,25 @@ public sealed record TokenUsage
     public int TotalTokens { get; init; }
 }
 
+/// <summary>
+/// Cumulative token usage counters captured by the transport.
+/// </summary>
+public sealed record LlmUsageSnapshot
+{
+    public long PromptTokens { get; init; }
+    public long CompletionTokens { get; init; }
+    public long TotalTokens { get; init; }
+    public int ContextWindowTokens { get; init; }
+}
+
+/// <summary>
+/// Optional telemetry surface for callers that want token usage stats.
+/// </summary>
+public interface ILlmUsageTelemetry
+{
+    LlmUsageSnapshot GetUsageSnapshot();
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Client Options
 // ─────────────────────────────────────────────────────────────────────────
@@ -183,6 +202,11 @@ public sealed record LlmClientOptions
     /// Maximum tokens in the response.
     /// </summary>
     public int MaxTokens { get; init; } = 2048;
+
+    /// <summary>
+    /// Approximate context window size used for context-fill percentage.
+    /// </summary>
+    public int ContextWindowTokens { get; init; } = 8192;
 
     /// <summary>
     /// Sampling temperature (0.0 = deterministic, 1.0 = creative).

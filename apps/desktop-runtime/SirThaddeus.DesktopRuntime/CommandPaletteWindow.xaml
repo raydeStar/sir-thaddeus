@@ -554,6 +554,45 @@
                                   Style="{StaticResource ViewTabStyle}"/>
                 </StackPanel>
 
+                <!-- Token usage ticker -->
+                <Border Grid.Column="2"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Margin="16,0,12,0"
+                        Padding="8,4"
+                        Background="{StaticResource Surface0Brush}"
+                        CornerRadius="8">
+                    <StackPanel Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="In "
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock Text="{Binding TokensIn}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource Subtext0Brush}"/>
+                        <TextBlock Text="  Out "
+                                   Margin="10,0,0,0"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock Text="{Binding TokensOut}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource Subtext0Brush}"/>
+                        <TextBlock Text="  Ctx "
+                                   Margin="10,0,0,0"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock Text="{Binding ContextFillPercent}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource Subtext0Brush}"/>
+                        <TextBlock Text="%"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Subtext0Brush}"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- Context lock -->
                 <ToggleButton Grid.Column="3"
                               Content="Lock Context"
@@ -2039,12 +2078,6 @@
                               FontSize="12"
                               Margin="0,0,0,8"/>
 
-                    <CheckBox Content="Prefer local TTS endpoint"
-                              IsChecked="{Binding VoicePreferLocalTts}"
-                              Foreground="{StaticResource TextBrush}"
-                              FontSize="12"
-                              Margin="0,0,0,8"/>
-
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="120"/>
@@ -2059,6 +2092,87 @@
                                  Style="{StaticResource ChatInputStyle}"
                                  FontSize="12" Padding="8,6"/>
                     </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="TTS Engine"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceTtsEngine, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="TTS Model Id"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceTtsModelId, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="TTS Voice Id"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceTtsVoiceId, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="STT Engine"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceSttEngine, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="STT Model Id"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding VoiceSttModelId, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <CheckBox Content="Prefer local TTS endpoint"
+                              IsChecked="{Binding VoicePreferLocalTts}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,8"/>
 
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
