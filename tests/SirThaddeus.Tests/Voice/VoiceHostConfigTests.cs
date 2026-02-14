@@ -131,6 +131,7 @@ public sealed class VoiceHostConfigTests
         Assert.Equal("qwen3asr", settings.GetResolvedYouTubeAsrProvider());
         Assert.Equal("qwen-asr-1.6b", settings.GetResolvedYouTubeAsrModelId());
         Assert.Equal("en-us", settings.GetResolvedYouTubeLanguageHint());
+        Assert.Equal("professional", settings.GetResolvedYouTubeDraftTone());
         Assert.False(settings.YouTubeKeepAudio);
     }
 
@@ -178,12 +179,14 @@ public sealed class VoiceHostConfigTests
             YouTubeAsrProvider = "QWEN-ASR",
             YouTubeAsrModelId = " qwen-asr-1.6b ",
             YouTubeLanguageHint = "AUTO",
+            YouTubeDraftTone = "PLAYFUL",
             YouTubeKeepAudio = true
         };
 
         Assert.Equal("qwen3asr", settings.GetResolvedYouTubeAsrProvider());
         Assert.Equal("qwen-asr-1.6b", settings.GetResolvedYouTubeAsrModelId());
         Assert.Equal("", settings.GetResolvedYouTubeLanguageHint());
+        Assert.Equal("playful", settings.GetResolvedYouTubeDraftTone());
         Assert.True(settings.YouTubeKeepAudio);
     }
 }

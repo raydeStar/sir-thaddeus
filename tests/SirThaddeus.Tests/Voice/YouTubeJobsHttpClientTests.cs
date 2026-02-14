@@ -37,6 +37,7 @@ public sealed class YouTubeJobsHttpClientTests
             keepAudio: false,
             asrProvider: "qwen3asr",
             asrModel: "qwen-asr-1.6b",
+            draftTone: "professional",
             cancellationToken: CancellationToken.None);
 
         Assert.Equal("job-1", result.JobId);
@@ -111,6 +112,7 @@ public sealed class YouTubeJobsHttpClientTests
             keepAudio: false,
             asrProvider: null,
             asrModel: null,
+            draftTone: null,
             cancellationToken: CancellationToken.None));
 
         Assert.Contains("400", ex.Message);
