@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -57,6 +58,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _youtubeAsrProvider = "qwen3asr";
     private string _youtubeAsrModelId = "qwen-asr-1.6b";
     private string _youtubeLanguageHint = "en-us";
+    private string _youtubeDraftTone = "professional";
     private bool _youtubeKeepAudio;
     private string _youtubeUrl = "";
     private string _youtubeJobId = "";
@@ -147,6 +149,7 @@ public sealed class SettingsViewModel : ViewModelBase
     public string YouTubeAsrProvider { get => _youtubeAsrProvider; set { if (SetProperty(ref _youtubeAsrProvider, value)) MarkDirty(); } }
     public string YouTubeAsrModelId { get => _youtubeAsrModelId; set { if (SetProperty(ref _youtubeAsrModelId, value)) MarkDirty(); } }
     public string YouTubeLanguageHint { get => _youtubeLanguageHint; set { if (SetProperty(ref _youtubeLanguageHint, value)) MarkDirty(); } }
+    public string YouTubeDraftTone { get => _youtubeDraftTone; set { if (SetProperty(ref _youtubeDraftTone, value)) MarkDirty(); } }
     public bool YouTubeKeepAudio { get => _youtubeKeepAudio; set { if (SetProperty(ref _youtubeKeepAudio, value)) MarkDirty(); } }
     public string YouTubeUrl { get => _youtubeUrl; set => SetProperty(ref _youtubeUrl, value); }
     public string YouTubeJobId { get => _youtubeJobId; private set => SetProperty(ref _youtubeJobId, value); }
@@ -220,6 +223,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ObservableCollection<AudioDeviceInfo> AvailableInputDevices  { get; } = new();
     public ObservableCollection<AudioDeviceInfo> AvailableOutputDevices { get; } = new();
+    public IReadOnlyList<string> AvailableDraftTones { get; } = new[] { "professional", "playful", "direct" };
 
     public AudioDeviceInfo? SelectedInputDevice
     {
@@ -390,6 +394,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _youtubeAsrProvider = s.Voice.GetResolvedYouTubeAsrProvider();
         _youtubeAsrModelId = s.Voice.GetResolvedYouTubeAsrModelId();
         _youtubeLanguageHint = s.Voice.GetResolvedYouTubeLanguageHint();
+        _youtubeDraftTone = s.Voice.GetResolvedYouTubeDraftTone();
         _youtubeKeepAudio = s.Voice.YouTubeKeepAudio;
 
         _memoryEnabled     = s.Memory.Enabled;
@@ -432,6 +437,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(YouTubeAsrProvider));
         OnPropertyChanged(nameof(YouTubeAsrModelId));
         OnPropertyChanged(nameof(YouTubeLanguageHint));
+        OnPropertyChanged(nameof(YouTubeDraftTone));
         OnPropertyChanged(nameof(YouTubeKeepAudio));
         OnPropertyChanged(nameof(MemoryEnabled));
         OnPropertyChanged(nameof(EmbeddingsEnabled));
@@ -519,6 +525,7 @@ public sealed class SettingsViewModel : ViewModelBase
                 keepAudio: YouTubeKeepAudio,
                 asrProvider: string.IsNullOrWhiteSpace(YouTubeAsrProvider) ? null : YouTubeAsrProvider.Trim(),
                 asrModel: string.IsNullOrWhiteSpace(YouTubeAsrModelId) ? null : YouTubeAsrModelId.Trim(),
+                draftTone: string.IsNullOrWhiteSpace(YouTubeDraftTone) ? "professional" : YouTubeDraftTone.Trim().ToLowerInvariant(),
                 cancellationToken: _youtubeJobPollCts.Token);
 
             YouTubeJobId = start.JobId;
@@ -1063,6 +1070,9 @@ public sealed class SettingsViewModel : ViewModelBase
                 YouTubeLanguageHint = string.IsNullOrWhiteSpace(_youtubeLanguageHint)
                     ? ""
                     : _youtubeLanguageHint.Trim(),
+                YouTubeDraftTone = string.IsNullOrWhiteSpace(_youtubeDraftTone)
+                    ? "professional"
+                    : _youtubeDraftTone.Trim().ToLowerInvariant(),
                 YouTubeKeepAudio = _youtubeKeepAudio
             },
             Memory = _settings.Memory with

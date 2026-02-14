@@ -258,6 +258,9 @@ public sealed record VoiceSettings
     [JsonPropertyName("youtubeLanguageHint")]
     public string YouTubeLanguageHint { get; init; } = "en-us";
 
+    [JsonPropertyName("youtubeDraftTone")]
+    public string YouTubeDraftTone { get; init; } = "professional";
+
     [JsonPropertyName("youtubeKeepAudio")]
     public bool YouTubeKeepAudio { get; init; } = false;
 
@@ -359,6 +362,17 @@ public sealed record VoiceSettings
             "auto" => "",
             "detect" => "",
             _ => raw
+        };
+    }
+
+    public string GetResolvedYouTubeDraftTone()
+    {
+        var raw = (YouTubeDraftTone ?? "").Trim().ToLowerInvariant();
+        return raw switch
+        {
+            "playful" => "playful",
+            "direct" => "direct",
+            _ => "professional"
         };
     }
 
