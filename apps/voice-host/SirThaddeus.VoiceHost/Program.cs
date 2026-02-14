@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using SirThaddeus.VoiceHost;
 using SirThaddeus.VoiceHost.Backends;
@@ -20,6 +21,10 @@ builder.Services.AddHttpClient<IAsrBackend, AsrProxyBackend>(client =>
 builder.Services.AddHttpClient<ITtsBackend, TtsProxyBackend>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(2);
+});
+builder.Services.AddHttpClient<IYouTubeJobsBackend, YouTubeJobsProxyBackend>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
 });
 builder.Services.AddSingleton<VoiceBackendSupervisor>();
 
@@ -283,6 +288,98 @@ app.MapPost("/tts", async (
 
     await ttsBackend.StreamSynthesisAsync(normalizedPayload, httpContext.Response, cancellationToken);
     return Results.Empty;
+});
+
+app.MapPost("/api/youtube/transcribe", async (
+    VoiceHostYouTubeTranscribeRequest payload,
+    HttpContext httpContext,
+    IYouTubeJobsBackend youtubeJobsBackend,
+    VoiceBackendSupervisor backendSupervisor,
+    CancellationToken cancellationToken) =>
+{
+    var requestId = ResolveRequestId(httpContext.Request.Headers["X-Request-Id"].ToString());
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
+    if (string.IsNullOrWhiteSpace(payload.VideoUrl))
+    {
+        return Results.BadRequest(new
+        {
+            requestId,
+            error = new
+            {
+                code = "INVALID_URL",
+                message = "videoUrl is required.",
+                details = new { }
+            }
+        });
+    }
+
+    var ensure = await backendSupervisor.EnsureYouTubeReadyAsync(cancellationToken);
+    if (!ensure.Success)
+    {
+        return Results.Json(new
+        {
+            requestId,
+            error = "Voice backend unavailable.",
+            errorCode = ensure.ErrorCode,
+            message = ensure.Message
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var proxyResult = await youtubeJobsBackend.StartJobAsync(payload, requestId, cancellationToken);
+    return Results.Content(proxyResult.Body, proxyResult.ContentType, Encoding.UTF8, proxyResult.StatusCode);
+});
+
+app.MapGet("/api/jobs/{jobId}", async (
+    string jobId,
+    HttpContext httpContext,
+    IYouTubeJobsBackend youtubeJobsBackend,
+    VoiceBackendSupervisor backendSupervisor,
+    CancellationToken cancellationToken) =>
+{
+    var requestId = ResolveRequestId(httpContext.Request.Headers["X-Request-Id"].ToString());
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
+    var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
+    if (!ensure.Success)
+    {
+        return Results.Json(new
+        {
+            requestId,
+            error = "Voice backend unavailable.",
+            errorCode = ensure.ErrorCode,
+            message = ensure.Message
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var proxyResult = await youtubeJobsBackend.GetJobAsync(jobId, requestId, cancellationToken);
+    return Results.Content(proxyResult.Body, proxyResult.ContentType, Encoding.UTF8, proxyResult.StatusCode);
+});
+
+app.MapPost("/api/jobs/{jobId}/cancel", async (
+    string jobId,
+    HttpContext httpContext,
+    IYouTubeJobsBackend youtubeJobsBackend,
+    VoiceBackendSupervisor backendSupervisor,
+    CancellationToken cancellationToken) =>
+{
+    var requestId = ResolveRequestId(httpContext.Request.Headers["X-Request-Id"].ToString());
+    httpContext.Response.Headers["X-Request-Id"] = requestId;
+
+    var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
+    if (!ensure.Success)
+    {
+        return Results.Json(new
+        {
+            requestId,
+            error = "Voice backend unavailable.",
+            errorCode = ensure.ErrorCode,
+            message = ensure.Message
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var proxyResult = await youtubeJobsBackend.CancelJobAsync(jobId, requestId, cancellationToken);
+    return Results.Content(proxyResult.Body, proxyResult.ContentType, Encoding.UTF8, proxyResult.StatusCode);
 });
 
 static BackendEngineStatus EnsureEngineStatus(BackendReadiness readiness, string fallbackEngine)

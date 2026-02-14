@@ -2249,6 +2249,308 @@
                                  FontSize="12" Padding="8,6"/>
                     </Grid>
 
+                    <!-- ─── VoiceHost Server ──────────────────────── -->
+                    <Border Background="{StaticResource Surface0Brush}"
+                            BorderBrush="{StaticResource Surface1Brush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12"
+                            Margin="0,0,0,20">
+                        <StackPanel>
+                            <TextBlock Text="VoiceHost Server"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       Margin="0,0,0,10"/>
+
+                            <!-- Status row: indicator dot + status text -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Ellipse Width="10" Height="10"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,8,0">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding VoiceHostIsReady}" Value="True">
+                                                    <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding VoiceHostIsReachable}" Value="True">
+                                                    <Setter Property="Fill" Value="{StaticResource YellowBrush}"/>
+                                                </DataTrigger>
+                                                <!-- Ready overrides reachable — must come after -->
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding VoiceHostIsReady}" Value="True"/>
+                                                        <Condition Binding="{Binding VoiceHostIsReachable}" Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="{Binding VoiceHostStatusText}"/>
+                                            <Setter Property="Foreground" Value="{StaticResource Subtext0Brush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding VoiceHostIsReady}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+
+                            <!-- Subsystem readiness indicators -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                                    <Ellipse Width="7" Height="7"
+                                             VerticalAlignment="Center"
+                                             Margin="0,0,5,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="True">
+                                                        <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Text="ASR"
+                                               FontSize="11"
+                                               Foreground="{StaticResource Overlay0Brush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                                    <Ellipse Width="7" Height="7"
+                                             VerticalAlignment="Center"
+                                             Margin="0,0,5,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="True">
+                                                        <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Text="TTS"
+                                               FontSize="11"
+                                               Foreground="{StaticResource Overlay0Brush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding VoiceHostVersion}"
+                                           FontSize="10"
+                                           Foreground="{StaticResource Overlay0Brush}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- Status message -->
+                            <TextBlock Text="{Binding VoiceHostMessage}"
+                                       FontSize="11"
+                                       Foreground="{StaticResource Overlay0Brush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10"/>
+
+                            <!-- Action buttons -->
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Start"
+                                        Command="{Binding StartVoiceHostCommand}"
+                                        Style="{StaticResource MemoryActionButtonStyle}"
+                                        Margin="0,0,8,0"/>
+                                <Button Content="Stop"
+                                        Command="{Binding StopVoiceHostCommand}"
+                                        Style="{StaticResource MemoryActionButtonStyle}"
+                                        Margin="0,0,8,0"/>
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshVoiceHostCommand}"
+                                        Style="{StaticResource MemoryActionButtonStyle}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ─── YouTube Transcribe ───────────────────────── -->
+                    <Border Background="{StaticResource Surface0Brush}"
+                            BorderBrush="{StaticResource Surface1Brush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12"
+                            Margin="0,0,0,20">
+                        <StackPanel>
+                            <TextBlock Text="YouTube Transcribe"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       Margin="0,0,0,8"/>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Video URL"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding YouTubeUrl, UpdateSourceTrigger=LostFocus}"
+                                         Style="{StaticResource ChatInputStyle}"
+                                         FontSize="12" Padding="8,6"/>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="ASR Provider"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding YouTubeAsrProvider, UpdateSourceTrigger=LostFocus}"
+                                         Style="{StaticResource ChatInputStyle}"
+                                         FontSize="12" Padding="8,6"/>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="ASR Model"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding YouTubeAsrModelId, UpdateSourceTrigger=LostFocus}"
+                                         Style="{StaticResource ChatInputStyle}"
+                                         FontSize="12" Padding="8,6"/>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Language Hint"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding YouTubeLanguageHint, UpdateSourceTrigger=LostFocus}"
+                                         Style="{StaticResource ChatInputStyle}"
+                                         FontSize="12" Padding="8,6"/>
+                            </Grid>
+
+                            <CheckBox Content="Keep converted audio files (do not clean work folder)"
+                                      IsChecked="{Binding YouTubeKeepAudio}"
+                                      Foreground="{StaticResource TextBrush}"
+                                      FontSize="12"
+                                      Margin="0,0,0,8"/>
+
+                            <StackPanel Orientation="Horizontal"
+                                        Margin="0,0,0,8">
+                                <Button Content="Start YouTube Job"
+                                        Command="{Binding StartYouTubeJobCommand}"
+                                        Style="{StaticResource MemoryActionButtonStyle}"
+                                        Margin="0,0,8,0"/>
+                                <Button Content="Cancel"
+                                        Command="{Binding CancelYouTubeJobCommand}"
+                                        Style="{StaticResource MemoryActionButtonStyle}"/>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding YouTubeJobStatus}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource Subtext0Brush}"/>
+                            <TextBlock Text="{Binding YouTubeJobStage}"
+                                       FontSize="11"
+                                       Foreground="{StaticResource Overlay0Brush}"
+                                       Margin="0,2,0,6"/>
+
+                            <ProgressBar Height="8"
+                                         IsIndeterminate="{Binding YouTubeJobIsRunning, Mode=OneWay}"
+                                         Value="{Binding YouTubeJobProgressPercent, Mode=OneWay}"
+                                         Maximum="100"
+                                         Margin="0,0,0,6"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Progress: "
+                                           FontSize="11"
+                                           Foreground="{StaticResource Overlay0Brush}"/>
+                                <TextBlock Text="{Binding YouTubeJobProgressPercent}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource Overlay0Brush}"/>
+                                <TextBlock Text="%"
+                                           FontSize="11"
+                                           Foreground="{StaticResource Overlay0Brush}"/>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding YouTubeErrorMessage}"
+                                       Foreground="{StaticResource RedBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8"/>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Transcript"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding YouTubeTranscriptPath}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextBrush}"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Output Folder"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding YouTubeOutputDir}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextBrush}"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+
+                            <TextBlock Text="Summary"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource Subtext0Brush}"
+                                       Margin="0,4,0,4"/>
+                            <TextBox Text="{Binding YouTubeSummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     MinHeight="140"
+                                     MaxHeight="260"
+                                     VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="Wrap"
+                                     Style="{StaticResource ChatInputStyle}"
+                                     FontSize="12"
+                                     Padding="8,6"/>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"
                             Background="{StaticResource Surface0Brush}"

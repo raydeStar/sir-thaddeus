@@ -83,3 +83,7 @@ apps/voice-backend/stt-models/*/*.bin
 apps/voice-backend/stt-models/*/*.model
 apps/voice-backend/.seed-*/
 packages/requested-files.zip
+
+# Generated YouTube transcript jobs (runtime output)
+data/youtube/
+apps/voice-backend/data/youtube/
