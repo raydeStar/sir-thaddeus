@@ -47,6 +47,8 @@
   <ItemGroup>
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
+             Link="DesktopRuntime\YouTubeJobsHttpClient.cs" />
   </ItemGroup>
 
 </Project>
