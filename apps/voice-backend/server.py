@@ -1266,6 +1266,7 @@ class YouTubeTranscribeRequest(BaseModel):
     keepAudio: bool = False
     asrProvider: Optional[str] = None
     asrModel: Optional[str] = None
+    draftTone: Optional[str] = None
 
 
 def build_health_payload(
@@ -1604,6 +1605,9 @@ async def youtube_transcribe(payload: YouTubeTranscribeRequest, request: Request
     asr_provider = normalize_stt_engine(payload.asrProvider or YOUTUBE_DEFAULT_ASR_PROVIDER)
     asr_model = (payload.asrModel or YOUTUBE_DEFAULT_ASR_MODEL_ID or "").strip()
     language_hint = normalize_stt_language(payload.languageHint or YOUTUBE_DEFAULT_LANGUAGE_HINT)
+    draft_tone = (payload.draftTone or "professional").strip().lower() or "professional"
+    if draft_tone not in {"professional", "playful", "direct"}:
+        draft_tone = "professional"
     summary_cfg = build_youtube_summary_config()
 
     if asr_provider not in {"qwen3asr", "faster-whisper"}:
@@ -1631,6 +1635,7 @@ async def youtube_transcribe(payload: YouTubeTranscribeRequest, request: Request
             asr_engine=asr_provider,
             asr_model=asr_model,
             summary_config=summary_cfg,
+            draft_tone=draft_tone,
         )
     except PipelineError as exc:
         status_code = 400 if exc.code in {"INVALID_URL"} else 503

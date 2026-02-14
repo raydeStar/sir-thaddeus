@@ -33,6 +33,7 @@ public sealed class YouTubeJobsHttpClient : IDisposable
         bool keepAudio,
         string? asrProvider,
         string? asrModel,
+        string? draftTone,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -44,7 +45,8 @@ public sealed class YouTubeJobsHttpClient : IDisposable
             languageHint,
             keepAudio,
             asrProvider,
-            asrModel
+            asrModel,
+            draftTone
         });
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
@@ -63,7 +65,8 @@ public sealed class YouTubeJobsHttpClient : IDisposable
                 ["requestId"] = requestId,
                 ["endpoint"] = endpoint,
                 ["videoUrl"] = RedactUrl(videoUrl),
-                ["keepAudio"] = keepAudio
+                ["keepAudio"] = keepAudio,
+                ["draftTone"] = draftTone ?? ""
             }
         });
 
@@ -171,6 +174,12 @@ public sealed class YouTubeJobsHttpClient : IDisposable
             Channel: response.Video?.Channel ?? "",
             TranscriptPath: response.TranscriptPath ?? "",
             OutputDir: response.OutputDir ?? "",
+            SummaryPath: response.SummaryPath ?? "",
+            HooksPath: response.HooksPath ?? "",
+            FactsSheetPath: response.FactsSheetPath ?? "",
+            LinkedinCarouselPath: response.LinkedinCarouselPath ?? "",
+            XThreadPath: response.XThreadPath ?? "",
+            NewsletterSummaryPath: response.NewsletterSummaryPath ?? "",
             Summary: response.Summary,
             Error: error);
     }
@@ -192,6 +201,12 @@ public sealed record YouTubeJobSnapshot(
     string Channel,
     string TranscriptPath,
     string OutputDir,
+    string SummaryPath,
+    string HooksPath,
+    string FactsSheetPath,
+    string LinkedinCarouselPath,
+    string XThreadPath,
+    string NewsletterSummaryPath,
     string? Summary,
     YouTubeJobError? Error)
 {
@@ -221,6 +236,12 @@ internal sealed record YouTubeJobResponse
     public YouTubeVideoInfo? Video { get; init; }
     public string? TranscriptPath { get; init; }
     public string? OutputDir { get; init; }
+    public string? SummaryPath { get; init; }
+    public string? HooksPath { get; init; }
+    public string? FactsSheetPath { get; init; }
+    public string? LinkedinCarouselPath { get; init; }
+    public string? XThreadPath { get; init; }
+    public string? NewsletterSummaryPath { get; init; }
     public string? Summary { get; init; }
     public YouTubeErrorResponse? Error { get; init; }
 }
