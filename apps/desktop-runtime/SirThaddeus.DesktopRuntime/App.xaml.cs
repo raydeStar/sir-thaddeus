@@ -2032,7 +2032,9 @@ public partial class App : System.Windows.Application
         // When memory is off, profile list features are no-op.
         try
         {
-            var settingsVm = new SettingsViewModel(_settings, settingsStore, _auditLogger!);
+            var settingsVm = new SettingsViewModel(
+                _settings, settingsStore, _auditLogger!,
+                voiceHostProcessManager: _voiceHostProcessManager);
             settingsVm.ActiveProfileChanged += profileId =>
             {
                 // Propagate to orchestrator for runtime tool calls

@@ -249,6 +249,18 @@ public sealed record VoiceSettings
     [JsonPropertyName("speakingTimeoutMs")]
     public int SpeakingTimeoutMs { get; init; } = 30_000;
 
+    [JsonPropertyName("youtubeAsrProvider")]
+    public string YouTubeAsrProvider { get; init; } = "qwen3asr";
+
+    [JsonPropertyName("youtubeAsrModelId")]
+    public string YouTubeAsrModelId { get; init; } = "qwen-asr-1.6b";
+
+    [JsonPropertyName("youtubeLanguageHint")]
+    public string YouTubeLanguageHint { get; init; } = "en-us";
+
+    [JsonPropertyName("youtubeKeepAudio")]
+    public bool YouTubeKeepAudio { get; init; } = false;
+
     public string GetVoiceHostBaseUrl()
     {
         var raw = string.IsNullOrWhiteSpace(VoiceHostBaseUrl)
@@ -319,6 +331,36 @@ public sealed record VoiceSettings
 
     public string GetResolvedTtsModelId()
         => string.IsNullOrWhiteSpace(TtsModelId) ? "" : TtsModelId.Trim();
+
+    public string GetResolvedYouTubeAsrProvider()
+    {
+        var provider = (YouTubeAsrProvider ?? "").Trim().ToLowerInvariant();
+        return provider switch
+        {
+            "" => "qwen3asr",
+            "qwen3asr" => "qwen3asr",
+            "qwen-asr" => "qwen3asr",
+            _ => provider
+        };
+    }
+
+    public string GetResolvedYouTubeAsrModelId()
+    {
+        var model = (YouTubeAsrModelId ?? "").Trim();
+        return string.IsNullOrWhiteSpace(model) ? "qwen-asr-1.6b" : model;
+    }
+
+    public string GetResolvedYouTubeLanguageHint()
+    {
+        var raw = (YouTubeLanguageHint ?? "").Trim().ToLowerInvariant();
+        return raw switch
+        {
+            "" => "",
+            "auto" => "",
+            "detect" => "",
+            _ => raw
+        };
+    }
 
     private static string CombineWithBase(string baseUrl, string relativePath)
     {

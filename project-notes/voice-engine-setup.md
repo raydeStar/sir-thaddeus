@@ -121,6 +121,57 @@ STT benchmark contract:
 python -c "import requests; r=requests.post('http://127.0.0.1:8001/stt/bench', timeout=10); print(r.status_code); print(r.text)"
 ```
 
+## YouTube Transcribe Pipeline
+
+User-invoked only endpoints:
+
+- `POST /api/youtube/transcribe`
+- `GET /api/jobs/{jobId}`
+- `POST /api/jobs/{jobId}/cancel`
+
+Request shape:
+
+```json
+{
+  "videoUrl": "https://www.youtube.com/watch?v=...",
+  "languageHint": null,
+  "keepAudio": false,
+  "asrProvider": "qwen3asr",
+  "asrModel": "qwen-asr-1.6b"
+}
+```
+
+Successful output artifacts:
+
+- `data/youtube/<videoId>/metadata.json`
+- `data/youtube/<videoId>/transcript.txt`
+- `data/youtube/<videoId>/summary.txt`
+
+Job stages:
+
+- `Resolving`
+- `DownloadingAudio`
+- `ConvertingAudio`
+- `Transcribing`
+- `WritingTranscript`
+- `Summarizing`
+- terminal: `Done` / `Failed` / `Cancelled`
+
+By default, the `work/` folder is deleted after success unless `keepAudio=true`.
+
+Smoke check:
+
+```powershell
+python -c "import requests, time; s=requests.post('http://127.0.0.1:8001/api/youtube/transcribe', json={'videoUrl':'https://www.youtube.com/watch?v=dQw4w9WgXcQ','keepAudio':False}, timeout=30); j=s.json(); print('start', s.status_code, j); job=j['jobId'];\
+import sys;\
+\
+while True:\
+ r=requests.get(f'http://127.0.0.1:8001/api/jobs/{job}', timeout=30); p=r.json(); print(p.get('status'), p.get('stage'), p.get('progress'));\
+ if p.get('status') in ('Done','Failed','Cancelled'):\
+  print('final', p); break;\
+ time.sleep(1)"
+```
+
 ## Benchmarks
 
 Automated endpoint benchmark (backend `/tts/test` + `/stt/bench`):

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 
 namespace SirThaddeus.VoiceHost.Backends;
 
@@ -29,6 +30,43 @@ public sealed class VoiceBackendSupervisor : IDisposable
     }
 
     public BackendSupervisorResult LastResult => _lastResult;
+
+    /// <summary>
+    /// Ensures ASR/TTS backends are ready and that YouTube API routes exist.
+    /// If the upstream is stale (healthy for ASR/TTS but missing YouTube routes),
+    /// attempts a one-time recycle before surfacing an actionable failure.
+    /// </summary>
+    public async Task<BackendSupervisorResult> EnsureYouTubeReadyAsync(CancellationToken cancellationToken)
+    {
+        var ensure = await EnsureRunningAsync(cancellationToken);
+        if (!ensure.Success)
+            return ensure;
+
+        if (await SupportsYouTubeApiAsync(cancellationToken))
+            return ensure;
+
+        _logger.LogWarning(
+            "Backend upstream missing YouTube routes; attempting recycle on port {Port}.",
+            _options.AsrUpstreamUri.Port);
+
+        TryRequestShutdown();
+        StopManagedProcess(graceful: true);
+
+        await Task.Delay(400, cancellationToken);
+
+        ensure = await EnsureRunningAsync(cancellationToken);
+        if (!ensure.Success)
+            return ensure;
+
+        if (await SupportsYouTubeApiAsync(cancellationToken))
+            return ensure;
+
+        _lastResult = BackendSupervisorResult.Failure(
+            "backend_youtube_api_missing",
+            "Voice backend is reachable but missing YouTube API routes. " +
+            "Restart VoiceHost from Settings and ensure apps/voice-backend/server.py is up to date.");
+        return _lastResult;
+    }
 
     public async Task<BackendSupervisorResult> EnsureRunningAsync(CancellationToken cancellationToken)
     {
@@ -165,6 +203,25 @@ public sealed class VoiceBackendSupervisor : IDisposable
         => string.Equals(a.Host, b.Host, StringComparison.OrdinalIgnoreCase) &&
            a.Port == b.Port;
 
+    private async Task<bool> SupportsYouTubeApiAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var uri = new UriBuilder(_options.AsrUpstreamUri)
+            {
+                Path = "/api/youtube/transcribe",
+                Query = ""
+            }.Uri;
+
+            using var response = await _httpClient.GetAsync(uri, cancellationToken);
+            return response.StatusCode != HttpStatusCode.NotFound;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private string ResolveBackendExecutablePath()
     {
         if (!string.Equals(_options.BackendExecutablePath, "auto", StringComparison.OrdinalIgnoreCase))
@@ -270,6 +327,124 @@ public sealed class VoiceBackendSupervisor : IDisposable
         startInfo.Environment["ST_VOICE_STT_ENGINE"] = _options.SttEngine;
         startInfo.Environment["ST_VOICE_STT_MODEL_ID"] = _options.SttModelId;
         startInfo.Environment["ST_VOICE_STT_LANGUAGE"] = _options.SttLanguage;
+
+        // Compose an effective PATH from process + user + machine values so
+        // child processes see recently installed tools without requiring logoff.
+        var effectivePath = BuildEffectivePath();
+        if (!string.IsNullOrWhiteSpace(effectivePath))
+            startInfo.Environment["PATH"] = effectivePath;
+
+        var lookupPath = startInfo.Environment.TryGetValue("PATH", out var pathValue)
+            ? pathValue
+            : string.Empty;
+        var ytDlpPath = ResolveExecutablePathOnPath("yt-dlp", lookupPath);
+        var ffmpegPath = ResolveExecutablePathOnPath("ffmpeg", lookupPath);
+
+        if (!string.IsNullOrWhiteSpace(ytDlpPath))
+            startInfo.Environment["ST_YOUTUBE_YTDLP_PATH"] = ytDlpPath;
+        if (!string.IsNullOrWhiteSpace(ffmpegPath))
+            startInfo.Environment["ST_YOUTUBE_FFMPEG_PATH"] = ffmpegPath;
+
+        _logger.LogInformation(
+            "Prepared backend tool paths. yt-dlp={YtDlpAvailable} ffmpeg={FfmpegAvailable}",
+            !string.IsNullOrWhiteSpace(ytDlpPath),
+            !string.IsNullOrWhiteSpace(ffmpegPath));
+    }
+
+    private static string BuildEffectivePath()
+    {
+        var entries = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        Append(Environment.GetEnvironmentVariable("PATH"));
+        Append(Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User));
+        Append(Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine));
+
+        return string.Join(Path.PathSeparator, entries);
+
+        void Append(string? rawPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+                return;
+
+            var parts = rawPath.Split(
+                Path.PathSeparator,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var part in parts)
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(part.Trim().Trim('"'));
+                if (string.IsNullOrWhiteSpace(expanded))
+                    continue;
+
+                if (seen.Add(expanded))
+                    entries.Add(expanded);
+            }
+        }
+    }
+
+    private static string? ResolveExecutablePathOnPath(string command, string? pathValue)
+    {
+        if (string.IsNullOrWhiteSpace(pathValue))
+            return null;
+
+        var names = BuildCommandNameCandidates(command);
+        var directories = pathValue.Split(
+            Path.PathSeparator,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var dirRaw in directories)
+        {
+            var dir = dirRaw.Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(dir))
+                continue;
+
+            foreach (var name in names)
+            {
+                try
+                {
+                    var fullPath = Path.Combine(dir, name);
+                    if (File.Exists(fullPath))
+                        return fullPath;
+                }
+                catch
+                {
+                    // Continue scanning remaining PATH entries.
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static List<string> BuildCommandNameCandidates(string command)
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(command))
+            return names;
+
+        if (seen.Add(command))
+            names.Add(command);
+
+        if (Path.HasExtension(command))
+            return names;
+
+        var pathExtRaw = Environment.GetEnvironmentVariable("PATHEXT");
+        var extParts = string.IsNullOrWhiteSpace(pathExtRaw)
+            ? new[] { ".EXE", ".CMD", ".BAT" }
+            : pathExtRaw.Split(
+                ';',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var extRaw in extParts)
+        {
+            var ext = extRaw.StartsWith(".", StringComparison.Ordinal) ? extRaw : "." + extRaw;
+            var candidate = command + ext;
+            if (seen.Add(candidate))
+                names.Add(candidate);
+        }
+
+        return names;
     }
 
     private BackendSupervisorResult StartManagedProcess(ProcessStartInfo startInfo, string resolvedPath)

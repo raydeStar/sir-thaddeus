@@ -29,6 +29,14 @@ public partial class CommandPaletteWindow : Window
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        IsVisibleChanged += OnVisibilityChanged;
+    }
+
+    private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        // Stop health polling when the command palette hides
+        if (e.NewValue is false)
+            _settingsVm?.StopVoiceHostHealthPolling();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -112,6 +120,10 @@ public partial class CommandPaletteWindow : Window
         InputArea.Visibility    = tab == "Chat"      ? Visibility.Visible : Visibility.Collapsed;
         NewChatButton.Visibility = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
 
+        // Stop health polling when leaving Settings tab
+        if (tab != "Settings")
+            _settingsVm?.StopVoiceHostHealthPolling();
+
         switch (tab)
         {
             case "Chat":
@@ -158,6 +170,9 @@ public partial class CommandPaletteWindow : Window
             _settingsLoaded = true;
             await _settingsVm.LoadAsync();
         }
+
+        // Start polling VoiceHost health while the Settings tab is visible
+        _settingsVm?.StartVoiceHostHealthPolling();
     }
 
     // ─────────────────────────────────────────────────────────────────

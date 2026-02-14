@@ -23,6 +23,8 @@ public sealed class SettingsViewModel : ViewModelBase
 {
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
+    private readonly YouTubeJobsHttpClient _youtubeJobsClient;
+    private readonly VoiceHostProcessManager? _voiceHostProcessManager;
 
     private AppSettings _settings;
 
@@ -52,6 +54,32 @@ public sealed class SettingsViewModel : ViewModelBase
     private int    _voiceAsrTimeoutMs = 45000;
     private int    _voiceAgentTimeoutMs = 90000;
     private int    _voiceSpeakingTimeoutMs = 90000;
+    private string _youtubeAsrProvider = "qwen3asr";
+    private string _youtubeAsrModelId = "qwen-asr-1.6b";
+    private string _youtubeLanguageHint = "en-us";
+    private bool _youtubeKeepAudio;
+    private string _youtubeUrl = "";
+    private string _youtubeJobId = "";
+    private string _youtubeJobStatus = "Idle";
+    private string _youtubeJobStage = "";
+    private int _youtubeJobProgressPercent;
+    private bool _youtubeJobIsRunning;
+    private string _youtubeSummary = "";
+    private string _youtubeTranscriptPath = "";
+    private string _youtubeOutputDir = "";
+    private string _youtubeErrorMessage = "";
+    private CancellationTokenSource? _youtubeJobPollCts;
+
+    // VoiceHost health panel
+    private string _voiceHostStatusText   = "Unknown";
+    private bool   _voiceHostIsReachable;
+    private bool   _voiceHostIsReady;
+    private bool   _voiceHostAsrReady;
+    private bool   _voiceHostTtsReady;
+    private string _voiceHostVersion      = "";
+    private string _voiceHostMessage      = "";
+    private bool   _voiceHostIsBusy;
+    private CancellationTokenSource? _voiceHostHealthPollCts;
 
     // Memory
     private bool   _memoryEnabled     = true;
@@ -116,6 +144,38 @@ public sealed class SettingsViewModel : ViewModelBase
     public int VoiceAsrTimeoutMs { get => _voiceAsrTimeoutMs; set { if (SetProperty(ref _voiceAsrTimeoutMs, value)) MarkDirty(); } }
     public int VoiceAgentTimeoutMs { get => _voiceAgentTimeoutMs; set { if (SetProperty(ref _voiceAgentTimeoutMs, value)) MarkDirty(); } }
     public int VoiceSpeakingTimeoutMs { get => _voiceSpeakingTimeoutMs; set { if (SetProperty(ref _voiceSpeakingTimeoutMs, value)) MarkDirty(); } }
+    public string YouTubeAsrProvider { get => _youtubeAsrProvider; set { if (SetProperty(ref _youtubeAsrProvider, value)) MarkDirty(); } }
+    public string YouTubeAsrModelId { get => _youtubeAsrModelId; set { if (SetProperty(ref _youtubeAsrModelId, value)) MarkDirty(); } }
+    public string YouTubeLanguageHint { get => _youtubeLanguageHint; set { if (SetProperty(ref _youtubeLanguageHint, value)) MarkDirty(); } }
+    public bool YouTubeKeepAudio { get => _youtubeKeepAudio; set { if (SetProperty(ref _youtubeKeepAudio, value)) MarkDirty(); } }
+    public string YouTubeUrl { get => _youtubeUrl; set => SetProperty(ref _youtubeUrl, value); }
+    public string YouTubeJobId { get => _youtubeJobId; private set => SetProperty(ref _youtubeJobId, value); }
+    public string YouTubeJobStatus { get => _youtubeJobStatus; private set => SetProperty(ref _youtubeJobStatus, value); }
+    public string YouTubeJobStage { get => _youtubeJobStage; private set => SetProperty(ref _youtubeJobStage, value); }
+    public int YouTubeJobProgressPercent { get => _youtubeJobProgressPercent; private set => SetProperty(ref _youtubeJobProgressPercent, value); }
+    public bool YouTubeJobIsRunning
+    {
+        get => _youtubeJobIsRunning;
+        private set
+        {
+            if (SetProperty(ref _youtubeJobIsRunning, value))
+                CommandManager.InvalidateRequerySuggested();
+        }
+    }
+    public string YouTubeSummary { get => _youtubeSummary; private set => SetProperty(ref _youtubeSummary, value); }
+    public string YouTubeTranscriptPath { get => _youtubeTranscriptPath; private set => SetProperty(ref _youtubeTranscriptPath, value); }
+    public string YouTubeOutputDir { get => _youtubeOutputDir; private set => SetProperty(ref _youtubeOutputDir, value); }
+    public string YouTubeErrorMessage { get => _youtubeErrorMessage; private set => SetProperty(ref _youtubeErrorMessage, value); }
+
+    // ─── VoiceHost Health ───────────────────────────────────────────
+    public string VoiceHostStatusText  { get => _voiceHostStatusText;  private set => SetProperty(ref _voiceHostStatusText, value); }
+    public bool   VoiceHostIsReachable { get => _voiceHostIsReachable; private set => SetProperty(ref _voiceHostIsReachable, value); }
+    public bool   VoiceHostIsReady     { get => _voiceHostIsReady;     private set => SetProperty(ref _voiceHostIsReady, value); }
+    public bool   VoiceHostAsrReady    { get => _voiceHostAsrReady;    private set => SetProperty(ref _voiceHostAsrReady, value); }
+    public bool   VoiceHostTtsReady    { get => _voiceHostTtsReady;    private set => SetProperty(ref _voiceHostTtsReady, value); }
+    public string VoiceHostVersion     { get => _voiceHostVersion;     private set => SetProperty(ref _voiceHostVersion, value); }
+    public string VoiceHostMessage     { get => _voiceHostMessage;     private set => SetProperty(ref _voiceHostMessage, value); }
+    public bool   VoiceHostIsBusy      { get => _voiceHostIsBusy;      private set { if (SetProperty(ref _voiceHostIsBusy, value)) CommandManager.InvalidateRequerySuggested(); } }
 
     // Memory
     public bool MemoryEnabled
@@ -209,6 +269,11 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand StopTestMicCommand      { get; }
     public ICommand PlayTestRecordingCommand { get; }
     public ICommand RefreshDevicesCommand    { get; }
+    public ICommand StartYouTubeJobCommand { get; }
+    public ICommand CancelYouTubeJobCommand { get; }
+    public ICommand StartVoiceHostCommand    { get; }
+    public ICommand StopVoiceHostCommand     { get; }
+    public ICommand RefreshVoiceHostCommand  { get; }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
@@ -249,11 +314,20 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // ─── Constructor ─────────────────────────────────────────────────
 
-    public SettingsViewModel(AppSettings settings, SqliteMemoryStore? store, IAuditLogger audit)
+    public SettingsViewModel(
+        AppSettings settings,
+        SqliteMemoryStore? store,
+        IAuditLogger audit,
+        YouTubeJobsHttpClient? youtubeJobsClient = null,
+        VoiceHostProcessManager? voiceHostProcessManager = null)
     {
         _settings = settings;
         _store    = store;
         _audit    = audit;
+        _voiceHostProcessManager = voiceHostProcessManager;
+        _youtubeJobsClient = youtubeJobsClient ?? new YouTubeJobsHttpClient(
+            () => _settings.Voice.GetVoiceHostBaseUrl(),
+            _audit);
 
         SaveCommand    = new RelayCommand(_ => SaveSettings());
         RefreshCommand = new AsyncRelayCommand(() => LoadAsync());
@@ -262,6 +336,11 @@ public sealed class SettingsViewModel : ViewModelBase
         StopTestMicCommand       = new RelayCommand(_ => StopMicTest(),        _ => IsTestingMic);
         PlayTestRecordingCommand = new RelayCommand(_ => PlayTestRecording(),  _ => HasTestRecording && !IsTestingMic);
         RefreshDevicesCommand    = new RelayCommand(_ => RefreshAudioDevices());
+        StartYouTubeJobCommand   = new AsyncRelayCommand(StartYouTubeJobAsync, () => !YouTubeJobIsRunning);
+        CancelYouTubeJobCommand  = new AsyncRelayCommand(CancelYouTubeJobAsync, () => YouTubeJobIsRunning);
+        StartVoiceHostCommand    = new AsyncRelayCommand(StartVoiceHostAsync,  () => !VoiceHostIsBusy);
+        StopVoiceHostCommand     = new AsyncRelayCommand(StopVoiceHostAsync,   () => !VoiceHostIsBusy);
+        RefreshVoiceHostCommand  = new AsyncRelayCommand(RefreshVoiceHostHealthAsync, () => !VoiceHostIsBusy);
 
         LoadFromSettings(settings);
         LoadAudioDevices();
@@ -308,6 +387,10 @@ public sealed class SettingsViewModel : ViewModelBase
         _voiceAsrTimeoutMs = s.Voice.AsrTimeoutMs;
         _voiceAgentTimeoutMs = s.Voice.AgentTimeoutMs;
         _voiceSpeakingTimeoutMs = s.Voice.SpeakingTimeoutMs;
+        _youtubeAsrProvider = s.Voice.GetResolvedYouTubeAsrProvider();
+        _youtubeAsrModelId = s.Voice.GetResolvedYouTubeAsrModelId();
+        _youtubeLanguageHint = s.Voice.GetResolvedYouTubeLanguageHint();
+        _youtubeKeepAudio = s.Voice.YouTubeKeepAudio;
 
         _memoryEnabled     = s.Memory.Enabled;
         _embeddingsEnabled = s.Memory.UseEmbeddings;
@@ -346,6 +429,10 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceAsrTimeoutMs));
         OnPropertyChanged(nameof(VoiceAgentTimeoutMs));
         OnPropertyChanged(nameof(VoiceSpeakingTimeoutMs));
+        OnPropertyChanged(nameof(YouTubeAsrProvider));
+        OnPropertyChanged(nameof(YouTubeAsrModelId));
+        OnPropertyChanged(nameof(YouTubeLanguageHint));
+        OnPropertyChanged(nameof(YouTubeKeepAudio));
         OnPropertyChanged(nameof(MemoryEnabled));
         OnPropertyChanged(nameof(EmbeddingsEnabled));
         OnPropertyChanged(nameof(McpPermDeveloperOverride));
@@ -398,6 +485,283 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             StatusText = $"Failed to load profiles: {ex.Message}";
         }
+    }
+
+    // ─── YouTube Job Flow ────────────────────────────────────────────
+
+    private async Task StartYouTubeJobAsync()
+    {
+        var videoUrl = (YouTubeUrl ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(videoUrl))
+        {
+            YouTubeErrorMessage = "Enter a YouTube URL first.";
+            return;
+        }
+
+        _youtubeJobPollCts?.Cancel();
+        _youtubeJobPollCts?.Dispose();
+        _youtubeJobPollCts = new CancellationTokenSource();
+
+        YouTubeJobIsRunning = true;
+        YouTubeJobStatus = "Running";
+        YouTubeJobStage = "Resolving";
+        YouTubeJobProgressPercent = 0;
+        YouTubeSummary = "";
+        YouTubeTranscriptPath = "";
+        YouTubeOutputDir = "";
+        YouTubeErrorMessage = "";
+
+        try
+        {
+            var start = await _youtubeJobsClient.StartJobAsync(
+                videoUrl: videoUrl,
+                languageHint: string.IsNullOrWhiteSpace(YouTubeLanguageHint) ? null : YouTubeLanguageHint.Trim(),
+                keepAudio: YouTubeKeepAudio,
+                asrProvider: string.IsNullOrWhiteSpace(YouTubeAsrProvider) ? null : YouTubeAsrProvider.Trim(),
+                asrModel: string.IsNullOrWhiteSpace(YouTubeAsrModelId) ? null : YouTubeAsrModelId.Trim(),
+                cancellationToken: _youtubeJobPollCts.Token);
+
+            YouTubeJobId = start.JobId;
+            if (!string.IsNullOrWhiteSpace(start.OutputDir))
+                YouTubeOutputDir = start.OutputDir;
+
+            await PollYouTubeJobAsync(start.JobId, _youtubeJobPollCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            YouTubeJobStatus = "Cancelled";
+            YouTubeJobStage = "Cancelled";
+        }
+        catch (Exception ex)
+        {
+            YouTubeJobStatus = "Failed";
+            YouTubeJobStage = "Failed";
+            YouTubeErrorMessage = ex.Message;
+        }
+        finally
+        {
+            if (!string.Equals(YouTubeJobStatus, "Running", StringComparison.OrdinalIgnoreCase))
+                YouTubeJobIsRunning = false;
+        }
+    }
+
+    private async Task CancelYouTubeJobAsync()
+    {
+        if (string.IsNullOrWhiteSpace(YouTubeJobId))
+            return;
+
+        try
+        {
+            _youtubeJobPollCts?.Cancel();
+            using var cancelCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var snapshot = await _youtubeJobsClient.CancelJobAsync(YouTubeJobId, cancelCts.Token);
+            ApplyYouTubeJobSnapshot(snapshot);
+        }
+        catch (Exception ex)
+        {
+            YouTubeErrorMessage = $"Cancel failed: {ex.Message}";
+            YouTubeJobIsRunning = false;
+        }
+    }
+
+    private async Task PollYouTubeJobAsync(string jobId, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var snapshot = await _youtubeJobsClient.GetJobAsync(jobId, cancellationToken);
+            ApplyYouTubeJobSnapshot(snapshot);
+            if (snapshot.IsTerminal)
+                return;
+            await Task.Delay(1000, cancellationToken);
+        }
+    }
+
+    private void ApplyYouTubeJobSnapshot(YouTubeJobSnapshot snapshot)
+    {
+        YouTubeJobId = snapshot.JobId;
+        YouTubeJobStatus = string.IsNullOrWhiteSpace(snapshot.Status) ? "Unknown" : snapshot.Status;
+        YouTubeJobStage = snapshot.Stage ?? "";
+        YouTubeJobProgressPercent = Math.Clamp((int)Math.Round(snapshot.Progress * 100.0), 0, 100);
+        if (!string.IsNullOrWhiteSpace(snapshot.TranscriptPath))
+            YouTubeTranscriptPath = snapshot.TranscriptPath;
+        if (!string.IsNullOrWhiteSpace(snapshot.OutputDir))
+            YouTubeOutputDir = snapshot.OutputDir;
+        if (!string.IsNullOrWhiteSpace(snapshot.Summary))
+            YouTubeSummary = snapshot.Summary;
+
+        if (snapshot.Error is not null)
+            YouTubeErrorMessage = $"{snapshot.Error.Code}: {snapshot.Error.Message}";
+
+        YouTubeJobIsRunning = !snapshot.IsTerminal;
+    }
+
+    // ─── VoiceHost Lifecycle ─────────────────────────────────────────
+
+    private async Task StartVoiceHostAsync()
+    {
+        if (_voiceHostProcessManager is null)
+        {
+            VoiceHostMessage = "Process manager unavailable.";
+            return;
+        }
+
+        VoiceHostIsBusy = true;
+        VoiceHostStatusText = "Starting...";
+        VoiceHostMessage = "";
+        try
+        {
+            var result = await _voiceHostProcessManager.EnsureRunningAsync(CancellationToken.None);
+            if (result.Success)
+            {
+                VoiceHostStatusText = "Running";
+                VoiceHostMessage = $"Listening at {result.BaseUrl}";
+            }
+            else
+            {
+                VoiceHostStatusText = "Failed";
+                VoiceHostMessage = result.UserMessage;
+            }
+
+            await RefreshVoiceHostHealthAsync();
+        }
+        catch (Exception ex)
+        {
+            VoiceHostStatusText = "Error";
+            VoiceHostMessage = ex.Message;
+        }
+        finally
+        {
+            VoiceHostIsBusy = false;
+        }
+    }
+
+    private async Task StopVoiceHostAsync()
+    {
+        if (_voiceHostProcessManager is null)
+        {
+            VoiceHostMessage = "Process manager unavailable.";
+            return;
+        }
+
+        VoiceHostIsBusy = true;
+        VoiceHostStatusText = "Stopping...";
+        try
+        {
+            _voiceHostProcessManager.Stop();
+            VoiceHostStatusText = "Stopped";
+            VoiceHostIsReachable = false;
+            VoiceHostIsReady = false;
+            VoiceHostAsrReady = false;
+            VoiceHostTtsReady = false;
+            VoiceHostVersion = "";
+            VoiceHostMessage = "VoiceHost stopped by user.";
+
+            // Small delay then verify it's actually gone
+            await Task.Delay(500);
+            await RefreshVoiceHostHealthAsync();
+        }
+        catch (Exception ex)
+        {
+            VoiceHostStatusText = "Error";
+            VoiceHostMessage = ex.Message;
+        }
+        finally
+        {
+            VoiceHostIsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Probes the VoiceHost /health endpoint and updates all status properties.
+    /// Called on-demand by the Refresh button or after Start/Stop.
+    /// </summary>
+    public async Task RefreshVoiceHostHealthAsync()
+    {
+        if (_voiceHostProcessManager is null)
+        {
+            VoiceHostStatusText = "Unavailable";
+            VoiceHostMessage = "VoiceHost process manager not initialized.";
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var health = await _voiceHostProcessManager.CheckHealthAsync(cts.Token);
+
+            VoiceHostIsReachable = health.Reachable;
+            VoiceHostIsReady     = health.Ready;
+            VoiceHostAsrReady    = health.AsrReady;
+            VoiceHostTtsReady    = health.TtsReady;
+            VoiceHostVersion     = health.Version;
+
+            if (health.Ready)
+            {
+                VoiceHostStatusText = "Ready";
+                VoiceHostMessage = string.IsNullOrWhiteSpace(health.Version)
+                    ? "All systems operational."
+                    : $"Version: {health.Version}";
+            }
+            else if (health.Reachable)
+            {
+                VoiceHostStatusText = "Warming Up";
+                VoiceHostMessage = string.IsNullOrWhiteSpace(health.Message)
+                    ? "Reachable but not fully ready."
+                    : health.Message;
+            }
+            else
+            {
+                VoiceHostStatusText = "Offline";
+                VoiceHostMessage = "VoiceHost is not running.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            VoiceHostStatusText = "Timeout";
+            VoiceHostMessage = "Health check timed out.";
+        }
+        catch (Exception ex)
+        {
+            VoiceHostStatusText = "Error";
+            VoiceHostMessage = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Starts a background health poll loop at 5-second intervals.
+    /// Called when the settings panel becomes visible.
+    /// </summary>
+    public void StartVoiceHostHealthPolling()
+    {
+        StopVoiceHostHealthPolling();
+        _voiceHostHealthPollCts = new CancellationTokenSource();
+        var token = _voiceHostHealthPollCts.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(
+                        () => _ = RefreshVoiceHostHealthAsync());
+                    await Task.Delay(5_000, token);
+                }
+                catch (OperationCanceledException) { break; }
+                catch { /* swallow — health polling is best-effort */ }
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// Stops the background health poll loop.
+    /// Called when the settings panel is hidden or the command palette closes.
+    /// </summary>
+    public void StopVoiceHostHealthPolling()
+    {
+        try { _voiceHostHealthPollCts?.Cancel(); }
+        catch { /* best effort */ }
+        _voiceHostHealthPollCts?.Dispose();
+        _voiceHostHealthPollCts = null;
     }
 
     // ─── Persistence ─────────────────────────────────────────────────
@@ -689,7 +1053,17 @@ public sealed class SettingsViewModel : ViewModelBase
                 PreferLocalTts = _voicePreferLocalTts,
                 AsrTimeoutMs = Math.Max(5_000, _voiceAsrTimeoutMs),
                 AgentTimeoutMs = Math.Max(10_000, _voiceAgentTimeoutMs),
-                SpeakingTimeoutMs = Math.Max(10_000, _voiceSpeakingTimeoutMs)
+                SpeakingTimeoutMs = Math.Max(10_000, _voiceSpeakingTimeoutMs),
+                YouTubeAsrProvider = string.IsNullOrWhiteSpace(_youtubeAsrProvider)
+                    ? "qwen3asr"
+                    : _youtubeAsrProvider.Trim(),
+                YouTubeAsrModelId = string.IsNullOrWhiteSpace(_youtubeAsrModelId)
+                    ? "qwen-asr-1.6b"
+                    : _youtubeAsrModelId.Trim(),
+                YouTubeLanguageHint = string.IsNullOrWhiteSpace(_youtubeLanguageHint)
+                    ? ""
+                    : _youtubeLanguageHint.Trim(),
+                YouTubeKeepAudio = _youtubeKeepAudio
             },
             Memory = _settings.Memory with
             {

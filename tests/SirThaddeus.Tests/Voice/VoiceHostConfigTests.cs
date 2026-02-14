@@ -128,6 +128,10 @@ public sealed class VoiceHostConfigTests
         Assert.Equal("faster-whisper", settings.GetNormalizedSttEngine());
         Assert.Equal("base", settings.GetResolvedSttModelId());
         Assert.Equal("en", settings.GetResolvedSttLanguage());
+        Assert.Equal("qwen3asr", settings.GetResolvedYouTubeAsrProvider());
+        Assert.Equal("qwen-asr-1.6b", settings.GetResolvedYouTubeAsrModelId());
+        Assert.Equal("en-us", settings.GetResolvedYouTubeLanguageHint());
+        Assert.False(settings.YouTubeKeepAudio);
     }
 
     [Fact]
@@ -164,5 +168,22 @@ public sealed class VoiceHostConfigTests
 
         Assert.Equal("", auto.GetResolvedSttLanguage());
         Assert.Equal("en-us", explicitEnglish.GetResolvedSttLanguage());
+    }
+
+    [Fact]
+    public void YouTubeAsrSettings_NormalizeProviderModelAndLanguage()
+    {
+        var settings = new VoiceSettings
+        {
+            YouTubeAsrProvider = "QWEN-ASR",
+            YouTubeAsrModelId = " qwen-asr-1.6b ",
+            YouTubeLanguageHint = "AUTO",
+            YouTubeKeepAudio = true
+        };
+
+        Assert.Equal("qwen3asr", settings.GetResolvedYouTubeAsrProvider());
+        Assert.Equal("qwen-asr-1.6b", settings.GetResolvedYouTubeAsrModelId());
+        Assert.Equal("", settings.GetResolvedYouTubeLanguageHint());
+        Assert.True(settings.YouTubeKeepAudio);
     }
 }

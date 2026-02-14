@@ -73,6 +73,38 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
 
     public int? CurrentPort => _currentPort;
 
+    /// <summary>
+    /// Probes the health endpoint without starting a process.
+    /// Used by the UI health panel for on-demand status checks.
+    /// </summary>
+    public async Task<VoiceHostHealthResult> CheckHealthAsync(CancellationToken cancellationToken)
+    {
+        var settings = GetSettingsSnapshot();
+        if (!TryNormalizeBaseUrl(settings.GetVoiceHostBaseUrl(), out var baseUrl, out _))
+            return VoiceHostHealthResult.Unreachable("invalid_voicehost_base", "VoiceHost base URL is invalid.");
+
+        var healthPath = string.IsNullOrWhiteSpace(settings.VoiceHostHealthPath)
+            ? "/health"
+            : settings.VoiceHostHealthPath.Trim();
+
+        return await ProbeHealthAsync(baseUrl, healthPath, cancellationToken);
+    }
+
+    /// <summary>
+    /// Kills the managed VoiceHost process if one is alive.
+    /// Clears session state so health checks reflect the stopped state.
+    /// </summary>
+    public void Stop()
+    {
+        StopManagedProcessIfAny();
+        _currentBaseUrl = null;
+        _currentPort = null;
+        WriteAudit("VOICEHOST_MANUAL_STOP", "ok", new Dictionary<string, object>
+        {
+            ["reason"] = "user_requested"
+        });
+    }
+
     public void UpdateSettings(VoiceSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
