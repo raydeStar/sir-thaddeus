@@ -1,0 +1,31 @@
+id: contract_file_permission_stub
+name: Tool Contract - file_read permission denied handling
+user_message: "Try file_read and clearly explain if permission is denied."
+allowed_tools:
+  - file_read
+mode: stub
+assertions:
+  required_tools:
+    - file_read
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - permission
+  forbidden_keywords: []
+  max_response_chars: 700
+min_score: 7.5
+stub:
+  default_failure: permission_denied
+  per_tool_failures:
+    file_read: permission_denied
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

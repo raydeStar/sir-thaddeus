@@ -1,0 +1,27 @@
+id: contract_tool_ping_replay
+name: Tool Contract - tool_ping replay happy path
+user_message: "Run tool_ping and return the status."
+allowed_tools:
+  - tool_ping
+mode: replay
+assertions:
+  required_tools:
+    - tool_ping
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - status
+  forbidden_keywords: []
+  max_response_chars: 500
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

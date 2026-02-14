@@ -1,0 +1,30 @@
+id: web_general_news_aggregate
+name: Web Search - General News Aggregate
+user_message: "Give me the top 5 technology news stories right now. Each bullet should have the headline and one sentence of context for why it matters."
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - matters
+  forbidden_keywords: []
+  max_response_chars: 1700
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

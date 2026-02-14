@@ -422,9 +422,13 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(settings.TtsEndpoint))
                 args += $" --tts-upstream {QuoteArg(settings.TtsEndpoint.Trim())}";
             args += $" --tts-engine {QuoteArg(settings.GetNormalizedTtsEngine())}";
-            args += $" --stt-engine {QuoteArg(settings.GetNormalizedSttEngine())}";
+            var configuredSttEngine = settings.GetNormalizedSttEngine();
+            // Interactive voice should always boot with faster-whisper.
+            // Qwen is reserved for transcription jobs.
+            const string frontendSttEngine = "faster-whisper";
+            args += $" --stt-engine {QuoteArg(frontendSttEngine)}";
 
-            var resolvedSttModelId = settings.GetResolvedSttModelId();
+            var resolvedSttModelId = ResolveFrontendSttModelId(settings, configuredSttEngine);
             if (!string.IsNullOrWhiteSpace(resolvedSttModelId))
                 args += $" --stt-model-id {QuoteArg(resolvedSttModelId)}";
             var resolvedSttLanguage = settings.GetResolvedSttLanguage();
@@ -492,7 +496,10 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
                 ["path"] = hostPath,
                 ["port"] = port,
                 ["pid"] = process.Id,
-                ["args"] = args
+                ["args"] = args,
+                ["configuredSttEngine"] = configuredSttEngine,
+                ["effectiveSttEngine"] = frontendSttEngine,
+                ["effectiveSttModelId"] = resolvedSttModelId
             });
 
             return (true, "");
@@ -516,6 +523,17 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         if (!value.Contains('\"'))
             return $"\"{value}\"";
         return $"\"{value.Replace("\"", "\\\"")}\"";
+    }
+
+    private static string ResolveFrontendSttModelId(VoiceSettings settings, string configuredSttEngine)
+    {
+        if (string.Equals(configuredSttEngine, "faster-whisper", StringComparison.OrdinalIgnoreCase))
+        {
+            var configuredModel = settings.GetResolvedSttModelId();
+            return string.IsNullOrWhiteSpace(configuredModel) ? "base" : configuredModel;
+        }
+
+        return "base";
     }
 
     private async Task<VoiceHostHealthResult> WaitForReadyAsync(

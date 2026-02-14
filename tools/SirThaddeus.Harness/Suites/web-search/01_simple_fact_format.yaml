@@ -1,0 +1,31 @@
+id: web_simple_fact_format
+name: Web Search - Simple Fact Format
+user_message: "When was C# first released? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise."
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - "answer:"
+    - "commentary:"
+  forbidden_keywords: []
+  max_response_chars: 320
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

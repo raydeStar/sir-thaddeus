@@ -1,0 +1,34 @@
+id: quality_web_grounding
+name: Quality - Web search grounding
+user_message: "Use web_search to answer what changed in C# 13 and keep it practical."
+allowed_tools:
+  - web_search
+mode: replay
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - c#
+    - changed
+  forbidden_keywords:
+    - http://
+    - https://
+  max_response_chars: 650
+min_score: 8.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+    - tools/SirThaddeus.Harness/
+  tier3_targets:
+    - packages/
+    - apps/
+    - tools/

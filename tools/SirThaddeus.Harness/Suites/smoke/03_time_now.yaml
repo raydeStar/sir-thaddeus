@@ -1,0 +1,27 @@
+id: smoke_time_now
+name: Smoke - Time Tool
+user_message: "Use time_now and tell me the current local time in one sentence."
+allowed_tools:
+  - time_now
+mode: live
+assertions:
+  required_tools:
+    - time_now
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - time
+  forbidden_keywords: []
+  max_response_chars: 400
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

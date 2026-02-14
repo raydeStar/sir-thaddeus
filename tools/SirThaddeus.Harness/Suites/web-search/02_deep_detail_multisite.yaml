@@ -1,0 +1,33 @@
+id: web_deep_detail_multisite
+name: Web Search - Deep Detail Multi-Site
+user_message: "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway."
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - overview
+    - common
+    - differences
+    - practical takeaway
+  forbidden_keywords: []
+  max_response_chars: 1500
+min_score: 7.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

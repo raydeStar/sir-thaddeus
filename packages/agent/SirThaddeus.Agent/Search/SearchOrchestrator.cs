@@ -62,16 +62,22 @@ public sealed class SearchOrchestrator
     // ── LLM Instructions ─────────────────────────────────────────────
     private const string NewsSummaryInstruction =
         "\n\nSearch results are in the next message. " +
-        "Synthesize across all sources. Cross-reference where " +
-        "they agree or differ. Be thorough. No URLs. " +
-        "ONLY use facts from the provided sources. " +
-        "Do NOT invent or guess details not in the results.";
+        "Present the key stories as individual items. " +
+        "For each item, give the headline followed by one sentence " +
+        "explaining why it matters (use the phrase 'matters because'). " +
+        "Note where sources agree or differ. " +
+        "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT invent or guess details not in the results. " +
+        "IMPORTANT: If the user's message specifies a response format " +
+        "(e.g. bullet count, headings, numbered list), follow it exactly.";
 
     private const string FactFindSummaryInstruction =
         "\n\nSearch results and article content are in the next message. " +
         "Synthesize into a clear, factual answer. Lead with the bottom line. " +
         "Include key facts. No URLs. " +
-        "ONLY use facts from the provided sources.";
+        "ONLY use facts from the provided sources. " +
+        "IMPORTANT: If the user's message specifies a response format " +
+        "(e.g. specific line prefixes, headings, structure), follow it exactly.";
 
     private const string DeepDiveInstruction =
         "\n\nFull article content from a prior source is in the next message. " +
@@ -602,6 +608,34 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        // Repeat the user's original request at the tail of the summary
+        // input. Small models lose early context in long prompts, so this
+        // puts format/structure instructions in the immediate attention
+        // window right before generation.
+        //
+        // When the user's message contains phrasing like "why it matters",
+        // provide a fill-in template so the model echoes their key phrases
+        // instead of paraphrasing. Small models follow templates more
+        // reliably than abstract format instructions.
+        var originalRequest = history.LastOrDefault(m => m.Role == "user")?.Content;
+        if (!string.IsNullOrWhiteSpace(originalRequest))
+        {
+            var lower = originalRequest.ToLowerInvariant();
+            if (lower.Contains("matters", StringComparison.Ordinal))
+            {
+                summaryInput +=
+                    "\n\n[ANSWER FORMAT — use this template for EACH item:]\n" +
+                    "- [Headline] — This matters because [one sentence of context].\n\n" +
+                    "[User's full request:]\n" + originalRequest;
+            }
+            else
+            {
+                summaryInput += "\n\n[Now answer the user's request below. " +
+                                "Follow their format EXACTLY.]\n" +
+                                originalRequest;
+            }
+        }
+
         var messages = InjectInstruction(history, instruction);
         messages.Add(ChatMessage.User(summaryInput));
 
@@ -763,7 +797,35 @@ public sealed class SearchOrchestrator
             return "";
 
         var idx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
-        return idx >= 0 ? toolResult[..idx].TrimEnd() : toolResult.TrimEnd();
+        var cleaned = idx >= 0 ? toolResult[..idx].TrimEnd() : toolResult.TrimEnd();
+
+        // The web_search tool embeds its own summarization instructions
+        // (e.g. "Synthesize these sources...") before the numbered results.
+        // Strip this prefix — the SearchOrchestrator provides its own
+        // instructions and competing directives confuse small models.
+        return StripToolInstructionPrefix(cleaned);
+    }
+
+    /// <summary>
+    /// Removes embedded LLM instruction text that appears before the first
+    /// numbered search result. The tool sometimes prepends "Synthesize..."
+    /// or similar directives that compete with the pipeline's own instructions.
+    /// </summary>
+    private static string StripToolInstructionPrefix(string text)
+    {
+        // Find the first numbered result: "1." at the start of a line
+        var firstResult = -1;
+        for (var i = 0; i < text.Length - 1; i++)
+        {
+            if (text[i] == '1' && text[i + 1] == '.' &&
+                (i == 0 || text[i - 1] == '\n' || text[i - 1] == '\r'))
+            {
+                firstResult = i;
+                break;
+            }
+        }
+
+        return firstResult > 0 ? text[firstResult..] : text;
     }
 
     /// <summary>
