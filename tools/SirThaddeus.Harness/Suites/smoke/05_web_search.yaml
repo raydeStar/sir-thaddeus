@@ -1,0 +1,29 @@
+id: smoke_web_search
+name: Smoke - Web Search
+user_message: "Use web_search to find one recent headline about .NET 9 and summarize it briefly."
+allowed_tools:
+  - web_search
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - .net
+  forbidden_keywords:
+    - http://
+    - https://
+  max_response_chars: 700
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

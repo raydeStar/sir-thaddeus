@@ -1,0 +1,31 @@
+id: contract_web_timeout_stub
+name: Tool Contract - web_search timeout handling
+user_message: "Use web_search for AI policy news and handle timeout gracefully."
+allowed_tools:
+  - web_search
+mode: stub
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - timeout
+  forbidden_keywords: []
+  max_response_chars: 700
+min_score: 7.5
+stub:
+  default_failure: timeout
+  per_tool_failures:
+    web_search: timeout
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

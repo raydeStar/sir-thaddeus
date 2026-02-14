@@ -15,4 +15,11 @@
     <ProjectReference Include="..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Prevent this utility project from globbing harness sources under tools/. -->
+    <Compile Remove="SirThaddeus.Harness\**\*.cs" />
+    <EmbeddedResource Remove="SirThaddeus.Harness\**\*" />
+    <None Remove="SirThaddeus.Harness\**\*" />
+  </ItemGroup>
+
 </Project>

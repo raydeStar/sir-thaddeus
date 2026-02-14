@@ -268,7 +268,10 @@ public static class IntentFeatureExtractor
             "price of ",    "price for ",
             "updates on ",  "update on ",   "updates about ",
             "what's the price", "whats the price",
-            "how much is",  "how much does"
+            "how much is",  "how much does",
+            "search the web",  "search online",    "look it up",
+            "look this up",    "find information",  "find info on",
+            "search about"
         ];
 
         foreach (var phrase in phrases)
@@ -276,6 +279,11 @@ public static class IntentFeatureExtractor
             if (lower.Contains(phrase, StringComparison.Ordinal))
                 return true;
         }
+
+        // Temporal freshness + update/info keywords together strongly
+        // signal a need for live web data regardless of domain topic.
+        if (HasTemporalFreshnessWithUpdateCue(lower))
+            return true;
 
         var hasTopic =
             lower.Contains("news", StringComparison.Ordinal) ||
@@ -437,15 +445,20 @@ public static class IntentFeatureExtractor
             "what is ",
             "what's ",
             "whats ",
+            "what are ",
             "who is ",
             "who's ",
             "whos ",
             "who was ",
             "when is ",
             "when was ",
+            "when did ",
             "where is ",
+            "where are ",
             "how many ",
             "how much ",
+            "in what year ",
+            "what year ",
             "define ",
             "meaning of "
         ];
@@ -543,6 +556,38 @@ public static class IntentFeatureExtractor
                lower.Contains("define ", StringComparison.Ordinal) ||
                lower.Contains("meaning of ", StringComparison.Ordinal) ||
                lower.Contains("what does ", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Detects queries that combine temporal freshness signals (e.g. "latest",
+    /// "recent") with update/information keywords (e.g. "updates", "changes",
+    /// "developments"). This compound pattern strongly indicates the user
+    /// wants current data from the web, even when no domain topic keyword
+    /// (news, weather, stock) is present.
+    /// </summary>
+    private static bool HasTemporalFreshnessWithUpdateCue(string lower)
+    {
+        var hasFreshness =
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("recent", StringComparison.Ordinal) ||
+            lower.Contains("current", StringComparison.Ordinal) ||
+            lower.Contains("this year", StringComparison.Ordinal) ||
+            lower.Contains("past year", StringComparison.Ordinal) ||
+            lower.Contains("last year", StringComparison.Ordinal) ||
+            lower.Contains("this month", StringComparison.Ordinal) ||
+            lower.Contains("right now", StringComparison.Ordinal);
+
+        if (!hasFreshness)
+            return false;
+
+        return lower.Contains("updates", StringComparison.Ordinal) ||
+               lower.Contains("update", StringComparison.Ordinal) ||
+               lower.Contains("developments", StringComparison.Ordinal) ||
+               lower.Contains("changes", StringComparison.Ordinal) ||
+               lower.Contains("releases", StringComparison.Ordinal) ||
+               lower.Contains("announcements", StringComparison.Ordinal) ||
+               lower.Contains("version", StringComparison.Ordinal) ||
+               lower.Contains("release", StringComparison.Ordinal);
     }
 
     private static bool ContainsAny(string lower, ReadOnlySpan<string> tokens)

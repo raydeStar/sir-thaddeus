@@ -63,15 +63,12 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
 
         var endpoint = BuildEndpointUrl();
         var voiceSettings = GetVoiceSettingsSnapshot();
-        var sttEngine = voiceSettings.GetNormalizedSttEngine();
-        var sttModelId = voiceSettings.GetResolvedSttModelId();
+        var configuredSttEngine = voiceSettings.GetNormalizedSttEngine();
+        // Keep interactive/front-end ASR pinned to faster-whisper.
+        // Qwen ASR is reserved for explicit transcription workflows.
+        var sttEngine = "faster-whisper";
+        var sttModelId = ResolveFrontendSttModelId(voiceSettings, configuredSttEngine);
         var sttLanguage = voiceSettings.GetResolvedSttLanguage();
-        if (string.Equals(sttEngine, "qwen3asr", StringComparison.OrdinalIgnoreCase) &&
-            string.IsNullOrWhiteSpace(sttModelId))
-        {
-            throw new InvalidOperationException(
-                "SttUnavailable: selected engine 'qwen3asr' requires sttModelId.");
-        }
 
         var requestId = BuildRequestId(sessionId);
         var startedAt = DateTimeOffset.UtcNow;
@@ -86,6 +83,7 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
             {
                 ["sessionId"] = sessionId,
                 ["requestId"] = requestId,
+                ["configuredEngine"] = configuredSttEngine,
                 ["engine"] = sttEngine,
                 ["modelId"] = sttModelId,
                 ["language"] = string.IsNullOrWhiteSpace(sttLanguage) ? "auto" : sttLanguage,
@@ -167,6 +165,7 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
             {
                 ["sessionId"] = sessionId,
                 ["requestId"] = requestId,
+                ["configuredEngine"] = configuredSttEngine,
                 ["engine"] = sttEngine,
                 ["modelId"] = sttModelId,
                 ["language"] = string.IsNullOrWhiteSpace(sttLanguage) ? "auto" : sttLanguage,
@@ -265,6 +264,17 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
         {
             return new VoiceSettings();
         }
+    }
+
+    private static string ResolveFrontendSttModelId(VoiceSettings voiceSettings, string configuredSttEngine)
+    {
+        if (string.Equals(configuredSttEngine, "faster-whisper", StringComparison.OrdinalIgnoreCase))
+        {
+            var configuredModel = voiceSettings.GetResolvedSttModelId();
+            return string.IsNullOrWhiteSpace(configuredModel) ? "base" : configuredModel;
+        }
+
+        return "base";
     }
 
     private static string BuildRequestId(string sessionId)

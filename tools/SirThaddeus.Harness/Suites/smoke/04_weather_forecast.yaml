@@ -1,0 +1,29 @@
+id: smoke_weather_forecast
+name: Smoke - Weather Pipeline
+user_message: "Use weather tools to provide a short weather outlook for Seattle, WA."
+allowed_tools:
+  - weather_geocode
+  - weather_forecast
+mode: live
+assertions:
+  required_tools:
+    - weather_geocode
+    - weather_forecast
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - seattle
+  forbidden_keywords: []
+  max_response_chars: 700
+min_score: 7.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

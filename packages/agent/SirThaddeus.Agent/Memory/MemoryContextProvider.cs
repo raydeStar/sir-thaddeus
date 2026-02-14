@@ -145,6 +145,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
                            packTextEl.ValueKind == JsonValueKind.String
                 ? (packTextEl.GetString() ?? "")
                 : "";
+            packText = SanitizePackTextForRequest(packText, request.UserMessage, request.IsColdGreeting);
 
             var facts = TryReadInt(root, "facts");
             var events = TryReadInt(root, "events");
@@ -257,6 +258,131 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             part.Length == 0
                 ? ""
                 : char.ToUpperInvariant(part[0]) + part[1..]));
+    }
+
+    private static string SanitizePackTextForRequest(
+        string packText,
+        string userMessage,
+        bool isColdGreeting)
+    {
+        if (string.IsNullOrWhiteSpace(packText) || isColdGreeting)
+            return packText;
+
+        if (LooksLikePersonalMemoryContextRequest(userMessage))
+            return packText;
+
+        // Public/third-person prompts should not receive rich memory
+        // context; it can leak unrelated preferences into answers.
+        if (LooksLikeThirdPersonPublicTopicPrompt(userMessage))
+            return "";
+
+        var reduced = StripTaggedSection(packText, "[NUGGETS]", "[/NUGGETS]");
+        reduced = StripTaggedSection(reduced, "[MEMORY CONTEXT]", "[/MEMORY CONTEXT]");
+        reduced = RemoveLinesContaining(reduced, "You know this user as");
+        reduced = reduced.Trim();
+
+        if (string.IsNullOrWhiteSpace(reduced))
+            return "";
+
+        return reduced +
+               "\n[MEMORY RULES]\n" +
+               "Use profile context only if directly relevant. " +
+               "Never mention memory retrieval, profile tags, or unrelated saved facts.\n" +
+               "[/MEMORY RULES]";
+    }
+
+    private static bool LooksLikePersonalMemoryContextRequest(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = $" {userMessage.Trim().ToLowerInvariant()} ";
+
+        if (lower.Contains(" i ", StringComparison.Ordinal) ||
+            lower.Contains(" i'm ", StringComparison.Ordinal) ||
+            lower.Contains(" im ", StringComparison.Ordinal) ||
+            lower.Contains(" i've ", StringComparison.Ordinal) ||
+            lower.Contains(" i ve ", StringComparison.Ordinal) ||
+            lower.Contains(" we ", StringComparison.Ordinal) ||
+            lower.Contains(" our ", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (lower.Contains(" about me ", StringComparison.Ordinal) ||
+            lower.Contains(" my name ", StringComparison.Ordinal) ||
+            lower.Contains(" call me ", StringComparison.Ordinal) ||
+            lower.Contains(" what do you remember ", StringComparison.Ordinal) ||
+            lower.Contains(" what do you know about me ", StringComparison.Ordinal) ||
+            lower.Contains(" remember that i ", StringComparison.Ordinal) ||
+            lower.Contains(" i prefer ", StringComparison.Ordinal) ||
+            lower.Contains(" i like ", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return lower.Contains(" my ", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeThirdPersonPublicTopicPrompt(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = $" {userMessage.Trim().ToLowerInvariant()} ";
+        var hasThirdPersonCue =
+            lower.Contains(" he ", StringComparison.Ordinal) ||
+            lower.Contains(" she ", StringComparison.Ordinal) ||
+            lower.Contains(" his ", StringComparison.Ordinal) ||
+            lower.Contains(" her ", StringComparison.Ordinal) ||
+            lower.Contains(" their ", StringComparison.Ordinal) ||
+            lower.Contains(" them ", StringComparison.Ordinal);
+
+        if (!hasThirdPersonCue)
+            return false;
+
+        return lower.Contains(" policy", StringComparison.Ordinal) ||
+               lower.Contains(" immigration", StringComparison.Ordinal) ||
+               lower.Contains(" president", StringComparison.Ordinal) ||
+               lower.Contains(" elected", StringComparison.Ordinal) ||
+               lower.Contains(" news", StringComparison.Ordinal) ||
+               lower.Contains(" latest", StringComparison.Ordinal) ||
+               lower.Contains(" current", StringComparison.Ordinal);
+    }
+
+    private static string StripTaggedSection(string text, string openTag, string closeTag)
+    {
+        var output = text;
+        while (true)
+        {
+            var start = output.IndexOf(openTag, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+                break;
+
+            var end = output.IndexOf(closeTag, start, StringComparison.OrdinalIgnoreCase);
+            if (end < 0)
+            {
+                output = output[..start];
+                break;
+            }
+
+            var removeEnd = end + closeTag.Length;
+            output = output[..start] + output[removeEnd..];
+        }
+
+        return output;
+    }
+
+    private static string RemoveLinesContaining(string text, string token)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var lines = text.Split('\n');
+        var kept = lines
+            .Where(line => !line.Contains(token, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        return string.Join("\n", kept);
     }
 
     private static int TryReadInt(JsonElement root, string propertyName)

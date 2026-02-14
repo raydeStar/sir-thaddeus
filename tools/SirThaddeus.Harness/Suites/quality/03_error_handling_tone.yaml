@@ -1,0 +1,33 @@
+id: quality_error_tone
+name: Quality - Failure handling tone and clarity
+user_message: "Try file_read on a restricted path and explain the failure clearly with a safe next step."
+allowed_tools:
+  - file_read
+mode: replay
+assertions:
+  required_tools:
+    - file_read
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - permission
+    - next step
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 700
+min_score: 8.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+    - tools/SirThaddeus.Harness/
+  tier3_targets:
+    - packages/
+    - apps/
+    - tools/

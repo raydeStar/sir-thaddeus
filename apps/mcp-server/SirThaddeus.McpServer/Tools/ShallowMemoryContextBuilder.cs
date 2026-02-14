@@ -53,12 +53,10 @@ internal static class ShallowMemoryContextBuilder
 
             sb.AppendLine("[/PROFILE]");
 
-            // Tell the LLM to actually use the name — small models
-            // often ignore context unless explicitly told what to do.
-            var firstName = userProfile.DisplayName.Split(' ', 2)[0];
             sb.AppendLine(
-                $"You know this user as \"{firstName}\" — " +
-                "address them by name naturally.");
+                "Memory context is private guidance. Do not mention profile " +
+                "tags, retrieval, or unrelated saved preferences unless the user " +
+                "explicitly asks about their own remembered details.");
         }
 
         // ── Nuggets block ────────────────────────────────────────────

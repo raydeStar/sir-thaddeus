@@ -1,0 +1,27 @@
+id: smoke_tool_capabilities
+name: Smoke - Capability Listing
+user_message: "Call tool_list_capabilities and summarize what capability groups are available."
+allowed_tools:
+  - tool_list_capabilities
+mode: live
+assertions:
+  required_tools:
+    - tool_list_capabilities
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - capability
+  forbidden_keywords: []
+  max_response_chars: 700
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

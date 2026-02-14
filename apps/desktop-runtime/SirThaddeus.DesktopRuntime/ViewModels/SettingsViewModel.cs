@@ -385,8 +385,9 @@ public sealed class SettingsViewModel : ViewModelBase
         _voiceTtsEngine = s.Voice.GetNormalizedTtsEngine();
         _voiceTtsModelId = s.Voice.GetResolvedTtsModelId();
         _voiceTtsVoiceId = s.Voice.GetResolvedTtsVoiceId();
-        _voiceSttEngine = s.Voice.GetNormalizedSttEngine();
-        _voiceSttModelId = s.Voice.GetResolvedSttModelId();
+        // Front-end ASR stays pinned to faster-whisper.
+        _voiceSttEngine = "faster-whisper";
+        _voiceSttModelId = ResolveFrontendSttModelIdForUi(s.Voice);
         _voicePreferLocalTts = s.Voice.PreferLocalTts;
         _voiceAsrTimeoutMs = s.Voice.AsrTimeoutMs;
         _voiceAgentTimeoutMs = s.Voice.AgentTimeoutMs;
@@ -1053,10 +1054,8 @@ public sealed class SettingsViewModel : ViewModelBase
                     : _voiceTtsEngine.Trim(),
                 TtsModelId = _voiceTtsModelId.Trim(),
                 TtsVoiceId = _voiceTtsVoiceId.Trim(),
-                SttEngine = string.IsNullOrWhiteSpace(_voiceSttEngine)
-                    ? "faster-whisper"
-                    : _voiceSttEngine.Trim(),
-                SttModelId = _voiceSttModelId.Trim(),
+                SttEngine = "faster-whisper",
+                SttModelId = ResolveFrontendSttModelIdForSave(_voiceSttEngine, _voiceSttModelId),
                 PreferLocalTts = _voicePreferLocalTts,
                 AsrTimeoutMs = Math.Max(5_000, _voiceAsrTimeoutMs),
                 AgentTimeoutMs = Math.Max(10_000, _voiceAgentTimeoutMs),
@@ -1133,6 +1132,31 @@ public sealed class SettingsViewModel : ViewModelBase
             "always" => "always",
             _ => "off"
         };
+    }
+
+    private static string ResolveFrontendSttModelIdForUi(VoiceSettings settings)
+    {
+        var configuredEngine = settings.GetNormalizedSttEngine();
+        if (string.Equals(configuredEngine, "faster-whisper", StringComparison.OrdinalIgnoreCase))
+        {
+            var model = settings.GetResolvedSttModelId();
+            return string.IsNullOrWhiteSpace(model) ? "base" : model;
+        }
+
+        return "base";
+    }
+
+    private static string ResolveFrontendSttModelIdForSave(string uiEngine, string uiModelId)
+    {
+        // Persist faster-whisper model defaults even when legacy configs still
+        // mention qwen3asr in the UI.
+        if (string.Equals((uiEngine ?? "").Trim(), "faster-whisper", StringComparison.OrdinalIgnoreCase))
+        {
+            var model = (uiModelId ?? "").Trim();
+            return string.IsNullOrWhiteSpace(model) ? "base" : model;
+        }
+
+        return "base";
     }
 }
 

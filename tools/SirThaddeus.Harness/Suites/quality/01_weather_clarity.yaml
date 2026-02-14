@@ -1,0 +1,35 @@
+id: quality_weather_clarity
+name: Quality - Weather response clarity
+user_message: "Use weather tools for Denver and provide a concise, useful plan for the day."
+allowed_tools:
+  - weather_geocode
+  - weather_forecast
+mode: replay
+assertions:
+  required_tools:
+    - weather_geocode
+    - weather_forecast
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - denver
+    - today
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 600
+min_score: 8.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+    - packages/config/SirThaddeus.Config/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+    - tools/SirThaddeus.Harness/
+  tier3_targets:
+    - packages/
+    - apps/
+    - tools/
