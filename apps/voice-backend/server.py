@@ -25,6 +25,29 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from youtube_pipeline import PipelineError, YouTubeJobManager, YouTubeSummaryConfig
+
+
+def _safe_int_env(name: str, default: int, min_value: int, max_value: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
+def _safe_float_env(name: str, default: float, min_value: float, max_value: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
 
 
 logging.basicConfig(
@@ -40,9 +63,50 @@ SCHEMA_VERSION = 1
 INSTANCE_ID = uuid.uuid4().hex
 APP_VERSION = "0.2.0"
 ROOT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = ROOT_DIR.parent.parent
 VOICES_ROOT = ROOT_DIR / "voices"
 STT_MODELS_ROOT = ROOT_DIR / "stt-models"
+DATA_ROOT = Path(os.environ.get("THADDEUS_DATA_DIR") or str(REPO_ROOT / "data")).expanduser().resolve()
 UNSAFE_ARTIFACTS_ALLOWED = (os.environ.get("ST_VOICE_ALLOW_UNSAFE_ARTIFACTS", "").strip().lower() in {"1", "true", "yes", "on"})
+
+YOUTUBE_DEFAULT_ASR_PROVIDER = (
+    os.environ.get("ST_YOUTUBE_ASR_PROVIDER") or "qwen3asr"
+).strip().lower() or "qwen3asr"
+YOUTUBE_DEFAULT_ASR_MODEL_ID = (
+    os.environ.get("ST_YOUTUBE_ASR_MODEL_ID") or "qwen-asr-1.6b"
+).strip() or "qwen-asr-1.6b"
+_YOUTUBE_LANGUAGE_HINT_RAW = (os.environ.get("ST_YOUTUBE_LANGUAGE_HINT") or "").strip().lower()
+YOUTUBE_DEFAULT_LANGUAGE_HINT = (
+    "" if _YOUTUBE_LANGUAGE_HINT_RAW in {"auto", "detect"} else _YOUTUBE_LANGUAGE_HINT_RAW
+)
+YOUTUBE_SUMMARY_BASE_URL = (
+    os.environ.get("ST_YOUTUBE_SUMMARY_BASE_URL")
+    or os.environ.get("ST_LLM_BASE_URL")
+    or "http://127.0.0.1:1234"
+).strip()
+YOUTUBE_SUMMARY_MODEL = (
+    os.environ.get("ST_YOUTUBE_SUMMARY_MODEL")
+    or os.environ.get("ST_LLM_MODEL")
+    or "local-model"
+).strip() or "local-model"
+YOUTUBE_SUMMARY_TEMPERATURE = _safe_float_env(
+    "ST_YOUTUBE_SUMMARY_TEMPERATURE",
+    default=0.2,
+    min_value=0.0,
+    max_value=1.0,
+)
+YOUTUBE_SUMMARY_MAX_INPUT_CHARS = _safe_int_env(
+    "ST_YOUTUBE_SUMMARY_MAX_INPUT_CHARS",
+    default=24_000,
+    min_value=2_000,
+    max_value=200_000,
+)
+YOUTUBE_SUMMARY_TIMEOUT_SEC = _safe_int_env(
+    "ST_YOUTUBE_SUMMARY_TIMEOUT_SEC",
+    default=120,
+    min_value=10,
+    max_value=1_800,
+)
 
 BLOCKED_ARTIFACT_EXTENSIONS = {".pt", ".pth"}
 KOKORO_ALLOWED_EXTENSIONS = {
@@ -102,6 +166,14 @@ def normalize_stt_language(value: Optional[str]) -> str:
         return "en"
     if normalized in {"auto", "detect"}:
         return ""
+    if "-" in normalized:
+        primary = normalized.split("-", 1)[0].strip()
+        if primary:
+            return primary
+    if "_" in normalized:
+        primary = normalized.split("_", 1)[0].strip()
+        if primary:
+            return primary
     return normalized
 
 
@@ -1032,6 +1104,142 @@ RUNTIME_CONFIG = build_runtime_config()
 PROVIDERS = ProviderRegistry(RUNTIME_CONFIG)
 
 
+def transcribe_youtube_audio(
+    audio_bytes: bytes,
+    engine: str,
+    model_id: str,
+    language_hint: str,
+    request_id: str,
+) -> str:
+    requested_engine = normalize_stt_engine(engine)
+    requested_model = (model_id or "").strip()
+    requested_language = normalize_stt_language(language_hint)
+
+    def _provider_details(candidate: BaseProvider, status_payload: Dict[str, Any]) -> Dict[str, Any]:
+        status_details = status_payload.get("details") or {}
+        return {
+            "engine": candidate.engine,
+            "modelId": candidate.model_id,
+            "lastError": status_details.get("lastError") or "",
+            "startupMs": status_details.get("startupMs") or 0,
+        }
+
+    requested_provider = PROVIDERS.get_stt(
+        engine=requested_engine,
+        model_id=requested_model,
+        language=requested_language,
+    )
+    requested_init = requested_provider.init_probe(force=False)
+    requested_status = requested_provider.build_engine_status(run_init_probe=False)
+    requested_ready = bool(requested_init.ready and requested_status.get("ready", False))
+
+    fallback_provider: Optional[BaseProvider] = None
+    fallback_init_ready = False
+    fallback_status: Dict[str, Any] = {}
+
+    fallback_engine = normalize_stt_engine(RUNTIME_CONFIG.stt_engine)
+    fallback_model = resolve_stt_model_id(fallback_engine, RUNTIME_CONFIG.stt_model_id)
+    if fallback_engine != requested_provider.engine or fallback_model != requested_provider.model_id:
+        fallback_provider = PROVIDERS.get_stt(
+            engine=fallback_engine,
+            model_id=fallback_model,
+            language=requested_language,
+        )
+        fallback_probe = fallback_provider.init_probe(force=False)
+        fallback_status = fallback_provider.build_engine_status(run_init_probe=False)
+        fallback_init_ready = bool(fallback_probe.ready and fallback_status.get("ready", False))
+
+    active_provider = requested_provider
+    active_mode = "requested"
+    if not requested_ready:
+        if fallback_provider is not None and fallback_init_ready:
+            active_provider = fallback_provider
+            active_mode = "fallback"
+            logger.warning(
+                "YOUTUBE_ASR_FALLBACK requestId=%s requestedEngine=%s requestedModel=%s fallbackEngine=%s fallbackModel=%s",
+                request_id,
+                requested_provider.engine,
+                requested_provider.model_id,
+                active_provider.engine,
+                active_provider.model_id,
+            )
+        else:
+            raise PipelineError(
+                "ASR_MODEL_UNAVAILABLE",
+                "Configured ASR model is unavailable.",
+                {
+                    "requested": _provider_details(requested_provider, requested_status),
+                    "fallback": _provider_details(fallback_provider, fallback_status)
+                    if fallback_provider is not None
+                    else None,
+                },
+            )
+
+    try:
+        return active_provider.transcribe(audio_bytes, request_id)
+    except Exception as exc:
+        if (
+            active_mode == "requested"
+            and fallback_provider is not None
+            and fallback_init_ready
+            and fallback_provider is not active_provider
+        ):
+            try:
+                logger.warning(
+                    "YOUTUBE_ASR_TRANSCRIBE_FALLBACK requestId=%s requestedEngine=%s requestedModel=%s fallbackEngine=%s fallbackModel=%s",
+                    request_id,
+                    active_provider.engine,
+                    active_provider.model_id,
+                    fallback_provider.engine,
+                    fallback_provider.model_id,
+                )
+                return fallback_provider.transcribe(audio_bytes, request_id)
+            except Exception as fallback_exc:
+                raise PipelineError(
+                    "ASR_TRANSCRIBE_FAILED",
+                    "ASR transcription failed.",
+                    {
+                        "requested": {
+                            "engine": active_provider.engine,
+                            "modelId": active_provider.model_id,
+                            "message": str(exc),
+                        },
+                        "fallback": {
+                            "engine": fallback_provider.engine,
+                            "modelId": fallback_provider.model_id,
+                            "message": str(fallback_exc),
+                        },
+                    },
+                ) from fallback_exc
+
+        raise PipelineError(
+            "ASR_TRANSCRIBE_FAILED",
+            "ASR transcription failed.",
+            {
+                "engine": active_provider.engine,
+                "modelId": active_provider.model_id,
+                "message": str(exc),
+            },
+        ) from exc
+
+
+YOUTUBE_JOBS = YouTubeJobManager(
+    data_root=DATA_ROOT,
+    transcribe_callback=transcribe_youtube_audio,
+    logger=logger,
+)
+
+
+def build_youtube_summary_config() -> YouTubeSummaryConfig:
+    return YouTubeSummaryConfig(
+        base_url=YOUTUBE_SUMMARY_BASE_URL,
+        model=YOUTUBE_SUMMARY_MODEL,
+        temperature=YOUTUBE_SUMMARY_TEMPERATURE,
+        max_input_chars=YOUTUBE_SUMMARY_MAX_INPUT_CHARS,
+        timeout_sec=YOUTUBE_SUMMARY_TIMEOUT_SEC,
+    )
+
+
 class TtsRequest(BaseModel):
     text: str
     requestId: Optional[str] = None
@@ -1052,7 +1260,19 @@ class TtsTestRequest(BaseModel):
     forceInit: bool = False
 
 
-def build_health_payload(asr_status: Dict[str, Any], tts_status: Dict[str, Any]) -> Dict[str, Any]:
+class YouTubeTranscribeRequest(BaseModel):
+    videoUrl: str
+    languageHint: Optional[str] = None
+    keepAudio: bool = False
+    asrProvider: Optional[str] = None
+    asrModel: Optional[str] = None
+
+
+def build_health_payload(
+    asr_status: Dict[str, Any],
+    tts_status: Dict[str, Any],
+    youtube_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     asr_ready = bool(asr_status.get("ready", False))
     tts_ready = bool(tts_status.get("ready", False))
     ready = asr_ready and tts_ready
@@ -1085,6 +1305,7 @@ def build_health_payload(asr_status: Dict[str, Any], tts_status: Dict[str, Any])
         "message": message,
         "asr": asr_status,
         "tts": tts_status,
+        "youtube": youtube_status or {},
     }
 
 
@@ -1120,12 +1341,30 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.error("TTS init probe failed on startup: %s", exc)
 
+    try:
+        youtube_dep = YOUTUBE_JOBS.dependency_status()
+        if youtube_dep.get("ready"):
+            logger.info(
+                "YouTube pipeline dependencies ready: yt-dlp=%s ffmpeg=%s",
+                (youtube_dep.get("ytDlp") or {}).get("path", ""),
+                (youtube_dep.get("ffmpeg") or {}).get("path", ""),
+            )
+        else:
+            logger.warning(
+                "YouTube pipeline dependencies missing: yt-dlp=%s ffmpeg=%s",
+                (youtube_dep.get("ytDlp") or {}).get("available", False),
+                (youtube_dep.get("ffmpeg") or {}).get("available", False),
+            )
+    except Exception as exc:
+        logger.warning("YouTube dependency probe failed: %s", exc)
+
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
     asr_status = PROVIDERS.get_stt().build_engine_status(run_init_probe=False)
     tts_status = PROVIDERS.get_tts().build_engine_status(run_init_probe=False)
-    return build_health_payload(asr_status, tts_status)
+    youtube_status = YOUTUBE_JOBS.dependency_status()
+    return build_health_payload(asr_status, tts_status, youtube_status=youtube_status)
 
 
 @app.post("/asr")
@@ -1357,6 +1596,122 @@ async def stt_bench(
         },
         headers={"X-Request-Id": request_id},
     )
+
+
+@app.post("/api/youtube/transcribe")
+async def youtube_transcribe(payload: YouTubeTranscribeRequest, request: Request):
+    request_id = resolve_request_id("youtube", request.headers.get("X-Request-Id"))
+    asr_provider = normalize_stt_engine(payload.asrProvider or YOUTUBE_DEFAULT_ASR_PROVIDER)
+    asr_model = (payload.asrModel or YOUTUBE_DEFAULT_ASR_MODEL_ID or "").strip()
+    language_hint = normalize_stt_language(payload.languageHint or YOUTUBE_DEFAULT_LANGUAGE_HINT)
+    summary_cfg = build_youtube_summary_config()
+
+    if asr_provider not in {"qwen3asr", "faster-whisper"}:
+        return JSONResponse(
+            {
+                "requestId": request_id,
+                "error": {
+                    "code": "ASR_MODEL_UNAVAILABLE",
+                    "message": "Unsupported ASR provider.",
+                    "details": {
+                        "configuredProvider": asr_provider,
+                        "supportedProviders": ["qwen3asr", "faster-whisper"],
+                    },
+                },
+            },
+            status_code=400,
+            headers={"X-Request-Id": request_id},
+        )
+
+    try:
+        state = YOUTUBE_JOBS.start_job(
+            video_url=payload.videoUrl,
+            language_hint=language_hint,
+            keep_audio=payload.keepAudio,
+            asr_engine=asr_provider,
+            asr_model=asr_model,
+            summary_config=summary_cfg,
+        )
+    except PipelineError as exc:
+        status_code = 400 if exc.code in {"INVALID_URL"} else 503
+        return JSONResponse(
+            {
+                "requestId": request_id,
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                },
+            },
+            status_code=status_code,
+            headers={"X-Request-Id": request_id},
+        )
+
+    logger.info("YOUTUBE_JOB_STARTED requestId=%s jobId=%s", request_id, state.get("jobId"))
+    return JSONResponse(
+        {
+            "requestId": request_id,
+            "jobId": state.get("jobId", ""),
+            "videoId": (state.get("video") or {}).get("videoId", ""),
+            "outputDir": state.get("outputDir", ""),
+        },
+        headers={"X-Request-Id": request_id},
+    )
+
+
+@app.get("/api/jobs/{job_id}")
+async def youtube_job_status(job_id: str, request: Request):
+    request_id = resolve_request_id("job-status", request.headers.get("X-Request-Id"))
+    state = YOUTUBE_JOBS.get_job(job_id)
+    if state is None:
+        return JSONResponse(
+            {
+                "requestId": request_id,
+                "jobId": job_id,
+                "status": "Failed",
+                "stage": "Failed",
+                "progress": 1.0,
+                "video": {"videoId": "", "title": "", "channel": "", "durationSec": 0},
+                "transcriptPath": "",
+                "summary": None,
+                "error": {
+                    "code": "JOB_NOT_FOUND_OR_EXPIRED",
+                    "message": "Job not found or expired.",
+                    "details": {},
+                },
+            },
+            status_code=404,
+            headers={"X-Request-Id": request_id},
+        )
+
+    state_with_request = dict(state)
+    state_with_request["requestId"] = request_id
+    return JSONResponse(state_with_request, headers={"X-Request-Id": request_id})
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def youtube_job_cancel(job_id: str, request: Request):
+    request_id = resolve_request_id("job-cancel", request.headers.get("X-Request-Id"))
+    state = YOUTUBE_JOBS.cancel_job(job_id)
+    if state is None:
+        return JSONResponse(
+            {
+                "requestId": request_id,
+                "jobId": job_id,
+                "error": {
+                    "code": "JOB_NOT_FOUND_OR_EXPIRED",
+                    "message": "Job not found or expired.",
+                    "details": {},
+                },
+            },
+            status_code=404,
+            headers={"X-Request-Id": request_id},
+        )
+
+    logger.info("YOUTUBE_JOB_CANCELLED requestId=%s jobId=%s", request_id, job_id)
+    state_with_request = dict(state)
+    state_with_request["requestId"] = request_id
+    return JSONResponse(state_with_request, headers={"X-Request-Id": request_id})
 
 
 @app.post("/shutdown")
