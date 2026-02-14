@@ -2453,6 +2453,22 @@
                                          FontSize="12" Padding="8,6"/>
                             </Grid>
 
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Draft Tone"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Subtext0Brush}"
+                                           VerticalAlignment="Center"/>
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding AvailableDraftTones}"
+                                          SelectedItem="{Binding YouTubeDraftTone, Mode=TwoWay}"
+                                          Style="{StaticResource DarkComboBoxStyle}"
+                                          ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                            </Grid>
+
                             <CheckBox Content="Keep converted audio files (do not clean work folder)"
                                       IsChecked="{Binding YouTubeKeepAudio}"
                                       Foreground="{StaticResource TextBrush}"

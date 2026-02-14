@@ -22,4 +22,7 @@ public sealed record VoiceHostYouTubeTranscribeRequest
 
     [JsonPropertyName("asrModel")]
     public string? AsrModel { get; init; }
+
+    [JsonPropertyName("draftTone")]
+    public string? DraftTone { get; init; }
 }
