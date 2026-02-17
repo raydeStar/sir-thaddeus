@@ -1,0 +1,34 @@
+id: contract_holiday_lookup
+name: Tool Contract - Holiday lookup for a specific country
+user_message: "Is today a public holiday in the United States?"
+allowed_tools:
+  - holidays_is_today
+  - holidays_next
+  - holidays_get
+  - time_now
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - file_read
+    - system_execute
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - holiday
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 800
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/UtilityRouter.cs
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

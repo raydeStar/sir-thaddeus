@@ -1,0 +1,43 @@
+id: reasoning_monty_hall_probability
+name: Reasoning - Monty Hall problem (counter-intuitive probability)
+user_message: "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  # Correct answer: switch. Switching gives 2/3 probability vs 1/3 for staying.
+  # Many small models get this wrong by claiming 50/50.
+  required_keywords:
+    - "switch"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - "50/50"
+    - "equal chance"
+    - "doesn't matter"
+  max_response_chars: 2000
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

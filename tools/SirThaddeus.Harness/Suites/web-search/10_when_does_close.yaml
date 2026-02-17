@@ -1,0 +1,35 @@
+id: web_when_does_close
+name: Web Search - "When does X close" triggers deep-dive
+user_message: "When does Target in Seattle close today?"
+allowed_tools:
+  - memory_retrieve
+  - places_lookup
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - target
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1400
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/IntentFeatureExtractor.cs
+    - packages/agent/SirThaddeus.Agent/Search/DeepDive/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier3_targets:
+    - packages/

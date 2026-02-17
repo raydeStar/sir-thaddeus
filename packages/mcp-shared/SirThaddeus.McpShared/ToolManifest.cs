@@ -59,7 +59,7 @@ public static class ToolManifest
             Aliases     = ["MemoryStoreFacts"],
             Category    = "memory",
             ReadWrite   = "write",
-            Permission  = "implicit",
+            Permission  = "required",
             Description = "Stores facts the user asked to remember. Checks duplicates/conflicts.",
             Limits      = "Max 10 facts per call. Upsert (idempotent)."
         },
@@ -69,7 +69,7 @@ public static class ToolManifest
             Aliases     = ["MemoryUpdateFact"],
             Category    = "memory",
             ReadWrite   = "write",
-            Permission  = "implicit",
+            Permission  = "required",
             Description = "Updates an existing fact after user confirms a conflict resolution.",
             Limits      = "Single fact per call."
         },
@@ -89,7 +89,7 @@ public static class ToolManifest
             Aliases     = ["MemoryDeleteFact"],
             Category    = "memory",
             ReadWrite   = "write",
-            Permission  = "implicit",
+            Permission  = "required",
             Description = "Soft-deletes a memory fact by ID.",
             Limits      = "Single fact per call. Soft-delete (reversible)."
         },
@@ -101,7 +101,7 @@ public static class ToolManifest
             Aliases     = ["WebSearch"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Searches the web and extracts article content from top results.",
             Limits      = "Max 10 results. 8s search timeout, 10s per page. Excerpts <= 1000 chars."
         },
@@ -111,9 +111,19 @@ public static class ToolManifest
             Aliases     = ["BrowserNavigate"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Fetches and extracts content from a specific URL.",
             Limits      = "20s timeout. Single page. Content <= 4000 chars."
+        },
+        new()
+        {
+            Name        = "places_lookup",
+            Aliases     = ["PlacesLookup"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Looks up place details (hours, reviews, links, map coordinates) for deep-dive briefings.",
+            Limits      = "Single place lookup. Timeout via ST_DEEPDIVE_PLACES_TIMEOUT_MS. Reviews clamped 1-5."
         },
         new()
         {
@@ -121,7 +131,7 @@ public static class ToolManifest
             Aliases     = ["WeatherGeocode"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Geocodes a place string to coordinates for weather lookup.",
             Limits      = "Max 5 candidates. Geocode cache enabled."
         },
@@ -131,7 +141,7 @@ public static class ToolManifest
             Aliases     = ["WeatherForecast"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Returns normalized weather forecast from coordinates (NWS US, Open-Meteo fallback).",
             Limits      = "Max 7 days. Forecast cache 10-30 min."
         },
@@ -141,7 +151,7 @@ public static class ToolManifest
             Aliases     = ["ResolveTimezone"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Resolves timezone from coordinates (NWS US, Open-Meteo fallback).",
             Limits      = "Coordinate input only. Timezone cache enabled."
         },
@@ -151,7 +161,7 @@ public static class ToolManifest
             Aliases     = ["HolidaysGet"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Returns public holidays for a country/year using Nager.Date.",
             Limits      = "Year clamped 1900-2100. Max 100 items."
         },
@@ -161,7 +171,7 @@ public static class ToolManifest
             Aliases     = ["HolidaysNext"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Returns upcoming public holidays for a country using Nager.Date.",
             Limits      = "Max 25 items."
         },
@@ -171,7 +181,7 @@ public static class ToolManifest
             Aliases     = ["HolidaysIsToday"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Checks if today is a public holiday for a country/region.",
             Limits      = "Bounded single-day response."
         },
@@ -181,7 +191,7 @@ public static class ToolManifest
             Aliases     = ["FeedFetch"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Fetches and parses RSS/Atom feeds directly from URL.",
             Limits      = "Max 20 items. Feed payload size bounded."
         },
@@ -191,7 +201,7 @@ public static class ToolManifest
             Aliases     = ["StatusCheckUrl"],
             Category    = "web",
             ReadWrite   = "read",
-            Permission  = "none",
+            Permission  = "required",
             Description = "Checks URL reachability with latency/status metadata.",
             Limits      = "HEAD first, GET fallback. Short cache TTL."
         },

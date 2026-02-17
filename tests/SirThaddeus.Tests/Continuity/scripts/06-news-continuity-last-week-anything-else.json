@@ -5,32 +5,32 @@
     "mode": "pipeline",
     "classification": "search",
     "entityJson": "{\"name\":\"\",\"type\":\"none\",\"hint\":\"\"}",
-    "queryJson": "{\"query\":\"boise latest news\",\"recency\":\"week\"}",
-    "followupQueryJson": "{\"query\":\"boise more news\",\"recency\":\"week\"}",
-    "summaryText": "Here is a Boise-focused news summary."
+    "queryJson": "{\"query\":\"seattle latest news\",\"recency\":\"week\"}",
+    "followupQueryJson": "{\"query\":\"seattle more news\",\"recency\":\"week\"}",
+    "summaryText": "Here is a Seattle-focused news summary."
   },
   "mcp": {
     "mode": "perTool",
     "fixedValue": "unexpected tool call",
     "perTool": {
       "web_search": {
-        "defaultResponse": "1. Boise city update -- example.com\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://example.com/boise-news\",\"title\":\"Boise city update\"}]"
+        "defaultResponse": "1. Seattle city update -- example.com\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://example.com/seattle-news\",\"title\":\"Seattle city update\"}]"
       }
     }
   },
   "turns": [
     {
-      "userMessage": "What happened in the news last week in Boise?",
+      "userMessage": "What happened in the news last week in Seattle?",
       "expect": {
         "success": true,
-        "textContains": ["Boise"],
+        "textContains": ["Seattle"],
         "toolCalls": {
           "includeAny": ["web_search", "browser_navigate"],
           "exclude": ["weather_geocode"]
         },
-        "toolArgsContains": ["boise"],
+        "toolArgsContains": ["seattle"],
         "context": {
-          "location": "Boise"
+          "location": "Seattle"
         }
       }
     },
@@ -38,14 +38,14 @@
       "userMessage": "anything else?",
       "expect": {
         "success": true,
-        "textContains": ["Boise"],
+        "textContains": ["Seattle"],
         "toolCalls": {
           "includeAny": ["web_search", "browser_navigate"],
           "exclude": ["weather_geocode"]
         },
-        "toolArgsContains": ["boise"],
+        "toolArgsContains": ["seattle"],
         "context": {
-          "location": "Boise",
+          "location": "Seattle",
           "locationInferred": true
         }
       }

@@ -29,11 +29,20 @@ public sealed record AppSettings
     [JsonPropertyName("weather")]
     public WeatherSettings Weather { get; init; } = new();
 
+    [JsonPropertyName("deepDive")]
+    public DeepDiveSettings DeepDive { get; init; } = new();
+
     [JsonPropertyName("memory")]
     public MemorySettings Memory { get; init; } = new();
 
     [JsonPropertyName("dialogue")]
     public DialogueSettings Dialogue { get; init; } = new();
+
+    [JsonPropertyName("location")]
+    public LocationSettings Location { get; init; } = new();
+
+    [JsonPropertyName("userProfile")]
+    public UserProfileSettings UserProfile { get; init; } = new();
 
     /// <summary>
     /// The profile_id of the currently active user profile.
@@ -43,6 +52,52 @@ public sealed record AppSettings
     /// </summary>
     [JsonPropertyName("activeProfileId")]
     public string? ActiveProfileId { get; init; }
+
+    public const string DefaultLocationProfileKey = "__default__";
+
+    /// <summary>
+    /// Resolves a stable key for profile-scoped location slots.
+    /// </summary>
+    public static string NormalizeLocationProfileKey(string? profileId)
+        => string.IsNullOrWhiteSpace(profileId)
+            ? DefaultLocationProfileKey
+            : profileId.Trim();
+
+    /// <summary>
+    /// Returns the effective manual location profile.
+    ///
+    /// Preference order:
+    /// 1) userProfile.locationsByProfile[profileId]
+    /// 2) userProfile.location (new shape)
+    /// 3) location (legacy shape)
+    /// </summary>
+    public LocationSettings GetEffectiveUserLocation(string? profileId = null)
+    {
+        var key = NormalizeLocationProfileKey(profileId);
+        if (UserProfile.LocationsByProfile.TryGetValue(key, out var scoped) &&
+            (scoped.HasStructuredState || scoped.IsConfigured))
+        {
+            return scoped;
+        }
+
+        if (UserProfile.Location.HasStructuredState || UserProfile.Location.IsConfigured)
+            return UserProfile.Location;
+
+        return Location;
+    }
+}
+
+/// <summary>
+/// Lightweight user profile settings bucket.
+/// </summary>
+public sealed record UserProfileSettings
+{
+    [JsonPropertyName("location")]
+    public LocationSettings Location { get; init; } = new();
+
+    [JsonPropertyName("locationsByProfile")]
+    public Dictionary<string, LocationSettings> LocationsByProfile { get; init; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -109,6 +164,12 @@ public sealed record LlmSettings
 
         // ── Output style ─────────────────────────────────────────────────
         "Be concise and structured. Lead with the answer, not the process. " +
+        "NEVER reply with a bare one-word or one-sentence answer like 'Yes' " +
+        "or 'No'. Always add useful context: a brief explanation, next steps, " +
+        "or a relevant detail that makes the answer actionable. " +
+        "For example, if asked 'Is McDonalds open?', say something like " +
+        "'Yes — the McDonalds at 850 University Blvd is currently open " +
+        "and serves until 11 PM tonight.' " +
         "After a tool runs, summarize what happened and what you recommend " +
         "next. Do not list URLs or raw JSON — the UI shows source cards " +
         "automatically. When writing code, prefer clear, production-ready " +
@@ -298,20 +359,24 @@ public sealed record VoiceSettings
             "" => "faster-whisper",
             "whisper" => "faster-whisper",
             "faster-whisper" => "faster-whisper",
-            "qwen3asr" => "qwen3asr",
-            _ => engine
+            // Interactive voice STT is intentionally pinned to faster-whisper.
+            // Qwen ASR is reserved for YouTube transcription jobs.
+            _ => "faster-whisper"
         };
     }
 
     public string GetResolvedSttModelId()
     {
-        if (!string.IsNullOrWhiteSpace(SttModelId))
-            return SttModelId.Trim();
+        var model = (SttModelId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            return "base";
 
-        // Deterministic default model for faster-whisper.
-        return string.Equals(GetNormalizedSttEngine(), "faster-whisper", StringComparison.Ordinal)
-            ? "base"
-            : "";
+        // Legacy configs may still carry qwen model ids in the front-end STT slot.
+        // Keep live voice deterministic by forcing the whisper default in that case.
+        if (model.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+            return "base";
+
+        return model;
     }
 
     public string GetResolvedSttLanguage()
@@ -469,7 +534,12 @@ public sealed record McpPermissionsSettings
     [JsonPropertyName("system")]
     public string System { get; init; } = "ask";
 
-    /// <summary>Web tools: web_search, browser_navigate.</summary>
+    /// <summary>
+    /// Web tools: web_search, browser_navigate, places_lookup,
+    /// weather_geocode, weather_forecast, resolve_timezone,
+    /// holidays_get, holidays_next, holidays_is_today,
+    /// feed_fetch, status_check_url.
+    /// </summary>
     [JsonPropertyName("web")]
     public string Web { get; init; } = "ask";
 
@@ -609,6 +679,31 @@ public sealed record WeatherSettings
 }
 
 /// <summary>
+/// Deep-dive provider settings. These values are forwarded to MCP tools
+/// so all external HTTP remains on the MCP side of the boundary.
+/// </summary>
+public sealed record DeepDiveSettings
+{
+    [JsonPropertyName("placesApiKey")]
+    public string PlacesApiKey { get; init; } = "";
+
+    [JsonPropertyName("placesTimeoutMs")]
+    public int PlacesTimeoutMs { get; init; } = 8_000;
+
+    [JsonPropertyName("maxToolCalls")]
+    public int MaxToolCalls { get; init; } = 8;
+
+    [JsonPropertyName("maxSources")]
+    public int MaxSources { get; init; } = 5;
+
+    [JsonPropertyName("maxReviewSnippets")]
+    public int MaxReviewSnippets { get; init; } = 3;
+
+    [JsonPropertyName("defaultLocale")]
+    public string DefaultLocale { get; init; } = "en-US";
+}
+
+/// <summary>
 /// Dialogue continuity settings for deterministic multi-turn context.
 /// Runtime owns optional persistence; agent remains in-memory only.
 /// </summary>
@@ -634,4 +729,133 @@ public sealed record DialogueSettings
     /// </summary>
     [JsonPropertyName("persistencePath")]
     public string PersistencePath { get; init; } = "auto";
+}
+
+/// <summary>
+/// User location settings (manual-only).
+///
+/// Current shape:
+/// - mode: "manual" | "unset"
+/// - value: coarse location text (city/state, ZIP, country)
+/// - updatedAt: ISO-8601 timestamp string
+///
+/// Legacy compatibility fields (enabled/label/timezone/latitude/longitude)
+/// remain readable so existing settings.json files continue to work.
+/// </summary>
+public sealed record LocationSettings
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "";
+
+    [JsonPropertyName("value")]
+    public string Value { get; init; } = "";
+
+    [JsonPropertyName("updatedAt")]
+    public string UpdatedAt { get; init; } = "";
+
+    // ── Legacy compatibility fields ────────────────────────────────
+
+    /// <summary>
+    /// Legacy master switch from older settings files.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; } = false;
+
+    /// <summary>
+    /// Legacy location label from older settings files.
+    /// </summary>
+    [JsonPropertyName("label")]
+    public string Label { get; init; } = "";
+
+    /// <summary>
+    /// Legacy latitude from older settings files.
+    /// </summary>
+    [JsonPropertyName("latitude")]
+    public double? Latitude { get; init; }
+
+    /// <summary>
+    /// Legacy longitude from older settings files.
+    /// </summary>
+    [JsonPropertyName("longitude")]
+    public double? Longitude { get; init; }
+
+    /// <summary>
+    /// Legacy timezone from older settings files.
+    /// </summary>
+    [JsonPropertyName("timezone")]
+    public string Timezone { get; init; } = "";
+
+    /// <summary>
+    /// True when any current-shape field was explicitly set.
+    /// </summary>
+    [JsonIgnore]
+    public bool HasStructuredState =>
+        !string.IsNullOrWhiteSpace((Mode ?? "").Trim()) ||
+        !string.IsNullOrWhiteSpace((Value ?? "").Trim()) ||
+        !string.IsNullOrWhiteSpace((UpdatedAt ?? "").Trim());
+
+    /// <summary>
+    /// Returns true when a manual location value is available.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(GetResolvedLabel());
+
+    /// <summary>
+    /// Returns normalized mode: "manual" | "unset".
+    /// </summary>
+    public string GetNormalizedMode()
+    {
+        var mode = (Mode ?? "").Trim().ToLowerInvariant();
+        if (mode == "manual")
+            return "manual";
+        if (mode == "unset")
+            return "unset";
+
+        // Compatibility path for older settings shape.
+        if (!string.IsNullOrWhiteSpace(Label) && Enabled)
+            return "manual";
+
+        return string.IsNullOrWhiteSpace((Value ?? "").Trim())
+            ? "unset"
+            : "manual";
+    }
+
+    /// <summary>
+    /// Returns the coarse manual location text (city/ZIP/country), if set.
+    /// </summary>
+    public string? GetResolvedLabel()
+    {
+        if (GetNormalizedMode() == "manual")
+        {
+            var value = (Value ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        // Compatibility fallback for older settings shape.
+        if (Enabled && !string.IsNullOrWhiteSpace(Label))
+            return Label.Trim();
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the timezone trimmed, or null when unset.
+    /// Manual mode intentionally does not require timezone.
+    /// </summary>
+    public string? GetResolvedTimezone()
+    {
+        var value = (Timezone ?? "").Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Returns updatedAt trimmed when set.
+    /// </summary>
+    public string? GetResolvedUpdatedAt()
+    {
+        var value = (UpdatedAt ?? "").Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
 }

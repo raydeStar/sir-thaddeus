@@ -10,25 +10,25 @@
     "fixedValue": "unexpected tool call",
     "perTool": {
       "weather_geocode": {
-        "defaultResponse": "{\"query\":\"Boise, ID\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Boise, Idaho, US\",\"regionCode\":\"ID\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":43.616613,\"longitude\":-116.200886,\"confidence\":0.95}]}"
+        "defaultResponse": "{\"query\":\"Seattle, WA\",\"source\":\"photon\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"results\":[{\"name\":\"Seattle, Washington, US\",\"regionCode\":\"WA\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":47.6062,\"longitude\":-122.3321,\"confidence\":0.95}]}"
       },
       "weather_forecast": {
-        "defaultResponse": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Boise, Idaho, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":43.616613,\"longitude\":-116.200886},\"current\":{\"temperature\":32,\"unit\":\"F\",\"condition\":\"partly sunny\",\"wind\":\"3 mph\",\"humidityPercent\":34},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":48,\"tempLow\":38,\"avgTemp\":43,\"unit\":\"F\",\"condition\":\"partly sunny\"}],\"alerts\":[]}"
+        "defaultResponse": "{\"provider\":\"nws\",\"providerReason\":\"us_primary\",\"cache\":{\"hit\":false,\"ageSeconds\":0},\"location\":{\"name\":\"Seattle, Washington, US\",\"countryCode\":\"US\",\"isUs\":true,\"latitude\":47.6062,\"longitude\":-122.3321},\"current\":{\"temperature\":45,\"unit\":\"F\",\"condition\":\"partly cloudy\",\"wind\":\"6 mph\",\"humidityPercent\":72},\"daily\":[{\"date\":\"2026-02-10\",\"tempHigh\":50,\"tempLow\":41,\"avgTemp\":46,\"unit\":\"F\",\"condition\":\"partly cloudy\"}],\"alerts\":[]}"
       }
     }
   },
   "turns": [
     {
-      "userMessage": "What's the weather like in Boise, ID?",
+      "userMessage": "What's the weather like in Seattle, WA?",
       "expect": {
         "success": true,
-        "textContains": ["Boise"],
+        "textContains": ["Seattle"],
         "toolCalls": {
           "include": ["weather_geocode", "weather_forecast"],
           "exclude": ["web_search"]
         },
         "context": {
-          "location": "Boise"
+          "location": "Seattle"
         }
       }
     },
@@ -36,15 +36,15 @@
       "userMessage": "today?",
       "expect": {
         "success": true,
-        "textContains": ["Using your previous location context", "Boise"],
+        "textContains": ["Using your previous location context", "Seattle"],
         "toolCalls": {
           "include": ["weather_geocode", "weather_forecast"],
           "exclude": ["web_search"]
         },
-        "toolArgsContains": ["\"place\":\"Boise"],
+        "toolArgsContains": ["\"place\":\"Seattle"],
         "toolArgsNotContains": ["\"place\":\"today"],
         "context": {
-          "location": "Boise",
+          "location": "Seattle",
           "locationInferred": true
         }
       }

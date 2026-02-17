@@ -3,6 +3,7 @@ name: Smoke - Tool Ping Health
 user_message: "Use tool_ping and report whether MCP tool execution is healthy."
 allowed_tools:
   - tool_ping
+  - memory_retrieve
 mode: live
 assertions:
   required_tools:

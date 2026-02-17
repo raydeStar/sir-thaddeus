@@ -64,6 +64,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private string? _lastUtilityContextKey;
     private DateTimeOffset _lastUtilityContextAt;
     private string _reasoningGuardrailsMode = "off";
+    private string? _userLocationHint;
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
     private DateTimeOffset _lastFirstPrinciplesAt;
 
@@ -98,6 +99,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string MemoryRetrieveToolNameAlt  = "MemoryRetrieve";
     private const string MemoryListFactsToolName    = "memory_list_facts";
     private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
+    private const string MemoryStoreFactsToolName   = "memory_store_facts";
+    private const string MemoryStoreFactsToolNameAlt = "MemoryStoreFacts";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
@@ -126,12 +129,32 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.";
 
     // ── Token budget per intent ──────────────────────────────────────
-    // Small models fill available space with filler. Tight caps force
-    // them to be concise and reduce self-dialogue / instruction echoing.
-    private const int MaxTokensCasual    = 160;
-    private const int MaxTokensWebSummary = 768;
-    private const int MaxTokensTooling   = 1024;
+    // Tight caps reduce filler from small models while still leaving
+    // enough headroom for a substantive answer (lists, step-by-step).
+    private const int MaxTokensCasual         = 512;
+    private const int MaxTokensCasualRetry    = 2048;
+    private const int MaxTokensWebSummary     = 1024;
+    private const int MaxTokensWebSummaryRetry = 2048;
+    private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
+
+    // ── Logic puzzle decomposition scaffold ──────────────────────────
+    // For small models, force a minimal first-principles structure so
+    // reasoning prompts stay grounded and reproducible.
+    private const string LogicPuzzleDecompositionModeSuffix =
+        "\n\n[LOGIC PUZZLE MODE]\n" +
+        "Break the problem into smallest parts before answering.\n" +
+        "Use this compact structure:\n" +
+        "Facts:\n" +
+        "- List the explicit givens from the prompt.\n" +
+        "Goal:\n" +
+        "- State exactly what must be determined.\n" +
+        "Basic checks:\n" +
+        "- Ask and answer 2-4 tiny checks (yes/no, arithmetic, or constraint checks).\n" +
+        "Answer:\n" +
+        "- Give the final answer in one clear sentence.\n" +
+        "Do not call tools. Do not invent missing facts.\n" +
+        "[/LOGIC PUZZLE MODE]\n";
 
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
     // optional embeddings don't finish in this window, we skip memory
@@ -193,6 +216,29 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// Set from <c>memory.enabled</c> in settings.
     /// </summary>
     public bool MemoryEnabled { get; set; } = true;
+
+    /// <summary>
+    /// User's configured location hint (e.g. "Portland, OR").
+    /// Set from the active profile's manual location value.
+    /// Injected into the system prompt so location-dependent queries
+    /// (weather, places, local news) default to the user's area.
+    /// </summary>
+    public string? UserLocationHint
+    {
+        get => _userLocationHint;
+        set
+        {
+            _userLocationHint = value;
+            // Propagate to search orchestrator for deep-dive place lookups
+            _searchOrchestrator.UserLocationHint = value;
+        }
+    }
+
+    /// <summary>
+    /// User's configured timezone (e.g. "America/Los_Angeles").
+    /// Set from the active profile's optional location timezone value.
+    /// </summary>
+    public string? UserTimezone { get; set; }
 
     /// <summary>
     /// First principles thinking mode:
@@ -282,7 +328,31 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _utilityIntentHandler = utilityIntentHandler ?? new UtilityIntentHandler();
 
         // Seed the conversation with the system prompt
-        _history.Add(ChatMessage.System(_systemPrompt));
+        _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
+    }
+
+    /// <summary>
+    /// Builds the effective system prompt by appending location context
+    /// when a user location hint is configured (opt-in).
+    /// </summary>
+    private string BuildEffectiveSystemPrompt()
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return _systemPrompt;
+
+        var locationBlock =
+            $"\n\n[USER LOCATION]\n" +
+            $"The user's home location is: {UserLocationHint.Trim()}." +
+            (string.IsNullOrWhiteSpace(UserTimezone)
+                ? ""
+                : $" Timezone: {UserTimezone.Trim()}.") +
+            " Use this as the default area when they ask about local " +
+            "businesses, weather, news, or places without specifying a " +
+            "location. Do NOT announce that you know their location — " +
+            "just use it naturally.\n" +
+            "[/USER LOCATION]";
+
+        return _systemPrompt + locationBlock;
     }
 
     /// <inheritdoc />
@@ -687,8 +757,26 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 roundTrips++;
 
                 var messages = _history.ToList();
+                if (LooksLikeLogicPuzzlePrompt(lowerIncoming))
+                {
+                    messages = InjectModeIntoSystemPrompt(messages, LogicPuzzleDecompositionModeSuffix);
+                    LogEvent("LOGIC_PUZZLE_SCAFFOLD",
+                        "Injected first-principles decomposition scaffold for chat-only solve.");
+                }
                 var response = await CallLlmWithRetrySafe(
                     messages, roundTrips, MaxTokensCasual, cancellationToken);
+
+                // ── Truncation recovery ──────────────────────────────
+                // If the LLM hit the token ceiling mid-sentence, retry
+                // once with a larger budget so it can finish its thought.
+                if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+                {
+                    LogEvent("CASUAL_TRUNCATED",
+                        $"Response truncated at {MaxTokensCasual} tokens — retrying with {MaxTokensCasualRetry}.");
+                    roundTrips++;
+                    response = await CallLlmWithRetrySafe(
+                        messages, roundTrips, MaxTokensCasualRetry, cancellationToken);
+                }
 
                 var text = _postProcessor.ProcessChatOnlyDraft(
                     response.Content ?? "[No response]",
@@ -785,8 +873,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
-            return AttachContextSnapshot(await RunToolLoopAsync(
-                tools, toolCallsMade, roundTrips, cancellationToken), usageBaseline);
+            var toolLoopResponse = await RunToolLoopAsync(
+                tools, toolCallsMade, roundTrips, cancellationToken);
+
+            var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
+                route,
+                contextualUserMessage,
+                tools,
+                toolCallsMade,
+                toolLoopResponse,
+                cancellationToken);
+            if (deterministicMemoryFallback is not null)
+                return AttachContextSnapshot(deterministicMemoryFallback, usageBaseline);
+
+            return AttachContextSnapshot(toolLoopResponse, usageBaseline);
         }
         catch (OperationCanceledException)
         {

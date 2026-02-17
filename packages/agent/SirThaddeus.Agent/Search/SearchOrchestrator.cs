@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Search;
@@ -28,7 +31,8 @@ public enum LookupModeHint
 {
     Auto = 0,
     Fact = 1,
-    News = 2
+    News = 2,
+    DeepDive = 3
 }
 
 public sealed class SearchOrchestrator
@@ -39,9 +43,16 @@ public sealed class SearchOrchestrator
     private readonly string           _systemPrompt;
     private readonly EntityResolver   _entityResolver;
     private readonly QueryBuilder     _queryBuilder;
+    private readonly DeepDiveCoordinator _deepDiveCoordinator;
 
     /// <summary>Formal search state — survives history trimming.</summary>
     public SearchSession Session { get; } = new();
+
+    /// <summary>
+    /// Optional user location hint (e.g. "Portland, OR") forwarded to
+    /// deep-dive place lookups. Set from the orchestrator's config.
+    /// </summary>
+    public string? UserLocationHint { get; set; }
 
     // ── Tool name conventions (try both casings) ─────────────────────
     private const string WebSearchToolName    = "web_search";
@@ -53,7 +64,8 @@ public sealed class SearchOrchestrator
     private const int DefaultMaxResults    = 5;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
-    private const int MaxTokensWebSummary  = 768;
+    private const int MaxTokensWebSummary  = 1024;
+    private const int MaxTokensWebSummaryRetry = 2048;
     private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
@@ -75,6 +87,17 @@ public sealed class SearchOrchestrator
         "\n\nSearch results and article content are in the next message. " +
         "Synthesize into a clear, factual answer. Lead with the bottom line. " +
         "Include key facts. No URLs. " +
+        "ONLY use facts from the provided sources. " +
+        "IMPORTANT: If the user's message specifies a response format " +
+        "(e.g. specific line prefixes, headings, structure), follow it exactly.";
+
+    private const string FactFindSnippetOnlyInstruction =
+        "\n\nSearch result snippets are in the next message (no full articles " +
+        "were retrievable). Extract EVERY relevant detail from the snippets. " +
+        "Lead with the bottom line, then list each factual key point as a " +
+        "bullet. Include specific names, dates, numbers, and quotes from the " +
+        "snippets. Be thorough — use all available information, do not " +
+        "summarize down to generalities. No URLs. " +
         "ONLY use facts from the provided sources. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. specific line prefixes, headings, structure), follow it exactly.";
@@ -115,6 +138,7 @@ public sealed class SearchOrchestrator
 
         _entityResolver = new EntityResolver(llm, mcp, audit);
         _queryBuilder   = new QueryBuilder(llm, audit);
+        _deepDiveCoordinator = new DeepDiveCoordinator(mcp, audit);
     }
 
     /// <summary>
@@ -153,6 +177,7 @@ public sealed class SearchOrchestrator
                 SearchMode.FollowUp      => await ExecuteFollowUpAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.NewsAggregate  => await ExecuteNewsAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.WebFactFind    => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
+                SearchMode.DeepDiveBriefing => await ExecuteDeepDiveBriefingAsync(userMessage, toolCallsMade, ct),
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
             };
 
@@ -201,7 +226,27 @@ public sealed class SearchOrchestrator
             query.Query, query.Recency, toolCallsMade, ct);
 
         if (string.IsNullOrWhiteSpace(toolResult))
-            return AgentResponse.FromError("Search returned no results.");
+        {
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                "Web search returned no results.",
+                ct);
+        }
+        if (LooksLikeNoResultsPayload(toolResult))
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } newsFailure)
+        {
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                newsFailure.Text,
+                ct);
+        }
 
         // ── 4. Parse results into SourceItems ────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
@@ -276,7 +321,27 @@ public sealed class SearchOrchestrator
             query.Query, query.Recency, toolCallsMade, ct);
 
         if (string.IsNullOrWhiteSpace(toolResult))
-            return AgentResponse.FromError("Search returned no results.");
+        {
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                "Web search returned no results.",
+                ct);
+        }
+        if (LooksLikeNoResultsPayload(toolResult))
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
+        {
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                factFailure.Text,
+                ct);
+        }
 
         // ── 4. Parse and record results ──────────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
@@ -295,25 +360,71 @@ public sealed class SearchOrchestrator
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
 
-        // ── 5. Fetch top 1-2 articles for deep synthesis ─────────────
-        var articlesToFetch = sources.Take(2).ToList();
-        var articleContent  = await FetchArticleContentAsync(
-            articlesToFetch, toolCallsMade, ct);
+        // ── 5. Fetch top articles for deep synthesis ──────────────────
+        // Prefer direct article URLs over aggregator wrappers.
+        // If all parsed sources are junk URLs, do a supplementary search
+        // to find actual article pages.
+        var navigable = sources
+            .Where(s => !IsJunkUrl(s.Url))
+            .Take(MaxFollowUpUrls)
+            .ToList();
+
+        if (navigable.Count == 0 && sources.Count > 0)
+        {
+            // All source URLs are aggregator wrappers. Run a supplementary
+            // search using the best source title to find direct article pages.
+            var bestTitle = sources
+                .OrderByDescending(s => s.Snippet?.Length ?? 0)
+                .First().Title;
+
+            if (!string.IsNullOrWhiteSpace(bestTitle))
+            {
+                var suppResult = await CallWebSearchAsync(
+                    bestTitle, "any", toolCallsMade, ct);
+
+                if (!string.IsNullOrWhiteSpace(suppResult))
+                {
+                    var suppSources = ParseSourcesFromToolResult(suppResult);
+                    navigable = suppSources
+                        .Where(s => !IsJunkUrl(s.Url))
+                        .Take(MaxFollowUpUrls)
+                        .ToList();
+
+                    // Merge supplementary snippets into the summary input
+                    if (navigable.Count > 0)
+                    {
+                        var suppText = StripSourcesJson(suppResult);
+                        if (!string.IsNullOrWhiteSpace(suppText))
+                            toolResult += "\n" + suppText;
+                    }
+                }
+            }
+        }
+
+        var articleContent = await FetchArticleContentAsync(
+            navigable, toolCallsMade, ct);
 
         // ── 6. Summarize ─────────────────────────────────────────────
+        var hasArticleContent = !string.IsNullOrWhiteSpace(articleContent);
         var sb = new StringBuilder();
         sb.AppendLine("[Search results — reference only, do not display to user]");
         sb.AppendLine(StripSourcesJson(toolResult));
 
-        if (!string.IsNullOrWhiteSpace(articleContent))
+        if (hasArticleContent)
         {
             sb.AppendLine();
             sb.AppendLine("[Full article content — reference only, do not display to user]");
             sb.AppendLine(articleContent);
         }
+
+        // When full article content is available, use the standard instruction.
+        // When only snippets are available, use a more aggressive extraction
+        // instruction that tells the model to surface every detail it can find.
         var instruction = isMarketQuoteRequest
             ? memoryPackText + FinanceQuoteSummaryInstruction
-            : memoryPackText + FactFindSummaryInstruction;
+            : hasArticleContent
+                ? memoryPackText + FactFindSummaryInstruction
+                : memoryPackText + FactFindSnippetOnlyInstruction;
 
         return await SummarizeAndRespond(
             sb.ToString(), instruction,
@@ -438,6 +549,18 @@ public sealed class SearchOrchestrator
         // Search for related coverage
         var toolResult = await CallWebSearchAsync(
             query, recency, toolCallsMade, ct);
+        if (LooksLikeNoResultsPayload(toolResult))
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } moreSourcesFailure)
+        {
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                moreSourcesFailure.Text,
+                ct);
+        }
 
         // Append new results to session (don't replace)
         if (!string.IsNullOrWhiteSpace(toolResult))
@@ -469,21 +592,102 @@ public sealed class SearchOrchestrator
             history, toolCallsMade, ct);
     }
 
+    /// <summary>
+    /// Produces a structured deep-dive briefing payload for place/product lookups.
+    /// </summary>
+    private async Task<AgentResponse> ExecuteDeepDiveBriefingAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var timezone = TimeZoneInfo.Local.Id;
+        var locale = CultureInfo.CurrentCulture.Name;
+
+        var result = await _deepDiveCoordinator.BuildPlaceBriefingAsync(
+            query: userMessage,
+            timezone: timezone,
+            locale: locale,
+            userLocationHint: UserLocationHint,
+            toolCallsMade: toolCallsMade,
+            cancellationToken: ct);
+
+        if (!result.Success || result.Briefing is null)
+        {
+            return AgentResponse.FromError(
+                "I couldn't assemble a deep-dive briefing for that request.")
+                with
+                {
+                    ToolCallsMade = toolCallsMade
+                };
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var sourceItems = result.Briefing.Cards
+            .SelectMany(card => card.Sources)
+            .Where(source => !string.IsNullOrWhiteSpace(source.Url))
+            .GroupBy(source => source.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SourceItem
+            {
+                SourceId = SourceItem.ComputeSourceId(group.Key),
+                Url = group.Key,
+                Title = group.First().Name
+            })
+            .ToList();
+
+        Session.RecordSearchResults(
+            SearchMode.DeepDiveBriefing,
+            query: userMessage,
+            recency: "any",
+            results: sourceItems,
+            now: now);
+
+        return new AgentResponse
+        {
+            Text = result.AssistantText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = 0,
+            DeepDiveBriefing = result.Briefing
+        };
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Shared Helpers
     // ─────────────────────────────────────────────────────────────────
 
+    private Task<AgentResponse> BuildOfflineReasoningResponseAsync(
+        string userMessage,
+        string memoryPackText,
+        IReadOnlyList<ChatMessage> history,
+        List<ToolCallRecord> toolCallsMade,
+        string reason,
+        CancellationToken ct)
+    {
+        return OfflineWebReasoningResponder.BuildAsync(
+            _llm,
+            _systemPrompt,
+            userMessage,
+            memoryPackText,
+            history,
+            toolCallsMade,
+            reason,
+            ct);
+    }
+
     /// <summary>
     /// Calls web_search via MCP with fallback to PascalCase tool name.
+    /// Injects location context when the query contains proximity signals.
     /// </summary>
     private async Task<string> CallWebSearchAsync(
         string query, string recency,
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        var effectiveQuery = InjectLocationIfProximityQuery(query);
+
         var args = JsonSerializer.Serialize(new
         {
-            query,
+            query = effectiveQuery,
             maxResults = DefaultMaxResults,
             recency
         });
@@ -522,6 +726,44 @@ public sealed class SearchOrchestrator
         return toolResult;
     }
 
+    // ── Proximity signal patterns ──────────────────────────────────────
+    private static readonly Regex ProximitySignalRegex = new(
+        @"\b(near\s*(?:me|by|here)|around\s*here|close\s*by|in\s+my\s+area)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// When the user's query contains proximity language ("near me", "nearby")
+    /// and a manual location hint is available, replaces the vague proximity
+    /// term with the concrete location so web search returns relevant results.
+    /// </summary>
+    private string InjectLocationIfProximityQuery(string query)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return query;
+
+        var match = ProximitySignalRegex.Match(query);
+        if (!match.Success)
+            return query;
+
+        var replacement = $"near {UserLocationHint.Trim()}";
+        var result = ProximitySignalRegex.Replace(query, replacement);
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCATION_INJECTED_INTO_QUERY",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["original"] = query,
+                ["effective"] = result,
+                ["locationHint"] = UserLocationHint.Trim()
+            }
+        });
+
+        return result;
+    }
+
     /// <summary>
     /// Fetches full article content via browser_navigate for the given
     /// sources. Tries both casing conventions. Filters out low-signal
@@ -535,7 +777,16 @@ public sealed class SearchOrchestrator
         if (sources.Count == 0)
             return null;
 
-        var fetchTasks = sources.Take(MaxFollowUpUrls).Select(async source =>
+        var navigableSources = sources
+            .Take(MaxFollowUpUrls + 2)          // over-select in case some are filtered
+            .Where(s => !IsJunkUrl(s.Url))
+            .Take(MaxFollowUpUrls)
+            .ToList();
+
+        if (navigableSources.Count == 0)
+            return null;
+
+        var fetchTasks = navigableSources.Select(async source =>
         {
             var args = JsonSerializer.Serialize(new { url = source.Url });
             string? content = null;
@@ -581,12 +832,20 @@ public sealed class SearchOrchestrator
 
         var results = await Task.WhenAll(fetchTasks);
 
+        // Build topic keywords from the source titles for relevance gating.
+        var topicKeywords = navigableSources
+            .SelectMany(s => ExtractKeywords(s.Title))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var sb = new StringBuilder();
         foreach (var (title, content) in results)
         {
             if (string.IsNullOrWhiteSpace(content))
                 continue;
             if (IsLowSignalContent(content))
+                continue;
+            if (!IsContentRelevant(content, topicKeywords))
                 continue;
 
             sb.AppendLine($"=== {title} ===");
@@ -596,6 +855,25 @@ public sealed class SearchOrchestrator
 
         var combined = sb.ToString().TrimEnd();
         return string.IsNullOrWhiteSpace(combined) ? null : combined;
+    }
+
+    /// <summary>
+    /// Quick token-overlap check to ensure fetched article content is
+    /// topically relevant to the sources we intended to navigate. Filters
+    /// out situations where a redirect or wrong page returned completely
+    /// off-topic content (e.g., "Word Origins" for a dragon movie).
+    /// </summary>
+    private static bool IsContentRelevant(string content, IReadOnlyList<string> topicKeywords)
+    {
+        if (topicKeywords.Count == 0)
+            return true;
+
+        var preview = content.Length > 800 ? content[..800] : content;
+        var lower   = preview.ToLowerInvariant();
+
+        var hits = topicKeywords.Count(k => lower.Contains(k, StringComparison.Ordinal));
+        // Require at least one topic keyword in the first ~800 chars.
+        return hits > 0;
     }
 
     /// <summary>
@@ -640,8 +918,11 @@ public sealed class SearchOrchestrator
         messages.Add(ChatMessage.User(summaryInput));
 
         LlmResponse response;
+        IReadOnlyList<ChatMessage> requestMessages = messages;
+        var llmRoundTrips = 0;
         try
         {
+            llmRoundTrips++;
             response = await _llm.ChatAsync(messages, tools: null, MaxTokensWebSummary, ct);
         }
         catch (HttpRequestException)
@@ -653,8 +934,10 @@ public sealed class SearchOrchestrator
                 ChatMessage.User(summaryInput)
             };
 
+            requestMessages = minimal;
             try
             {
+                llmRoundTrips++;
                 response = await _llm.ChatAsync(minimal, tools: null, MaxTokensWebSummary, ct);
             }
             catch
@@ -664,8 +947,32 @@ public sealed class SearchOrchestrator
                     Text = BuildExtractiveFallback(summaryInput),
                     Success       = true,
                     ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = 1
+                    LlmRoundTrips = Math.Max(1, llmRoundTrips)
                 };
+            }
+        }
+
+        if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                llmRoundTrips++;
+                var expanded = await _llm.ChatAsync(
+                    requestMessages,
+                    tools: null,
+                    MaxTokensWebSummaryRetry,
+                    ct);
+
+                if (!string.IsNullOrWhiteSpace(expanded.Content))
+                    response = expanded;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (HttpRequestException)
+            {
+                // Keep the first draft if retry fails.
             }
         }
 
@@ -683,7 +990,7 @@ public sealed class SearchOrchestrator
             Text          = text,
             Success       = true,
             ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = 1
+            LlmRoundTrips = Math.Max(1, llmRoundTrips)
         };
     }
 
@@ -923,6 +1230,53 @@ public sealed class SearchOrchestrator
         return false;
     }
 
+    /// <summary>
+    /// Rejects URLs that are ad redirects, tracker scripts, or domains
+    /// known to return no useful article content. Prevents wasting a
+    /// browser_navigate call on junk pages.
+    /// </summary>
+    private static bool IsJunkUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return true;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return true;
+
+        var host = uri.Host.ToLowerInvariant();
+        var path = uri.AbsolutePath.ToLowerInvariant();
+
+        // DDG ad redirects: duckduckgo.com/y.js?ad_domain=...
+        if (host.Contains("duckduckgo.com") && path.Contains("/y.js"))
+            return true;
+
+        // Google News wrapper/redirect pages — these render a JS shell
+        // that returns ~158 chars with no article content. The actual
+        // articles live behind opaque redirect URLs.
+        if (host.Contains("news.google.com"))
+            return true;
+
+        // Google ad services and click-tracking
+        if (host.Contains("googleadservices.com") ||
+            host.Contains("googlesyndication.com") ||
+            host.Contains("doubleclick.net") ||
+            host.Contains("google.com/aclk"))
+            return true;
+
+        // Generic ad/tracker hosts
+        if (host.Contains("ad.") || host.StartsWith("ads.") ||
+            host.Contains("track.") || host.Contains("click.") ||
+            host.Contains("pixel.") || host.Contains("beacon."))
+            return true;
+
+        // URL path looks like an ad or tracker script
+        if (path.Contains("/ad/") || path.Contains("/ads/") ||
+            path.Contains("/click") || path.Contains("/redirect"))
+            return true;
+
+        return false;
+    }
+
     private static int? TryParseWordCount(string? content)
     {
         if (string.IsNullOrWhiteSpace(content))
@@ -981,6 +1335,46 @@ public sealed class SearchOrchestrator
         return lines.Count > 0
             ? string.Join("\n\n", lines)
             : "I found some results but couldn't generate a clean summary.";
+    }
+
+    private static bool LooksLikeNoResultsPayload(string toolResult)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return true;
+
+        return toolResult.TrimStart().StartsWith(
+            "No results found for ",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static AgentResponse BuildNoResultsResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        var isLocalBusinessRequest =
+            lower.Contains("restaurant", StringComparison.Ordinal) ||
+            lower.Contains("restaurants", StringComparison.Ordinal) ||
+            lower.Contains("florist", StringComparison.Ordinal) ||
+            lower.Contains("cafe", StringComparison.Ordinal) ||
+            lower.Contains("coffee", StringComparison.Ordinal) ||
+            lower.Contains("open", StringComparison.Ordinal) ||
+            lower.Contains("hours", StringComparison.Ordinal);
+
+        var text = isLocalBusinessRequest
+            ? "I could not retrieve live local business results for that request right now. " +
+              "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
+              "and I can check its current hours."
+            : "I could not retrieve usable web results for that request right now. " +
+              "Try a more specific query with a clear name, place, or timeframe.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
     }
 
     private static IReadOnlyList<string> ExtractKeywords(string text)
@@ -1052,6 +1446,7 @@ public sealed class SearchOrchestrator
         {
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.News => SearchMode.NewsAggregate,
+            LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
             _ => SearchModeRouter.Classify(userMessage, Session, now)
         };
     }
@@ -1069,6 +1464,11 @@ public sealed class SearchOrchestrator
             {
                 SuppressSourceCardsUi = false,
                 SuppressToolActivityUi = false
+            },
+            SearchMode.DeepDiveBriefing => response with
+            {
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
             },
             _ => response
         };

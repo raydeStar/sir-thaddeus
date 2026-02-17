@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using SirThaddeus.DesktopRuntime.Converters;
 
 using RadioButton = System.Windows.Controls.RadioButton;
 using SirThaddeus.DesktopRuntime.ViewModels;
@@ -28,8 +29,16 @@ public partial class CommandPaletteWindow : Window
     public CommandPaletteWindow()
     {
         InitializeComponent();
+
+        // Brand the window icon from the SVG silhouette.
+        var brandIcon = Services.BrandIcon.WindowIcon;
+        if (brandIcon is not null)
+            Icon = brandIcon;
+
         Loaded += OnLoaded;
         IsVisibleChanged += OnVisibilityChanged;
+        Closed += OnClosed;
+        MarkdownToFlowDocumentConverter.BriefRequested += OnBriefRequested;
     }
 
     private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -37,6 +46,11 @@ public partial class CommandPaletteWindow : Window
         // Stop health polling when the command palette hides
         if (e.NewValue is false)
             _settingsVm?.StopVoiceHostHealthPolling();
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        MarkdownToFlowDocumentConverter.BriefRequested -= OnBriefRequested;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -50,6 +64,11 @@ public partial class CommandPaletteWindow : Window
     {
         _viewModel = viewModel;
         DataContext = viewModel;
+
+        viewModel.BriefingReady += () =>
+        {
+            Dispatcher.BeginInvoke(() => ActivateTab("Briefing"));
+        };
 
         viewModel.MessageAdded += () =>
         {
@@ -98,10 +117,11 @@ public partial class CommandPaletteWindow : Window
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // View Tab Switching (Chat ↔ Memory)
+    // View Tab Switching
     // ─────────────────────────────────────────────────────────────────
 
     private void ChatTab_Click(object sender, RoutedEventArgs e)     => ActivateTab("Chat");
+    private void BriefingTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Briefing");
     private void MemoryTab_Click(object sender, RoutedEventArgs e)   => ActivateTab("Memory");
     private void ProfileTab_Click(object sender, RoutedEventArgs e)  => ActivateTab("Profile");
     private void SettingsTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Settings");
@@ -109,11 +129,13 @@ public partial class CommandPaletteWindow : Window
     private void ActivateTab(string tab)
     {
         ChatTabButton.IsChecked     = tab == "Chat";
+        BriefingTabButton.IsChecked = tab == "Briefing";
         MemoryTabButton.IsChecked   = tab == "Memory";
         ProfileTabButton.IsChecked  = tab == "Profile";
         SettingsTabButton.IsChecked = tab == "Settings";
 
         ChatView.Visibility     = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
+        BriefingView.Visibility = tab == "Briefing" ? Visibility.Visible : Visibility.Collapsed;
         MemoryView.Visibility   = tab == "Memory"   ? Visibility.Visible : Visibility.Collapsed;
         ProfileView.Visibility  = tab == "Profile"  ? Visibility.Visible : Visibility.Collapsed;
         SettingsView.Visibility = tab == "Settings"  ? Visibility.Visible : Visibility.Collapsed;
@@ -133,6 +155,9 @@ public partial class CommandPaletteWindow : Window
             case "Memory":
                 LazyLoadMemory();
                 MemorySearchBox?.Focus();
+                break;
+
+            case "Briefing":
                 break;
 
             case "Profile":
@@ -173,6 +198,17 @@ public partial class CommandPaletteWindow : Window
 
         // Start polling VoiceHost health while the Settings tab is visible
         _settingsVm?.StartVoiceHostHealthPolling();
+    }
+
+    private void ClearManualLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_settingsVm is null)
+            return;
+
+        _settingsVm.LocationLabel = "";
+
+        if (_settingsVm.SaveCommand.CanExecute(null))
+            _settingsVm.SaveCommand.Execute(null);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -318,6 +354,19 @@ public partial class CommandPaletteWindow : Window
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
+        // Ctrl+1..5 tab shortcuts
+        if (Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            switch (e.Key)
+            {
+                case Key.D1: ActivateTab("Chat");     e.Handled = true; return;
+                case Key.D2: ActivateTab("Briefing"); e.Handled = true; return;
+                case Key.D3: ActivateTab("Memory");   e.Handled = true; return;
+                case Key.D4: ActivateTab("Profile");  e.Handled = true; return;
+                case Key.D5: ActivateTab("Settings"); e.Handled = true; return;
+            }
+        }
+
         switch (e.Key)
         {
             case Key.Escape:
@@ -344,11 +393,56 @@ public partial class CommandPaletteWindow : Window
     {
         if (ChatView.Visibility == Visibility.Visible)
             ChatInput?.Focus();
+        else if (BriefingView.Visibility == Visibility.Visible)
+            return;
         else if (MemoryView.Visibility == Visibility.Visible)
             MemorySearchBox?.Focus();
         else if (ProfileView.Visibility == Visibility.Visible)
             NuggetSearchBox?.Focus();
         // Settings tab: no specific element to focus
+    }
+
+    /// <summary>
+    /// Opens a source card's URL in the default browser.
+    /// This is a user-initiated action (click), not an agent action.
+    /// </summary>
+    private void CopyMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ChatMessageViewModel message })
+            return;
+
+        var text = (message.Content ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+        }
+        catch
+        {
+            // Clipboard access can fail in restricted desktop states.
+        }
+    }
+
+    private void RetryMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null)
+            return;
+        if (sender is not FrameworkElement { DataContext: ChatMessageViewModel message })
+            return;
+
+        _viewModel.RetryMessage(message);
+    }
+
+    private async void ReadAloudMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null)
+            return;
+        if (sender is not FrameworkElement { DataContext: ChatMessageViewModel message })
+            return;
+
+        await _viewModel.ReadAloudMessageAsync(message);
     }
 
     /// <summary>
@@ -369,5 +463,47 @@ public partial class CommandPaletteWindow : Window
                 // If the browser can't be launched, just ignore
             }
         }
+    }
+
+    private void OnBriefRequested(string recommendationName)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_viewModel is null)
+                return;
+
+            ActivateTab("Chat");
+            _viewModel.RequestDeepDiveBriefing(recommendationName);
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Chat History Sidebar
+    // ─────────────────────────────────────────────────────────────────
+
+    private bool _chatHistoryExpanded;
+
+    private void ChatHistoryToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _chatHistoryExpanded = !_chatHistoryExpanded;
+
+        if (_chatHistoryExpanded)
+        {
+            ChatHistoryColumn.Width = new System.Windows.GridLength(200);
+            ChatHistoryPanel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ChatHistoryColumn.Width = new System.Windows.GridLength(0);
+            ChatHistoryPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void ChatHistoryItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ChatSessionSnapshot session })
+            return;
+
+        _viewModel?.LoadChatSessionCommand.Execute(session);
     }
 }

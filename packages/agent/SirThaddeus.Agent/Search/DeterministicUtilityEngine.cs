@@ -106,7 +106,8 @@ public static class DeterministicUtilityEngine
 
     private static DeterministicUtilityResult? TryParseStrict(string message)
     {
-        return TryParsePercent(message)
+        return ClassicReasoningEngine.TryMatch(message)
+            ?? TryParsePercent(message)
             ?? TryParseArithmetic(message)
             ?? TryParseConversion(message, StrictConversionPattern);
     }
@@ -289,7 +290,6 @@ public static class DeterministicUtilityEngine
         if (fromUnit == toUnit)
             return value;
 
-        // Temperature pairs for v1 (F↔C, C↔K).
         if (fromUnit == "fahrenheit" && toUnit == "celsius")
             return (value - 32.0) * 5.0 / 9.0;
         if (fromUnit == "celsius" && toUnit == "fahrenheit")

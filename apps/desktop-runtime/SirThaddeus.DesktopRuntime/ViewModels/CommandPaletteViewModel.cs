@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Windows.Input;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Core;
 using SirThaddeus.DesktopRuntime.Services;
@@ -60,6 +63,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private string _voiceTranscriptText = "";
     private bool _isVoiceActive;
     private string _reasoningGuardrailsMode = "off";
+    private bool _expectingBriefingPayload;
     // Old voice test fields removed — replaced by VoiceStatusText / VoiceTranscriptText / IsVoiceActive.
 
     private static readonly Regex TaggedThinkingRegex = new(
@@ -97,9 +101,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         ClearCommand  = new RelayCommand(ClearConversation);
         CancelCommand = new RelayCommand(CancelProcessing, () => _isProcessing);
         ToggleContextLockCommand = new RelayCommand(_ => ContextLocked = !ContextLocked);
+        LoadChatSessionCommand = new RelayCommand(LoadChatSession);
 
         _contextLocked = _orchestrator.ContextLocked;
         ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
+
+        BriefingPanel = new BriefingPanelViewModel();
+        TryLoadBriefingFixture();
 
         // Check connection on construction (fire-and-forget, logged on failure)
         _ = CheckConnectionAsync();
@@ -123,6 +131,18 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// Compact continuity chips rendered above chat input.
     /// </summary>
     public ObservableCollection<ContextChipViewModel> ContextChips { get; } = [];
+
+    /// <summary>
+    /// Dedicated deep-dive briefing panel state for the Briefing tab.
+    /// </summary>
+    public BriefingPanelViewModel BriefingPanel { get; }
+
+    /// <summary>
+    /// Saved chat sessions for the history sidebar.
+    /// </summary>
+    public ObservableCollection<ChatSessionSnapshot> ChatHistory { get; } = [];
+
+    public ICommand LoadChatSessionCommand { get; }
 
     /// <summary>
     /// Current text in the input box.
@@ -258,6 +278,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public Action? VoiceMicUp  { get; set; }
     public Action? VoiceShutup { get; set; }
 
+    /// <summary>
+    /// Optional app-level callback used by chat UI "Read aloud" actions.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? ReadAloudRequestedAsync { get; set; }
+
     // ─────────────────────────────────────────────────────────────────
     // Commands
     // ─────────────────────────────────────────────────────────────────
@@ -286,6 +311,56 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// The runtime uses this to clear session-scoped permission grants.
     /// </summary>
     public event Action? ConversationCleared;
+
+    /// <summary>
+    /// Raised when a valid deep-dive briefing is available for rendering.
+    /// </summary>
+    public event Action? BriefingReady;
+
+    /// <summary>
+    /// Allows external callers (voice pipeline) to signal that a briefing
+    /// was set on <see cref="BriefingPanel"/> and the tab should activate.
+    /// </summary>
+    public void RaiseBriefingReady() => BriefingReady?.Invoke();
+
+    /// <summary>
+    /// One-click deep-dive entry point from clickable recommendation links.
+    /// </summary>
+    public void RequestDeepDiveBriefing(string recommendationName)
+    {
+        var target = (recommendationName ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(target))
+            return;
+
+        if (IsProcessing)
+        {
+            AddLog(LogEntryKind.Info, $"Ignored briefing click while processing: {target}");
+            return;
+        }
+
+        // Keep the prompt deterministic so click-through consistently
+        // routes into the deep-dive flow.
+        InputText = $"Give me a deep-dive briefing for {target}. Include hours, reviews, map context, and direct links.";
+        if (SendCommand.CanExecute(null))
+            SendCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Applies a context snapshot from the voice pipeline so context chips
+    /// stay in sync regardless of input method.
+    /// </summary>
+    public void ApplyVoiceContextSnapshot(object? snapshot)
+    {
+        if (snapshot is DialogueContextSnapshot typed)
+            ApplyContextSnapshot(typed);
+        else
+            ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
+    }
+
+    /// <summary>
+    /// Persists dialogue state after a voice turn completes.
+    /// </summary>
+    public Task PersistDialogueStateFromVoiceAsync() => PersistDialogueStateAsync();
 
     // ─────────────────────────────────────────────────────────────────
     // Connection Health Check
@@ -357,9 +432,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             return;
 
         var userText = InputText.Trim();
+        _expectingBriefingPayload = LooksLikeDeepDiveQuery(userText);
         InputText = string.Empty;
         IsProcessing = true;
         _processingCts = new CancellationTokenSource();
+
+        if (_expectingBriefingPayload)
+            BriefingPanel.SetLoading();
 
         // ── Display the user message ─────────────────────────────
         AddMessage(ChatMessageRole.User, userText);
@@ -403,7 +482,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 {
                     Role    = ChatMessageRole.Assistant,
                     Content = displayParts.DisplayText,
-                    ThoughtContent = displayParts.ThinkingText
+                    ThoughtContent = displayParts.ThinkingText,
+                    RetryPrompt = userText
                 };
 
                 // ── Parse source cards from web search results ───
@@ -412,6 +492,23 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 // full internal logs for diagnostics.
                 if (!result.SuppressSourceCardsUi)
                     TryAttachSourceCards(assistantMsg, result.ToolCallsMade);
+
+                if (result.DeepDiveBriefing is not null)
+                {
+                    if (BriefingPanel.TrySetBriefing(result.DeepDiveBriefing, out var briefingErrors))
+                    {
+                        BriefingReady?.Invoke();
+                    }
+                    else
+                    {
+                        BriefingPanel.SetFailure("Deep-dive briefing payload was invalid.");
+                        AddLog(LogEntryKind.Error, $"Briefing validation failed: {string.Join(" | ", briefingErrors)}");
+                    }
+                }
+                else if (_expectingBriefingPayload)
+                {
+                    BriefingPanel.SetFailure("No briefing payload was returned for this deep-dive request.");
+                }
 
                 Messages.Add(assistantMsg);
                 MessageAdded?.Invoke();
@@ -454,6 +551,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                         AddLog(LogEntryKind.Info, line);
                 }
 
+                LogReasoningTraceJson(userText, result);
+
                 if (result.TokenUsage is { } usage)
                 {
                     AddLog(LogEntryKind.Info,
@@ -467,6 +566,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             {
                 AddMessage(ChatMessageRole.Status, $"Error: {result.Error}");
                 AddLog(LogEntryKind.Error, $"Agent error: {result.Error}");
+                if (_expectingBriefingPayload)
+                    BriefingPanel.SetFailure(result.Error ?? "Deep-dive request failed.");
             }
 
             ApplyContextSnapshot(result.ContextSnapshot ?? _orchestrator.GetContextSnapshot());
@@ -476,11 +577,15 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Messages.Remove(thinkingMsg);
             AddStatus("Cancelled.");
+            if (_expectingBriefingPayload)
+                BriefingPanel.SetFailure("Deep-dive request was cancelled.");
         }
         catch (HttpRequestException ex)
         {
             Messages.Remove(thinkingMsg);
             AddStatus($"Cannot reach LLM: {ex.Message}");
+            if (_expectingBriefingPayload)
+                BriefingPanel.SetFailure("Could not complete deep-dive request because the LLM was unreachable.");
 
             IsLlmConnected  = false;
             ConnectionStatus = "Disconnected";
@@ -489,6 +594,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Messages.Remove(thinkingMsg);
             AddStatus($"Unexpected error: {ex.Message}");
+            if (_expectingBriefingPayload)
+                BriefingPanel.SetFailure($"Unexpected deep-dive error: {ex.Message}");
         }
         finally
         {
@@ -497,6 +604,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
             _processingCts?.Dispose();
             _processingCts = null;
+            _expectingBriefingPayload = false;
         }
     }
 
@@ -507,6 +615,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
     private void ClearConversation()
     {
+        // Save current session to history if it has substantive content.
+        SnapshotCurrentSession();
+
         Messages.Clear();
         ActivityLog.Clear();
         ContextChips.Clear();
@@ -531,6 +642,54 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         // Re-check connection and show welcome status
         _ = CheckConnectionAsync();
+    }
+
+    private void SnapshotCurrentSession()
+    {
+        // Only save sessions with at least one user message.
+        var userMessages = Messages.Where(m => m.Role == ChatMessageRole.User).ToList();
+        if (userMessages.Count == 0) return;
+
+        // Derive a title from the first user message.
+        var firstUserMsg = userMessages[0].Content;
+        var title = firstUserMsg.Length > 60
+            ? firstUserMsg[..57] + "..."
+            : firstUserMsg;
+
+        var snapshot = new ChatSessionSnapshot(
+            Title:     title,
+            Timestamp: DateTime.Now,
+            Messages:  Messages.Select(m => new ChatSessionMessage(m.Role.ToString(), m.Content)).ToList());
+
+        ChatHistory.Insert(0, snapshot);
+
+        // Cap at a reasonable size.
+        const int maxSessions = 30;
+        while (ChatHistory.Count > maxSessions)
+            ChatHistory.RemoveAt(ChatHistory.Count - 1);
+    }
+
+    private void LoadChatSession(object? parameter)
+    {
+        if (parameter is not ChatSessionSnapshot session) return;
+
+        // Clear current without re-saving (already in history).
+        Messages.Clear();
+        ActivityLog.Clear();
+
+        foreach (var msg in session.Messages)
+        {
+            if (Enum.TryParse<ChatMessageRole>(msg.Role, out var role))
+            {
+                Messages.Add(new ChatMessageViewModel
+                {
+                    Role    = role,
+                    Content = msg.Content
+                });
+            }
+        }
+
+        MessageAdded?.Invoke();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -640,9 +799,63 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Role = ChatMessageRole.Assistant,
             Content = displayParts.DisplayText,
-            ThoughtContent = displayParts.ThinkingText
+            ThoughtContent = displayParts.ThinkingText,
+            RetryPrompt = ResolveMostRecentUserPrompt()
         });
         MessageAdded?.Invoke();
+    }
+
+    /// <summary>
+    /// Replays the originating user prompt for a specific assistant message.
+    /// </summary>
+    public void RetryMessage(ChatMessageViewModel? message)
+    {
+        if (message is null || IsProcessing)
+            return;
+
+        var prompt = ResolveRetryPrompt(message);
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            AddStatus("No prior user prompt found for retry.");
+            return;
+        }
+
+        RemoveRetryTurnFromMessageFeed(message, prompt);
+        InputText = prompt;
+        if (SendCommand.CanExecute(null))
+            SendCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Reads a chat message aloud through the configured playback service.
+    /// </summary>
+    public async Task ReadAloudMessageAsync(ChatMessageViewModel? message, CancellationToken cancellationToken = default)
+    {
+        if (message is null)
+            return;
+
+        var text = (message.Content ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        if (ReadAloudRequestedAsync is null)
+        {
+            AddStatus("Read aloud is not available right now.");
+            return;
+        }
+
+        try
+        {
+            await ReadAloudRequestedAsync(text, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            AddStatus("Read aloud cancelled.");
+        }
+        catch (Exception ex)
+        {
+            AddLog(LogEntryKind.Error, $"Read aloud failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -663,6 +876,133 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         ActivityLog.Add(new LogEntry { Kind = kind, Text = text });
         LogEntryAdded?.Invoke();
+    }
+
+    private string ResolveRetryPrompt(ChatMessageViewModel message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.RetryPrompt))
+            return message.RetryPrompt.Trim();
+
+        var index = Messages.IndexOf(message);
+        if (index <= 0)
+            return "";
+
+        for (var i = index - 1; i >= 0; i--)
+        {
+            var candidate = Messages[i];
+            if (candidate.Role == ChatMessageRole.User &&
+                !string.IsNullOrWhiteSpace(candidate.Content))
+            {
+                return candidate.Content.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private string ResolveMostRecentUserPrompt()
+    {
+        for (var i = Messages.Count - 1; i >= 0; i--)
+        {
+            var candidate = Messages[i];
+            if (candidate.Role == ChatMessageRole.User &&
+                !string.IsNullOrWhiteSpace(candidate.Content))
+            {
+                return candidate.Content.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private void RemoveRetryTurnFromMessageFeed(ChatMessageViewModel assistantMessage, string prompt)
+    {
+        var assistantIndex = Messages.IndexOf(assistantMessage);
+        if (assistantIndex < 0)
+            return;
+
+        // Remove any immediate tool-activity rows emitted for that same turn.
+        while (assistantIndex + 1 < Messages.Count &&
+               Messages[assistantIndex + 1].Role == ChatMessageRole.ToolActivity)
+        {
+            Messages.RemoveAt(assistantIndex + 1);
+        }
+
+        Messages.RemoveAt(assistantIndex);
+
+        var expectedPrompt = (prompt ?? "").Trim();
+        var userIndex = -1;
+
+        for (var i = Math.Min(assistantIndex - 1, Messages.Count - 1); i >= 0; i--)
+        {
+            var candidate = Messages[i];
+            if (candidate.Role != ChatMessageRole.User)
+                continue;
+
+            var candidatePrompt = (candidate.Content ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(expectedPrompt) &&
+                string.Equals(candidatePrompt, expectedPrompt, StringComparison.Ordinal))
+            {
+                userIndex = i;
+                break;
+            }
+
+            // Fallback: nearest preceding user bubble.
+            if (userIndex < 0)
+                userIndex = i;
+        }
+
+        if (userIndex >= 0)
+            Messages.RemoveAt(userIndex);
+    }
+
+    /// <summary>
+    /// Emits a compact structured trace for first-principles / logic-puzzle turns
+    /// so the activity pane can show *why* no tools were called.
+    /// </summary>
+    private void LogReasoningTraceJson(string userText, AgentResponse result)
+    {
+        var normalizedMode = NormalizeReasoningGuardrailsMode(ReasoningGuardrailsMode);
+        var lower = (userText ?? "").Trim().ToLowerInvariant();
+        var logicPuzzleDetected = IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower);
+
+        if (!result.GuardrailsUsed &&
+            !logicPuzzleDetected &&
+            normalizedMode is not ("auto" or "always"))
+        {
+            return;
+        }
+
+        var toolNames = result.ToolCallsMade
+            .Select(call => call.ToolName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var trace = new Dictionary<string, object?>
+        {
+            ["path"] = result.GuardrailsUsed
+                ? "first_principles_guardrails"
+                : logicPuzzleDetected
+                    ? "logic_puzzle_chat_only"
+                    : "standard_chat_or_tooling",
+            ["reasoningGuardrailsMode"] = normalizedMode,
+            ["logicPuzzleDetected"] = logicPuzzleDetected,
+            ["guardrailsUsed"] = result.GuardrailsUsed,
+            ["llmRoundTrips"] = result.LlmRoundTrips,
+            ["toolCalls"] = toolNames
+        };
+
+        if (logicPuzzleDetected && !result.GuardrailsUsed)
+        {
+            trace["note"] = "Logic puzzle prompts route to chat-only to avoid irrelevant tool calls.";
+        }
+
+        if (result.GuardrailsUsed)
+        {
+            trace["rationale"] = result.GuardrailsRationale.Take(3).ToArray();
+        }
+
+        AddLog(LogEntryKind.Info, $"logic_trace={JsonSerializer.Serialize(trace)}");
     }
 
     private static string Truncate(string value, int maxLength)
@@ -912,6 +1252,99 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             "always" => "always",
             _ => "off"
         };
+    }
+
+    /// <summary>
+    /// Mirrors IntentFeatureExtractor.LooksLikeDeepDiveLookup so the UI
+    /// pre-activates the Briefing tab whenever the agent is likely to
+    /// produce a deep-dive payload. Keep these two in sync.
+    /// </summary>
+    private static bool LooksLikeDeepDiveQuery(string userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = userText.ToLowerInvariant();
+
+        // Explicit signals (shared with agent)
+        if (lower.Contains("deep dive", StringComparison.Ordinal) ||
+            lower.Contains("hours + reviews", StringComparison.Ordinal) ||
+            lower.Contains("hours and reviews", StringComparison.Ordinal) ||
+            lower.Contains("tell me when", StringComparison.Ordinal) ||
+            lower.Contains("opening hours", StringComparison.Ordinal) ||
+            lower.Contains("closing time", StringComparison.Ordinal) ||
+            lower.Contains("store hours", StringComparison.Ordinal) ||
+            lower.Contains("business hours", StringComparison.Ordinal) ||
+            lower.Contains("hours of operation", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var hasOpenCloseLanguage =
+            lower.Contains(" open", StringComparison.Ordinal) ||
+            lower.Contains(" opens", StringComparison.Ordinal) ||
+            lower.Contains(" opening", StringComparison.Ordinal) ||
+            lower.Contains(" close", StringComparison.Ordinal) ||
+            lower.Contains(" closes", StringComparison.Ordinal) ||
+            lower.Contains(" closing", StringComparison.Ordinal);
+
+        if ((lower.Contains("tell me when", StringComparison.Ordinal) ||
+             lower.Contains("what time", StringComparison.Ordinal)) &&
+            hasOpenCloseLanguage)
+        {
+            return true;
+        }
+
+        // "is X open" / "are they open" patterns
+        if (lower.Contains("is it open", StringComparison.Ordinal) ||
+            lower.Contains("are they open", StringComparison.Ordinal) ||
+            lower.Contains("is it closed", StringComparison.Ordinal) ||
+            lower.Contains("are they closed", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (lower.StartsWith("is ", StringComparison.Ordinal) &&
+            (lower.Contains(" open", StringComparison.Ordinal) ||
+             lower.Contains(" closed", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        // "when does X open/close" patterns
+        if ((lower.Contains("when does", StringComparison.Ordinal) ||
+             lower.Contains("when do they", StringComparison.Ordinal) ||
+             lower.Contains("when is", StringComparison.Ordinal) ||
+             lower.Contains("what time", StringComparison.Ordinal)) &&
+            (lower.Contains(" open", StringComparison.Ordinal) ||
+             lower.Contains(" close", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        // Legacy: open AND close together
+        return lower.Contains("open", StringComparison.Ordinal) &&
+               lower.Contains("close", StringComparison.Ordinal);
+    }
+
+    private void TryLoadBriefingFixture()
+    {
+        try
+        {
+            var fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "deep_dive_place.sample.json");
+            if (!File.Exists(fixturePath))
+            {
+                BriefingPanel.SetFailure("No fixture briefing found.");
+                return;
+            }
+
+            if (BriefingPanel.TryLoadFixture(fixturePath, out _))
+                BriefingReady?.Invoke();
+        }
+        catch
+        {
+            BriefingPanel.SetFailure("Could not load the fixture briefing.");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

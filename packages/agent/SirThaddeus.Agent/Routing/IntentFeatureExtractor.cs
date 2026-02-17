@@ -40,6 +40,7 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> patterns =
         [
             "read the file",   "read this file",    "read file",
+            "file_read",       "file read",
             "open the file",   "open this file",    "open file",
             "list files",      "list the files",    "show files",
             "what's in the file", "whats in the file",
@@ -199,6 +200,8 @@ public static class IntentFeatureExtractor
 
     public static bool LooksLikeMemoryWriteRequest(string lower)
     {
+        var normalized = NormalizeLoosePhraseInput(lower);
+
         ReadOnlySpan<string> storagePhrases =
         [
             "remember that", "remember this", "remember i",
@@ -212,7 +215,8 @@ public static class IntentFeatureExtractor
 
         foreach (var phrase in storagePhrases)
         {
-            if (lower.Contains(phrase, StringComparison.Ordinal))
+            if (lower.Contains(phrase, StringComparison.Ordinal) ||
+                normalized.Contains(phrase, StringComparison.Ordinal))
                 return true;
         }
 
@@ -230,7 +234,8 @@ public static class IntentFeatureExtractor
 
         foreach (var phrase in correctionPhrases)
         {
-            if (lower.Contains(phrase, StringComparison.Ordinal))
+            if (lower.Contains(phrase, StringComparison.Ordinal) ||
+                normalized.Contains(phrase, StringComparison.Ordinal))
                 return true;
         }
 
@@ -245,7 +250,8 @@ public static class IntentFeatureExtractor
 
         foreach (var phrase in revocationPhrases)
         {
-            if (lower.Contains(phrase, StringComparison.Ordinal))
+            if (lower.Contains(phrase, StringComparison.Ordinal) ||
+                normalized.Contains(phrase, StringComparison.Ordinal))
                 return true;
         }
 
@@ -256,6 +262,12 @@ public static class IntentFeatureExtractor
     {
         if (LooksLikeLogicPuzzlePrompt(lower))
             return false;
+
+        if (lower.Contains("web_search", StringComparison.Ordinal) ||
+            lower.Contains("web search", StringComparison.Ordinal))
+        {
+            return true;
+        }
 
         if (LooksLikeIdentityLookup(lower))
             return true;
@@ -271,7 +283,25 @@ public static class IntentFeatureExtractor
             "how much is",  "how much does",
             "search the web",  "search online",    "look it up",
             "look this up",    "find information",  "find info on",
-            "search about"
+            "search about",
+
+            // Recommendation / product signals -- these imply the user
+            // needs current real-world data, not a canned opinion.
+            "recommend",    "suggestion for",  "suggestions for",
+            "best ",        "top rated",        "top-rated",
+            "on amazon",    "on ebay",          "on etsy",
+            "on walmart",
+
+            // Comparison signals -- comparing real-world entities
+            // typically needs current info (movies, products, etc.)
+            "compared to",    "how does it compare",
+            "word for word",  "similar to the original",
+            "like the original",
+
+            // Conversational search phrasing the LLM classifier often
+            // misclassifies as casual chat. Excludes "tell me about" and
+            // bare "tell me how/what" which are too broad (catch opinions).
+            "can you tell me", "tell me if",     "tell me whether"
         ];
 
         foreach (var phrase in phrases)
@@ -305,7 +335,15 @@ public static class IntentFeatureExtractor
             lower.Contains("dogecoin", StringComparison.Ordinal) ||
             lower.Contains("ethereum", StringComparison.Ordinal) ||
             lower.Contains("solana", StringComparison.Ordinal) ||
-            lower.Contains("forex", StringComparison.Ordinal);
+            lower.Contains("forex", StringComparison.Ordinal) ||
+            lower.Contains(".com", StringComparison.Ordinal) ||
+            lower.Contains("movie", StringComparison.Ordinal) ||
+            lower.Contains("film", StringComparison.Ordinal) ||
+            lower.Contains("live action", StringComparison.Ordinal) ||
+            lower.Contains("review", StringComparison.Ordinal) ||
+            lower.Contains("rating", StringComparison.Ordinal) ||
+            lower.Contains("supplement", StringComparison.Ordinal) ||
+            lower.Contains("product", StringComparison.Ordinal);
 
         if (!hasTopic)
             return false;
@@ -426,6 +464,167 @@ public static class IntentFeatureExtractor
                lower.Contains("recent news", StringComparison.Ordinal);
     }
 
+    public static bool LooksLikeDeepDiveLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        ReadOnlySpan<string> explicitSignals =
+        [
+            "deep dive",
+            "hours + reviews",
+            "hours and reviews",
+            "tell me when it opens",
+            "tell me when it closes",
+            "what time does",
+            "what time do they open",
+            "what time do they close",
+            "opening hours",
+            "closing time",
+            "store hours",
+            "business hours",
+            "hours of operation"
+        ];
+
+        if (ContainsAny(lower, explicitSignals))
+            return true;
+
+        // Natural phrasing often includes "tell me when <place> is open/closed".
+        var hasTellMeWhen = lower.Contains("tell me when", StringComparison.Ordinal);
+        var hasWhatTime = lower.Contains("what time", StringComparison.Ordinal);
+        var hasOpenCloseLanguage =
+            lower.Contains(" open", StringComparison.Ordinal) ||
+            lower.Contains(" opens", StringComparison.Ordinal) ||
+            lower.Contains(" opening", StringComparison.Ordinal) ||
+            lower.Contains(" close", StringComparison.Ordinal) ||
+            lower.Contains(" closes", StringComparison.Ordinal) ||
+            lower.Contains(" closing", StringComparison.Ordinal);
+        if ((hasTellMeWhen || hasWhatTime) && hasOpenCloseLanguage)
+            return true;
+
+        // ── "Is X open" patterns ─────────────────────────────────────
+        if (LooksLikeIsOpenQuery(lower))
+            return true;
+
+        // ── "When does X open/close" patterns ────────────────────────
+        if (LooksLikeWhenOpenQuery(lower))
+            return true;
+
+        // ── Local business discovery ("find open restaurants near X") ─
+        if (LooksLikeLocalBusinessDiscovery(lower))
+            return true;
+
+        var hasHoursVerb =
+            lower.Contains("open", StringComparison.Ordinal) ||
+            lower.Contains("close", StringComparison.Ordinal) ||
+            lower.Contains("hours", StringComparison.Ordinal);
+
+        var hasReviewVerb =
+            lower.Contains("reviews", StringComparison.Ordinal) ||
+            lower.Contains("rating", StringComparison.Ordinal) ||
+            lower.Contains("what to expect", StringComparison.Ordinal);
+
+        return hasHoursVerb && hasReviewVerb;
+    }
+
+    /// <summary>
+    /// Detects "is X open" / "are they open" / "is it open" phrasing.
+    /// </summary>
+    internal static bool LooksLikeIsOpenQuery(string lower)
+    {
+        ReadOnlySpan<string> isOpenPatterns =
+        [
+            "is it open",
+            "are they open",
+            "are you open",
+            "is it closed",
+            "are they closed"
+        ];
+
+        foreach (var pattern in isOpenPatterns)
+        {
+            if (lower.Contains(pattern, StringComparison.Ordinal))
+                return true;
+        }
+
+        if (lower.StartsWith("is ", StringComparison.Ordinal) &&
+            (lower.Contains(" open", StringComparison.Ordinal) ||
+             lower.Contains(" closed", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects "when/what time does X open/close" phrasing.
+    /// </summary>
+    private static bool LooksLikeWhenOpenQuery(string lower)
+    {
+        var hasWhenLikeSignal =
+            lower.Contains("when does", StringComparison.Ordinal) ||
+            lower.Contains("when do they", StringComparison.Ordinal) ||
+            lower.Contains("when is", StringComparison.Ordinal) ||
+            lower.Contains("what time", StringComparison.Ordinal);
+
+        if (!hasWhenLikeSignal) return false;
+
+        return lower.Contains(" open", StringComparison.Ordinal) ||
+               lower.Contains(" close", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Detects local business discovery requests that ask for currently
+    /// open places or business options in a location.
+    /// Example: "find me open restaurants in Rexburg right now".
+    /// </summary>
+    private static bool LooksLikeLocalBusinessDiscovery(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        // Guard against non-place "open" topics.
+        if (lower.Contains("open source", StringComparison.Ordinal))
+            return false;
+
+        ReadOnlySpan<string> businessTerms =
+        [
+            "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "florist", "bakery", "bar", "pub", "store", "shop",
+            "grocery", "supermarket", "pharmacy", "hotel", "motel",
+            "gas station", "car wash", "laundromat", "salon", "barber",
+            "gym", "dentist", "clinic", "doctor", "urgent care"
+        ];
+
+        if (!ContainsAny(lower, businessTerms))
+            return false;
+
+        var hasActionCue =
+            lower.Contains("find", StringComparison.Ordinal) ||
+            lower.Contains("show", StringComparison.Ordinal) ||
+            lower.Contains("recommend", StringComparison.Ordinal) ||
+            lower.Contains("best ", StringComparison.Ordinal) ||
+            lower.Contains("good ", StringComparison.Ordinal) ||
+            lower.Contains("open", StringComparison.Ordinal) ||
+            lower.Contains("hours", StringComparison.Ordinal) ||
+            lower.Contains("close", StringComparison.Ordinal);
+
+        if (!hasActionCue)
+            return false;
+
+        var hasLocalCue =
+            lower.Contains("near me", StringComparison.Ordinal) ||
+            lower.Contains("nearby", StringComparison.Ordinal) ||
+            lower.Contains("around me", StringComparison.Ordinal) ||
+            lower.Contains(" in ", StringComparison.Ordinal) ||
+            lower.Contains("right now", StringComparison.Ordinal) ||
+            lower.Contains("today", StringComparison.Ordinal) ||
+            lower.Contains("tonight", StringComparison.Ordinal);
+
+        return hasLocalCue;
+    }
+
     public static bool LooksLikeFactLookup(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower))
@@ -476,46 +675,7 @@ public static class IntentFeatureExtractor
     }
 
     public static bool LooksLikeLogicPuzzlePrompt(string lower)
-    {
-        if (string.IsNullOrWhiteSpace(lower))
-            return false;
-
-        var normalized = lower.Replace('’', '\'');
-        var hasPhotoCue =
-            normalized.Contains("who is in the photograph", StringComparison.Ordinal) ||
-            normalized.Contains("who is in the photo", StringComparison.Ordinal) ||
-            normalized.Contains("who is in the picture", StringComparison.Ordinal) ||
-            normalized.Contains("who's in the photograph", StringComparison.Ordinal) ||
-            normalized.Contains("who's in the photo", StringComparison.Ordinal) ||
-            normalized.Contains("who's in the picture", StringComparison.Ordinal) ||
-            normalized.Contains("whos in the photograph", StringComparison.Ordinal) ||
-            normalized.Contains("whos in the photo", StringComparison.Ordinal) ||
-            normalized.Contains("whos in the picture", StringComparison.Ordinal) ||
-            normalized.Contains("looking at a photograph", StringComparison.Ordinal) ||
-            normalized.Contains("pointing to a photograph", StringComparison.Ordinal);
-        var hasOnlyChildCue =
-            normalized.Contains("brothers and sisters, i have none", StringComparison.Ordinal) ||
-            normalized.Contains("brothers and sisters i have none", StringComparison.Ordinal) ||
-            normalized.Contains("i have no siblings", StringComparison.Ordinal) ||
-            normalized.Contains("i don't have siblings", StringComparison.Ordinal) ||
-            normalized.Contains("i do not have siblings", StringComparison.Ordinal) ||
-            normalized.Contains("i am an only child", StringComparison.Ordinal) ||
-            normalized.Contains("i'm an only child", StringComparison.Ordinal);
-
-        var hasFamilyEquation =
-            (normalized.Contains("that man's", StringComparison.Ordinal) ||
-             normalized.Contains("that woman's", StringComparison.Ordinal) ||
-             normalized.Contains("that person's", StringComparison.Ordinal) ||
-             normalized.Contains("that boy's", StringComparison.Ordinal) ||
-             normalized.Contains("that girl's", StringComparison.Ordinal)) &&
-            normalized.Contains(" is my ", StringComparison.Ordinal) &&
-            (normalized.Contains(" father's ", StringComparison.Ordinal) ||
-             normalized.Contains(" mother's ", StringComparison.Ordinal)) &&
-            (normalized.Contains(" son", StringComparison.Ordinal) ||
-             normalized.Contains(" daughter", StringComparison.Ordinal));
-
-        return hasPhotoCue && hasOnlyChildCue && hasFamilyEquation;
-    }
+        => LogicPuzzleDetector.IsLogicPuzzle(lower);
 
     public static bool LooksLikeIdentityLookup(string lower)
     {
@@ -600,5 +760,30 @@ public static class IntentFeatureExtractor
 
         return false;
     }
-}
 
+    private static string NormalizeLoosePhraseInput(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var buffer = new System.Text.StringBuilder(value.Length);
+        var lastWasSpace = true;
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c) || c is '\'' or '-')
+            {
+                buffer.Append(c);
+                lastWasSpace = false;
+                continue;
+            }
+
+            if (lastWasSpace)
+                continue;
+
+            buffer.Append(' ');
+            lastWasSpace = true;
+        }
+
+        return buffer.ToString().Trim();
+    }
+}

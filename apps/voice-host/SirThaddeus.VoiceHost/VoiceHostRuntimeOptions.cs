@@ -212,19 +212,21 @@ public sealed record VoiceHostRuntimeOptions(
             "" => "faster-whisper",
             "whisper" => "faster-whisper",
             "faster-whisper" => "faster-whisper",
-            "qwen3asr" => "qwen3asr",
-            _ => value
+            // VoiceHost /asr is reserved for live voice-to-text and is pinned to whisper.
+            _ => "faster-whisper"
         };
     }
 
     private static string NormalizeSttModelId(string sttEngineRaw, string sttModelIdRaw)
     {
-        if (!string.IsNullOrWhiteSpace(sttModelIdRaw))
-            return sttModelIdRaw.Trim();
+        var model = (sttModelIdRaw ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            return "base";
 
-        return string.Equals(NormalizeSttEngine(sttEngineRaw), "faster-whisper", StringComparison.Ordinal)
-            ? "base"
-            : "";
+        if (model.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+            return "base";
+
+        return model;
     }
 
     private static string NormalizeSttLanguage(string raw)

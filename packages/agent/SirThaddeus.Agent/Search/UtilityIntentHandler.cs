@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Dialogue;
+using System.Text.Json;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -119,6 +120,60 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 cancellationToken);
         }
 
+        if (string.Equals(utilityResult.Category, "meta", StringComparison.OrdinalIgnoreCase))
+        {
+            if (utilityResult.McpToolName is not null &&
+                utilityResult.McpToolArgs is not null &&
+                request.ExecuteGenericToolCallAsync is not null)
+            {
+                await request.ExecuteGenericToolCallAsync(
+                    utilityResult,
+                    request.ToolCallsMade,
+                    cancellationToken);
+            }
+
+            var summary = BuildMetaCapabilitiesSummary(request.ToolCallsMade);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                return new AgentResponse
+                {
+                    Text = summary,
+                    Success = true,
+                    ToolCallsMade = request.ToolCallsMade.ToList(),
+                    LlmRoundTrips = request.RoundTrips
+                };
+            }
+
+            return null;
+        }
+
+        if (string.Equals(utilityResult.Category, "time_local", StringComparison.OrdinalIgnoreCase))
+        {
+            if (utilityResult.McpToolName is not null &&
+                utilityResult.McpToolArgs is not null &&
+                request.ExecuteGenericToolCallAsync is not null)
+            {
+                await request.ExecuteGenericToolCallAsync(
+                    utilityResult,
+                    request.ToolCallsMade,
+                    cancellationToken);
+            }
+
+            var summary = BuildLocalTimeSummary(request.ToolCallsMade);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                return new AgentResponse
+                {
+                    Text = summary,
+                    Success = true,
+                    ToolCallsMade = request.ToolCallsMade.ToList(),
+                    LlmRoundTrips = request.RoundTrips
+                };
+            }
+
+            return null;
+        }
+
         if (utilityResult.McpToolName is not null && utilityResult.McpToolArgs is not null)
         {
             if (request.ExecuteGenericToolCallAsync is not null)
@@ -146,5 +201,113 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             SuppressSourceCardsUi = suppressUiArtifacts,
             SuppressToolActivityUi = suppressUiArtifacts
         };
+    }
+
+    private static string? BuildMetaCapabilitiesSummary(IList<ToolCallRecord> calls)
+    {
+        var capabilityCall = calls
+            .LastOrDefault(call => string.Equals(
+                call.ToolName,
+                "tool_list_capabilities",
+                StringComparison.OrdinalIgnoreCase));
+        if (capabilityCall is null || string.IsNullOrWhiteSpace(capabilityCall.Result))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(capabilityCall.Result);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return null;
+
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+                if (!item.TryGetProperty("category", out var categoryEl) ||
+                    categoryEl.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var category = categoryEl.GetString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(category))
+                    groups.Add(category);
+            }
+
+            if (groups.Count == 0)
+                return "Capability groups are currently unavailable from the manifest response.";
+
+            var ordered = groups
+                .OrderBy(group => CategoryRank(group))
+                .ThenBy(group => group, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var listText = string.Join(", ", ordered);
+            return $"Available capability groups: {listText}.\n\n" +
+                   "Use `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int CategoryRank(string category)
+    {
+        return category.ToLowerInvariant() switch
+        {
+            "memory" => 0,
+            "web" => 1,
+            "file" => 2,
+            "system" => 3,
+            "screen" => 4,
+            "meta" => 5,
+            "time" => 6,
+            _ => 100
+        };
+    }
+
+    private static string? BuildLocalTimeSummary(IList<ToolCallRecord> calls)
+    {
+        var timeCall = calls
+            .LastOrDefault(call => string.Equals(
+                call.ToolName,
+                "time_now",
+                StringComparison.OrdinalIgnoreCase));
+        if (timeCall is null || string.IsNullOrWhiteSpace(timeCall.Result))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(timeCall.Result);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var iso = root.TryGetProperty("iso", out var isoEl) && isoEl.ValueKind == JsonValueKind.String
+                ? isoEl.GetString()
+                : null;
+            var timezone = root.TryGetProperty("timezone", out var timezoneEl) && timezoneEl.ValueKind == JsonValueKind.String
+                ? timezoneEl.GetString()
+                : "local timezone";
+            var offset = root.TryGetProperty("offset", out var offsetEl) && offsetEl.ValueKind == JsonValueKind.String
+                ? offsetEl.GetString()
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(iso) &&
+                DateTimeOffset.TryParse(iso, out var parsed))
+            {
+                var formatted = parsed.ToString("h:mm:ss tt");
+                var offsetText = !string.IsNullOrWhiteSpace(offset) ? $"UTC{offset}" : "current UTC offset";
+                return $"The current local time is {formatted} in {timezone} ({offsetText}).";
+            }
+
+            return $"The current local time is available for {timezone}.";
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

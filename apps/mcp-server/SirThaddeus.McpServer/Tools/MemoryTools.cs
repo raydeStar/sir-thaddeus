@@ -185,8 +185,8 @@ public static class MemoryTools
 
         try
         {
-            var facts = JsonSerializer.Deserialize<List<FactInput>>(factsJson, JsonReadOpts);
-            if (facts is null or { Count: 0 })
+            var facts = ParseFactInputs(factsJson);
+            if (facts.Count == 0)
                 return JsonResponse(new { error = "No facts provided.", stored = 0 });
 
             // Cap at 10 facts per call to prevent abuse
@@ -538,6 +538,98 @@ public static class MemoryTools
         public string Predicate  { get; init; } = "";
         public string Object     { get; init; } = "";
         public string? Sensitivity { get; init; }
+    }
+
+    private static List<FactInput> ParseFactInputs(string factsJson)
+    {
+        if (string.IsNullOrWhiteSpace(factsJson))
+            return [];
+
+        // Canonical format: JSON array of fact objects.
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<FactInput>>(factsJson, JsonReadOpts);
+            if (list is { Count: > 0 })
+                return list;
+        }
+        catch
+        {
+            // Fall through to compatibility parsers.
+        }
+
+        // Compatibility: single JSON object instead of array.
+        try
+        {
+            var single = JsonSerializer.Deserialize<FactInput>(factsJson, JsonReadOpts);
+            if (single is not null && HasFactTuple(single.Subject, single.Predicate, single.Object))
+                return [single];
+        }
+        catch
+        {
+            // Fall through to legacy key/value parser.
+        }
+
+        // Legacy/LLM fallback: "subject=Rebecca;predicate=is;obj=poopy pants"
+        if (TryParseLegacyFactTuple(factsJson, out var legacy))
+            return [legacy];
+
+        return [];
+    }
+
+    private static bool HasFactTuple(string? subject, string? predicate, string? obj) =>
+        !string.IsNullOrWhiteSpace(subject) &&
+        !string.IsNullOrWhiteSpace(predicate) &&
+        !string.IsNullOrWhiteSpace(obj);
+
+    private static bool TryParseLegacyFactTuple(string raw, out FactInput fact)
+    {
+        fact = new FactInput();
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var chunks = raw.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var chunk in chunks)
+        {
+            var equalsIndex = chunk.IndexOf('=');
+            var colonIndex = chunk.IndexOf(':');
+            var splitIndex = equalsIndex >= 0
+                ? equalsIndex
+                : colonIndex;
+            if (splitIndex <= 0 || splitIndex >= chunk.Length - 1)
+                continue;
+
+            var key = chunk[..splitIndex].Trim();
+            var value = chunk[(splitIndex + 1)..].Trim().Trim('"', '\'');
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                map[key] = value;
+        }
+
+        map.TryGetValue("subject", out var subject);
+        if (string.IsNullOrWhiteSpace(subject))
+            map.TryGetValue("subj", out subject);
+
+        map.TryGetValue("predicate", out var predicate);
+        if (string.IsNullOrWhiteSpace(predicate))
+            map.TryGetValue("pred", out predicate);
+
+        map.TryGetValue("object", out var obj);
+        if (string.IsNullOrWhiteSpace(obj))
+            map.TryGetValue("obj", out obj);
+
+        if (string.IsNullOrWhiteSpace(obj))
+            map.TryGetValue("value", out obj);
+
+        if (!HasFactTuple(subject, predicate, obj))
+            return false;
+
+        fact = new FactInput
+        {
+            Subject = subject!.Trim(),
+            Predicate = predicate!.Trim(),
+            Object = obj!.Trim()
+        };
+        return true;
     }
 
     /// <summary>

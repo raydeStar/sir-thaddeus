@@ -33,7 +33,12 @@ public sealed class AgentVoiceService : IVoiceAgentService
             HasTokenUsage = tokenUsage is not null,
             TokensIn = tokenUsage?.TokensIn ?? 0,
             TokensOut = tokenUsage?.TokensOut ?? 0,
-            ContextFillPercent = tokenUsage?.ContextFillPercent ?? 0
+            ContextFillPercent = tokenUsage?.ContextFillPercent ?? 0,
+            LlmRoundTrips = response.LlmRoundTrips,
+            SuppressSourceCardsUi = response.SuppressSourceCardsUi,
+            Payload = response.DeepDiveBriefing,
+            ContextPayload = response.ContextSnapshot,
+            ToolCallsPayload = response.ToolCallsMade
         };
     }
 }

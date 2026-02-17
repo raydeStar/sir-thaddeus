@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -52,6 +53,19 @@ public sealed class SlotExtract
     {
         if (string.IsNullOrWhiteSpace(userMessage))
             return new ExtractedSlots { RawMessage = userMessage ?? "" };
+
+        // Logic puzzles are pure reasoning — no location, no tools.
+        // Short-circuit before LLM extraction to prevent the small
+        // model from hallucinating location/intent slots.
+        if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(
+                userMessage.Trim().ToLowerInvariant()))
+        {
+            return new ExtractedSlots
+            {
+                Intent = "chat",
+                RawMessage = userMessage.Trim()
+            };
+        }
 
         var heuristic = ExtractHeuristically(userMessage, currentState);
         if (ShouldUseHeuristicOnly(heuristic))

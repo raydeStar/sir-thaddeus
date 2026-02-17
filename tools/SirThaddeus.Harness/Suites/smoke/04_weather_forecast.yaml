@@ -4,6 +4,7 @@ user_message: "Use weather tools to provide a short weather outlook for Seattle,
 allowed_tools:
   - weather_geocode
   - weather_forecast
+  - memory_retrieve
 mode: live
 assertions:
   required_tools:

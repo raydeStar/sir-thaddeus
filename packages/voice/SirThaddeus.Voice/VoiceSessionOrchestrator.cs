@@ -473,7 +473,12 @@ public sealed class VoiceSessionOrchestrator :
             response.HasTokenUsage,
             response.TokensIn,
             response.TokensOut,
-            response.ContextFillPercent);
+            response.ContextFillPercent,
+            response.Payload,
+            response.ContextPayload,
+            response.ToolCallsPayload,
+            response.LlmRoundTrips,
+            response.SuppressSourceCardsUi);
 
         if (!response.Success || string.IsNullOrWhiteSpace(response.Text))
         {
@@ -847,7 +852,12 @@ public sealed class VoiceSessionOrchestrator :
         bool hasTokenUsage = false,
         int tokensIn = 0,
         int tokensOut = 0,
-        int contextFillPercent = 0)
+        int contextFillPercent = 0,
+        object? payload = null,
+        object? contextPayload = null,
+        object? toolCallsPayload = null,
+        int llmRoundTrips = 0,
+        bool suppressSourceCardsUi = false)
     {
         try
         {
@@ -861,7 +871,12 @@ public sealed class VoiceSessionOrchestrator :
                 HasTokenUsage = hasTokenUsage,
                 TokensIn = tokensIn,
                 TokensOut = tokensOut,
-                ContextFillPercent = contextFillPercent
+                ContextFillPercent = contextFillPercent,
+                LlmRoundTrips = llmRoundTrips,
+                SuppressSourceCardsUi = suppressSourceCardsUi,
+                Payload = payload,
+                ContextPayload = contextPayload,
+                ToolCallsPayload = toolCallsPayload
             });
         }
         catch

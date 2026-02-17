@@ -51,6 +51,7 @@ public partial class App : System.Windows.Application
     // ─────────────────────────────────────────────────────────────────────
 
     private AgentOrchestrator? _orchestrator;
+    private IAgentOrchestrator? _agentEntryPoint;
     private IDialogueStatePersistence? _dialogueStatePersistence;
 
     // ─────────────────────────────────────────────────────────────────────
@@ -134,6 +135,7 @@ public partial class App : System.Windows.Application
         _runtimeController.StateChanged += OnRuntimeStateChanged;
 
         LogStartup();
+        InitializeLocationServices();
 
         // ── 3. Create LLM client (Layer 3) ──────────────────────────
         var llmOptions = new LlmClientOptions
@@ -235,6 +237,10 @@ public partial class App : System.Windows.Application
         _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
         _orchestrator.ReasoningGuardrailsMode = _settings.Ui.ReasoningGuardrails;
 
+        // Apply manual location (if configured) as the default hint
+        // for local lookups. Device geolocation remains policy-disabled.
+        ApplyManualLocationToOrchestrator(_settings, emitAuditEvent: true);
+
         if (_dialogueStatePersistence is not null)
         {
             var seededState = await _dialogueStatePersistence.LoadAsync();
@@ -251,6 +257,23 @@ public partial class App : System.Windows.Application
             Action = "AGENT_ORCHESTRATOR_CREATED",
             Result = "ok"
         });
+
+        _agentEntryPoint = new LocationAwareAgentOrchestrator(
+            _orchestrator,
+            getSettings: () => _settings,
+            getActiveProfileId: () => _orchestrator?.ActiveProfileId,
+            saveManualLocation: SaveManualLocationFromConversation,
+            touchManualLocationTimestamp: TouchManualLocationTimestampFromConversation,
+            applySettings: updated =>
+            {
+                if (updated is null)
+                    return;
+
+                _settings = updated;
+                _permissionGate?.UpdateSettings(updated);
+                ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
+            },
+            queueManualLocationPrompt: QueueManualLocationPromptFromConversation);
 
         // ── 7. Voice pipeline (PTT -> Transcribe -> Thinking -> Speak) ──
         _voiceHostProcessManager = new VoiceHostProcessManager(_auditLogger, _settings.Voice);
@@ -275,7 +298,7 @@ public partial class App : System.Windows.Application
         _asrClient = new LocalAsrHttpClient(GetVoiceHostBaseUrlForRequests, () => _settings.Voice, _auditLogger);
         _asrClient.TranscriptReceived += OnAsrTranscriptReceived;
         _asrClient.TimingUpdated += OnAsrTimingUpdated;
-        _voiceAgentService = new AgentVoiceService(_orchestrator);
+        _voiceAgentService = new AgentVoiceService(_agentEntryPoint ?? _orchestrator!);
         _voiceOrchestrator = new VoiceSessionOrchestrator(
             _audioCaptureService,
             _audioPlaybackService,
@@ -315,8 +338,8 @@ public partial class App : System.Windows.Application
         _hotkeyOwnerWindow = _overlayWindow ?? CreateHiddenHotkeyWindow();
         InitializeHotkeys(_hotkeyOwnerWindow);
 
-        // Optional warm-up runs in background and never blocks app startup.
-        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(6), startIfMissing: false);
+        // Start VoiceHost in the background so Kokoro is warm by first use.
+        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(6), startIfMissing: true);
     }
 
     private void OnPttMicDown()
@@ -344,7 +367,7 @@ public partial class App : System.Windows.Application
         try
         {
             MarkVoiceMicReleased();
-            _ = await TryHandleMicUpAsync(showUserFacingFailure: true);
+            await TryHandleMicUpAsync();
         }
         finally
         {
@@ -360,51 +383,13 @@ public partial class App : System.Windows.Application
         AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
     }
 
-    private async Task<bool> TryHandleMicUpAsync(bool showUserFacingFailure)
+    private async Task TryHandleMicUpAsync()
     {
-        await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
-        PublishVoiceStatus("Transcribing...");
-
-        var readyStopwatch = Stopwatch.StartNew();
-        var ready = await EnsureVoiceHostReadyAsync(showUserFacingFailure: showUserFacingFailure);
-        readyStopwatch.Stop();
-
-        if (!ready)
-        {
-            LogVoiceTiming("VoiceHost readiness failed", readyStopwatch.Elapsed, GetCurrentVoiceSessionId(), LogEntryKind.Error);
-
-            var failureMessage = "Voice unavailable.";
-            if (_lastVoiceHostFailureMessage is not null)
-                failureMessage = _lastVoiceHostFailureMessage;
-
-            _voiceOrchestrator?.EnqueueFault(failureMessage);
-            PublishVoiceStatus(failureMessage);
-            return false;
-        }
-
-        LogVoiceTiming("VoiceHost readiness", readyStopwatch.Elapsed, GetCurrentVoiceSessionId(), LogEntryKind.Info);
-        var allowRealtimeHint = string.Equals(
-            _settings?.Voice.GetNormalizedSttEngine(),
-            "faster-whisper",
-            StringComparison.OrdinalIgnoreCase);
-        var (hintTranscript, hintObservedAtUtc) = GetLiveAsrPreviewHint();
-        if (allowRealtimeHint && !string.IsNullOrWhiteSpace(hintTranscript) && hintObservedAtUtc is { } observedAt)
-        {
-            _voiceOrchestrator?.SetRealtimeTranscriptHint(hintTranscript, observedAt);
-            WriteVoiceAuditNonBlocking("VOICE_PREVIEW_HINT_SUBMITTED", "ok", new Dictionary<string, object>
-            {
-                ["sessionId"] = GetCurrentVoiceSessionId() ?? "",
-                ["transcriptLength"] = hintTranscript.Length,
-                ["hintObservedAtUtc"] = observedAt.ToString("O")
-            });
-        }
-        else
-        {
-            _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
-        }
-
+        // Never gate mic release on readiness checks: stop capture first.
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
         _voiceOrchestrator?.EnqueueMicUp();
-        return true;
+        PublishVoiceStatus("Transcribing...");
+        await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
     }
 
     private string GetVoiceHostBaseUrlForRequests()
@@ -1012,6 +997,10 @@ public partial class App : System.Windows.Application
                         e.TokensIn,
                         e.TokensOut,
                         e.ContextFillPercent);
+                    TryForwardVoiceBriefing(e.Payload);
+                    TryApplyVoiceContext(e.ContextPayload);
+                    if (e.LlmRoundTrips > 0)
+                        AppendVoiceActivity($"Agent response ready [{e.LlmRoundTrips} LLM round-trip(s)]", LogEntryKind.Info);
                     break;
 
                 case VoiceProgressKind.PhaseInfo:
@@ -1217,6 +1206,37 @@ public partial class App : System.Windows.Application
             LogVoiceTiming("Agent response ready", elapsed, resolvedSessionId, LogEntryKind.Info);
         if (agentFinalMarked)
             LogVoiceStageTimestamp("t_agent_final", now, resolvedSessionId);
+    }
+
+    /// <summary>
+    /// Forwards a deep-dive briefing from the voice pipeline to the
+    /// briefing panel and switches the UI to the Briefing tab.
+    /// </summary>
+    private void TryForwardVoiceBriefing(object? payload)
+    {
+        if (payload is not Agent.Search.DeepDive.DeepDiveBriefing briefing)
+            return;
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_commandPaletteViewModel?.BriefingPanel.TrySetBriefing(briefing, out _) == true)
+                _commandPaletteViewModel.RaiseBriefingReady();
+        });
+    }
+
+    /// <summary>
+    /// Applies context snapshot from voice turns so context chips,
+    /// topic tracking, and dialogue state stay in sync with typed chat.
+    /// </summary>
+    private void TryApplyVoiceContext(object? contextPayload)
+    {
+        Dispatcher.BeginInvoke(async () =>
+        {
+            if (_commandPaletteViewModel is null) return;
+
+            _commandPaletteViewModel.ApplyVoiceContextSnapshot(contextPayload);
+            await _commandPaletteViewModel.PersistDialogueStateFromVoiceAsync();
+        });
     }
 
     private void MarkVoiceSpeakingStarted(DateTimeOffset timestampUtc, string? sessionIdHint = null)
@@ -1839,6 +1859,29 @@ public partial class App : System.Windows.Application
                 ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
                 : settings.Weather.UserAgent.Trim();
 
+        // Web search provider settings
+        var webModeRaw = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
+        var webMode = webModeRaw is "auto" or "searxng" or "ddg_html" or "google_news" or "manual"
+            ? webModeRaw
+            : "auto";
+        env["WEBSEARCH_MODE"] = webMode;
+        env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(settings.WebSearch.SearxngBaseUrl)
+            ? "http://localhost:8080"
+            : settings.WebSearch.SearxngBaseUrl.Trim();
+        env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
+        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
+
+        // Deep-dive provider settings (Places + budgets)
+        if (!string.IsNullOrWhiteSpace(settings.DeepDive.PlacesApiKey))
+            env["ST_DEEPDIVE_PLACES_API_KEY"] = settings.DeepDive.PlacesApiKey.Trim();
+        env["ST_DEEPDIVE_PLACES_TIMEOUT_MS"] = Math.Clamp(settings.DeepDive.PlacesTimeoutMs, 2_000, 20_000).ToString();
+        env["ST_DEEPDIVE_MAX_TOOL_CALLS"] = Math.Clamp(settings.DeepDive.MaxToolCalls, 1, 20).ToString();
+        env["ST_DEEPDIVE_MAX_SOURCES"] = Math.Clamp(settings.DeepDive.MaxSources, 1, 10).ToString();
+        env["ST_DEEPDIVE_REVIEW_SNIPPETS_MAX"] = Math.Clamp(settings.DeepDive.MaxReviewSnippets, 1, 5).ToString();
+        env["ST_DEEPDIVE_DEFAULT_LOCALE"] = string.IsNullOrWhiteSpace(settings.DeepDive.DefaultLocale)
+            ? "en-US"
+            : settings.DeepDive.DefaultLocale.Trim();
+
         return env;
     }
 
@@ -1974,7 +2017,7 @@ public partial class App : System.Windows.Application
         var host = new RuntimeControllerHost(_runtimeController!);
 
         var viewModel = new CommandPaletteViewModel(
-            _orchestrator!,
+            _agentEntryPoint ?? _orchestrator!,
             _llmClient!,
             host,
             _auditLogger!,
@@ -1985,6 +2028,7 @@ public partial class App : System.Windows.Application
         viewModel.VoiceMicDown = OnPttMicDown;
         viewModel.VoiceMicUp  = OnPttMicUp;
         viewModel.VoiceShutup = OnPttShutup;
+        viewModel.ReadAloudRequestedAsync = ReadChatMessageAloudAsync;
 
         _commandPaletteViewModel = viewModel;
         _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
@@ -2062,6 +2106,7 @@ public partial class App : System.Windows.Application
                     _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 if (_commandPaletteViewModel is not null)
                     _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
 
                 if (_ttsService is not null)
                     _ttsService.Enabled = updated.Audio.TtsEnabled;
@@ -2094,6 +2139,48 @@ public partial class App : System.Windows.Application
         }
 
         return window;
+    }
+
+    private async Task ReadChatMessageAloudAsync(string text, CancellationToken cancellationToken)
+    {
+        var playback = _audioPlaybackService;
+        if (playback is null)
+            throw new InvalidOperationException("Audio playback service is not initialized.");
+
+        var normalized = (text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        // Stop any in-flight playback so voices don't overlap.
+        try { await playback.StopAsync(CancellationToken.None); }
+        catch { /* best effort */ }
+
+        var voiceSettings = _settings?.Voice ?? new VoiceSettings();
+        var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();
+        var requiresLocalVoiceHost =
+            !string.Equals(selectedTtsEngine, "windows", StringComparison.OrdinalIgnoreCase) &&
+            voiceSettings.PreferLocalTts;
+
+        // If Kokoro (or any non-Windows engine) is configured, ensure VoiceHost
+        // is fully started before attempting synthesis. No Windows SAPI fallback.
+        if (requiresLocalVoiceHost)
+        {
+            _commandPaletteViewModel?.AddVoiceLog(
+                "Starting voice services for read-aloud...", LogEntryKind.Info);
+
+            var ready = await EnsureVoiceHostReadyAsync(showUserFacingFailure: false);
+            if (!ready)
+            {
+                _commandPaletteViewModel?.AddVoiceLog(
+                    "Read aloud skipped: voice services could not start. " +
+                    "Check VoiceHost settings or start it manually from the Settings tab.",
+                    LogEntryKind.Error);
+                return;
+            }
+        }
+
+        var sessionId = $"read-aloud-{Guid.NewGuid():N}";
+        await playback.PlayTextAsync(normalized, sessionId, cancellationToken);
     }
 
     // ─────────────────────────────────────────────────────────────────────

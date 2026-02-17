@@ -71,6 +71,12 @@ public sealed class ChatMessageViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Original user prompt associated with this assistant response.
+    /// Used by the "Retry" UI action to replay the same turn.
+    /// </summary>
+    public string RetryPrompt { get; init; } = "";
+
+    /// <summary>
     /// Optional model reasoning trace rendered in a collapsed expander.
     /// This keeps the main answer concise while still making thought text accessible.
     /// </summary>

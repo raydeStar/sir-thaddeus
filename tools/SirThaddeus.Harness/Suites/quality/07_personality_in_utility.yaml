@@ -1,0 +1,36 @@
+id: quality_personality_in_utility
+name: Quality - Utility responses include personality or follow-up
+user_message: "What is 145 divided by 7?"
+allowed_tools:
+  - memory_retrieve
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - places_lookup
+    - weather_geocode
+    - weather_forecast
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+  max_response_chars: 400
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/AgentOrchestrator.Internal.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

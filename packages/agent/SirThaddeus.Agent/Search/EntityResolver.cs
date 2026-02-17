@@ -101,6 +101,26 @@ public sealed class EntityResolver
         if (extracted is null)
             return null;
 
+        // Guard: reject hallucinated entities that share no tokens with the
+        // user's actual message. Small models sometimes invent entities from
+        // their training data ("Prime Minister of Japan" for a dragon movie).
+        if (!EntityOverlapsUserMessage(extracted, userMessage))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "ENTITY_REJECTED_NO_OVERLAP",
+                Result = $"Extracted \"{extracted.Name}\" has no token overlap with user message — skipping.",
+                Details = new Dictionary<string, object>
+                {
+                    ["name"] = extracted.Name,
+                    ["type"] = extracted.Type,
+                    ["hint"] = extracted.Hint
+                }
+            });
+            return null;
+        }
+
         _audit.Append(new AuditEvent
         {
             Actor  = "agent",
@@ -387,6 +407,63 @@ public sealed class EntityResolver
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Verifies the extracted entity shares at least one meaningful token
+    /// with the user's original message. Prevents hallucinated entities
+    /// (e.g., "Prime Minister of Japan" for a dragon movie question) from
+    /// wasting a canonicalization search call and poisoning query results.
+    /// </summary>
+    internal static bool EntityOverlapsUserMessage(ExtractedEntity entity, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Name) || string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var msgLower = userMessage.ToLowerInvariant();
+        var entityTokens = Tokenize(entity.Name);
+        var hintTokens   = Tokenize(entity.Hint);
+
+        // Any significant entity-name token present in the message? Pass.
+        if (entityTokens.Any(t => msgLower.Contains(t, StringComparison.Ordinal)))
+            return true;
+
+        // Any significant hint token present? Also pass.
+        if (hintTokens.Any(t => msgLower.Contains(t, StringComparison.Ordinal)))
+            return true;
+
+        // Reverse check: does the message contain at least one word that
+        // appears in either the entity name or hint? Catches situations
+        // where the model reformulated the entity slightly.
+        var entityText = $"{entity.Name} {entity.Hint}".ToLowerInvariant();
+        var msgTokens  = Tokenize(userMessage);
+        return msgTokens.Any(t => t.Length >= 4 && entityText.Contains(t, StringComparison.Ordinal));
+    }
+
+    private static readonly HashSet<string> StopWords =
+    [
+        "the", "a", "an", "of", "in", "on", "at", "to", "for",
+        "is", "it", "and", "or", "but", "not", "this", "that",
+        "with", "from", "by", "was", "are", "were", "been",
+        "has", "had", "have", "do", "does", "did", "will",
+        "can", "could", "would", "should", "may", "might",
+        "i", "you", "he", "she", "we", "they", "me", "my",
+        "what", "how", "when", "where", "who", "which", "why",
+        "new", "its", "your", "our", "their", "his", "her",
+        "unknown", "none", "null"
+    ];
+
+    private static List<string> Tokenize(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        return text
+            .ToLowerInvariant()
+            .Split([' ', ',', '.', '?', '!', ':', ';', '"', '\'', '(', ')'],
+                   StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length >= 3 && !StopWords.Contains(t))
+            .ToList();
     }
 
     private static string StripCodeFences(string content)

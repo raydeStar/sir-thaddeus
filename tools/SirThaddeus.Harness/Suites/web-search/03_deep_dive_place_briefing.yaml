@@ -1,0 +1,35 @@
+id: web_deep_dive_place_briefing
+name: Web Search - Deep Dive Place Briefing
+user_message: "Deep dive Seattle Flowers with hours + reviews and what to expect."
+allowed_tools:
+  - memory_retrieve
+  - places_lookup
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - places_lookup
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - briefing
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1200
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/DeepDive/
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - apps/mcp-server/SirThaddeus.McpServer/Tools/PlacesTools.cs
+  tier2_targets:
+    - apps/desktop-runtime/SirThaddeus.DesktopRuntime/
+  tier3_targets:
+    - packages/

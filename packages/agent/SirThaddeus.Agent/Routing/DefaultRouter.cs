@@ -15,6 +15,7 @@ public sealed class DefaultRouter : IRouter
     {
         Casual,
         FactLookup,
+        DeepDive,
         NewsLookup,
         Tooling
     }
@@ -50,6 +51,9 @@ public sealed class DefaultRouter : IRouter
             return MakeRoute(Intents.LookupSearch, confidence: 0.95, needsWeb: true, needsSearch: true, needsBrowser: true);
         }
 
+        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
+            return MakeRoute(Intents.LookupDeepDive, confidence: 0.95, needsWeb: true, needsSearch: true, needsBrowser: true);
+
         if (IntentFeatureExtractor.LooksLikeScreenRequest(lower))
             return MakeRoute(Intents.ScreenObserve, confidence: 0.95, needsScreen: true);
 
@@ -79,6 +83,7 @@ public sealed class DefaultRouter : IRouter
         {
             ChatIntent.Casual => MakeRoute(Intents.ChatOnly, confidence: 0.8),
             ChatIntent.FactLookup => MakeRoute(Intents.LookupFact, confidence: 0.88, needsWeb: true, needsSearch: true),
+            ChatIntent.DeepDive => MakeRoute(Intents.LookupDeepDive, confidence: 0.9, needsWeb: true, needsSearch: true, needsBrowser: true),
             ChatIntent.NewsLookup => MakeRoute(Intents.LookupNews, confidence: 0.88, needsWeb: true, needsSearch: true),
             ChatIntent.Tooling => RefineToolingIntent(lower),
             _ => MakeRoute(Intents.GeneralTool, confidence: 0.3)
@@ -126,8 +131,19 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeMemoryWriteRequest(lower))
             return ChatIntent.Tooling;
 
+        if (IntentFeatureExtractor.LooksLikeScreenRequest(lower) ||
+            IntentFeatureExtractor.LooksLikeFileRequest(lower) ||
+            IntentFeatureExtractor.LooksLikeSystemCommand(lower) ||
+            IntentFeatureExtractor.LooksLikeBrowseRequest(lower))
+        {
+            return ChatIntent.Tooling;
+        }
+
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
+
+        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
+            return ChatIntent.DeepDive;
 
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return ChatIntent.NewsLookup;
@@ -174,19 +190,66 @@ public sealed class DefaultRouter : IRouter
     {
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
+        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
+            return ChatIntent.DeepDive;
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return ChatIntent.NewsLookup;
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return ChatIntent.FactLookup;
         if (IntentFeatureExtractor.LooksLikeMemoryWriteRequest(lower))
             return ChatIntent.Tooling;
+        if (IntentFeatureExtractor.LooksLikeScreenRequest(lower) ||
+            IntentFeatureExtractor.LooksLikeFileRequest(lower) ||
+            IntentFeatureExtractor.LooksLikeSystemCommand(lower) ||
+            IntentFeatureExtractor.LooksLikeBrowseRequest(lower))
+        {
+            return ChatIntent.Tooling;
+        }
+
+        // Safety net: when the LLM classifier returns an unparseable
+        // response, questions that look like information requests should
+        // route to search rather than defaulting to bare chat.
+        if (LooksLikeInformationQuestion(lower))
+            return ChatIntent.FactLookup;
+
         return ChatIntent.Casual;
     }
 
+    /// <summary>
+    /// Lightweight check for queries that are clearly asking for
+    /// real-world information but didn't match any specific heuristic.
+    /// Used as a last-resort before defaulting to casual chat.
+    /// </summary>
+    private static bool LooksLikeInformationQuestion(string lower)
+    {
+        if (lower.Length < 15)
+            return false;
+
+        if (IntentFeatureExtractor.LooksLikeGreeting(lower))
+            return false;
+
+        var hasQuestionMark = lower.Contains('?');
+        var hasQuestionWord =
+            lower.Contains("can you", StringComparison.Ordinal) ||
+            lower.Contains("could you", StringComparison.Ordinal) ||
+            lower.Contains("what", StringComparison.Ordinal) ||
+            lower.Contains("how", StringComparison.Ordinal) ||
+            lower.Contains("where", StringComparison.Ordinal) ||
+            lower.Contains("when", StringComparison.Ordinal) ||
+            lower.Contains("is it", StringComparison.Ordinal) ||
+            lower.Contains("is there", StringComparison.Ordinal) ||
+            lower.Contains("are there", StringComparison.Ordinal) ||
+            lower.Contains("do you know", StringComparison.Ordinal);
+
+        return hasQuestionMark && hasQuestionWord;
+    }
+
     private static ChatIntent InferSearchIntent(string lower)
-        => IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
-            ? ChatIntent.NewsLookup
-            : ChatIntent.FactLookup;
+        => IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower)
+            ? ChatIntent.DeepDive
+            : IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
+                ? ChatIntent.NewsLookup
+                : ChatIntent.FactLookup;
 
     internal static RouterOutput MakeRoute(
         string intent,

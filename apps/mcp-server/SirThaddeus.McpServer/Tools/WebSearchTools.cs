@@ -31,6 +31,8 @@ namespace SirThaddeus.McpServer.Tools;
 [McpServerToolType]
 public static class WebSearchTools
 {
+    private const int DefaultSearchTimeoutMs = 8_000;
+    private const int DefaultMaxResults = 5;
     private const int AutoReadCount     = 5;
     private const int ExcerptMaxChars   = 1000;
     private const int CardExcerptChars  = 250;
@@ -90,7 +92,11 @@ public static class WebSearchTools
     private static async Task<string> ExecuteSearchAsync(
         string query, int maxResults, string recency, CancellationToken cancellationToken)
     {
+        var configuredDefaultMaxResults = ParseIntEnv("WEBSEARCH_MAX_RESULTS", DefaultMaxResults, 1, 10);
+        if (maxResults <= 0)
+            maxResults = configuredDefaultMaxResults;
         maxResults = Math.Clamp(maxResults, 1, 10);
+        var searchTimeoutMs = ParseIntEnv("WEBSEARCH_TIMEOUT_MS", DefaultSearchTimeoutMs, 2_000, 30_000);
 
         // Normalize recency to a known value
         recency = NormalizeRecency(recency);
@@ -105,7 +111,7 @@ public static class WebSearchTools
             new WebSearchOptions
             {
                 MaxResults = fetchCount,
-                TimeoutMs  = 8_000,
+                TimeoutMs  = searchTimeoutMs,
                 Recency    = recency
             },
             cancellationToken);
@@ -264,9 +270,21 @@ public static class WebSearchTools
                 vetted.Add(r);
         }
 
-        // Fail-open fallback to avoid brittle empty responses.
+        // Fail-open only when results have SOME signal overlap.
+        // If zero tokens matched across all results, returning them is
+        // worse than returning nothing (obituaries for a florist query).
         if (vetted.Count == 0)
-            return results.Take(Math.Min(3, results.Count)).ToList();
+        {
+            var anyPartialMatch = results.Any(r =>
+            {
+                var text = BuildRelevanceText(r, extractionMap).ToLowerInvariant();
+                return anchorTokens.Any(t => text.Contains(t, StringComparison.Ordinal));
+            });
+
+            return anyPartialMatch
+                ? results.Take(Math.Min(3, results.Count)).ToList()
+                : [];
+        }
 
         return vetted;
     }
@@ -605,4 +623,12 @@ public static class WebSearchTools
     /// </summary>
     private static string NormalizeRecency(string raw) =>
         RecencyHelper.Normalize(raw);
+
+    private static int ParseIntEnv(string key, int fallback, int min, int max)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        if (!int.TryParse(raw, out var parsed))
+            return fallback;
+        return Math.Clamp(parsed, min, max);
+    }
 }

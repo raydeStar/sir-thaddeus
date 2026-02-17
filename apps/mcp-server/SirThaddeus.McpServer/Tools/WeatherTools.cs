@@ -38,7 +38,7 @@ public static class WeatherTools
         "Returns normalized place candidates with lat/lon, country code, " +
         "US flag, confidence, and cache metadata.")]
     public static async Task<string> WeatherGeocode(
-        [Description("Human location string, e.g. 'Rexburg, ID'")] string place,
+        [Description("Human location string, e.g. 'Portland, OR'")] string place,
         [Description("Max candidates to return (1-5, default 3)")] int maxResults = 3,
         CancellationToken cancellationToken = default)
     {

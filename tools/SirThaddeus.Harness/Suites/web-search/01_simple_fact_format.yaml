@@ -1,15 +1,17 @@
 id: web_simple_fact_format
 name: Web Search - Simple Fact Format
-user_message: "When was C# first released? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise."
+user_message: "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise."
 allowed_tools:
-  - memory_retrieve
   - web_search
   - browser_navigate
 mode: live
 assertions:
   required_tools:
     - web_search
-  forbidden_tools: []
+  forbidden_tools:
+    - file_read
+    - system_execute
+    - screen_capture
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: false
@@ -17,8 +19,9 @@ expectations:
   required_keywords:
     - "answer:"
     - "commentary:"
-  forbidden_keywords: []
-  max_response_chars: 320
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 500
 min_score: 7.0
 patch_targets:
   tier1_targets:

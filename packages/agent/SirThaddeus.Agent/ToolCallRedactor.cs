@@ -58,6 +58,8 @@ public static class ToolCallRedactor
             // Web search: log query + recency (safe)
             "websearch" or "web_search"
                 => Truncate(argumentsJson, 200),
+            "placeslookup" or "places_lookup"
+                => Truncate(argumentsJson, 220),
 
             // Browser navigate: log the URL
             "browsernavigate" or "browser_navigate"
@@ -120,6 +122,8 @@ public static class ToolCallRedactor
             // Web search: log result count + titles, not full excerpts
             "websearch" or "web_search"
                 => SummarizeSearchOutput(output),
+            "placeslookup" or "places_lookup"
+                => SummarizePlacesOutput(output),
 
             // Weather geocode: log candidate count
             "weathergeocode" or "weather_geocode"
@@ -180,6 +184,45 @@ public static class ToolCallRedactor
             });
 
         return $"[Search: {resultCount} results, {output.Length} chars total]";
+    }
+
+    private static string SummarizePlacesOutput(string output)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+            {
+                return $"[Places lookup error: {Truncate(err.GetString() ?? "", 120)}]";
+            }
+
+            string name = "";
+            int reviews = 0;
+            if (root.TryGetProperty("place", out var place) &&
+                place.ValueKind == JsonValueKind.Object)
+            {
+                if (place.TryGetProperty("name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String)
+                {
+                    name = nameEl.GetString() ?? "";
+                }
+
+                if (place.TryGetProperty("reviews", out var reviewsEl) &&
+                    reviewsEl.ValueKind == JsonValueKind.Array)
+                {
+                    reviews = reviewsEl.GetArrayLength();
+                }
+            }
+
+            return $"[Places lookup: place={Truncate(name, 60)}, review_snippets={reviews}]";
+        }
+        catch
+        {
+            return $"[Places lookup: {output.Length} chars]";
+        }
     }
 
     private static string SummarizeWeatherGeocodeOutput(string output)

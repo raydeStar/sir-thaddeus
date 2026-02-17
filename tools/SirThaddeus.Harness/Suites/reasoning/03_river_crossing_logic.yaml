@@ -1,0 +1,44 @@
+id: reasoning_river_crossing_logic
+name: Reasoning - Fox/chicken/grain river crossing (constraint propagation)
+user_message: "A farmer needs to cross a river with a fox, a chicken, and a bag of grain. The boat can only carry the farmer and one item. If left alone, the fox eats the chicken and the chicken eats the grain. How does the farmer get everything across?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  # The key insight: farmer must bring chicken first, then manage
+  # which items are never left alone together. The chicken must
+  # cross first AND come back at some point (or be swapped).
+  required_keywords:
+    - "chicken"
+    - "fox"
+    - "grain"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - impossible
+  max_response_chars: 2400
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

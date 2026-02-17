@@ -1,4 +1,6 @@
 using static SirThaddeus.Agent.OrchestratorMessageHelpers;
+using SirThaddeus.Agent.Search;
+using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Agent.PostProcessing;
 
@@ -46,6 +48,12 @@ public sealed class DeterministicChatPostProcessor
         {
             logEvent?.Invoke("AGENT_ABUSIVE_USER_BOUNDARY", "Detected abusive user turn; returning boundary response.");
             return BuildRespectfulResetReply();
+        }
+
+        if (TryResolveClassicReasoningOverride(userMessage, out var deterministicOverride))
+        {
+            logEvent?.Invoke("AGENT_CLASSIC_REASONING_OVERRIDE", "Applied deterministic override for classic reasoning prompt.");
+            return deterministicOverride;
         }
 
         return text;
@@ -105,9 +113,16 @@ public sealed class DeterministicChatPostProcessor
         sanitized = TruncateSelfDialogue(sanitized);
         sanitized = TrimHallucinatedConversationTail(sanitized, latestUserMessage);
         sanitized = SanitizeCommon(sanitized);
+        sanitized = SourceCitationFormatter.Apply(sanitized, toolCallsMade);
 
         if (LooksLikeUnsafeMirroringResponse(userMessage: null, assistantText: sanitized))
             return BuildRespectfulResetReply();
+
+        // Guard against bare responses (e.g. "Yes", "No") that lack substance.
+        // When the LLM returns a very short answer to a question, nudge the
+        // user to ask a follow-up so the experience doesn't feel hollow.
+        if (IsBareResponse(sanitized) && IsLikelyQuestion(latestUserMessage))
+            sanitized = EnrichBareResponse(sanitized);
 
         return sanitized;
     }
@@ -235,6 +250,76 @@ public sealed class DeterministicChatPostProcessor
                  lower.Contains("to you", StringComparison.Ordinal)));
     }
 
+    // ── Bare response detection ────────────────────────────────────
+    // Small models sometimes return "Yes", "No", or a single bare
+    // sentence. This is a poor experience — enrich them with a nudge.
+
+    private static bool IsBareResponse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim().TrimEnd('.', '!', '?');
+        var lower = trimmed.ToLowerInvariant();
+
+        // Exact bare affirmations/negations (with or without punctuation)
+        ReadOnlySpan<string> bareTokens =
+        [
+            "yes", "no", "yeah", "yep", "nope",
+            "sure", "correct", "incorrect",
+            "true", "false", "negative", "affirmative"
+        ];
+
+        foreach (var token in bareTokens)
+        {
+            if (lower == token)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsLikelyQuestion(string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var trimmed = userMessage.Trim();
+        if (trimmed.EndsWith('?'))
+            return true;
+
+        var lower = trimmed.ToLowerInvariant();
+        return lower.StartsWith("is ", StringComparison.Ordinal) ||
+               lower.StartsWith("are ", StringComparison.Ordinal) ||
+               lower.StartsWith("does ", StringComparison.Ordinal) ||
+               lower.StartsWith("do ", StringComparison.Ordinal) ||
+               lower.StartsWith("can ", StringComparison.Ordinal) ||
+               lower.StartsWith("will ", StringComparison.Ordinal) ||
+               lower.StartsWith("would ", StringComparison.Ordinal) ||
+               lower.StartsWith("should ", StringComparison.Ordinal) ||
+               lower.StartsWith("what ", StringComparison.Ordinal) ||
+               lower.StartsWith("when ", StringComparison.Ordinal) ||
+               lower.StartsWith("where ", StringComparison.Ordinal) ||
+               lower.StartsWith("how ", StringComparison.Ordinal);
+    }
+
+    private static string EnrichBareResponse(string bareText)
+    {
+        var trimmed = bareText.Trim();
+        var lower = trimmed.ToLowerInvariant().TrimEnd('.', '!');
+
+        // Affirmative bare answers get a helpful follow-up prompt
+        if (lower is "yes" or "yeah" or "yep" or "correct" or "true" or "sure")
+            return $"{trimmed} — want me to dig up more details on that?";
+
+        // Negative bare answers
+        if (lower is "no" or "nope" or "false" or "incorrect" or "negative")
+            return $"{trimmed} — would you like me to look into why, or find alternatives?";
+
+        // Generic short answer: append a conversational continuation
+        return $"{trimmed}\n\nNeed me to expand on that?";
+    }
+
     private static bool LooksLikeEmailToolName(string toolName)
     {
         if (string.IsNullOrWhiteSpace(toolName))
@@ -245,5 +330,10 @@ public sealed class DeterministicChatPostProcessor
                lower.Contains("mail_", StringComparison.Ordinal) ||
                lower.Contains("_mail", StringComparison.Ordinal) ||
                lower.Contains("smtp", StringComparison.Ordinal);
+    }
+
+    private static bool TryResolveClassicReasoningOverride(string userMessage, out string answer)
+    {
+        return ClassicReasoningEngine.TryBuildCarWashReasoning(userMessage, out answer);
     }
 }

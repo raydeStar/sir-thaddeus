@@ -1,0 +1,32 @@
+id: contract_tool_unavailable_stub
+name: Tool Contract - tool_unavailable error handling
+user_message: "Use web_search to find the latest Rust language release notes."
+allowed_tools:
+  - web_search
+mode: stub
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - unavailable
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 700
+min_score: 7.5
+stub:
+  default_failure: tool_unavailable
+  per_tool_failures:
+    web_search: tool_unavailable
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/ToolLoop/ToolLoopExecutor.cs
+    - packages/agent/SirThaddeus.Agent/Search/WebToolFailureMapper.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

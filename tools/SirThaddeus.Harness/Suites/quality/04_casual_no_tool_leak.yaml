@@ -1,0 +1,37 @@
+id: quality_casual_no_tool_leak
+name: Quality - Conversational query must not leak into tools
+user_message: "Tell me about your favorite thing to help people with. What makes you good at it?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - error
+    - timeout
+    - permission
+    - denied
+    - as an ai
+  max_response_chars: 800
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

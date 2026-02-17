@@ -211,8 +211,8 @@ public class UtilityRouterTests
     [Theory]
     [InlineData("weather in Seattle")]
     [InlineData("forecast for New York")]
-    [InlineData("what is the weather like in Rexburg, ID?")]
-    [InlineData("can you tell me what the weather is in rexburg,id?")]
+    [InlineData("what is the weather like in Portland, OR?")]
+    [InlineData("can you tell me what the weather is in portland,or?")]
     public void Weather_RoutesToGeocodeTool(string input)
     {
         var result = UtilityRouter.TryHandle(input);
@@ -224,22 +224,22 @@ public class UtilityRouterTests
     [Fact]
     public void Weather_GeocodeArgs_ContainLocation()
     {
-        var result = UtilityRouter.TryHandle("what is the weather like in Rexburg, ID? please");
+        var result = UtilityRouter.TryHandle("what is the weather like in Portland, OR? please");
         Assert.NotNull(result);
         Assert.Equal("weather_geocode", result!.McpToolName);
         Assert.NotNull(result.McpToolArgs);
-        Assert.Contains("\"place\":\"Rexburg, ID\"", result.McpToolArgs);
+        Assert.Contains("\"place\":\"Portland, OR\"", result.McpToolArgs);
         Assert.Contains("\"maxResults\":3", result.McpToolArgs);
     }
 
     [Fact]
     public void Weather_GeocodeArgs_StripsTemporalTailFromPlace()
     {
-        var result = UtilityRouter.TryHandle("What's the forecast for Rexburg today?");
+        var result = UtilityRouter.TryHandle("What's the forecast for Portland today?");
         Assert.NotNull(result);
         Assert.Equal("weather_geocode", result!.McpToolName);
         Assert.NotNull(result.McpToolArgs);
-        Assert.Contains("\"place\":\"Rexburg\"", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"place\":\"Portland\"", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("today", result.McpToolArgs, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -651,7 +651,7 @@ public class DialogueLocationCarryForwardTests
         var current = new DialogueState
         {
             Topic = "news",
-            LocationName = "Boise, Idaho",
+            LocationName = "Seattle, Washington",
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
 
@@ -666,7 +666,7 @@ public class DialogueLocationCarryForwardTests
         var merge = new MergeSlots();
         var merged = merge.Run(current, extracted, DateTimeOffset.UtcNow);
 
-        Assert.Equal("Boise, Idaho", merged.LocationText);
+        Assert.Equal("Seattle, Washington", merged.LocationText);
         Assert.True(merged.LocationInferredFromState);
     }
 
@@ -698,7 +698,7 @@ public class DialogueLocationCarryForwardTests
 
     [Theory]
     [InlineData("New York")]
-    [InlineData("Boise, Idaho")]
+    [InlineData("Seattle, Washington")]
     [InlineData("San Luis Obispo")]
     [InlineData("St. Louis")]
     [InlineData("Washington, D.C.")]
@@ -1252,9 +1252,9 @@ public class SearchPipelineGoldenTests
             return new LlmResponse { IsComplete = true, Content = "LLM should not be needed here.", FinishReason = "stop" };
         });
         var geocodeResult =
-            """{"query":"Rexburg, ID","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+            """{"query":"Portland, OR","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765,"confidence":0.95}]}""";
         var forecastResult =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"windy","wind":"12 mph","humidityPercent":71},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":36,"unit":"F","condition":"windy"}],"alerts":[]}""";
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765},"current":{"temperature":39,"unit":"F","condition":"windy","wind":"12 mph","humidityPercent":71},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":36,"unit":"F","condition":"windy"}],"alerts":[]}""";
 
         var mcp = new FakeMcpClient((tool, _) => tool switch
         {
@@ -1265,10 +1265,10 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("What is the weather like in Rexburg, ID?");
+        var result = await agent.ProcessAsync("What is the weather like in Portland, OR?");
 
         Assert.True(result.Success);
-        Assert.Contains("Rexburg", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Portland", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("39F", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("wind", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Avg temp", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -1298,7 +1298,7 @@ public class SearchPipelineGoldenTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"category":"weather","canonicalMessage":"weather in Rexburg, ID","confidence":0.92}""",
+                    Content = """{"category":"weather","canonicalMessage":"weather in Portland, OR","confidence":0.92}""",
                     FinishReason = "stop"
                 };
             }
@@ -1306,15 +1306,15 @@ public class SearchPipelineGoldenTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Rexburg will be cool tomorrow with a chance of wind.",
+                Content = "Portland will be cool tomorrow with a chance of wind.",
                 FinishReason = "stop"
             };
         });
 
         var geocodeResult =
-            """{"query":"Rexburg, ID","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+            """{"query":"Portland, OR","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765,"confidence":0.95}]}""";
         var forecastResult =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"partly cloudy","wind":"7 mph","humidityPercent":54},"daily":[{"date":"2026-02-10","tempHigh":44,"tempLow":31,"avgTemp":38,"unit":"F","condition":"partly cloudy"}],"alerts":[]}""";
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765},"current":{"temperature":39,"unit":"F","condition":"partly cloudy","wind":"7 mph","humidityPercent":54},"daily":[{"date":"2026-02-10","tempHigh":44,"tempLow":31,"avgTemp":38,"unit":"F","condition":"partly cloudy"}],"alerts":[]}""";
 
         var mcp = new FakeMcpClient((tool, _) => tool switch
         {
@@ -1326,7 +1326,7 @@ public class SearchPipelineGoldenTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
         var result = await agent.ProcessAsync(
-            "I'm going on a trip to Rexburg tomorrow and want to check conditions there.");
+            "I'm going on a trip to Portland tomorrow and want to check conditions there.");
 
         Assert.True(result.Success);
         Assert.Contains("39F", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -1340,7 +1340,7 @@ public class SearchPipelineGoldenTests
 
         Assert.Single(geocodeCalls);
         Assert.Single(forecastCalls);
-        Assert.Contains("rexburg", geocodeCalls[0].Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("portland", geocodeCalls[0].Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -1349,9 +1349,9 @@ public class SearchPipelineGoldenTests
     {
         var llm = new FakeLlmClient("LLM should not be called");
         var geocodeResult =
-            """{"query":"Rexburg","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Day-Today, Scotland, GB","countryCode":"GB","isUs":false,"latitude":55.9551009,"longitude":-2.9878669,"confidence":0.10},{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
+            """{"query":"Portland","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Day-Today, Scotland, GB","countryCode":"GB","isUs":false,"latitude":55.9551009,"longitude":-2.9878669,"confidence":0.10},{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765,"confidence":0.95}]}""";
         var forecastResult =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":25,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":31,"tempLow":19,"avgTemp":25,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765},"current":{"temperature":25,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":31,"tempLow":19,"avgTemp":25,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
 
         var mcp = new FakeMcpClient((tool, _) => tool switch
         {
@@ -1362,10 +1362,10 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("What's the forecast for Rexburg today?");
+        var result = await agent.ProcessAsync("What's the forecast for Portland today?");
 
         Assert.True(result.Success);
-        Assert.Contains("Rexburg", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Portland", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Scotland", result.Text, StringComparison.OrdinalIgnoreCase);
 
         var geocodeCall = mcp.Calls.First(c =>
@@ -1373,47 +1373,47 @@ public class SearchPipelineGoldenTests
         var forecastCall = mcp.Calls.First(c =>
             c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
 
-        Assert.Contains("\"place\":\"Rexburg\"", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"place\":\"Portland\"", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("today", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("\"latitude\":43.826", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("\"longitude\":-111.789", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"latitude\":45.5231", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"longitude\":-122.6765", forecastCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task UtilityBypass_Weather_FollowUp_ReusesPreviousPlaceContext()
     {
         var llm = new FakeLlmClient("LLM should not be called");
-        var boiseGeocode =
-            """{"query":"Boise, ID","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886,"confidence":0.95}]}""";
+        var seattleGeocode =
+            """{"query":"Seattle, WA","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Seattle, Washington, US","countryCode":"US","isUs":true,"latitude":47.6062,"longitude":-122.3321,"confidence":0.95}]}""";
         var todayMuseumGeocode =
             """{"query":"today","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Today Art Museum, CN","countryCode":"CN","isUs":false,"latitude":39.896836,"longitude":116.461529,"confidence":0.70}]}""";
-        var boiseForecast =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+        var seattleForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Seattle, Washington, US","countryCode":"US","isUs":true,"latitude":47.6062,"longitude":-122.3321},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
 
         var mcp = new FakeMcpClient((tool, args) => tool switch
         {
-            "weather_geocode" => args.Contains("boise", StringComparison.OrdinalIgnoreCase)
-                ? boiseGeocode
+            "weather_geocode" => args.Contains("seattle", StringComparison.OrdinalIgnoreCase)
+                ? seattleGeocode
                 : todayMuseumGeocode,
-            "weather_forecast" => boiseForecast,
+            "weather_forecast" => seattleForecast,
             _ => "unexpected tool call"
         });
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var first = await agent.ProcessAsync("Whats the weather like in Boise, ID?");
+        var first = await agent.ProcessAsync("Whats the weather like in Seattle, WA?");
         Assert.True(first.Success);
-        Assert.Contains("Boise", first.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Seattle", first.Text, StringComparison.OrdinalIgnoreCase);
 
         var second = await agent.ProcessAsync("Thats great! can you get the forecast for today?");
         Assert.True(second.Success);
-        Assert.Contains("Boise", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Seattle", second.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Today Art Museum", second.Text, StringComparison.OrdinalIgnoreCase);
 
         var geocodeCalls = mcp.Calls.Where(c =>
             c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.True(geocodeCalls.Count >= 2);
-        Assert.Contains("\"place\":\"Boise", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"place\":\"Seattle", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"place\":\"today", geocodeCalls[1].Args, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1421,21 +1421,21 @@ public class SearchPipelineGoldenTests
     public async Task UtilityBypass_WeatherActivityFollowUps_StayOnWeatherPipeline()
     {
         var llm = new FakeLlmClient("LLM should not be called");
-        var rexburgGeocode =
-            """{"query":"Rexburg, Idaho","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789,"confidence":0.95}]}""";
-        var rexburgForecast =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Rexburg, Idaho, US","countryCode":"US","isUs":true,"latitude":43.826,"longitude":-111.789},"current":{"temperature":39,"unit":"F","condition":"chance rain and snow","wind":"7 mph","humidityPercent":85},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":35,"unit":"F","condition":"chance rain and snow"}],"alerts":[]}""";
+        var portlandGeocode =
+            """{"query":"Portland, Oregon","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765,"confidence":0.95}]}""";
+        var portlandForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Portland, Oregon, US","countryCode":"US","isUs":true,"latitude":45.5231,"longitude":-122.6765},"current":{"temperature":39,"unit":"F","condition":"chance rain and snow","wind":"7 mph","humidityPercent":85},"daily":[{"date":"2026-02-10","tempHigh":42,"tempLow":30,"avgTemp":35,"unit":"F","condition":"chance rain and snow"}],"alerts":[]}""";
 
         var mcp = new FakeMcpClient((tool, _) => tool switch
         {
-            "weather_geocode" => rexburgGeocode,
-            "weather_forecast" => rexburgForecast,
+            "weather_geocode" => portlandGeocode,
+            "weather_forecast" => portlandForecast,
             _ => "unexpected tool call"
         });
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var first = await agent.ProcessAsync("What is the weather in Rexburg, Idaho today?");
+        var first = await agent.ProcessAsync("What is the weather in Portland, Oregon today?");
         Assert.True(first.Success);
 
         var second = await agent.ProcessAsync("What can I do in that kind of weather?");
@@ -1470,8 +1470,8 @@ public class SearchPipelineGoldenTests
             if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
             {
                 var userInput = messages.LastOrDefault(m => m.Role == "user")?.Content ?? "";
-                var query = userInput.Contains("boise", StringComparison.OrdinalIgnoreCase)
-                    ? """{"query":"boise latest news","recency":"day"}"""
+                var query = userInput.Contains("seattle", StringComparison.OrdinalIgnoreCase)
+                    ? """{"query":"seattle latest news","recency":"day"}"""
                     : """{"query":"top headlines","recency":"day"}""";
 
                 return new LlmResponse
@@ -1485,31 +1485,31 @@ public class SearchPipelineGoldenTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Here is a Boise-focused news summary.",
+                Content = "Here is a Seattle-focused news summary.",
                 FinishReason = "stop"
             };
         });
 
-        var boiseGeocode =
-            """{"query":"Boise, ID","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886,"confidence":0.95}]}""";
-        var boiseForecast =
-            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Boise, Idaho, US","countryCode":"US","isUs":true,"latitude":43.616613,"longitude":-116.200886},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
+        var seattleGeocode =
+            """{"query":"Seattle, WA","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Seattle, Washington, US","countryCode":"US","isUs":true,"latitude":47.6062,"longitude":-122.3321,"confidence":0.95}]}""";
+        var seattleForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Seattle, Washington, US","countryCode":"US","isUs":true,"latitude":47.6062,"longitude":-122.3321},"current":{"temperature":32,"unit":"F","condition":"partly sunny","wind":"3 mph","humidityPercent":34},"daily":[{"date":"2026-02-10","tempHigh":48,"tempLow":38,"avgTemp":43,"unit":"F","condition":"partly sunny"}],"alerts":[]}""";
         var newsSearchResult =
-            "1. Boise city update — example.com\n" +
+            "1. Seattle city update — example.com\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://example.com/boise-news\",\"title\":\"Boise city update\"}]";
+            "[{\"url\":\"https://example.com/seattle-news\",\"title\":\"Seattle city update\"}]";
 
         var mcp = new FakeMcpClient((tool, _) => tool switch
         {
-            "weather_geocode" => boiseGeocode,
-            "weather_forecast" => boiseForecast,
+            "weather_geocode" => seattleGeocode,
+            "weather_forecast" => seattleForecast,
             "web_search" => newsSearchResult,
             _ => "unexpected tool call"
         });
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var weather = await agent.ProcessAsync("Whats the weather like in Boise, ID?");
+        var weather = await agent.ProcessAsync("Whats the weather like in Seattle, WA?");
         Assert.True(weather.Success);
 
         var news = await agent.ProcessAsync("oh cool! can i get the news?");
@@ -1517,7 +1517,7 @@ public class SearchPipelineGoldenTests
 
         var webSearchCall = mcp.Calls.Last(c =>
             c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("boise", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("seattle", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

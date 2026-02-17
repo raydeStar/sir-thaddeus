@@ -1,0 +1,44 @@
+id: reasoning_water_jug_constraint
+name: Reasoning - Water jug constraint satisfaction (classic)
+user_message: "If you have a 3-liter jug and a 5-liter jug, how do you measure exactly 4 liters?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  # Correct solution leaves exactly 4 liters in the 5L jug after 6 steps.
+  # Any valid approach (fill/pour/empty cycles) that reaches 4L is acceptable.
+  required_keywords:
+    - "4 liter"
+    - "5"
+    - "3"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - i cannot
+    - impossible
+  max_response_chars: 2400
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

@@ -1,0 +1,79 @@
+<UserControl x:Class="SirThaddeus.DesktopRuntime.Views.BriefingHistoryPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+
+    <Border Background="{DynamicResource MantleBrush}"
+            BorderBrush="{DynamicResource Surface0Brush}"
+            BorderThickness="0,0,1,0">
+        <DockPanel>
+            <!-- Header -->
+            <Border DockPanel.Dock="Top"
+                    Padding="10,10"
+                    BorderBrush="{DynamicResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+                <TextBlock Text="History"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextBrush}" />
+            </Border>
+
+            <!-- History list -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding History}"
+                              Padding="6">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,4"
+                                    Padding="8,6"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource CardBgBrush}"
+                                    BorderBrush="{DynamicResource Surface0Brush}"
+                                    BorderThickness="1"
+                                    Cursor="Hand"
+                                    MouseLeftButtonUp="HistoryItem_Click">
+                                <StackPanel>
+                                    <!-- Title + confidence -->
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="{Binding Title}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="140" />
+                                        <Border DockPanel.Dock="Right"
+                                                Background="{DynamicResource BlueBadgeBgBrush}"
+                                                CornerRadius="6"
+                                                Padding="4,1"
+                                                Margin="4,0,0,0">
+                                            <TextBlock Text="{Binding Confidence}"
+                                                       FontSize="9"
+                                                       Foreground="{DynamicResource BlueBrush}" />
+                                        </Border>
+                                    </DockPanel>
+
+                                    <!-- Status line -->
+                                    <TextBlock Text="{Binding StatusLine}"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource Subtext0Brush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,2,0,0" />
+
+                                    <!-- Timestamp -->
+                                    <TextBlock Text="{Binding TimestampDisplay}"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Surface2Brush}"
+                                               Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

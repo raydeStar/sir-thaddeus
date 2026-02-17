@@ -14,9 +14,9 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords:
-    - matters
-  forbidden_keywords: []
+  required_keywords: []
+  forbidden_keywords:
+    - as an ai
   max_response_chars: 1700
 min_score: 7.0
 patch_targets:

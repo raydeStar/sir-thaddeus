@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net;
 using System.Text.Json;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -91,38 +92,72 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
             }
         });
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-        using var payload = new MultipartFormDataContent();
-        using var audioContent = new ByteArrayContent(clip.AudioBytes);
+        var allowStartupRetries =
+            voiceSettings.VoiceHostEnabled &&
+            !IsPreviewSessionId(sessionId);
+        var retryDeadlineUtc = startedAt + TimeSpan.FromMilliseconds(
+            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 120_000));
+        var attempt = 0;
+        string transcript;
 
-        audioContent.Headers.ContentType = new MediaTypeHeaderValue(clip.ContentType);
-        payload.Add(audioContent, "audio", "audio.wav");
-        payload.Add(new StringContent(sessionId), "sessionId");
-        payload.Add(new StringContent(sttEngine), "engine");
-        if (!string.IsNullOrWhiteSpace(sttModelId))
-            payload.Add(new StringContent(sttModelId), "modelId");
-        if (!string.IsNullOrWhiteSpace(sttLanguage))
+        while (true)
         {
-            payload.Add(new StringContent(sttLanguage), "sttLanguage");
-            payload.Add(new StringContent(sttLanguage), "language");
+            attempt++;
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            using var payload = new MultipartFormDataContent();
+            using var audioContent = new ByteArrayContent(clip.AudioBytes);
+
+            audioContent.Headers.ContentType = new MediaTypeHeaderValue(clip.ContentType);
+            payload.Add(audioContent, "audio", "audio.wav");
+            payload.Add(new StringContent(sessionId), "sessionId");
+            payload.Add(new StringContent(sttEngine), "engine");
+            if (!string.IsNullOrWhiteSpace(sttModelId))
+                payload.Add(new StringContent(sttModelId), "modelId");
+            if (!string.IsNullOrWhiteSpace(sttLanguage))
+            {
+                payload.Add(new StringContent(sttLanguage), "sttLanguage");
+                payload.Add(new StringContent(sttLanguage), "language");
+            }
+            payload.Add(new StringContent(requestId), "requestId");
+            request.Content = payload;
+            request.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
+
+            try
+            {
+                using var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var shouldRetry =
+                        allowStartupRetries &&
+                        IsRetryableStartupStatusCode(response.StatusCode) &&
+                        DateTimeOffset.UtcNow < retryDeadlineUtc;
+                    if (shouldRetry)
+                    {
+                        await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+                        continue;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"ASR request failed ({(int)response.StatusCode}): {body}");
+                }
+
+                transcript = ParseTranscript(body, response.Content.Headers.ContentType?.MediaType);
+                break;
+            }
+            catch (HttpRequestException) when (
+                allowStartupRetries &&
+                DateTimeOffset.UtcNow < retryDeadlineUtc &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+            }
         }
-        payload.Add(new StringContent(requestId), "requestId");
-        request.Content = payload;
-        request.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
 
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"ASR request failed ({(int)response.StatusCode}): {body}");
-        }
-
-        var transcript = ParseTranscript(body, response.Content.Headers.ContentType?.MediaType);
         var completedAt = DateTimeOffset.UtcNow;
         RaiseTimingEvent(sessionId, requestId, AsrTimingStage.FirstToken, completedAt, "final_response");
         RaiseTimingEvent(sessionId, requestId, AsrTimingStage.Final, completedAt);
@@ -283,6 +318,22 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
             ? "asr"
             : sessionId.Trim();
         return $"{prefix}-asr-{Guid.NewGuid():N}";
+    }
+
+    private static bool IsPreviewSessionId(string sessionId)
+        => !string.IsNullOrWhiteSpace(sessionId) &&
+           sessionId.StartsWith("preview-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRetryableStartupStatusCode(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.ServiceUnavailable ||
+           statusCode == HttpStatusCode.BadGateway ||
+           statusCode == HttpStatusCode.GatewayTimeout;
+
+    private static TimeSpan GetRetryDelay(int attempt)
+    {
+        var boundedAttempt = Math.Clamp(attempt, 1, 6);
+        var delayMs = 150 * boundedAttempt;
+        return TimeSpan.FromMilliseconds(delayMs);
     }
 }
 

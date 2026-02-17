@@ -27,6 +27,9 @@ public enum SearchMode
     /// <summary>Canonical answer, entity-focused, stable references.</summary>
     WebFactFind,
 
+    /// <summary>Structured deep-dive place/product briefing payload.</summary>
+    DeepDiveBriefing,
+
     /// <summary>Deep dive or more-sources on a prior result.</summary>
     FollowUp
 }

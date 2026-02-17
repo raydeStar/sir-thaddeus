@@ -1,21 +1,25 @@
 id: contract_tool_ping_replay
-name: Tool Contract - tool_ping replay happy path
-user_message: "Run tool_ping and return the status."
+name: Tool Contract - tool_ping returns structured health status
+user_message: "Run tool_ping and confirm whether the MCP server is responding. Keep your reply to two sentences maximum."
 allowed_tools:
   - tool_ping
-mode: replay
+mode: live
 assertions:
   required_tools:
     - tool_ping
-  forbidden_tools: []
+  forbidden_tools:
+    - web_search
+    - file_read
+    - system_execute
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
   required_keywords:
-    - status
-  forbidden_keywords: []
-  max_response_chars: 500
+    - responding
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 350
 min_score: 8.0
 patch_targets:
   tier1_targets:

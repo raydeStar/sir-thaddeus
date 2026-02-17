@@ -150,6 +150,12 @@ def normalize_tts_engine(value: Optional[str]) -> str:
 
 
 def normalize_stt_engine(value: Optional[str]) -> str:
+    """Resolve an STT engine identifier to a canonical name.
+
+    qwen3asr is valid ONLY for the YouTube transcription pipeline.
+    All other callers (especially the /asr live endpoint) should use
+    normalize_live_stt_engine() which pins to faster-whisper.
+    """
     normalized = (value or "").strip().lower()
     if not normalized:
         return "faster-whisper"
@@ -158,6 +164,15 @@ def normalize_stt_engine(value: Optional[str]) -> str:
     if normalized in {"faster-whisper", "qwen3asr"}:
         return normalized
     return normalized
+
+
+def normalize_live_stt_engine(value: Optional[str]) -> str:
+    """Pin the live /asr endpoint to faster-whisper unconditionally.
+
+    Qwen3-ASR is reserved for video transcription jobs. Any other engine
+    value for interactive voice-to-text is remapped to faster-whisper.
+    """
+    return "faster-whisper"
 
 
 def normalize_stt_language(value: Optional[str]) -> str:
@@ -1392,7 +1407,10 @@ async def asr(
         )
 
     audio_bytes = await upload.read()
-    provider = PROVIDERS.get_stt(engine=engine, model_id=modelId, language=language)
+    # Live voice-to-text is pinned to faster-whisper regardless of what
+    # the client sends.  Qwen ASR lives behind /api/youtube/transcribe.
+    live_engine = normalize_live_stt_engine(engine)
+    provider = PROVIDERS.get_stt(engine=live_engine, model_id=modelId, language=language)
     init = provider.init_probe(force=False)
     status = provider.build_engine_status(run_init_probe=False)
     if not init.ready or not status.get("ready", False):

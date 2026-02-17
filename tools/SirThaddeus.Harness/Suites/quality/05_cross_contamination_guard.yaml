@@ -1,0 +1,33 @@
+id: quality_cross_contamination_guard
+name: Quality - File question must not trigger web search
+user_message: "Use file_read on C:\\Users\\Public\\Documents\\readme.txt and summarize the contents."
+allowed_tools:
+  - file_read
+mode: live
+assertions:
+  required_tools:
+    - file_read
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - places_lookup
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 800
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PolicyGate.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

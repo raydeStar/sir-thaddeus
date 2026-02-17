@@ -703,7 +703,7 @@ public class AgentFlowTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Hey Mark, what's up? I'm good. Can you do 6 * 7 for me? I always mess that one up.",
+                Content = "Hey Alex, what's up? I'm good. Can you do 6 * 7 for me? I always mess that one up.",
                 FinishReason = "stop"
             };
         });
@@ -1117,7 +1117,7 @@ public class MemoryRetrievalAuditTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "I know you as Mark.",
+                Content = "I know you as Alex.",
                 FinishReason = "stop"
             };
         });
@@ -2467,6 +2467,8 @@ internal sealed class FakeMcpClient : IMcpToolClient
                  """{"type":"object","properties":{"memoryId":{"type":"string"}},"required":["memoryId"]}"""),
         MakeTool("web_search",         "Searches the web for information",
                  """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("places_lookup",      "Looks up place details for deep-dive briefings",
+                 """{"type":"object","properties":{"query":{"type":"string"},"timezone":{"type":"string"},"locale":{"type":"string"},"userLocationHint":{"type":"string"},"maxReviewSnippets":{"type":"integer"}},"required":["query"]}"""),
         MakeTool("weather_geocode",    "Geocodes a place for weather lookup",
                  """{"type":"object","properties":{"place":{"type":"string"},"maxResults":{"type":"integer"}},"required":["place"]}"""),
         MakeTool("weather_forecast",   "Fetches weather from coordinates",

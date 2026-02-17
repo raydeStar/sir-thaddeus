@@ -136,7 +136,7 @@ public sealed class VoiceHostConfigTests
     }
 
     [Fact]
-    public void SttModelId_WhenExplicit_Preserved()
+    public void SttModelId_WhenLegacyQwenConfigured_FallsBackToWhisperDefaults()
     {
         var settings = new VoiceSettings
         {
@@ -144,8 +144,8 @@ public sealed class VoiceHostConfigTests
             SttModelId = "qwen3-medium"
         };
 
-        Assert.Equal("qwen3asr", settings.GetNormalizedSttEngine());
-        Assert.Equal("qwen3-medium", settings.GetResolvedSttModelId());
+        Assert.Equal("faster-whisper", settings.GetNormalizedSttEngine());
+        Assert.Equal("base", settings.GetResolvedSttModelId());
     }
 
     [Fact]

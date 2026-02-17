@@ -58,6 +58,11 @@ Write-Host "  Restore       : $Restore"
 if ($Filter) { Write-Host "  Filter        : $Filter" }
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
+# ── Policy Guard: no device geolocation APIs ─────────────────
+Write-Section "Policy Guard (No Device Geolocation)"
+& "$PSScriptRoot\check-no-device-geolocation.ps1" -RepoRoot $RepoRoot
+if ($LASTEXITCODE -ne 0) { Fail "Device geolocation policy guard failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
+
 # ── Optional restore ──────────────────────────────────────────
 if ($Restore) {
     Write-Section "Restore"

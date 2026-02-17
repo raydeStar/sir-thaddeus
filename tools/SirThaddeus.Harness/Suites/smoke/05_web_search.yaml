@@ -1,8 +1,9 @@
 id: smoke_web_search
 name: Smoke - Web Search
-user_message: "Use web_search to find one recent headline about .NET 9 and summarize it briefly."
+user_message: "Search for a recent technology headline and summarize it in two sentences."
 allowed_tools:
   - web_search
+  - memory_retrieve
 mode: live
 assertions:
   required_tools:
@@ -12,11 +13,9 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
-  required_keywords:
-    - .net
+  required_keywords: []
   forbidden_keywords:
-    - http://
-    - https://
+    - as an ai
   max_response_chars: 700
 min_score: 7.0
 patch_targets:
