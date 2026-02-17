@@ -1,20 +1,23 @@
 id: quality_error_tone
 name: Quality - Failure handling tone and clarity
-user_message: "Try file_read on a restricted path and explain the failure clearly with a safe next step."
+user_message: "Use file_read on C:\\Users\\Public\\nonexistent.txt and explain the failure clearly."
 allowed_tools:
   - file_read
-mode: replay
+  - file_list
+mode: live
 assertions:
   required_tools:
     - file_read
-  forbidden_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+    - screen_capture
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
   required_keywords:
-    - permission
-    - next step
+    - file
   forbidden_keywords:
     - as an ai
   max_response_chars: 700

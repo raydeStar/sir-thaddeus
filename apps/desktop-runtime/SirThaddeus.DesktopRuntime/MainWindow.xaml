@@ -18,15 +18,15 @@
         Loaded="Window_Loaded">
 
     <Window.Resources>
-        <!-- Color palette -->
-        <SolidColorBrush x:Key="PillBackgroundBrush" Color="#1E1E2E"/>
-        <SolidColorBrush x:Key="PillBorderBrush" Color="#45475A"/>
-        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#CDD6F4"/>
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A6ADC8"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#89B4FA"/>
-        <SolidColorBrush x:Key="DangerBrush" Color="#F38BA8"/>
-        <SolidColorBrush x:Key="SuccessBrush" Color="#A6E3A1"/>
-        <SolidColorBrush x:Key="DrawerBackgroundBrush" Color="#181825"/>
+        <!-- Semantic aliases mapping pill-specific names to shared theme tokens -->
+        <SolidColorBrush x:Key="PillBackgroundBrush" Color="{Binding Color, Source={StaticResource BaseBrush}}"/>
+        <SolidColorBrush x:Key="PillBorderBrush"     Color="{Binding Color, Source={StaticResource Surface1Brush}}"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush"    Color="{Binding Color, Source={StaticResource TextBrush}}"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush"  Color="{Binding Color, Source={StaticResource Subtext0Brush}}"/>
+        <SolidColorBrush x:Key="AccentBrush"         Color="{Binding Color, Source={StaticResource BlueBrush}}"/>
+        <SolidColorBrush x:Key="DangerBrush"         Color="{Binding Color, Source={StaticResource RedBrush}}"/>
+        <SolidColorBrush x:Key="SuccessBrush"        Color="{Binding Color, Source={StaticResource GreenBrush}}"/>
+        <SolidColorBrush x:Key="DrawerBackgroundBrush" Color="{Binding Color, Source={StaticResource MantleBrush}}"/>
 
         <!-- Button style -->
         <Style x:Key="ActionButtonStyle" TargetType="Button">
@@ -45,7 +45,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#585B70"/>
+                                <Setter Property="Background" Value="{DynamicResource Surface2Brush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.5"/>
@@ -58,7 +58,7 @@
 
         <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
             <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
+            <Setter Property="Foreground" Value="{DynamicResource BaseBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
@@ -70,7 +70,7 @@
                           BlurRadius="15" 
                           ShadowDepth="3" 
                           Opacity="0.4"
-                          Color="#000000"/>
+                          Color="Black"/>
     </Window.Resources>
 
     <Border CornerRadius="12" 

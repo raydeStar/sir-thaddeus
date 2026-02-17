@@ -72,6 +72,19 @@ public sealed record VoiceAgentResponse
     public int TokensIn { get; init; }
     public int TokensOut { get; init; }
     public int ContextFillPercent { get; init; }
+    public int LlmRoundTrips { get; init; }
+    public bool SuppressSourceCardsUi { get; init; }
+
+    // ── Opaque payloads (avoids coupling Voice → Agent) ──────────────
+
+    /// <summary>Deep-dive briefing (DeepDiveBriefing).</summary>
+    public object? Payload { get; init; }
+
+    /// <summary>Dialogue context snapshot for context chip updates.</summary>
+    public object? ContextPayload { get; init; }
+
+    /// <summary>Tool call records for source card rendering.</summary>
+    public object? ToolCallsPayload { get; init; }
 }
 
 /// <summary>
@@ -159,6 +172,17 @@ public sealed class VoiceProgressEventArgs : EventArgs
     public int TokensIn { get; init; }
     public int TokensOut { get; init; }
     public int ContextFillPercent { get; init; }
+    public int LlmRoundTrips { get; init; }
+    public bool SuppressSourceCardsUi { get; init; }
+
+    /// <summary>Deep-dive briefing payload.</summary>
+    public object? Payload { get; init; }
+
+    /// <summary>Dialogue context snapshot for context chip updates.</summary>
+    public object? ContextPayload { get; init; }
+
+    /// <summary>Tool call records for source card rendering.</summary>
+    public object? ToolCallsPayload { get; init; }
 }
 
 public enum VoiceProgressKind

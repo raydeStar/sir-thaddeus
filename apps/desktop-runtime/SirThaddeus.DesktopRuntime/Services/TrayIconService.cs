@@ -76,9 +76,8 @@ public sealed class TrayIconService : IDisposable
         {
             Visible = true,
             // 63-char max; keep short.
-            Text = "Assistant Runtime",
-            // Placeholder icon until a real one is supplied.
-            Icon = SystemIcons.Application,
+            Text = "Sir Thaddeus",
+            Icon = BrandIcon.TrayIcon,
             ContextMenuStrip = menu
         };
 
@@ -97,7 +96,7 @@ public sealed class TrayIconService : IDisposable
             Result = "ok",
             Details = new Dictionary<string, object>
             {
-                ["icon"] = "SystemIcons.Application",
+                ["icon"] = "BrandIcon.TrayIcon",
                 ["tooltip"] = _notifyIcon.Text
             }
         });

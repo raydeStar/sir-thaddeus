@@ -309,10 +309,10 @@ public sealed partial class QueryBuilder
         EntityResolver.ResolvedEntity? entity,
         SearchSession session)
     {
-        var topic = entity?.CanonicalName
-            ?? ExtractTopicFromMessage(userMessage)
-            ?? session.LastQuery
-            ?? userMessage.Trim();
+        // Prefer the extracted message topic when it carries more signal
+        // than the entity name alone. "good florist Portland" > "Portland".
+        var messageTopic = ExtractTopicFromMessage(userMessage);
+        var topic = PickBestTopic(messageTopic, entity?.CanonicalName, session.LastQuery, userMessage);
 
         // Truncate long topics
         if (topic.Length > 60)
@@ -338,7 +338,7 @@ public sealed partial class QueryBuilder
                 }
                 : new SearchQuery
                 {
-                    Query        = entity is not null ? $"{entity.CanonicalName} overview" : $"{topic}",
+                    Query        = topic,
                     Recency      = "any",
                     UsedFallback = true
                 },
@@ -350,6 +350,40 @@ public sealed partial class QueryBuilder
                 UsedFallback = true
             }
         };
+    }
+
+    /// <summary>
+    /// Picks the most informative topic string from the available candidates.
+    /// Prefers the message topic when it carries specific context that the
+    /// entity name alone doesn't capture.
+    ///
+    /// "good florist Portland" beats "Portland" — intent preserved.
+    /// "Elon Musk" beats "who is that guy" — entity adds specificity.
+    /// </summary>
+    private static string PickBestTopic(
+        string? messageTopic,
+        string? entityName,
+        string? lastQuery,
+        string rawMessage)
+    {
+        if (!string.IsNullOrWhiteSpace(messageTopic) && !string.IsNullOrWhiteSpace(entityName))
+        {
+            // Check if the message topic subsumes the entity (e.g., "florist Portland"
+            // contains "Portland") — prefer the richer topic.
+            if (messageTopic!.Contains(entityName!, StringComparison.OrdinalIgnoreCase)
+                && messageTopic.Length > entityName.Length + 3)
+            {
+                return messageTopic;
+            }
+
+            // Otherwise prefer the entity — it's a cleaner, disambiguated name.
+            return entityName!;
+        }
+
+        return messageTopic
+            ?? entityName
+            ?? lastQuery
+            ?? rawMessage.Trim();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -608,11 +642,17 @@ public sealed partial class QueryBuilder
     {
         // Handles "wassup ...? can you ...", keeping only the request segment.
         var lowered = message.ToLowerInvariant();
+
+        // Compound markers must come BEFORE their shorter forms.
+        // "find me a florist" → strips "find me " leaving "a florist"
+        // vs "find" alone → strips "find " leaving "me a florist" (broken).
         ReadOnlySpan<string> markers =
         [
             " can you ", " could you ", " would you ", " will you ",
             " please ", " pull up ", " bring up ", " show me ",
-            " get me ", " search for ", " look up ", " find "
+            " get me ", " find me ", " find out ", " find us ",
+            " search for ", " look up ", " find ",
+            " recommend me ", " recommend "
         ];
 
         foreach (var marker in markers)
@@ -638,6 +678,11 @@ public sealed partial class QueryBuilder
         cleaned = LeadingFillerRegex().Replace(cleaned, "").Trim();
         cleaned = LeadingRequestVerbRegex().Replace(cleaned, "").Trim();
         cleaned = StripLeadPhrasesRegex().Replace(cleaned, "").Trim();
+
+        // Strip residual pronouns/articles left after marker stripping.
+        // "me a good florist" → "good florist"
+        cleaned = LeadingPronounRegex().Replace(cleaned, "").Trim();
+
         cleaned = cleaned.TrimEnd('?', '.', '!', ',');
         cleaned = TailPoliteRegex().Replace(cleaned, "").Trim();
         cleaned = cleaned.TrimEnd('?', '.', '!', ',');
@@ -700,7 +745,7 @@ public sealed partial class QueryBuilder
     };
 
     [GeneratedRegex(
-        @"^(?:can you |could you |please |hey |hi |yo |search for |look up |find |get me |show me |pull up |bring up |what(?:'s| is| are) )+",
+        @"^(?:can you |could you |please |hey |hi |yo |search for |look up |find me |find us |find out |find |recommend me |recommend |get me |show me |pull up |bring up |what(?:'s| is| are) )+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex StripLeadPhrasesRegex();
 
@@ -718,6 +763,11 @@ public sealed partial class QueryBuilder
         @"^\s*(?:check|look\s+up|look|find|get|show|pull\s+up|bring\s+up)\s+(?:on\s+)?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex LeadingRequestVerbRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:me|us|myself|ourselves)\s+(?:a\s+|an\s+|some\s+|the\s+)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex LeadingPronounRegex();
 
     [GeneratedRegex(
         @"(?:\s+for me)?(?:\s+please|\s+pls|\s+thanks|\s+thank you)+\s*$",

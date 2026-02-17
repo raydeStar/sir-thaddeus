@@ -40,7 +40,7 @@ public static class UtilityRouter
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Handles chatty forms like:
-    // "can you tell me what the weather is in rexburg, id?"
+    // "can you tell me what the weather is in portland, or?"
     private static readonly Regex WeatherLoosePattern = new(
         @"\b(?:weather|forecast|temperature|temp)\b.*?\b(?:in|for|at|near)\b\s+(.+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -56,6 +56,10 @@ public static class UtilityRouter
 
     private static readonly Regex TimeZonePattern = new(
         @"time\s*zone\s+(?:for|of|in)\s+(.+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LocalTimeNowPattern = new(
+        @"\b(?:what\s+time\s+is\s+it|current\s+time|current\s+local\s+time|time\s+right\s+now|time\s+now)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // ── Holiday patterns ─────────────────────────────────────────────
@@ -82,6 +86,10 @@ public static class UtilityRouter
 
     private static readonly Regex StatusIntentPattern = new(
         @"\b(?:is|check|status|uptime)\b.+\b(?:up|online|reachable|down)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex MetaCapabilitiesPattern = new(
+        @"\b(?:tool[_\s\-]*list[_\s\-]*capabilities|capability\s+groups?|capabilities\s+are\s+available|available\s+capabilit(?:y|ies)|available\s+tools?)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex UrlLikePattern = new(
@@ -139,7 +147,7 @@ public static class UtilityRouter
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Strip tail temporal markers that should influence forecast day,
-    // not geocoder place matching (e.g. "Rexburg today" -> "Rexburg").
+    // not geocoder place matching (e.g. "Portland today" -> "Portland").
     private static readonly Regex LocationTemporalTailPattern = new(
         @"\s+(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|next\s+week)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -210,12 +218,31 @@ public static class UtilityRouter
         return TryWeather(trimmed)
             ?? TryTime(trimmed)
             ?? TryHoliday(trimmed)
+            ?? TryMetaCapabilities(trimmed)
             ?? TryStatus(trimmed)
             ?? TryFeed(trimmed)
             ?? TryLetterCount(trimmed)
             ?? TrySimpleFact(trimmed)
             ?? TryCalculator(trimmed)
             ?? TryConversion(trimmed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Meta / Capabilities
+    // ─────────────────────────────────────────────────────────────────
+
+    private static UtilityResult? TryMetaCapabilities(string message)
+    {
+        if (!MetaCapabilitiesPattern.IsMatch(message))
+            return null;
+
+        return new UtilityResult
+        {
+            Category = "meta",
+            Answer = "[capabilities lookup]",
+            McpToolName = "tool_list_capabilities",
+            McpToolArgs = "{}"
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -292,23 +319,35 @@ public static class UtilityRouter
         var match = TimeInPattern.Match(message);
         if (!match.Success)
             match = TimeZonePattern.Match(message);
-        if (!match.Success)
-            return null;
 
-        var location = NormalizeLocationCandidate(match.Groups[1].Value);
-        if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
+        if (match.Success)
+        {
+            var location = NormalizeLocationCandidate(match.Groups[1].Value);
+            if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
+                return null;
+
+            return new UtilityResult
+            {
+                Category = "time",
+                Answer = $"[time lookup for: {location}]",
+                McpToolName = "weather_geocode",
+                McpToolArgs = JsonSerializer.Serialize(new
+                {
+                    place = location,
+                    maxResults = 3
+                })
+            };
+        }
+
+        if (!LocalTimeNowPattern.IsMatch(message))
             return null;
 
         return new UtilityResult
         {
-            Category = "time",
-            Answer = $"[time lookup for: {location}]",
-            McpToolName = "weather_geocode",
-            McpToolArgs = JsonSerializer.Serialize(new
-            {
-                place = location,
-                maxResults = 3
-            })
+            Category = "time_local",
+            Answer = "[local time lookup]",
+            McpToolName = "time_now",
+            McpToolArgs = "{}"
         };
     }
 
@@ -929,6 +968,14 @@ public static class UtilityRouter
             "",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Strip trailing instruction tails that are not part of the place.
+        // Example: "Denver and provide a concise plan for the day" -> "Denver".
+        location = Regex.Replace(
+            location,
+            @"\s+(?:and|then)\s+(?:provide|give|tell|show|share|include|summarize|explain)\b.*$",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         location = LocationTemporalTailPattern.Replace(location, "");
         if (TemporalOnlyLocationPattern.IsMatch(location.Trim()))
             return "";
@@ -1001,7 +1048,7 @@ public static class UtilityRouter
             return true;
         }
 
-        // "Idaho, US" -> country=US, region=US-ID (best effort when 2-letter region)
+        // "Oregon, US" -> country=US, region=US-OR (best effort when 2-letter region)
         var parts = cleaned.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length >= 2 &&
             TryResolveCountryCode(parts[^1], out var parsedCountry))

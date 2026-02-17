@@ -15,6 +15,10 @@ public partial class PermissionPromptWindow : Window
     public PermissionPromptWindow()
     {
         InitializeComponent();
+
+        var brandIcon = Services.BrandIcon.WindowIcon;
+        if (brandIcon is not null)
+            Icon = brandIcon;
     }
 
     /// <summary>

@@ -117,5 +117,36 @@ public class RouterTests
         Assert.True(route.NeedsWeb);
         Assert.True(route.NeedsSearch);
     }
+
+    [Theory]
+    [InlineData("deep dive on portland floral hours and reviews")]
+    [InlineData("what time does Portland Floral open and close?")]
+    [InlineData("tell me when this place opens and closes with reviews")]
+    [InlineData("is mcdonalds in portland or open right now?")]
+    [InlineData("is Walmart open?")]
+    [InlineData("is it open right now?")]
+    [InlineData("are they open today?")]
+    [InlineData("when does Target in Seattle close?")]
+    [InlineData("when does the post office open?")]
+    [InlineData("store hours for Costco in Tacoma")]
+    [InlineData("business hours for Trader Joe's in Portland")]
+    public async Task RouteAsync_DeepDiveSignals_RouteToLookupDeepDive(string message)
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = message,
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.LookupDeepDive, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
+        Assert.True(route.NeedsBrowserAutomation);
+    }
 }
 

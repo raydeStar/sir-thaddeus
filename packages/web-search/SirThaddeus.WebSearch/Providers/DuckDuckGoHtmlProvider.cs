@@ -54,27 +54,17 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
         try
         {
-            // POST form-encoded query to the DDG HTML endpoint.
-            // DDG accepts df (date filter): d = past day, w = past week, m = past month.
-            var formFields = new Dictionary<string, string> { ["q"] = query };
-
             var dfValue = MapRecencyToDdg(options.Recency);
-            if (dfValue is not null)
-                formFields["df"] = dfValue;
-
-            var content = new FormUrlEncodedContent(formFields);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(options.TimeoutMs);
 
-            var results = await RetryHelper.ExecuteAsync(async () =>
-            {
-                var response = await _http.PostAsync(SearchUrl, content, cts.Token);
-                response.EnsureSuccessStatusCode();
+            // Try POST first (original approach).
+            var results = await TryPostSearchAsync(query, dfValue, options.MaxResults, cts.Token);
 
-                var html = await response.Content.ReadAsStringAsync(cts.Token);
-                return ParseResults(html, options.MaxResults);
-            }, cancellationToken);
+            // If POST returned 0, try GET (DDG may block POST from automated clients).
+            if (results.Count == 0)
+                results = await TryGetSearchAsync(query, dfValue, options.MaxResults, cts.Token);
 
             return new SearchResults
             {
@@ -93,6 +83,51 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
         catch (Exception ex)
         {
             return new SearchResults { Provider = Name, Errors = [$"Parse error: {ex.Message}"] };
+        }
+    }
+
+    private async Task<List<SearchResult>> TryPostSearchAsync(
+        string query, string? dfValue, int maxResults, CancellationToken ct)
+    {
+        try
+        {
+            var formFields = new Dictionary<string, string> { ["q"] = query };
+            if (dfValue is not null)
+                formFields["df"] = dfValue;
+
+            var content = new FormUrlEncodedContent(formFields);
+            return await RetryHelper.ExecuteAsync(async () =>
+            {
+                var response = await _http.PostAsync(SearchUrl, content, ct);
+                response.EnsureSuccessStatusCode();
+                var html = await response.Content.ReadAsStringAsync(ct);
+                return ParseResults(html, maxResults);
+            }, ct);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async Task<List<SearchResult>> TryGetSearchAsync(
+        string query, string? dfValue, int maxResults, CancellationToken ct)
+    {
+        try
+        {
+            var qs = $"?q={WebUtility.UrlEncode(query)}";
+            if (dfValue is not null)
+                qs += $"&df={dfValue}";
+
+            var url = SearchUrl + qs;
+            var response = await _http.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+            var html = await response.Content.ReadAsStringAsync(ct);
+            return ParseResults(html, maxResults);
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -121,9 +156,23 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
+        // Strategy 1: class-based selectors (original DDG Lite structure).
+        var results = ParseByClassSelectors(doc, maxResults);
+        if (results.Count > 0)
+            return results;
+
+        // Strategy 2: redirect-link scraping (works regardless of class names).
+        return ParseByRedirectLinks(doc, maxResults);
+    }
+
+    /// <summary>
+    /// Original strategy: find result divs by CSS class.
+    /// Works when DDG Lite uses div.result + a.result__a + a.result__snippet.
+    /// </summary>
+    private static List<SearchResult> ParseByClassSelectors(HtmlDocument doc, int maxResults)
+    {
         var results = new List<SearchResult>();
 
-        // DDG HTML uses .result class for each search result block
         var resultNodes = doc.DocumentNode.SelectNodes(
             "//div[contains(@class, 'result')]");
 
@@ -135,7 +184,6 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
             if (results.Count >= maxResults)
                 break;
 
-            // Title + URL from the primary result link
             var titleNode = node.SelectSingleNode(
                 ".//a[contains(@class, 'result__a')]");
 
@@ -144,13 +192,10 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
             var title = CleanText(titleNode.InnerText);
             var href  = titleNode.GetAttributeValue("href", "");
-
-            // Resolve DDG redirect URLs
-            var url = ResolveUrl(href);
+            var url   = ResolveUrl(href);
             if (string.IsNullOrEmpty(url))
                 continue;
 
-            // Snippet text
             var snippetNode = node.SelectSingleNode(
                 ".//a[contains(@class, 'result__snippet')]")
                 ?? node.SelectSingleNode(".//td[contains(@class, 'result-snippet')]");
@@ -159,15 +204,67 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
                 ? CleanText(snippetNode.InnerText)
                 : string.Empty;
 
-            // Domain
-            var source = ExtractDomain(url);
+            results.Add(new SearchResult
+            {
+                Title   = title,
+                Url     = url,
+                Snippet = snippet,
+                Source  = ExtractDomain(url)
+            });
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Fallback strategy: scans for DDG redirect links (//duckduckgo.com/l/?uddg=...)
+    /// and reconstructs results from surrounding context. Works even when DDG
+    /// changes their CSS class names, as long as the redirect URL pattern persists.
+    /// </summary>
+    private static List<SearchResult> ParseByRedirectLinks(HtmlDocument doc, int maxResults)
+    {
+        var results = new List<SearchResult>();
+
+        // Find all anchors with a DDG redirect href.
+        var allAnchors = doc.DocumentNode.SelectNodes("//a[contains(@href, 'uddg=')]");
+        if (allAnchors is null)
+            return results;
+
+        // DDG Lite may produce multiple anchors per result (title + snippet).
+        // Deduplicate by resolved URL, keeping the first (title) anchor.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var anchor in allAnchors)
+        {
+            if (results.Count >= maxResults)
+                break;
+
+            var href = anchor.GetAttributeValue("href", "");
+            var url  = ResolveUrl(href);
+            if (string.IsNullOrEmpty(url) || !seen.Add(url))
+                continue;
+
+            var title = CleanText(anchor.InnerText);
+            if (string.IsNullOrWhiteSpace(title) || title.Length < 4)
+                continue;
+
+            // Look for a sibling or nearby anchor with the same URL for the snippet.
+            var snippet = string.Empty;
+            var nextSibling = anchor.ParentNode?.SelectSingleNode(
+                $".//a[contains(@href, 'uddg=') and position() > 1]");
+            if (nextSibling is not null)
+            {
+                var siblingUrl = ResolveUrl(nextSibling.GetAttributeValue("href", ""));
+                if (string.Equals(siblingUrl, url, StringComparison.OrdinalIgnoreCase))
+                    snippet = CleanText(nextSibling.InnerText);
+            }
 
             results.Add(new SearchResult
             {
                 Title   = title,
                 Url     = url,
                 Snippet = snippet,
-                Source  = source
+                Source  = ExtractDomain(url)
             });
         }
 

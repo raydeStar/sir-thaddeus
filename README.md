@@ -1,6 +1,14 @@
-# Sir Thaddeus
+<p align="center">
+  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
+</p>
 
-Local-first Windows agent runtime: **desktop UI is optional**, the runtime is designed to run **tray-only/headless**, talk to a **local LLM (LM Studio / any OpenAI-compatible server)**, and execute actions through an **MCP tool server**.
+<h1 align="center">Sir Thaddeus</h1>
+
+<p align="center">
+  Local-first Windows agent runtime: <strong>desktop UI is optional</strong>, the runtime runs <strong>tray-only/headless</strong>, talks to a <strong>local LLM</strong>, and executes actions through an <strong>MCP tool server</strong>.
+</p>
+
+---
 
 ## What exists right now
 

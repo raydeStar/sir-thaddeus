@@ -107,6 +107,11 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 log("AGENT_TOOL_RESULT", $"{skipped.ToolCall.Function.Name} -> skipped");
             }
 
+            var executedWinnerCount = 0;
+            var successfulPayloadCount = 0;
+            var timeoutErrorCount = 0;
+            var unavailableErrorCount = 0;
+
             foreach (var toolCall in conflictResolution.Winners)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -131,6 +136,14 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                     success = false;
                 }
 
+                executedWinnerCount++;
+                if (success && !LooksLikeStructuredError(result))
+                    successfulPayloadCount++;
+                if (IsTimeoutLikeResult(result))
+                    timeoutErrorCount++;
+                if (IsUnavailableLikeResult(result))
+                    unavailableErrorCount++;
+
                 request.ToolCallsMade.Add(new ToolCallRecord
                 {
                     ToolName = toolCall.Function.Name,
@@ -141,6 +154,45 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 
                 request.History.Add(ChatMessage.ToolResult(toolCall.Id, result));
                 log("AGENT_TOOL_RESULT", $"{toolCall.Function.Name} -> {(success ? "ok" : "error")}");
+            }
+
+            // All tools failed with structured errors — return deterministic
+            // messages instead of letting the LLM hallucinate a response.
+            if (executedWinnerCount > 0 && successfulPayloadCount == 0)
+            {
+                if (timeoutErrorCount > 0)
+                {
+                    const string timeoutMsg =
+                        "I hit a timeout while running web tools, so I couldn't complete that request right now. " +
+                        "Please retry in a moment or narrow the query.";
+                    request.History.Add(ChatMessage.Assistant(timeoutMsg));
+                    log("AGENT_TIMEOUT_FALLBACK", timeoutMsg);
+
+                    return new AgentResponse
+                    {
+                        Text = timeoutMsg,
+                        Success = true,
+                        ToolCallsMade = request.ToolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    };
+                }
+
+                if (unavailableErrorCount > 0)
+                {
+                    const string unavailableMsg =
+                        "The requested tool is currently unavailable. " +
+                        "Please verify MCP server connectivity and try again.";
+                    request.History.Add(ChatMessage.Assistant(unavailableMsg));
+                    log("AGENT_UNAVAILABLE_FALLBACK", unavailableMsg);
+
+                    return new AgentResponse
+                    {
+                        Text = unavailableMsg,
+                        Success = true,
+                        ToolCallsMade = request.ToolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    };
+                }
             }
 
             if (roundTrips >= request.MaxRoundTrips)
@@ -163,6 +215,107 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
     {
         var msg = ex.Message ?? "";
         return msg.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeStructuredError(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                   doc.RootElement.TryGetProperty("error", out _);
+        }
+        catch
+        {
+            return payload.Contains("tool error", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsUnavailableLikeResult(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                return false;
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.String)
+                return errorEl.GetString()?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true;
+
+            if (errorEl.ValueKind == JsonValueKind.Object)
+            {
+                if (errorEl.TryGetProperty("code", out var codeEl) &&
+                    codeEl.ValueKind == JsonValueKind.String &&
+                    codeEl.GetString()?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return true;
+                }
+
+                if (errorEl.TryGetProperty("message", out var msgEl) &&
+                    msgEl.ValueKind == JsonValueKind.String &&
+                    msgEl.GetString()?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch
+        {
+            return payload.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsTimeoutLikeResult(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                return false;
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.String)
+                return errorEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true;
+
+            if (errorEl.ValueKind == JsonValueKind.Object)
+            {
+                if (errorEl.TryGetProperty("code", out var codeEl) &&
+                    codeEl.ValueKind == JsonValueKind.String &&
+                    codeEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return true;
+                }
+
+                if (errorEl.TryGetProperty("message", out var msgEl) &&
+                    msgEl.ValueKind == JsonValueKind.String &&
+                    msgEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch
+        {
+            return payload.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }
 

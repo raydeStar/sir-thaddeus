@@ -3,6 +3,7 @@ name: Tool Contract - web_search timeout handling
 user_message: "Use web_search for AI policy news and handle timeout gracefully."
 allowed_tools:
   - web_search
+  - browser_navigate
 mode: stub
 assertions:
   required_tools:

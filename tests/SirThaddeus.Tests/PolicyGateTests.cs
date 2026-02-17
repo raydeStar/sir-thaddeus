@@ -22,6 +22,8 @@ public class PolicyGateTests
         MakeTool("browser_navigate"),
         MakeTool("web_search"),
         MakeTool("WebSearch"),
+        MakeTool("places_lookup"),
+        MakeTool("PlacesLookup"),
         MakeTool("weather_geocode"),
         MakeTool("weather_forecast"),
         MakeTool("resolve_timezone"),
@@ -121,6 +123,18 @@ public class PolicyGateTests
     public void LookupNews_UsesInternalSearchPath_AndSkipsToolLoop()
     {
         var policy = PolicyGate.Evaluate(Route(Intents.LookupNews));
+        var filtered = PolicyGate.FilterTools(AllTools, policy);
+
+        Assert.Empty(filtered);
+        Assert.False(policy.UseToolLoop);
+        Assert.Contains(ToolCapability.SystemExecute, policy.ForbiddenCapabilities);
+        Assert.Contains(ToolCapability.MemoryWrite, policy.ForbiddenCapabilities);
+    }
+
+    [Fact]
+    public void LookupDeepDive_UsesInternalSearchPath_AndSkipsToolLoop()
+    {
+        var policy = PolicyGate.Evaluate(Route(Intents.LookupDeepDive));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
 
         Assert.Empty(filtered);
@@ -263,13 +277,13 @@ public class PolicyGateTests
         Assert.Contains("MemoryRetrieve", names);
         Assert.Contains("tool_ping", names);
         Assert.Contains("tool_list_capabilities", names);
+        Assert.Contains("time_now", names);
 
         Assert.DoesNotContain("web_search", names);
         Assert.DoesNotContain("system_execute", names);
         Assert.DoesNotContain("screen_capture", names);
         Assert.DoesNotContain("file_read", names);
         Assert.DoesNotContain("memory_store_facts", names);
-        Assert.DoesNotContain("time_now", names);
     }
 
     [Fact]

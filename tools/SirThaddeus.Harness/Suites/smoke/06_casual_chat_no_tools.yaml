@@ -1,0 +1,43 @@
+id: smoke_casual_no_tools
+name: Smoke - Casual Chat Must Not Invoke Tools
+user_message: "Hey, how are you doing today? Just wanted to say thanks for helping me out."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - file_write
+    - system_execute
+    - screen_capture
+    - tool_ping
+    - weather_geocode
+    - weather_forecast
+    - memory_store_facts
+    - memory_retrieve
+    - places_lookup
+    - tool_list_capabilities
+    - time_now
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - error
+    - timeout
+    - permission
+    - denied
+    - as an ai
+  max_response_chars: 600
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

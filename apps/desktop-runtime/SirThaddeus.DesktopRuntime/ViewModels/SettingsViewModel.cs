@@ -101,6 +101,9 @@ public sealed class SettingsViewModel : ViewModelBase
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
     private string _reasoningGuardrails = "off";
 
+    // Location (manual city/ZIP)
+    private string _locationLabel = "";
+
     // Audio Devices
     private AudioDeviceInfo? _selectedInputDevice;
     private AudioDeviceInfo? _selectedOutputDevice;
@@ -139,7 +142,7 @@ public sealed class SettingsViewModel : ViewModelBase
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
     public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) MarkDirty(); } }
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
-    public string VoiceTtsVoiceId { get => _voiceTtsVoiceId; set { if (SetProperty(ref _voiceTtsVoiceId, value)) MarkDirty(); } }
+    public string VoiceTtsVoiceId { get => _voiceTtsVoiceId; set { if (SetProperty(ref _voiceTtsVoiceId, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
     public string VoiceSttEngine { get => _voiceSttEngine; set { if (SetProperty(ref _voiceSttEngine, value)) MarkDirty(); } }
     public string VoiceSttModelId { get => _voiceSttModelId; set { if (SetProperty(ref _voiceSttModelId, value)) MarkDirty(); } }
     public bool VoicePreferLocalTts { get => _voicePreferLocalTts; set { if (SetProperty(ref _voicePreferLocalTts, value)) MarkDirty(); } }
@@ -208,6 +211,10 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // Weather
     public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
+
+    // Location (manual city/ZIP)
+    public string LocationLabel { get => _locationLabel; set { if (SetProperty(ref _locationLabel, value)) MarkDirty(); } }
+
     public string ReasoningGuardrails
     {
         get => _reasoningGuardrails;
@@ -224,6 +231,29 @@ public sealed class SettingsViewModel : ViewModelBase
     public ObservableCollection<AudioDeviceInfo> AvailableInputDevices  { get; } = new();
     public ObservableCollection<AudioDeviceInfo> AvailableOutputDevices { get; } = new();
     public IReadOnlyList<string> AvailableDraftTones { get; } = new[] { "professional", "playful", "direct" };
+
+    // ─── Kokoro Voice Catalog ────────────────────────────────────────
+
+    /// <summary>
+    /// Installed Kokoro voice IDs discovered from the local filesystem.
+    /// Bound to the TTS Voice dropdown in the settings panel.
+    /// </summary>
+    public ObservableCollection<string> AvailableKokoroVoices { get; } = new();
+
+    /// <summary>
+    /// Currently selected Kokoro voice. Two-way synced with
+    /// <see cref="VoiceTtsVoiceId"/> so persistence is unchanged.
+    /// </summary>
+    public string? SelectedKokoroVoice
+    {
+        get => string.IsNullOrWhiteSpace(_voiceTtsVoiceId) ? null : _voiceTtsVoiceId;
+        set
+        {
+            var normalized = (value ?? "").Trim();
+            VoiceTtsVoiceId = normalized;
+            OnPropertyChanged();
+        }
+    }
 
     public AudioDeviceInfo? SelectedInputDevice
     {
@@ -289,8 +319,8 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             if (SetProperty(ref _selectedProfile, value))
             {
-                MarkDirty();
-                SaveSettings();
+                LoadLocationForProfile(value?.ProfileId);
+                SaveProfileSelectionOnly();
             }
         }
     }
@@ -362,6 +392,7 @@ public sealed class SettingsViewModel : ViewModelBase
         LoadFromSettings(_settings);
         LoadAudioDevices();
         await LoadProfilesAsync();
+        ClearDirty();
         StatusText = "Settings loaded.";
     }
 
@@ -412,6 +443,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _weatherUserAgent         = s.Weather.UserAgent;
         _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
+        LoadLocationForProfile(s.ActiveProfileId);
 
         // Notify all bindings
         OnPropertyChanged(nameof(LlmBaseUrl));
@@ -452,6 +484,9 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(WeatherUserAgent));
         OnPropertyChanged(nameof(ReasoningGuardrails));
         OnPropertyChanged(nameof(InputGain));
+        OnPropertyChanged(nameof(LocationLabel));
+
+        RefreshKokoroVoiceCatalog();
     }
 
     private async Task LoadProfilesAsync()
@@ -486,6 +521,7 @@ public sealed class SettingsViewModel : ViewModelBase
                     ?? AvailableProfiles[0];
 
                 OnPropertyChanged(nameof(SelectedProfile));
+                LoadLocationForProfile(_selectedProfile?.ProfileId);
             });
         }
         catch (Exception ex)
@@ -772,12 +808,23 @@ public sealed class SettingsViewModel : ViewModelBase
         _voiceHostHealthPollCts = null;
     }
 
-    // ─── Persistence ─────────────────────────────────────────────────
+    // ─── Dirty State ────────────────────────────────────────────────
 
-    private void MarkDirty()
+    private bool _hasUnsavedChanges;
+
+    /// <summary>
+    /// True when the user has modified any setting since the last save/load.
+    /// Bound to the sticky bar to signal pending changes.
+    /// </summary>
+    public bool HasUnsavedChanges
     {
-        // Future: could debounce auto-save here
+        get => _hasUnsavedChanges;
+        private set => SetProperty(ref _hasUnsavedChanges, value);
     }
+
+    private void MarkDirty() => HasUnsavedChanges = true;
+
+    private void ClearDirty() => HasUnsavedChanges = false;
 
     // ─── Audio Device Management ────────────────────────────────────
 
@@ -1020,6 +1067,48 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void SaveSettings()
     {
+        var locationProfileId = _selectedProfile?.ProfileId ?? _settings.ActiveProfileId;
+        var locationProfileKey = AppSettings.NormalizeLocationProfileKey(locationProfileId);
+        var previousLocation = _settings.GetEffectiveUserLocation(locationProfileId);
+        var previousLocationMode = previousLocation.GetNormalizedMode();
+        var previousLocationValue = previousLocation.GetResolvedLabel() ?? "";
+
+        var manualLocationValue = (_locationLabel ?? "").Trim();
+        var nextLocationMode = string.IsNullOrWhiteSpace(manualLocationValue)
+            ? "unset"
+            : "manual";
+        var nextLocationValue = string.Equals(nextLocationMode, "manual", StringComparison.OrdinalIgnoreCase)
+            ? manualLocationValue
+            : "";
+
+        var locationChanged =
+            !string.Equals(previousLocationMode, nextLocationMode, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(previousLocationValue, nextLocationValue, StringComparison.Ordinal);
+
+        var nextLocationUpdatedAt = locationChanged
+            ? DateTimeOffset.UtcNow.ToString("O")
+            : previousLocation.GetResolvedUpdatedAt() ?? "";
+
+        var nextLocation = previousLocation with
+        {
+            Mode = nextLocationMode,
+            Value = nextLocationValue,
+            UpdatedAt = nextLocationUpdatedAt,
+
+            // Mirror legacy fields for backwards-safe settings migration.
+            Enabled = string.Equals(nextLocationMode, "manual", StringComparison.OrdinalIgnoreCase),
+            Label = nextLocationValue,
+            Timezone = "",
+            Latitude = null,
+            Longitude = null
+        };
+        var scopedLocations = new Dictionary<string, LocationSettings>(
+            _settings.UserProfile.LocationsByProfile,
+            StringComparer.OrdinalIgnoreCase)
+        {
+            [locationProfileKey] = nextLocation
+        };
+
         var updated = _settings with
         {
             Llm = _settings.Llm with
@@ -1102,16 +1191,54 @@ public sealed class SettingsViewModel : ViewModelBase
             {
                 ReasoningGuardrails = NormalizeReasoningGuardrailsMode(_reasoningGuardrails)
             },
+            UserProfile = _settings.UserProfile with
+            {
+                Location = nextLocation,
+                LocationsByProfile = scopedLocations
+            },
+            Location = nextLocation,
             ActiveProfileId = _selectedProfile?.ProfileId
         };
 
         SettingsManager.Save(updated);
         _settings = updated;
+        ClearDirty();
 
         StatusText = "Settings saved.";
 
         ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
         SettingsChanged?.Invoke(updated);
+
+        if (string.Equals(nextLocationMode, "manual", StringComparison.OrdinalIgnoreCase) &&
+            locationChanged)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "LOCATION_MANUAL_SAVED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["mode"] = "manual",
+                    ["value"] = nextLocationValue,
+                    ["profileId"] = locationProfileId ?? ""
+                }
+            });
+        }
+        else if (string.Equals(previousLocationMode, "manual", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(nextLocationMode, "unset", StringComparison.OrdinalIgnoreCase))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "LOCATION_CLEARED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["profileId"] = locationProfileId ?? ""
+                }
+            });
+        }
 
         _audit.Append(new AuditEvent
         {
@@ -1121,6 +1248,60 @@ public sealed class SettingsViewModel : ViewModelBase
                 ? $"activeProfile={_selectedProfile.ProfileId}"
                 : "activeProfile=none"
         });
+    }
+
+    private void SaveProfileSelectionOnly()
+    {
+        var updated = _settings with
+        {
+            ActiveProfileId = _selectedProfile?.ProfileId
+        };
+
+        SettingsManager.Save(updated);
+        _settings = updated;
+        StatusText = "Profile selected.";
+
+        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        SettingsChanged?.Invoke(updated);
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "user",
+            Action = "SETTINGS_SAVED",
+            Result = _selectedProfile?.ProfileId is not null
+                ? $"activeProfile={_selectedProfile.ProfileId}"
+                : "activeProfile=none"
+        });
+    }
+
+    private void LoadLocationForProfile(string? profileId)
+    {
+        var effectiveLocation = _settings.GetEffectiveUserLocation(profileId);
+        _locationLabel = effectiveLocation.GetResolvedLabel() ?? "";
+
+        OnPropertyChanged(nameof(LocationLabel));
+    }
+
+    // ─── Kokoro Voice Catalog ────────────────────────────────────────
+
+    private void RefreshKokoroVoiceCatalog()
+    {
+        var discovered = KokoroVoiceCatalog.Discover();
+
+        AvailableKokoroVoices.Clear();
+        foreach (var voiceId in discovered)
+            AvailableKokoroVoices.Add(voiceId);
+
+        // Ensure the current setting is always present in the list
+        // even if the pack folder was removed since the last save.
+        var current = (_voiceTtsVoiceId ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(current) &&
+            !AvailableKokoroVoices.Contains(current))
+        {
+            AvailableKokoroVoices.Add(current);
+        }
+
+        OnPropertyChanged(nameof(SelectedKokoroVoice));
     }
 
     private static string NormalizeReasoningGuardrailsMode(string? mode)
@@ -1153,7 +1334,11 @@ public sealed class SettingsViewModel : ViewModelBase
         if (string.Equals((uiEngine ?? "").Trim(), "faster-whisper", StringComparison.OrdinalIgnoreCase))
         {
             var model = (uiModelId ?? "").Trim();
-            return string.IsNullOrWhiteSpace(model) ? "base" : model;
+            if (string.IsNullOrWhiteSpace(model))
+                return "base";
+            if (model.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+                return "base";
+            return model;
         }
 
         return "base";

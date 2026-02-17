@@ -71,6 +71,7 @@ public static class Intents
     public const string LookupSearch = "lookup_search";
     public const string LookupFact   = "lookup_fact";
     public const string LookupNews   = "lookup_news";
+    public const string LookupDeepDive = "lookup_deep_dive";
 
     // ── Browser ──────────────────────────────────────────────────────
     public const string BrowseOnce        = "browse_once";

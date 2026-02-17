@@ -1,0 +1,108 @@
+<UserControl x:Class="SirThaddeus.DesktopRuntime.Views.HeroCardControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+
+    <Border Background="{DynamicResource HeroCardBgBrush}"
+            BorderBrush="{DynamicResource Surface1Brush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="16"
+            Margin="0,0,0,12">
+        <StackPanel>
+            <!-- Title row with confidence badge -->
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left"
+                           Text="{Binding CurrentBriefing.Hero.Title}"
+                           FontSize="20"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource TextBrush}"
+                           VerticalAlignment="Center" />
+                <Border DockPanel.Dock="Right"
+                        Background="{DynamicResource BlueBadgeBgBrush}"
+                        CornerRadius="10"
+                        Padding="10,3"
+                        Margin="8,0,0,0">
+                    <TextBlock Text="{Binding CurrentBriefing.Hero.Confidence}"
+                               FontSize="11"
+                               Foreground="{DynamicResource BlueBrush}"
+                               FontWeight="SemiBold" />
+                </Border>
+            </DockPanel>
+
+            <!-- Separator line -->
+            <Border BorderBrush="{DynamicResource Surface1Brush}"
+                    BorderThickness="0,0,0,1"
+                    Margin="0,10,0,10" />
+
+            <!-- Status -->
+            <TextBlock Text="{Binding CurrentBriefing.Hero.StatusLine}"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource GreenBrush}" />
+
+            <!-- Today's hours -->
+            <TextBlock Text="{Binding CurrentBriefing.Hero.ClosesText}"
+                       Margin="0,4,0,0"
+                       FontSize="13"
+                       Foreground="{DynamicResource Subtext1Brush}" />
+
+            <!-- Address -->
+            <TextBlock Text="{Binding CurrentBriefing.Hero.Address}"
+                       Margin="0,10,0,0"
+                       FontSize="12"
+                       Foreground="{DynamicResource Subtext0Brush}"
+                       TextWrapping="Wrap" />
+
+            <!-- Last checked timestamp -->
+            <TextBlock Text="{Binding CurrentBriefing.Hero.LastCheckedIso, StringFormat=Last checked: {0}}"
+                       Margin="0,10,0,0"
+                       FontSize="10"
+                       Foreground="{DynamicResource Surface2Brush}" />
+
+            <!-- Action buttons -->
+            <WrapPanel Margin="0,12,0,0">
+                <Button Content="&#x1F310;  Website"
+                        Command="{Binding OpenUrlCommand}"
+                        CommandParameter="{Binding WebsiteUrl}"
+                        Visibility="{Binding HasWebsite, Converter={StaticResource BoolToVisibility}}"
+                        Margin="0,0,8,6"
+                        Padding="12,6"
+                        Background="{DynamicResource Surface0Brush}"
+                        Foreground="{DynamicResource BlueBrush}"
+                        BorderBrush="{DynamicResource Surface1Brush}"
+                        BorderThickness="1"
+                        Cursor="Hand" />
+
+                <Button Content="&#x1F9ED;  Directions"
+                        Command="{Binding OpenUrlCommand}"
+                        CommandParameter="{Binding DirectionsUrl}"
+                        Visibility="{Binding HasDirections, Converter={StaticResource BoolToVisibility}}"
+                        Margin="0,0,8,6"
+                        Padding="12,6"
+                        Background="{DynamicResource Surface0Brush}"
+                        Foreground="{DynamicResource BlueBrush}"
+                        BorderBrush="{DynamicResource Surface1Brush}"
+                        BorderThickness="1"
+                        Cursor="Hand" />
+
+                <Button Content="&#x1F4CB;  Copy Phone"
+                        Command="{Binding CopyTextCommand}"
+                        CommandParameter="{Binding PhoneText}"
+                        Visibility="{Binding HasPhone, Converter={StaticResource BoolToVisibility}}"
+                        Margin="0,0,8,6"
+                        Padding="12,6"
+                        Background="{DynamicResource Surface0Brush}"
+                        Foreground="{DynamicResource BlueBrush}"
+                        BorderBrush="{DynamicResource Surface1Brush}"
+                        BorderThickness="1"
+                        Cursor="Hand" />
+            </WrapPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

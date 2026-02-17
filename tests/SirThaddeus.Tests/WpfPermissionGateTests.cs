@@ -1,5 +1,6 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Config;
+using SirThaddeus.McpShared;
 
 namespace SirThaddeus.Tests;
 
@@ -23,6 +24,8 @@ public class ToolGroupResolutionTests
     [Theory]
     [InlineData("WebSearch",        "web")]
     [InlineData("web_search",       "web")]
+    [InlineData("PlacesLookup",     "web")]
+    [InlineData("places_lookup",    "web")]
     [InlineData("BrowserNavigate",  "web")]
     [InlineData("browser_navigate", "web")]
     [InlineData("WeatherGeocode",   "web")]
@@ -135,6 +138,45 @@ public class ToolGroupResolutionTests
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
         var group = ToolGroupPolicy.ResolveGroup(canonical);
         Assert.Equal(expected, group);
+    }
+
+    [Fact]
+    public void ManifestTools_AndAliases_MapToKnownGroups()
+    {
+        foreach (var tool in ToolManifest.All)
+        {
+            var canonicalName = AuditedMcpToolClient.Canonicalize(tool.Name);
+            var group = ToolGroupPolicy.ResolveGroup(canonicalName);
+            Assert.NotEqual("unknown", group);
+
+            foreach (var alias in tool.Aliases)
+            {
+                var canonicalAlias = AuditedMcpToolClient.Canonicalize(alias);
+                var aliasGroup = ToolGroupPolicy.ResolveGroup(canonicalAlias);
+                Assert.Equal(group, aliasGroup);
+            }
+        }
+    }
+
+    [Fact]
+    public void ManifestTools_DefaultPolicies_AreControllableOrAlwaysSafe()
+    {
+        var snapshot = ToolGroupPolicy.BuildSnapshot(new AppSettings(), isDebugBuild: false);
+
+        foreach (var tool in ToolManifest.All)
+        {
+            var canonicalName = AuditedMcpToolClient.Canonicalize(tool.Name);
+            var group = ToolGroupPolicy.ResolveGroup(canonicalName);
+            var effective = ToolGroupPolicy.ResolveEffectivePolicy(group, snapshot);
+
+            if (group is "meta" or "memoryRead")
+            {
+                Assert.Equal("always", effective);
+                continue;
+            }
+
+            Assert.Equal("ask", effective);
+        }
     }
 }
 

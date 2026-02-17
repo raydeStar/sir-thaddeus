@@ -1,0 +1,51 @@
+<UserControl x:Class="SirThaddeus.DesktopRuntime.Views.MapPaneControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Grid>
+        <Border Background="{DynamicResource CardBgBrush}"
+                BorderBrush="{DynamicResource Surface1Brush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="12"
+                Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="Map"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextBrush}" />
+
+                <Border Margin="0,10,0,10"
+                        Height="220"
+                        CornerRadius="8"
+                        BorderBrush="{DynamicResource Surface2Brush}"
+                        BorderThickness="1"
+                        Background="{DynamicResource BaseBrush}">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="Map preview placeholder"
+                                   Foreground="{DynamicResource Subtext0Brush}"
+                                   FontSize="12"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding MapTitle}"
+                                   Foreground="{DynamicResource TextBrush}"
+                                   FontWeight="SemiBold"
+                                   FontSize="12"
+                                   Margin="0,6,0,0"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding MapCoordinates}"
+                                   Foreground="{DynamicResource BlueBrush}"
+                                   FontSize="11"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="Map rendering is optional and non-blocking. Core briefing cards stay available even when map data is missing."
+                           Foreground="{DynamicResource Overlay2Brush}"
+                           FontSize="11"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

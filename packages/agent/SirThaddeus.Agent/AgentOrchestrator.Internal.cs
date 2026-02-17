@@ -99,7 +99,7 @@ public sealed partial class AgentOrchestrator
         if (!geocodeCall.Success)
         {
             var errorText = "I couldn't resolve that location for weather lookup. " +
-                            "Try a city and region like \"Rexburg, ID\".";
+                            "Try a city and region like \"Portland, OR\".";
             _history.Add(ChatMessage.Assistant(errorText));
             return new AgentResponse
             {
@@ -794,7 +794,7 @@ public sealed partial class AgentOrchestrator
 
             if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
             {
-                var line = $"In {location}, it's about **{currentTemp}{unitSuffix}** and **{condition}** right now.";
+                var line = $"Today in {location}, it's about **{currentTemp}{unitSuffix}** and **{condition}** right now.";
                 return avgTemp.HasValue
                     ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
                     : line;
@@ -802,7 +802,7 @@ public sealed partial class AgentOrchestrator
 
             if (currentTemp.HasValue)
             {
-                var line = $"In {location}, it's about **{currentTemp}{unitSuffix}** right now.";
+                var line = $"Today in {location}, it's about **{currentTemp}{unitSuffix}** right now.";
                 return avgTemp.HasValue
                     ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
                     : line;
@@ -810,7 +810,7 @@ public sealed partial class AgentOrchestrator
 
             if (!string.IsNullOrWhiteSpace(condition))
             {
-                var line = $"In {location}, conditions are **{condition}** right now.";
+                var line = $"Today in {location}, conditions are **{condition}** right now.";
                 return avgTemp.HasValue
                     ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
                     : line;
@@ -889,13 +889,13 @@ public sealed partial class AgentOrchestrator
         string avgSuffix)
     {
         if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
-            return $"In {location}, it's about {currentTemp}{unitSuffix} with {condition.ToLowerInvariant()} right now.";
+            return $"Today in {location}, it's about {currentTemp}{unitSuffix} with {condition.ToLowerInvariant()} right now.";
 
         if (currentTemp.HasValue)
-            return $"In {location}, it's about {currentTemp}{unitSuffix} right now.";
+            return $"Today in {location}, it's about {currentTemp}{unitSuffix} right now.";
 
         if (!string.IsNullOrWhiteSpace(condition))
-            return $"In {location}, conditions are {condition.ToLowerInvariant()} right now.";
+            return $"Today in {location}, conditions are {condition.ToLowerInvariant()} right now.";
 
         if (avgTemp.HasValue)
             return $"In {location}, average temp is around {avgTemp}{avgSuffix}.";
@@ -2128,6 +2128,15 @@ public sealed partial class AgentOrchestrator
         var response = await CallLlmWithRetrySafe(
             messagesForSummary, roundTrips, MaxTokensWebSummary, cancellationToken);
 
+        if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            LogEvent("AGENT_SUMMARY_RETRY_EXPANDED",
+                $"Follow-up summary hit token cap ({MaxTokensWebSummary}); retrying with {MaxTokensWebSummaryRetry}.");
+            roundTrips++;
+            response = await CallLlmWithRetrySafe(
+                messagesForSummary, roundTrips, MaxTokensWebSummaryRetry, cancellationToken);
+        }
+
         string text;
         if (response.FinishReason == "error")
         {
@@ -2158,6 +2167,16 @@ public sealed partial class AgentOrchestrator
                 roundTrips++;
                 var rewritten = await CallLlmWithRetrySafe(
                     rewriteMessages, roundTrips, MaxTokensWebSummary, cancellationToken);
+
+                if (string.Equals(rewritten.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+                {
+                    LogEvent("AGENT_SUMMARY_REWRITE_RETRY_EXPANDED",
+                        $"Rewrite hit token cap ({MaxTokensWebSummary}); retrying with {MaxTokensWebSummaryRetry}.");
+                    roundTrips++;
+                    rewritten = await CallLlmWithRetrySafe(
+                        rewriteMessages, roundTrips, MaxTokensWebSummaryRetry, cancellationToken);
+                }
+
                 if (!string.IsNullOrWhiteSpace(rewritten.Content) &&
                     rewritten.FinishReason != "error")
                     text = StripThinkingScaffold(rewritten.Content!);
@@ -2496,7 +2515,7 @@ public sealed partial class AgentOrchestrator
     {
         var preserveLock = _dialogueStore.Get().ContextLocked;
         _history.Clear();
-        _history.Add(ChatMessage.System(_systemPrompt));
+        _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
         _searchOrchestrator.Session.Clear();
         _dialogueStore.Reset();
         if (preserveLock)
@@ -2712,12 +2731,17 @@ public sealed partial class AgentOrchestrator
 
         var personalityLine = utilityResult.Category.ToLowerInvariant() switch
         {
-            "calculator" =>
-                "Need another quick one? Toss over the next math step.",
-            "conversion" =>
-                "Need another unit converted?",
-            "fact" =>
-                "Want a quick benchmark comparison next?",
+            "calculator"  => "Need another quick one? Toss over the next math step.",
+            "conversion"  => "Need another unit converted?",
+            "fact"        => "Want a quick benchmark comparison next?",
+            "weather"     => "Stay prepared out there — anything else weather-related?",
+            "time"        => "Time waits for no one. Need a timezone comparison?",
+            "time_local"  => "Right on the clock. Anything else time-sensitive?",
+            "holiday"     => "Mark your calendar. Want to check another date?",
+            "feed"        => "That's the latest from the feed. Want me to dig deeper into any item?",
+            "status"      => "Status confirmed. Want me to keep an eye on it?",
+            "meta"        => "That's the toolkit rundown. Want details on any specific capability?",
+            "text"        => "Quick count complete. Another text analysis?",
             _ => ""
         };
 
@@ -3989,6 +4013,7 @@ public sealed partial class AgentOrchestrator
             Intents.MemoryRead    => ChatIntent.Casual,
             Intents.LookupFact    => ChatIntent.WebLookup,
             Intents.LookupNews    => ChatIntent.WebLookup,
+            Intents.LookupDeepDive => ChatIntent.WebLookup,
             Intents.LookupSearch  => ChatIntent.WebLookup,
             _                     => ChatIntent.Tooling
         };
@@ -4000,6 +4025,7 @@ public sealed partial class AgentOrchestrator
         {
             Intents.LookupFact => LookupModeHint.Fact,
             Intents.LookupNews => LookupModeHint.News,
+            Intents.LookupDeepDive => LookupModeHint.DeepDive,
             _ => LookupModeHint.Auto
         };
     }
@@ -4010,7 +4036,8 @@ public sealed partial class AgentOrchestrator
     private static bool IsLookupIntent(string intent) =>
         intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
-        intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase);
+        intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
 
     private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
     {

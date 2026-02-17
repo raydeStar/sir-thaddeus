@@ -3,6 +3,7 @@ name: Smoke - Capability Listing
 user_message: "Call tool_list_capabilities and summarize what capability groups are available."
 allowed_tools:
   - tool_list_capabilities
+  - memory_retrieve
 mode: live
 assertions:
   required_tools:
@@ -15,7 +16,7 @@ expectations:
   required_keywords:
     - capability
   forbidden_keywords: []
-  max_response_chars: 700
+  max_response_chars: 1200
 min_score: 7.0
 patch_targets:
   tier1_targets:

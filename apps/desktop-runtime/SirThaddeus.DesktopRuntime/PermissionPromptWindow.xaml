@@ -7,56 +7,9 @@
         WindowStartupLocation="CenterOwner"
         WindowStyle="SingleBorderWindow"
         ResizeMode="NoResize"
-        Background="#1E1E2E"
-        Foreground="#CDD6F4"
+        Background="{DynamicResource BaseBrush}"
+        Foreground="{DynamicResource TextBrush}"
         ShowInTaskbar="False">
-
-    <Window.Resources>
-        <SolidColorBrush x:Key="BackgroundBrush" Color="#1E1E2E"/>
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#313244"/>
-        <SolidColorBrush x:Key="TextBrush" Color="#CDD6F4"/>
-        <SolidColorBrush x:Key="SubtextBrush" Color="#A6ADC8"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#89B4FA"/>
-        <SolidColorBrush x:Key="WarnBrush" Color="#FAB387"/>
-        <SolidColorBrush x:Key="DenyBrush" Color="#F38BA8"/>
-        <SolidColorBrush x:Key="AllowBrush" Color="#A6E3A1"/>
-
-        <Style x:Key="AllowOnceButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource AllowBrush}"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-
-        <Style x:Key="AllowSessionButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-
-        <Style x:Key="AllowAlwaysButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#CBA6F7"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-
-        <Style x:Key="DenyButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource DenyBrush}"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-    </Window.Resources>
 
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -77,7 +30,7 @@
 
         <!-- Request Summary -->
         <Border Grid.Row="1" 
-                Background="{StaticResource SurfaceBrush}"
+                Background="{DynamicResource Surface0Brush}"
                 CornerRadius="4"
                 Padding="16"
                 Margin="0,0,0,16">
@@ -94,29 +47,29 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Capability:" 
-                           Foreground="{StaticResource SubtextBrush}"
+                           Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="0" Grid.Column="1" 
                            x:Name="CapabilityText"
-                           Foreground="{StaticResource WarnBrush}"
+                           Foreground="{DynamicResource PeachBrush}"
                            FontWeight="Bold"/>
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Purpose:" 
-                           Foreground="{StaticResource SubtextBrush}"
+                           Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="1" Grid.Column="1" 
                            x:Name="PurposeText"
                            TextWrapping="Wrap"/>
 
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Scope:" 
-                           Foreground="{StaticResource SubtextBrush}"
+                           Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="2" Grid.Column="1" 
                            x:Name="ScopeText"
                            TextWrapping="Wrap"/>
 
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Duration:" 
-                           Foreground="{StaticResource SubtextBrush}"
+                           Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,0"/>
                 <TextBlock Grid.Row="3" Grid.Column="1" 
                            x:Name="DurationText"/>
@@ -132,7 +85,7 @@
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0"/>
                 <TextBlock Text="This action will grant the specified capability. Review carefully."
-                           Foreground="{StaticResource WarnBrush}"
+                           Foreground="{DynamicResource PeachBrush}"
                            TextWrapping="Wrap"
                            FontSize="12"/>
             </StackPanel>
@@ -143,19 +96,19 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
             <Button Content="Deny" 
-                    Style="{StaticResource DenyButtonStyle}"
+                    Style="{DynamicResource DenyButtonStyle}"
                     Click="DenyButton_Click"
                     Margin="0,0,8,0"/>
             <Button Content="Allow once" 
-                    Style="{StaticResource AllowOnceButtonStyle}"
+                    Style="{DynamicResource AllowOnceButtonStyle}"
                     Click="AllowOnceButton_Click"
                     Margin="0,0,8,0"/>
             <Button Content="Allow for session" 
-                    Style="{StaticResource AllowSessionButtonStyle}"
+                    Style="{DynamicResource AllowSessionButtonStyle}"
                     Click="AllowSessionButton_Click"
                     Margin="0,0,8,0"/>
             <Button Content="Allow always" 
-                    Style="{StaticResource AllowAlwaysButtonStyle}"
+                    Style="{DynamicResource AllowAlwaysButtonStyle}"
                     Click="AllowAlwaysButton_Click"/>
         </StackPanel>
     </Grid>

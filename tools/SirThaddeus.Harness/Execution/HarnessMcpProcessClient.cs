@@ -190,7 +190,54 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
         {
             env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings.Memory.DbPath);
             env["ST_LLM_BASEURL"] = settings.Llm.BaseUrl;
+            if (settings.Memory.UseEmbeddings)
+            {
+                var embModel = string.IsNullOrWhiteSpace(settings.Memory.EmbeddingsModel)
+                    ? settings.Llm.Model
+                    : settings.Memory.EmbeddingsModel;
+                env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
+            }
         }
+
+        // Mirror desktop runtime MCP environment wiring so harness live mode
+        // exercises the same provider stack and budgets.
+        var webModeRaw = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
+        var webMode = webModeRaw is "auto" or "searxng" or "ddg_html" or "google_news" or "manual"
+            ? webModeRaw
+            : "auto";
+        env["WEBSEARCH_MODE"] = webMode;
+        env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(settings.WebSearch.SearxngBaseUrl)
+            ? "http://localhost:8080"
+            : settings.WebSearch.SearxngBaseUrl.Trim();
+        env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
+        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
+
+        env["ST_WEATHER_PROVIDER_MODE"] = settings.Weather.ProviderMode;
+        env["ST_WEATHER_FORECAST_CACHE_MINUTES"] =
+            Math.Clamp(settings.Weather.ForecastCacheMinutes, 10, 30).ToString();
+        env["ST_WEATHER_GEOCODE_CACHE_MINUTES"] =
+            Math.Max(60, settings.Weather.GeocodeCacheMinutes).ToString();
+        env["ST_WEATHER_PLACE_MEMORY_ENABLED"] =
+            settings.Weather.PlaceMemoryEnabled ? "true" : "false";
+        env["ST_WEATHER_PLACE_MEMORY_PATH"] = ResolveWeatherPlaceMemoryPath(settings.Weather.PlaceMemoryPath);
+        env["ST_WEATHER_USER_AGENT"] =
+            string.IsNullOrWhiteSpace(settings.Weather.UserAgent)
+                ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
+                : settings.Weather.UserAgent.Trim();
+
+        if (!string.IsNullOrWhiteSpace(settings.DeepDive.PlacesApiKey))
+            env["ST_DEEPDIVE_PLACES_API_KEY"] = settings.DeepDive.PlacesApiKey.Trim();
+        env["ST_DEEPDIVE_PLACES_TIMEOUT_MS"] =
+            Math.Clamp(settings.DeepDive.PlacesTimeoutMs, 2_000, 20_000).ToString();
+        env["ST_DEEPDIVE_MAX_TOOL_CALLS"] =
+            Math.Clamp(settings.DeepDive.MaxToolCalls, 1, 20).ToString();
+        env["ST_DEEPDIVE_MAX_SOURCES"] =
+            Math.Clamp(settings.DeepDive.MaxSources, 1, 10).ToString();
+        env["ST_DEEPDIVE_REVIEW_SNIPPETS_MAX"] =
+            Math.Clamp(settings.DeepDive.MaxReviewSnippets, 1, 5).ToString();
+        env["ST_DEEPDIVE_DEFAULT_LOCALE"] = string.IsNullOrWhiteSpace(settings.DeepDive.DefaultLocale)
+            ? "en-US"
+            : settings.DeepDive.DefaultLocale.Trim();
 
         return env;
     }
@@ -202,6 +249,15 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "SirThaddeus", "memory.db");
+    }
+
+    private static string ResolveWeatherPlaceMemoryPath(string weatherPlaceMemoryPath)
+    {
+        if (!string.Equals(weatherPlaceMemoryPath, "auto", StringComparison.OrdinalIgnoreCase))
+            return weatherPlaceMemoryPath;
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(localAppData, "SirThaddeus", "weather-places.json");
     }
 
     private static string ResolveServerPath(string configuredPath)

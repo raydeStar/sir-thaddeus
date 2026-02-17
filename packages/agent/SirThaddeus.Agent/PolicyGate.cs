@@ -131,6 +131,15 @@ public static class PolicyGate
             RequiredPermissions = []
         },
 
+        // ── Deep-dive lookup: internal deep-dive orchestration only ──
+        [Intents.LookupDeepDive] = new PolicyDecision
+        {
+            AllowedCapabilities = [],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite],
+            UseToolLoop = false,
+            RequiredPermissions = []
+        },
+
         // ── Browse once: fetch a specific URL ────────────────────────
         [Intents.BrowseOnce] = new PolicyDecision
         {
@@ -195,8 +204,8 @@ public static class PolicyGate
         // As sub-intent detection improves, fewer messages land here.
         [Intents.GeneralTool] = new PolicyDecision
         {
-            AllowedCapabilities = [ToolCapability.MemoryRead, ToolCapability.Meta],
-            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite, ToolCapability.TimeRead],
+            AllowedCapabilities = [ToolCapability.MemoryRead, ToolCapability.Meta, ToolCapability.TimeRead],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite],
             RequiredPermissions = []
         },
     };

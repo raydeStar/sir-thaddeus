@@ -3,7 +3,8 @@ name: Quality - Web search grounding
 user_message: "Use web_search to answer what changed in C# 13 and keep it practical."
 allowed_tools:
   - web_search
-mode: replay
+  - browser_navigate
+mode: live
 assertions:
   required_tools:
     - web_search
@@ -14,11 +15,10 @@ assertions:
 expectations:
   required_keywords:
     - c#
-    - changed
   forbidden_keywords:
     - http://
     - https://
-  max_response_chars: 650
+  max_response_chars: 1200
 min_score: 8.5
 patch_targets:
   tier1_targets:

@@ -1,0 +1,34 @@
+id: smoke_calculator_deterministic
+name: Smoke - Deterministic Calculator (No Web/MCP)
+user_message: "What is 347 multiplied by 29?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - system_execute
+    - screen_capture
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "10063"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+  max_response_chars: 400
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/UtilityRouter.cs
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

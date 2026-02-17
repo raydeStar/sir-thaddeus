@@ -1,0 +1,33 @@
+id: contract_timezone_lookup
+name: Tool Contract - Timezone lookup via weather_geocode
+user_message: "What time is it in Tokyo, Japan right now?"
+allowed_tools:
+  - weather_geocode
+  - resolve_timezone
+  - time_now
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - file_read
+    - system_execute
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - tokyo
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 500
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/UtilityRouter.cs
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

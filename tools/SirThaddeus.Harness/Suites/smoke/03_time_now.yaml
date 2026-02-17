@@ -1,13 +1,18 @@
 id: smoke_time_now
 name: Smoke - Time Tool
-user_message: "Use time_now and tell me the current local time in one sentence."
+user_message: "What time is it right now? Tell me in one sentence."
 allowed_tools:
   - time_now
 mode: live
 assertions:
   required_tools:
     - time_now
-  forbidden_tools: []
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - screen_capture
+    - web_search
+    - browser_navigate
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: true

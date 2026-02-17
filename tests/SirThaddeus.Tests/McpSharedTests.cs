@@ -26,6 +26,7 @@ public class ToolManifestTests
 
         // Spot-check key tools exist
         Assert.Contains(all, t => t.Name == "web_search");
+        Assert.Contains(all, t => t.Name == "places_lookup");
         Assert.Contains(all, t => t.Name == "screen_capture");
         Assert.Contains(all, t => t.Name == "system_execute");
         Assert.Contains(all, t => t.Name == "memory_retrieve");
@@ -116,6 +117,20 @@ public class ToolManifestTests
         Assert.Contains("file_read", requiresPermission);
         Assert.Contains("file_list", requiresPermission);
         Assert.Contains("system_execute", requiresPermission);
+        Assert.Contains("web_search", requiresPermission);
+        Assert.Contains("browser_navigate", requiresPermission);
+        Assert.Contains("places_lookup", requiresPermission);
+        Assert.Contains("weather_geocode", requiresPermission);
+        Assert.Contains("weather_forecast", requiresPermission);
+        Assert.Contains("resolve_timezone", requiresPermission);
+        Assert.Contains("holidays_get", requiresPermission);
+        Assert.Contains("holidays_next", requiresPermission);
+        Assert.Contains("holidays_is_today", requiresPermission);
+        Assert.Contains("feed_fetch", requiresPermission);
+        Assert.Contains("status_check_url", requiresPermission);
+        Assert.Contains("memory_store_facts", requiresPermission);
+        Assert.Contains("memory_update_fact", requiresPermission);
+        Assert.Contains("memory_delete_fact", requiresPermission);
     }
 }
 

@@ -3,6 +3,24 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/CatppuccinMocha.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Apply accent focus ring to all focusable controls for keyboard nav -->
+            <Style TargetType="Button">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
+            </Style>
+            <Style TargetType="ToggleButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
+            </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

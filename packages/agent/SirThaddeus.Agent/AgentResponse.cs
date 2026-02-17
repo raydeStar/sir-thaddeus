@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Search.DeepDive;
 
 namespace SirThaddeus.Agent;
 
@@ -65,6 +66,11 @@ public sealed record AgentResponse
     /// Never includes chain-of-thought.
     /// </summary>
     public IReadOnlyList<string> GuardrailsRationale { get; init; } = [];
+
+    /// <summary>
+    /// Optional structured payload for the dedicated briefing panel.
+    /// </summary>
+    public DeepDiveBriefing? DeepDiveBriefing { get; init; }
 
     public static AgentResponse FromError(string error) => new()
     {

@@ -14,7 +14,7 @@ public class WeatherServiceTests
             if (req.RequestUri!.ToString().Contains("photon.komoot.io/api", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonResponse(
-                    """{"features":[{"geometry":{"coordinates":[-111.789,43.826]},"properties":{"name":"Rexburg","state":"Idaho","country":"United States","countrycode":"US"}}]}""");
+                    """{"features":[{"geometry":{"coordinates":[-122.6765,45.5231]},"properties":{"name":"Portland","state":"Oregon","country":"United States","countrycode":"US"}}]}""");
             }
 
             return JsonResponse("""{"error":"unexpected"}""", HttpStatusCode.NotFound);
@@ -25,8 +25,8 @@ public class WeatherServiceTests
             new WeatherServiceOptions { GeocodeCacheMinutes = 1_440, PlaceMemoryEnabled = false },
             http);
 
-        var first = await svc.GeocodeAsync("Rexburg, ID", 1);
-        var second = await svc.GeocodeAsync("rexburg,   id", 1);
+        var first = await svc.GeocodeAsync("Portland, OR", 1);
+        var second = await svc.GeocodeAsync("portland,   or", 1);
 
         Assert.NotEmpty(first.Results);
         Assert.NotEmpty(second.Results);
@@ -50,7 +50,7 @@ public class WeatherServiceTests
             if (url.Contains("geocoding-api.open-meteo.com", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonResponse(
-                    """{"results":[{"name":"Rexburg","admin1":"Idaho","country":"United States","country_code":"US","latitude":43.826,"longitude":-111.789}]}""");
+                    """{"results":[{"name":"Portland","admin1":"Oregon","country":"United States","country_code":"US","latitude":45.5231,"longitude":-122.6765}]}""");
             }
 
             return JsonResponse("""{"error":"unexpected"}""", HttpStatusCode.NotFound);
@@ -59,7 +59,7 @@ public class WeatherServiceTests
         using var http = new HttpClient(handler);
         var svc = new WeatherService(new WeatherServiceOptions(), http);
 
-        var geocode = await svc.GeocodeAsync("Rexburg, Idaho", maxResults: 1);
+        var geocode = await svc.GeocodeAsync("Portland, Oregon", maxResults: 1);
 
         Assert.Equal("open-meteo-fallback", geocode.Source);
         Assert.Single(geocode.Results);
@@ -78,7 +78,7 @@ public class WeatherServiceTests
             if (url.Contains("/points/", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonResponse(
-                    """{"properties":{"forecast":"https://api.weather.gov/gridpoints/PIH/100,100/forecast","forecastHourly":"https://api.weather.gov/gridpoints/PIH/100,100/forecast/hourly","relativeLocation":{"properties":{"city":"Rexburg","state":"ID"}}}}""");
+                    """{"properties":{"forecast":"https://api.weather.gov/gridpoints/PQR/100,100/forecast","forecastHourly":"https://api.weather.gov/gridpoints/PQR/100,100/forecast/hourly","relativeLocation":{"properties":{"city":"Portland","state":"OR"}}}}""");
             }
             if (url.EndsWith("/forecast", StringComparison.OrdinalIgnoreCase))
             {
@@ -102,7 +102,7 @@ public class WeatherServiceTests
         using var http = new HttpClient(handler);
         var svc = new WeatherService(new WeatherServiceOptions(), http);
 
-        var wx = await svc.ForecastAsync(43.826, -111.789, "Rexburg, ID", "US", days: 3);
+        var wx = await svc.ForecastAsync(45.5231, -122.6765, "Portland, OR", "US", days: 3);
 
         Assert.Equal("nws", wx.Provider);
         Assert.Equal("us_primary", wx.ProviderReason);
@@ -173,7 +173,7 @@ public class WeatherServiceTests
         using var http = new HttpClient(handler);
         var svc = new WeatherService(new WeatherServiceOptions(), http);
 
-        var wx = await svc.ForecastAsync(43.826, -111.789, "Rexburg, ID", "US", days: 1);
+        var wx = await svc.ForecastAsync(45.5231, -122.6765, "Portland, OR", "US", days: 1);
 
         Assert.Equal("open-meteo", wx.Provider);
         Assert.Equal("fallback_nws_error", wx.ProviderReason);

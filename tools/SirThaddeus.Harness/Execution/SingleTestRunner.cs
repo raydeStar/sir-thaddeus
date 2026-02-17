@@ -56,11 +56,18 @@ public sealed class SingleTestRunner
         IToolExecutor baseExecutor;
         if (mode is HarnessExecutionMode.Replay or HarnessExecutionMode.Stub)
         {
-            loadedFixture = await _fixtureStore.LoadAsync(
-                _context.Options.FixturesRoot,
-                _context.SuiteName,
-                test.Id,
-                cancellationToken);
+            try
+            {
+                loadedFixture = await _fixtureStore.LoadAsync(
+                    _context.Options.FixturesRoot,
+                    _context.SuiteName,
+                    test.Id,
+                    cancellationToken);
+            }
+            catch (FileNotFoundException) when (mode == HarnessExecutionMode.Stub)
+            {
+                loadedFixture = null;
+            }
         }
 
         switch (mode)
@@ -79,9 +86,18 @@ public sealed class SingleTestRunner
             }
             case HarnessExecutionMode.Stub:
             {
-                llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
-                var replayExecutor = new ReplayToolExecutor(loadedFixture!);
-                baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
+                if (loadedFixture is not null)
+                {
+                    llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
+                    var replayExecutor = new ReplayToolExecutor(loadedFixture);
+                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
+                }
+                else
+                {
+                    llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
+                    var liveExecutor = new LiveToolExecutor(settings);
+                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
+                }
                 break;
             }
             default:
@@ -105,6 +121,7 @@ public sealed class SingleTestRunner
             mcpClient,
             new TestAuditLogger(),
             settings.Llm.SystemPrompt);
+        orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
 
         var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
         traceRecorder.RecordFinal(response.Text);
@@ -187,6 +204,23 @@ public sealed class SingleTestRunner
             "stub" => HarnessExecutionMode.Stub,
             _ => options.Mode
         };
+    }
+
+    private static bool ShouldEnableMemoryForTest(HarnessTestCase test, AppSettings settings)
+    {
+        if (!settings.Memory.Enabled)
+            return false;
+
+        // If the test explicitly forbids memory tools, disable pre-fetch.
+        if (test.Assertions.ForbiddenTools.Any(tool =>
+                tool.StartsWith("memory_", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        if (test.AllowedTools.Count == 0)
+            return settings.Memory.Enabled;
+
+        return test.AllowedTools.Any(tool =>
+            tool.StartsWith("memory_", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CursorJudgePacket BuildJudgePacket(

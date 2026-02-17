@@ -15,7 +15,7 @@ public class PublicApiProvidersTests
             if (url.Contains("api.weather.gov/points", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonResponse(
-                    """{"properties":{"timeZone":"America/Denver"}}""");
+                    """{"properties":{"timeZone":"America/Los_Angeles"}}""");
             }
 
             return JsonResponse("""{"error":"unexpected"}""", HttpStatusCode.NotFound);
@@ -26,10 +26,10 @@ public class PublicApiProvidersTests
             new PublicApiServiceOptions { TimezoneCacheMinutes = 60 },
             http);
 
-        var first = await provider.ResolveAsync(43.826, -111.789, "US");
-        var second = await provider.ResolveAsync(43.826, -111.789, "US");
+        var first = await provider.ResolveAsync(45.5231, -122.6765, "US");
+        var second = await provider.ResolveAsync(45.5231, -122.6765, "US");
 
-        Assert.Equal("America/Denver", first.Timezone);
+        Assert.Equal("America/Los_Angeles", first.Timezone);
         Assert.Equal("nws", first.Source);
         Assert.False(first.Cache.Hit);
         Assert.True(second.Cache.Hit);
@@ -50,7 +50,7 @@ public class PublicApiProvidersTests
 
             if (url.Contains("api.open-meteo.com", StringComparison.OrdinalIgnoreCase))
             {
-                return JsonResponse("""{"timezone":"America/Denver"}""");
+                return JsonResponse("""{"timezone":"America/Los_Angeles"}""");
             }
 
             return JsonResponse("""{"error":"unexpected"}""", HttpStatusCode.NotFound);
@@ -59,9 +59,9 @@ public class PublicApiProvidersTests
         using var http = new HttpClient(handler);
         var provider = new TimezoneProvider(new PublicApiServiceOptions(), http);
 
-        var result = await provider.ResolveAsync(43.826, -111.789, "US");
+        var result = await provider.ResolveAsync(45.5231, -122.6765, "US");
 
-        Assert.Equal("America/Denver", result.Timezone);
+        Assert.Equal("America/Los_Angeles", result.Timezone);
         Assert.Equal("open-meteo", result.Source);
         Assert.Contains(handler.Requests, r =>
             r.Url.Contains("api.weather.gov/points", StringComparison.OrdinalIgnoreCase));
@@ -81,7 +81,7 @@ public class PublicApiProvidersTests
                     """
                     [
                       {"date":"2026-01-01","localName":"New Year's Day","name":"New Year's Day","countryCode":"US","global":true,"counties":null,"launchYear":null,"types":["Public"]},
-                      {"date":"2026-03-01","localName":"Idaho Day","name":"Idaho Day","countryCode":"US","global":false,"counties":["US-ID"],"launchYear":2000,"types":["Public"]},
+                      {"date":"2026-03-01","localName":"Oregon Day","name":"Oregon Day","countryCode":"US","global":false,"counties":["US-OR"],"launchYear":2000,"types":["Public"]},
                       {"date":"2026-03-02","localName":"California Day","name":"California Day","countryCode":"US","global":false,"counties":["US-CA"],"launchYear":2000,"types":["Public"]}
                     ]
                     """);
@@ -95,13 +95,13 @@ public class PublicApiProvidersTests
             new PublicApiServiceOptions { HolidaysCacheMinutes = 120 },
             http);
 
-        var first = await provider.GetHolidaysAsync("US", 2026, "US-ID", maxItems: 20);
-        var second = await provider.GetHolidaysAsync("US", 2026, "US-ID", maxItems: 20);
+        var first = await provider.GetHolidaysAsync("US", 2026, "US-OR", maxItems: 20);
+        var second = await provider.GetHolidaysAsync("US", 2026, "US-OR", maxItems: 20);
 
         Assert.False(first.Cache.Hit);
         Assert.True(second.Cache.Hit);
         Assert.Contains(first.Holidays, h => h.Name.Contains("New Year's Day", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(first.Holidays, h => h.Name.Contains("Idaho Day", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(first.Holidays, h => h.Name.Contains("Oregon Day", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(first.Holidays, h => h.Name.Contains("California Day", StringComparison.OrdinalIgnoreCase));
         Assert.Single(handler.Requests.Where(r =>
             r.Url.Contains("/PublicHolidays/2026/US", StringComparison.OrdinalIgnoreCase)));

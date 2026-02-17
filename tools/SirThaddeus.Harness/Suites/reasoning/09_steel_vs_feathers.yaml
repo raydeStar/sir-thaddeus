@@ -1,0 +1,41 @@
+id: reasoning_steel_vs_feathers
+name: Reasoning - Semantic precision (1 kg steel vs 1 kg feathers)
+user_message: "Which weighs more: 1 kilogram of steel or 1 kilogram of feathers?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "same"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - i cannot
+    - "steel is heavier"
+    - "steel weighs more"
+  max_response_chars: 2400
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

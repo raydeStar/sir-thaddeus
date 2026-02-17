@@ -1,0 +1,42 @@
+id: reasoning_rooster_egg
+name: Reasoning - Biological fact trap (rooster cannot lay eggs)
+user_message: "A rooster lays an egg on a barn roof. Which side does it roll down?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "do not lay"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - i cannot
+    - "left side"
+    - "right side"
+    - "the steeper"
+  max_response_chars: 2400
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

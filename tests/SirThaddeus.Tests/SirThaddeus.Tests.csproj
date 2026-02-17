@@ -49,6 +49,10 @@
              Link="DesktopRuntime\VoiceHostProcessManager.cs" />
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
              Link="DesktopRuntime\YouTubeJobsHttpClient.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\DeviceLocationProviders.cs"
+             Link="DesktopRuntime\DeviceLocationProviders.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\LocationAwareAgentOrchestrator.cs"
+             Link="DesktopRuntime\LocationAwareAgentOrchestrator.cs" />
   </ItemGroup>
 
 </Project>

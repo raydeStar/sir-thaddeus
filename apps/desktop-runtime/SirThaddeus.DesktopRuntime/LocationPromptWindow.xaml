@@ -1,0 +1,77 @@
+<Window x:Class="SirThaddeus.DesktopRuntime.LocationPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Set your location (optional)"
+        Width="560"
+        Height="280"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="NoResize"
+        Background="{DynamicResource BaseBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        ShowInTaskbar="False">
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Set your location (optional)"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,10"/>
+
+        <TextBlock Grid.Row="1"
+                   Text="Used for local results like store hours and nearby places. Stored locally."
+                   Foreground="{DynamicResource Subtext0Brush}"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,14"/>
+
+        <TextBlock Grid.Row="2"
+                   Text="City, State or ZIP"
+                   Foreground="{DynamicResource Subtext0Brush}"
+                   FontSize="11"
+                   Margin="0,0,0,6"/>
+
+        <Border Grid.Row="3"
+                Background="{DynamicResource Surface0Brush}"
+                CornerRadius="6"
+                Padding="10"
+                Margin="0,0,0,16">
+            <TextBox x:Name="ManualLocationTextBox"
+                     FontSize="13"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     Foreground="{DynamicResource TextBrush}"
+                     CaretBrush="{DynamicResource BlueBrush}"
+                     VerticalContentAlignment="Center"
+                     TextChanged="ManualLocationTextBox_OnTextChanged"
+                     KeyDown="ManualLocationTextBox_OnKeyDown"/>
+        </Border>
+
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="SkipButton"
+                    Content="Skip"
+                    Width="90"
+                    Style="{DynamicResource AllowSessionButtonStyle}"
+                    Padding="10,6"
+                    Margin="0,0,8,0"
+                    Click="SkipButton_Click"/>
+            <Button x:Name="SaveButton"
+                    Content="Save"
+                    Width="90"
+                    Style="{DynamicResource AllowOnceButtonStyle}"
+                    Padding="10,6"
+                    IsEnabled="False"
+                    Click="SaveButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
