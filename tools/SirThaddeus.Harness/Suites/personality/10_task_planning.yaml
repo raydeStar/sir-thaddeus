@@ -1,0 +1,33 @@
+id: personality_task_planning_default
+name: Personality - Task planning produces structured steps
+personality_id: helpful_default
+user_message: "Help me plan a small birthday party for 10 people on a budget of $200."
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - budget
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+  max_response_chars: 1400
+  expect_structured_format: true
+  expect_signature: false
+  max_avg_sentence_words: 25
+  min_avg_sentence_words: 6
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

@@ -116,11 +116,17 @@ public sealed class SingleTestRunner
             modelName,
             cancellationToken);
 
+        var effectivePersonalityId = !string.IsNullOrWhiteSpace(test.PersonalityId)
+            ? test.PersonalityId
+            : settings.ActivePersonalityId;
+
         var orchestrator = new AgentOrchestrator(
             llmClient,
             mcpClient,
             new TestAuditLogger(),
-            settings.Llm.SystemPrompt);
+            settings.Llm.SystemPrompt,
+            activePersonalityId: effectivePersonalityId,
+            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings));
         orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
 
         var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);

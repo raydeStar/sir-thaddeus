@@ -2,6 +2,7 @@ using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine.Profiles;
 using Microsoft.Extensions.Time.Testing;
 
 namespace SirThaddeus.Tests;
@@ -372,6 +373,73 @@ public class AgentFlowTests
     }
 
     [Fact]
+    public async Task WebLookup_NewsResponse_PreservesActivePersonalityPresentation()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+            }
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"","type":"none","hint":""}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"latest local news","recency":"day"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Here are the top local headlines and why they matter today.",
+                FinishReason = "stop"
+            };
+        });
+
+        var toolResult =
+            "1. City council approves transit expansion.\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            """[{"url":"https://example.com/local","title":"Local transit expansion"}]""";
+
+        var mcp = new FakeMcpClient(returnValue: toolResult);
+        var audit = new TestAuditLogger();
+
+        var profileDir = Path.Combine(Path.GetTempPath(), $"personality-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(profileDir);
+        var store = new PersonalityProfileStore();
+        store.EnsureBuiltInsInstalled(profileDir);
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            activePersonalityId: BuiltInProfileCatalog.SirThaddeusId,
+            personalityProfilesDirectory: profileDir);
+
+        var result = await agent.ProcessAsync("Can you pull up local news for me?");
+
+        Assert.True(result.Success);
+        Assert.Contains("-- Sir Thaddeus", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WebLookup_SearchExtraction_StripsAssistantNameAndDefaultsToHeadlines()
     {
         // New pipeline: QueryBuilder validates query tokens against user message.
@@ -450,15 +518,21 @@ public class AgentFlowTests
 
         Assert.True(result.Success);
 
-        var webSearch = mcp.Calls.FirstOrDefault(c =>
-            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
-            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+        // Multi-intent may produce >1 web_search call (news + super bowl).
+        // Find the one that carries the super bowl query.
+        var webSearches = mcp.Calls
+            .Where(c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                        c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
+        Assert.True(webSearches.Count > 0, "Expected at least one web_search call.");
 
-        // Should not contain a random old year
-        Assert.DoesNotContain("2024", webSearch.Args, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("super bowl", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+        var superBowlSearch = webSearches
+            .FirstOrDefault(c => c.Args.Contains("super bowl", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(superBowlSearch.Tool),
+            "Expected a web_search call containing 'super bowl'.");
+        Assert.DoesNotContain("2024", superBowlSearch.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -2338,6 +2412,94 @@ public class PolicyFilteringTests
         Assert.True(result.SuppressToolActivityUi);
         Assert.DoesNotContain(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+#endregion
+
+#region ── Multi-Intent Segmentation ───────────────────────────────────────
+
+public class MultiIntentSegmentationTests
+{
+    [Fact]
+    public async Task MixedTurn_ComposesUnifiedResponse_AndExecutesActionables()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (system.Contains("Resolve the primary entity", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"","type":"none","hint":""}""", FinishReason = "stop" };
+
+            if (system.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local news latest","recency":"day"}""", FinishReason = "stop" };
+
+            if (system.Contains("Search results are in the next message", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "Here are the latest local headlines.", FinishReason = "stop" };
+
+            if (system.Contains("Classify the user message", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            return new LlmResponse { IsComplete = true, Content = "Sure thing.", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (tool.Contains("weather_geocode", StringComparison.OrdinalIgnoreCase))
+                return """{"results":[{"name":"Seattle, WA","countryCode":"US","regionCode":"WA","latitude":47.6062,"longitude":-122.3321}]}""";
+            if (tool.Contains("weather_forecast", StringComparison.OrdinalIgnoreCase))
+                return """{"current":{"temperature":50,"unit":"F","condition":"Cloudy"}}""";
+            if (tool.Contains("web_search", StringComparison.OrdinalIgnoreCase))
+            {
+                return "1. Local update\n" +
+                       "<!-- SOURCES_JSON -->\n" +
+                       "[{\"url\":\"https://example.com/local\",\"title\":\"Local update\"}]";
+            }
+            if (tool.Contains("resolve_timezone", StringComparison.OrdinalIgnoreCase))
+                return """{"timezone":"America/Los_Angeles","localTime":"2026-02-17T10:15:00-08:00"}""";
+            return "{}";
+        });
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await agent.ProcessAsync(
+            "Hey there! What's 2+2 and what's the weather in Seattle and local news near me and what time is it in Tokyo? Anyway rough day.");
+
+        Assert.True(result.Success);
+        Assert.Contains("thanks for the message", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2+2", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(mcp.Calls, c => c.Tool.Contains("weather_forecast", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Contains("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GreetingOnly_FollowsNormalPath_AndDoesNotInvokeTools()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (system.Contains("Classify the user message", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "Hey - doing great today.", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient(returnValue: "{}");
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Hey, how are you today? Hope things are good.");
+
+        Assert.True(result.Success);
+        var nonMemoryTools = result.ToolCallsMade
+            .Where(t => !t.ToolName.Equals("MemoryRetrieve", StringComparison.OrdinalIgnoreCase)
+                     && !t.ToolName.Equals("memory_retrieve", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Empty(nonMemoryTools);
     }
 }
 

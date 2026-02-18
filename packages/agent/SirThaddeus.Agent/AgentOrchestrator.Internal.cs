@@ -6,6 +6,7 @@ using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.PostProcessing;
+using SirThaddeus.Agent.ConversationSegmentation;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.ToolLoop;
@@ -17,6 +18,248 @@ namespace SirThaddeus.Agent;
 
 public sealed partial class AgentOrchestrator
 {
+    private static bool IsMultiIntentBypassActive() => MultiIntentBypassDepth.Value > 0;
+
+    private static IDisposable EnterMultiIntentBypassScope() => new MultiIntentBypassScope();
+
+    private sealed class MultiIntentBypassScope : IDisposable
+    {
+        private bool _disposed;
+
+        public MultiIntentBypassScope()
+        {
+            MultiIntentBypassDepth.Value++;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            MultiIntentBypassDepth.Value = Math.Max(0, MultiIntentBypassDepth.Value - 1);
+        }
+    }
+
+    private async Task<AgentResponse?> TryProcessMultiIntentTurnAsync(
+        string userMessage,
+        List<ToolCallRecord> aggregateToolCalls,
+        CancellationToken cancellationToken)
+    {
+        var segmentation = _conversationSegmenter.Segment(userMessage);
+        if (!segmentation.HasActionable)
+            return null; // Explicit no-actionable fast path
+
+        var actionableSegments = segmentation.Segments
+            .Where(s => s.IsActionable)
+            .OrderBy(s => s.Order)
+            .ToList();
+
+        var nonActionableContext = segmentation.Segments
+            .Where(s => !s.IsActionable)
+            .Select(s => s.Text.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
+
+        // Keep single-intent throughput untouched unless the turn is truly
+        // multi-actionable or clearly wrapped in social/chit-chat context.
+        var hasSocialWrapper = nonActionableContext.Any(IsSocialWrapperSegment);
+        var mixedConversationalTurn = actionableSegments.Count > 1 || hasSocialWrapper;
+        if (!mixedConversationalTurn)
+            return null;
+
+        if (!segmentation.HighConfidence)
+        {
+            var fallback = await _miniActionableExtractor.TryExtractAsync(
+                userMessage,
+                maxActionables: 2,
+                cancellationToken);
+
+            if (fallback.Count > 0)
+            {
+                actionableSegments = fallback
+                    .OrderBy(s => s.StartIndex)
+                    .ToList();
+                LogEvent("SEGMENTATION_FALLBACK_USED",
+                    $"reason={segmentation.ConfidenceReason}, actionables={actionableSegments.Count}");
+            }
+        }
+
+        if (actionableSegments.Count == 0)
+            return null;
+
+        LogEvent("SEGMENT_PLAN",
+            $"segments={segmentation.Segments.Count}, actionables={actionableSegments.Count}, " +
+            $"high_confidence={segmentation.HighConfidence}, reason={segmentation.ConfidenceReason}");
+
+        var executionPlan = await _segmentExecutionCoordinator.ExecuteAsync(
+            new SegmentExecutionRequest
+            {
+                ActionableSegments = actionableSegments,
+                MaxToolUsingActionables = 2,
+                ExecuteActionableAsync = ExecuteActionableSegmentAsync
+            },
+            cancellationToken);
+
+        var executedCalls = executionPlan.Executed
+            .SelectMany(e => e.ToolCallsMade)
+            .ToList();
+        aggregateToolCalls.AddRange(executedCalls);
+
+        var composedText = _unifiedResponseComposer.Compose(new UnifiedResponseComposeRequest
+        {
+            OriginalMessage = userMessage,
+            NonActionableContext = nonActionableContext,
+            Executed = executionPlan.Executed,
+            Deferred = executionPlan.Deferred
+        });
+
+        _history.Add(ChatMessage.Assistant(composedText));
+        LogEvent("SEGMENT_EXECUTION_SUMMARY",
+            $"detected={segmentation.Segments.Count}, actionable={actionableSegments.Count}, " +
+            $"executed={executionPlan.Executed.Count}, deferred={executionPlan.Deferred.Count}");
+        LogEvent("AGENT_RESPONSE", composedText);
+
+        var llmRoundTrips = executionPlan.Executed.Sum(e => e.LlmRoundTrips);
+        var success = executionPlan.Executed.Count == 0 || executionPlan.Executed.All(e => e.Success);
+        var allowToolResultPersonalityPresentation = executedCalls.Any(c =>
+            IsPersonalityPresentationEligibleTool(c.ToolName));
+
+        // Propagate the first briefing payload so the UI can display it.
+        var briefing = executionPlan.Executed
+            .Select(e => e.DeepDiveBriefing)
+            .FirstOrDefault(b => b is not null);
+
+        return new AgentResponse
+        {
+            Text = composedText,
+            Success = success,
+            ToolCallsMade = aggregateToolCalls,
+            LlmRoundTrips = llmRoundTrips,
+            DeepDiveBriefing = briefing,
+            AllowToolResultPersonalityPresentation = allowToolResultPersonalityPresentation
+        };
+    }
+
+    private async Task<ConversationSegmentation.SegmentExecutionResult> ExecuteActionableSegmentAsync(
+        ConversationSegmentation.ConversationSegment segment,
+        CancellationToken cancellationToken)
+    {
+        var historyCountBefore = _history.Count;
+        try
+        {
+            using var _ = EnterMultiIntentBypassScope();
+            using var segmentScope = ConversationSegmentation.SegmentExecutionContext.Enter(segment.SegmentId);
+            var segmentResponse = await ProcessAsync(segment.Text, cancellationToken);
+
+            var segmentToolCalls = segmentResponse.ToolCallsMade
+                .Where(CountAsToolUsingCall)
+                .ToList();
+
+            var inferredIntent = InferIntentFromToolCalls(segment.Text, segmentToolCalls);
+            LogEvent("SEGMENT_EXECUTED",
+                $"segment_id={segment.SegmentId}, segment_order={segment.Order}, " +
+                $"segment_intent={inferredIntent}, tool_call_count={segmentToolCalls.Count}");
+
+            return new ConversationSegmentation.SegmentExecutionResult
+            {
+                SegmentId = segment.SegmentId,
+                SegmentText = segment.Text,
+                Intent = inferredIntent,
+                Success = segmentResponse.Success,
+                ResponseText = segmentResponse.Text,
+                UsedTools = segmentToolCalls.Count > 0,
+                ToolCallCount = segmentToolCalls.Count,
+                ToolCallsMade = segmentResponse.ToolCallsMade,
+                LlmRoundTrips = segmentResponse.LlmRoundTrips,
+                Error = segmentResponse.Error,
+                DeepDiveBriefing = segmentResponse.DeepDiveBriefing
+            };
+        }
+        catch (Exception ex)
+        {
+            LogEvent("SEGMENT_EXECUTION_ERROR",
+                $"segment_id={segment.SegmentId}, error={ex.Message}");
+            return new ConversationSegmentation.SegmentExecutionResult
+            {
+                SegmentId = segment.SegmentId,
+                SegmentText = segment.Text,
+                Intent = "error",
+                Success = false,
+                ResponseText = $"I hit an issue while handling \"{Truncate(segment.Text, 48)}\".",
+                UsedTools = false,
+                ToolCallCount = 0,
+                ToolCallsMade = [],
+                LlmRoundTrips = 0,
+                Error = ex.Message
+            };
+        }
+        finally
+        {
+            // Recursive segment calls should not pollute top-level history.
+            while (_history.Count > historyCountBefore)
+                _history.RemoveAt(_history.Count - 1);
+        }
+    }
+
+    private static bool CountAsToolUsingCall(ToolCallRecord record)
+    {
+        var name = (record.ToolName ?? "").Trim().ToLowerInvariant();
+        if (name.Length == 0)
+            return false;
+
+        // Memory retrieval prefetch is not counted toward multi-intent
+        // tool-action caps.
+        return name is not "memoryretrieve" and not "memory_retrieve";
+    }
+
+    private static bool IsPersonalityPresentationEligibleTool(string? toolName)
+    {
+        var normalized = (toolName ?? "").Trim().ToLowerInvariant();
+        if (normalized.Length == 0)
+            return false;
+
+        return normalized.Contains("web_search", StringComparison.Ordinal) ||
+               normalized.Contains("websearch", StringComparison.Ordinal) ||
+               normalized.Contains("browser_navigate", StringComparison.Ordinal) ||
+               normalized.Contains("browsernavigate", StringComparison.Ordinal);
+    }
+
+    private static string InferIntentFromToolCalls(
+        string segmentText,
+        IReadOnlyList<ToolCallRecord> toolCalls)
+    {
+        if (toolCalls.Any(c => c.ToolName.Contains("weather", StringComparison.OrdinalIgnoreCase)))
+            return "weather";
+        if (toolCalls.Any(c => c.ToolName.Contains("time", StringComparison.OrdinalIgnoreCase)))
+            return "time";
+        if (toolCalls.Any(c => c.ToolName.Contains("search", StringComparison.OrdinalIgnoreCase)))
+            return "lookup";
+        if (toolCalls.Any())
+            return "tool";
+
+        var lower = segmentText.ToLowerInvariant();
+        if (lower.Contains("weather", StringComparison.Ordinal))
+            return "weather";
+        if (lower.Contains("news", StringComparison.Ordinal))
+            return "lookup";
+        return "chat";
+    }
+
+    private static bool IsSocialWrapperSegment(string text)
+    {
+        var lower = (text ?? "").Trim().ToLowerInvariant();
+        if (lower.Length == 0)
+            return false;
+
+        return Regex.IsMatch(lower, @"\b(?:hey|hi|hello|yo)\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\bhow are you\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\bthanks?\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\bthank you\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\banyway\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\b(?:bye|goodbye|gotta go|see ya)\b", RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(lower, @"\b(?:rough day|in trouble)\b", RegexOptions.CultureInvariant);
+    }
+
 
     // ─────────────────────────────────────────────────────────────────
     // Tool Loop
@@ -712,7 +955,7 @@ public sealed partial class AgentOrchestrator
     /// Builds a short deterministic weather response from the normalized
     /// weather_forecast MCP JSON output.
     /// </summary>
-    private static string? TryBuildWeatherBriefFromForecastJson(
+    private string? TryBuildWeatherBriefFromForecastJson(
         string forecastJson,
         string userMessage,
         string fallbackLocation)
@@ -779,7 +1022,27 @@ public sealed partial class AgentOrchestrator
             if (string.IsNullOrWhiteSpace(location))
                 location = "there";
 
-            var unitSuffix = string.IsNullOrWhiteSpace(unit) ? "" : unit.ToUpperInvariant();
+            var normalizedUnit = NormalizeTemperatureUnit(unit);
+            var shouldRespectExplicitTempUnit = HasExplicitTemperatureUnitRequest(userMessage);
+            var preferredUnits = NormalizeUnitPreference(PreferredUnits);
+
+            if (!shouldRespectExplicitTempUnit)
+            {
+                if (preferredUnits == "metric" && string.Equals(normalizedUnit, "F", StringComparison.Ordinal))
+                {
+                    currentTemp = ConvertTemperature(currentTemp, "F", "C");
+                    avgTemp = ConvertTemperature(avgTemp, "F", "C");
+                    normalizedUnit = "C";
+                }
+                else if (preferredUnits == "imperial" && string.Equals(normalizedUnit, "C", StringComparison.Ordinal))
+                {
+                    currentTemp = ConvertTemperature(currentTemp, "C", "F");
+                    avgTemp = ConvertTemperature(avgTemp, "C", "F");
+                    normalizedUnit = "F";
+                }
+            }
+
+            var unitSuffix = normalizedUnit;
             var avgSuffix = string.IsNullOrWhiteSpace(unitSuffix) ? "" : unitSuffix;
             if (LooksLikeWeatherActivityAdviceRequest(userMessage))
             {
@@ -901,6 +1164,57 @@ public sealed partial class AgentOrchestrator
             return $"In {location}, average temp is around {avgTemp}{avgSuffix}.";
 
         return $"In {location}, weather conditions are available.";
+    }
+
+    private static string NormalizeTemperatureUnit(string? rawUnit)
+    {
+        var lower = (rawUnit ?? "").Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "f" or "fahrenheit" => "F",
+            "c" or "celsius" => "C",
+            _ => ""
+        };
+    }
+
+    private static int? ConvertTemperature(int? value, string fromUnit, string toUnit)
+    {
+        if (!value.HasValue)
+            return null;
+
+        if (string.Equals(fromUnit, toUnit, StringComparison.OrdinalIgnoreCase))
+            return value.Value;
+
+        if (string.Equals(fromUnit, "C", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(toUnit, "F", StringComparison.OrdinalIgnoreCase))
+        {
+            return (int)Math.Round((value.Value * 9.0 / 5.0) + 32.0, MidpointRounding.AwayFromZero);
+        }
+
+        if (string.Equals(fromUnit, "F", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(toUnit, "C", StringComparison.OrdinalIgnoreCase))
+        {
+            return (int)Math.Round((value.Value - 32.0) * 5.0 / 9.0, MidpointRounding.AwayFromZero);
+        }
+
+        return value.Value;
+    }
+
+    private static bool HasExplicitTemperatureUnitRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (lower.Contains("celsius", StringComparison.Ordinal) ||
+            lower.Contains("fahrenheit", StringComparison.Ordinal) ||
+            lower.Contains("°c", StringComparison.Ordinal) ||
+            lower.Contains("°f", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(lower, @"\bin\s+c\b|\bin\s+f\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     }
 
     private static double? ToFahrenheit(int? temp, string unitSuffix)
@@ -2590,7 +2904,7 @@ public sealed partial class AgentOrchestrator
         if (plan is null || string.Equals(plan.Category, "none", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var utility = UtilityRouter.TryHandle(normalizedMessage);
+        var utility = UtilityRouter.TryHandle(normalizedMessage, UserLocationHint, PreferredUnits);
         if (utility is null)
         {
             utility = new UtilityRouter.UtilityResult
@@ -2643,7 +2957,10 @@ public sealed partial class AgentOrchestrator
     {
         var latestUserMessage = _history.LastOrDefault(m => m.Role == "user")?.Content;
         var sanitizedText = _postProcessor.SanitizeFinalResponse(
-            response.Text, response.ToolCallsMade, latestUserMessage);
+            response.Text,
+            response.ToolCallsMade,
+            latestUserMessage,
+            allowToolResultPersonalityPresentation: response.AllowToolResultPersonalityPresentation);
         if (!string.Equals(sanitizedText, response.Text, StringComparison.Ordinal))
         {
             LogEvent("RESPONSE_SANITIZED",
@@ -2907,6 +3224,63 @@ public sealed partial class AgentOrchestrator
                 return;
             }
         }
+    }
+
+    private static void InjectPersonalityAnchorIntoHistoryInPlace(
+        List<ChatMessage> history,
+        string anchorText,
+        string turnTag)
+    {
+        if (string.IsNullOrWhiteSpace(anchorText) || string.IsNullOrWhiteSpace(turnTag))
+            return;
+
+        var marker = $"system:personality_anchor:v1:{turnTag}";
+
+        for (var i = 0; i < history.Count; i++)
+        {
+            if (history[i].Role != "system")
+                continue;
+
+            var content = history[i].Content ?? "";
+            if (content.Contains(marker, StringComparison.Ordinal))
+                return; // idempotent for this turn
+
+            content = StripPersonalityAnchors(content);
+            var updated = string.IsNullOrWhiteSpace(content)
+                ? anchorText.Trim()
+                : $"{content.TrimEnd()}\n\n{anchorText.Trim()}";
+
+            history[i] = ChatMessage.System(updated);
+            return;
+        }
+
+        history.Insert(0, ChatMessage.System(anchorText.Trim()));
+    }
+
+    private static string StripPersonalityAnchors(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return content;
+
+        const string openToken = "[PERSONALITY_ANCHOR ";
+        const string closeToken = "[/PERSONALITY_ANCHOR]";
+
+        var output = content;
+        while (true)
+        {
+            var start = output.IndexOf(openToken, StringComparison.Ordinal);
+            if (start < 0)
+                break;
+
+            var end = output.IndexOf(closeToken, start, StringComparison.Ordinal);
+            if (end < 0)
+                break;
+
+            end += closeToken.Length;
+            output = output.Remove(start, end - start);
+        }
+
+        return output.Trim();
     }
 
     private static List<ChatMessage> InjectModeIntoSystemPrompt(
@@ -4258,7 +4632,7 @@ public sealed partial class AgentOrchestrator
             if (!SharesMeaningfulToken(userMessage, canonical))
                 return null;
 
-            var routed = UtilityRouter.TryHandle(canonical);
+            var routed = UtilityRouter.TryHandle(canonical, UserLocationHint, PreferredUnits);
             if (routed is null)
                 return null;
 

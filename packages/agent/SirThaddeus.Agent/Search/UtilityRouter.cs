@@ -49,6 +49,16 @@ public static class UtilityRouter
         @"(?:will it|is it going to)\s+(?:rain|snow|storm|be (?:hot|cold|warm|sunny|cloudy))\s+(?:in|at|near)\s+(.+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Catches bare weather queries with no location:
+    //   "what's the weather?"  "how's the weather today?"
+    //   "can you tell me what the weather is like today?"
+    // Only matches when there's NO location preposition — these need
+    // UserLocationHint to resolve.
+    private static readonly Regex WeatherBarePattern = new(
+        @"^(?:.*?\b)?(?:weather|forecast|temperature|temp)\b(?:\s+is)?(?:\s+(?:like|looking like|looking|going to be))?" +
+        @"(?:\s+(?:today|tomorrow|tonight|this\s+(?:morning|afternoon|evening|week|weekend)|right now|currently|now))?\s*[?.!]*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // ── Time zone patterns ───────────────────────────────────────────
     private static readonly Regex TimeInPattern = new(
         @"(?:what(?:'s| is)\s+(?:the\s+)?time(?:\s+is\s+it)?|what\s+time\s+is\s+it|time)\s+(?:in|at|for)\s+(.+)",
@@ -204,25 +214,65 @@ public static class UtilityRouter
         ["br"] = "BR"
     };
 
+    // ── Proximity pronouns ──────────────────────────────────────────
+    // Tokens that mean "the user's location" rather than a real place.
+    private static readonly HashSet<string> ProximityPronouns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "me", "my location", "my area", "here", "nearby", "near me",
+        "my place", "my city", "my town", "home", "current location"
+    };
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="place"/> is a pronoun
+    /// that should be resolved from the user's profile location.
+    /// </summary>
+    internal static bool IsProximityPronoun(string? place)
+        => !string.IsNullOrWhiteSpace(place) && ProximityPronouns.Contains(place.Trim());
+
+    /// <summary>
+    /// If <paramref name="place"/> is a proximity pronoun and a
+    /// <paramref name="userLocationHint"/> is available, return the
+    /// hint; otherwise return <paramref name="place"/> unchanged.
+    /// </summary>
+    internal static string ResolveProximityPlace(string place, string? userLocationHint)
+    {
+        if (string.IsNullOrWhiteSpace(userLocationHint))
+            return place;
+        return IsProximityPronoun(place) ? userLocationHint.Trim() : place;
+    }
+
     /// <summary>
     /// Attempts to handle the message as a utility query. Returns null
     /// if the message is not a utility intent.
     /// </summary>
-    public static UtilityResult? TryHandle(string userMessage)
+    /// <param name="userMessage">Raw user input.</param>
+    /// <param name="userLocationHint">
+    /// Optional profile-resolved location (e.g. "Rexburg, ID"). When
+    /// provided, proximity pronouns like "me" or "here" are replaced
+    /// before geocode tool calls.
+    /// </param>
+    /// <param name="preferredUnits">
+    /// Optional global unit preference ("imperial", "metric", "auto").
+    /// Used only when a utility prompt omits explicit units.
+    /// </param>
+    public static UtilityResult? TryHandle(
+        string userMessage,
+        string? userLocationHint = null,
+        string? preferredUnits = null)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
             return null;
 
         var trimmed = userMessage.Trim();
 
-        return TryWeather(trimmed)
-            ?? TryTime(trimmed)
+        return TryWeather(trimmed, userLocationHint)
+            ?? TryTime(trimmed, userLocationHint)
             ?? TryHoliday(trimmed)
             ?? TryMetaCapabilities(trimmed)
             ?? TryStatus(trimmed)
             ?? TryFeed(trimmed)
             ?? TryLetterCount(trimmed)
-            ?? TrySimpleFact(trimmed)
+            ?? TrySimpleFact(trimmed, preferredUnits)
             ?? TryCalculator(trimmed)
             ?? TryConversion(trimmed);
     }
@@ -249,7 +299,7 @@ public static class UtilityRouter
     // Weather
     // ─────────────────────────────────────────────────────────────────
 
-    private static UtilityResult? TryWeather(string message)
+    private static UtilityResult? TryWeather(string message, string? userLocationHint)
     {
         var lower = message.ToLowerInvariant();
 
@@ -265,12 +315,30 @@ public static class UtilityRouter
             match = WillItRainPattern.Match(message);
         if (!match.Success)
             match = WeatherLoosePattern.Match(message);
-        if (!match.Success)
-            return null;
 
-        var location = NormalizeLocation(match.Groups[1].Value);
-        if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
+        string location;
+
+        if (match.Success)
+        {
+            location = NormalizeLocation(match.Groups[1].Value);
+            if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
+                return null;
+
+            // Resolve proximity pronouns ("me", "here") to the user's
+            // configured location so we geocode the right place.
+            location = ResolveProximityPlace(location, userLocationHint);
+        }
+        else if (!string.IsNullOrWhiteSpace(userLocationHint) &&
+                 WeatherBarePattern.IsMatch(message))
+        {
+            // Bare weather query with no location (e.g. "what's the weather?")
+            // — fall back to the user's profile location.
+            location = userLocationHint.Trim();
+        }
+        else
+        {
             return null;
+        }
 
         // Route to coordinate-first weather tools:
         //   weather_geocode(place) -> weather_forecast(lat,lon)
@@ -314,7 +382,7 @@ public static class UtilityRouter
     // Time / Time Zones
     // ─────────────────────────────────────────────────────────────────
 
-    private static UtilityResult? TryTime(string message)
+    private static UtilityResult? TryTime(string message, string? userLocationHint)
     {
         var match = TimeInPattern.Match(message);
         if (!match.Success)
@@ -325,6 +393,8 @@ public static class UtilityRouter
             var location = NormalizeLocationCandidate(match.Groups[1].Value);
             if (string.IsNullOrWhiteSpace(location) || location.Length < 2)
                 return null;
+
+            location = ResolveProximityPlace(location, userLocationHint);
 
             return new UtilityResult
             {
@@ -581,13 +651,13 @@ public static class UtilityRouter
         return normalized.Trim();
     }
 
-    private static UtilityResult? TrySimpleFact(string message)
+    private static UtilityResult? TrySimpleFact(string message, string? preferredUnits)
     {
         var lower = message.ToLowerInvariant();
 
         if (MoonDistancePattern.IsMatch(lower))
         {
-            var (value, unitLabel) = ResolveMoonDistanceUnit(lower);
+            var (value, unitLabel) = ResolveMoonDistanceUnit(lower, preferredUnits);
             var formatted = FormatMoonDistance(value, unitLabel);
 
             return new UtilityResult
@@ -939,14 +1009,20 @@ public static class UtilityRouter
         return count;
     }
 
-    private static (double Value, string UnitLabel) ResolveMoonDistanceUnit(string lowerMessage)
+    private static (double Value, string UnitLabel) ResolveMoonDistanceUnit(
+        string lowerMessage,
+        string? preferredUnits)
     {
         if (lowerMessage.Contains("meter", StringComparison.Ordinal))
             return (AvgEarthMoonDistanceKm * 1_000.0, "meters");
         if (lowerMessage.Contains("mile", StringComparison.Ordinal))
             return (AvgEarthMoonDistanceKm * 0.621371, "miles");
 
-        // Default to kilometers when no explicit unit is requested.
+        // Respect global preference only when no explicit unit was requested.
+        if (NormalizePreferredUnits(preferredUnits) == "imperial")
+            return (AvgEarthMoonDistanceKm * 0.621371, "miles");
+
+        // Default to kilometers for metric/auto or unknown values.
         return (AvgEarthMoonDistanceKm, "kilometers");
     }
 
@@ -954,6 +1030,17 @@ public static class UtilityRouter
     {
         var decimals = unitLabel == "kilometers" ? 0 : 0;
         return $"{Math.Round(value, decimals):N0} {unitLabel}";
+    }
+
+    private static string NormalizePreferredUnits(string? preferredUnits)
+    {
+        var lower = (preferredUnits ?? "").Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "imperial" => "imperial",
+            "metric" => "metric",
+            _ => "auto"
+        };
     }
 
     private static string NormalizeLocation(string value)

@@ -54,13 +54,23 @@ public static class BrandIcon
             var icoPath = ResolveOutputPath("sir-thaddeus.ico");
             if (File.Exists(icoPath))
             {
-                var bi = new BitmapImage();
-                bi.BeginInit();
-                bi.UriSource = new Uri(icoPath, UriKind.Absolute);
-                bi.CacheOption = BitmapCacheOption.OnLoad;
-                bi.EndInit();
-                bi.Freeze();
-                return bi;
+                // BitmapImage only picks one frame from a multi-frame .ico
+                // (usually the smallest). IconBitmapDecoder reads all frames
+                // so we can hand WPF the largest one — it will downscale
+                // cleanly for title bars (16px) while the taskbar and
+                // Alt+Tab get a crisp high-res version.
+                using var fs = File.OpenRead(icoPath);
+                var decoder = new IconBitmapDecoder(
+                    fs,
+                    BitmapCreateOptions.PreservePixelFormat,
+                    BitmapCacheOption.OnLoad);
+
+                var best = decoder.Frames
+                    .OrderByDescending(f => f.PixelWidth)
+                    .FirstOrDefault();
+
+                best?.Freeze();
+                return best;
             }
         }
         catch

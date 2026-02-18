@@ -1,6 +1,6 @@
 id: web_movie_comparison_dragon
 name: Web Search - Movie Comparison (How to Train Your Dragon)
-user_message: "Can you tell me if the new live action How to Train a Dragon is word for word like the originals?"
+user_message: "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?"
 allowed_tools:
   - memory_retrieve
   - web_search

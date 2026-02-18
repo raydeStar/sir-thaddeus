@@ -8,7 +8,9 @@ using SirThaddeus.Voice;
 namespace SirThaddeus.DesktopRuntime.Services;
 
 /// <summary>
-/// Plays assistant responses with local TTS first and SAPI fallback.
+/// Plays assistant responses via local TTS (Kokoro).
+/// If local TTS is unavailable or fails, speech is silently skipped.
+/// Windows SAPI is never used as a fallback.
 /// </summary>
 public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 {
@@ -46,7 +48,6 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
     private readonly IAuditLogger _auditLogger;
     private readonly LocalTtsHttpClient? _localTtsClient;
-    private readonly TextToSpeechService _fallbackTts;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
     private readonly object _gate = new();
 
@@ -64,12 +65,10 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
     public AudioPlaybackService(
         IAuditLogger auditLogger,
-        TextToSpeechService fallbackTts,
         Func<VoiceSettings> voiceSettingsProvider,
         LocalTtsHttpClient? localTtsClient = null)
     {
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
-        _fallbackTts = fallbackTts ?? throw new ArgumentNullException(nameof(fallbackTts));
         _voiceSettingsProvider = voiceSettingsProvider ?? throw new ArgumentNullException(nameof(voiceSettingsProvider));
         _localTtsClient = localTtsClient;
     }
@@ -116,16 +115,20 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             var voiceSettings = GetVoiceSettingsSnapshot();
             var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();
 
-            if (string.Equals(selectedTtsEngine, "windows", StringComparison.OrdinalIgnoreCase))
+            if (_localTtsClient is null)
             {
-                await _fallbackTts.SpeakAsync(speechText, cancellationToken);
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "voice",
+                    Action = "VOICE_TTS_SKIPPED",
+                    Result = "warn",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["sessionId"] = sessionId,
+                        ["reason"] = "no_local_tts_client"
+                    }
+                });
                 return;
-            }
-
-            if (!voiceSettings.PreferLocalTts || _localTtsClient is null)
-            {
-                throw new InvalidOperationException(
-                    $"TtsUnavailable: selected engine '{selectedTtsEngine}' requires local TTS endpoint.");
             }
 
             try
@@ -133,19 +136,29 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
                 var audioBytes = await _localTtsClient.SynthesizeAsync(speechText, sessionId, cancellationToken);
                 if (audioBytes is null || audioBytes.Length == 0)
                 {
-                    throw new InvalidOperationException(
-                        $"TtsUnavailable: local '{selectedTtsEngine}' synthesis returned empty audio.");
+                    _auditLogger.Append(new AuditEvent
+                    {
+                        Actor = "voice",
+                        Action = "VOICE_TTS_SKIPPED",
+                        Result = "warn",
+                        Details = new Dictionary<string, object>
+                        {
+                            ["sessionId"] = sessionId,
+                            ["engine"] = selectedTtsEngine,
+                            ["reason"] = "empty_audio_response"
+                        }
+                    });
+                    return;
                 }
 
                 await PlayWaveBytesAsync(audioBytes, sessionId, cancellationToken);
-                return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _auditLogger.Append(new AuditEvent
                 {
                     Actor = "voice",
-                    Action = "VOICE_TTS_UNAVAILABLE",
+                    Action = "VOICE_TTS_SKIPPED",
                     Result = "error",
                     Details = new Dictionary<string, object>
                     {
@@ -154,8 +167,6 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
                         ["reason"] = ex.Message
                     }
                 });
-
-                throw new InvalidOperationException($"TtsUnavailable: {ex.Message}", ex);
             }
         }
         finally
@@ -183,7 +194,6 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         }
 
         try { output?.Stop(); } catch { }
-        try { _fallbackTts.Stop(); } catch { }
         completion?.TrySetResult(true);
 
         return Task.CompletedTask;

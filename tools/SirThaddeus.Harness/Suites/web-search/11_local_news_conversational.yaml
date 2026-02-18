@@ -1,0 +1,37 @@
+id: web_local_news_conversational_wrapper
+name: Web Search - Conversational Local News Wrapper
+user_message: "Hey whats up, how are you today? Can you pull up the local news in Boise, ID? Anyway, gotta go, bye!"
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - boise
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1700
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/ConversationSegmentation/
+    - packages/agent/SirThaddeus.Agent/Search/SearchOrchestrator.cs
+    - packages/agent/SirThaddeus.Agent/Search/QueryBuilder.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier3_targets:
+    - packages/
+

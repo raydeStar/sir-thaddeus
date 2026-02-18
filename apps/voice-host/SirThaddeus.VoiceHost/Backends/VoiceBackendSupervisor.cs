@@ -68,7 +68,36 @@ public sealed class VoiceBackendSupervisor : IDisposable
         return _lastResult;
     }
 
-    public async Task<BackendSupervisorResult> EnsureRunningAsync(CancellationToken cancellationToken)
+    public Task<BackendSupervisorResult> EnsureRunningAsync(CancellationToken cancellationToken)
+        => EnsureReadyAsync(
+            requireAsr: true,
+            requireTts: true,
+            successCode: "backends_ready",
+            successMessage: "Backend upstreams are ready.",
+            cancellationToken);
+
+    public Task<BackendSupervisorResult> EnsureAsrReadyAsync(CancellationToken cancellationToken)
+        => EnsureReadyAsync(
+            requireAsr: true,
+            requireTts: false,
+            successCode: "asr_ready",
+            successMessage: "ASR backend is ready.",
+            cancellationToken);
+
+    public Task<BackendSupervisorResult> EnsureTtsReadyAsync(CancellationToken cancellationToken)
+        => EnsureReadyAsync(
+            requireAsr: false,
+            requireTts: true,
+            successCode: "tts_ready",
+            successMessage: "TTS backend is ready.",
+            cancellationToken);
+
+    private async Task<BackendSupervisorResult> EnsureReadyAsync(
+        bool requireAsr,
+        bool requireTts,
+        string successCode,
+        string successMessage,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_options.AutoStartBackends)
@@ -83,11 +112,9 @@ public sealed class VoiceBackendSupervisor : IDisposable
         try
         {
             var current = await ProbeTargetsAsync(cancellationToken);
-            if (current.Asr.Ready && current.Tts.Ready)
+            if (IsReadyForScope(current, requireAsr, requireTts))
             {
-                _lastResult = BackendSupervisorResult.Ok(
-                    "backends_ready",
-                    "Backend upstreams are ready.");
+                _lastResult = BackendSupervisorResult.Ok(successCode, successMessage);
                 return _lastResult;
             }
 
@@ -119,7 +146,12 @@ public sealed class VoiceBackendSupervisor : IDisposable
                 }
             }
 
-            var wait = await WaitForReadyAsync(cancellationToken);
+            var wait = await WaitForReadyAsync(
+                requireAsr,
+                requireTts,
+                successCode,
+                successMessage,
+                cancellationToken);
             _lastResult = wait;
             return wait;
         }
@@ -137,7 +169,12 @@ public sealed class VoiceBackendSupervisor : IDisposable
         return (asrTask.Result, ttsTask.Result);
     }
 
-    private async Task<BackendSupervisorResult> WaitForReadyAsync(CancellationToken cancellationToken)
+    private async Task<BackendSupervisorResult> WaitForReadyAsync(
+        bool requireAsr,
+        bool requireTts,
+        string successCode,
+        string successMessage,
+        CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(_options.BackendStartupTimeoutMs);
         BackendReadiness lastAsr = BackendReadiness.NotReady("unknown");
@@ -151,11 +188,11 @@ public sealed class VoiceBackendSupervisor : IDisposable
             lastAsr = probe.Asr;
             lastTts = probe.Tts;
 
-            if (probe.Asr.Ready && probe.Tts.Ready)
+            if (IsReadyForScope(probe, requireAsr, requireTts))
             {
                 return BackendSupervisorResult.Ok(
-                    "backends_ready",
-                    "Backend upstreams are ready.",
+                    successCode,
+                    successMessage,
                     processId: TryGetManagedProcessId());
             }
 
@@ -176,6 +213,13 @@ public sealed class VoiceBackendSupervisor : IDisposable
             $"Voice backend did not become ready within {_options.BackendStartupTimeoutMs}ms. {detail}",
             processId: TryGetManagedProcessId());
     }
+
+    private static bool IsReadyForScope(
+        (BackendReadiness Asr, BackendReadiness Tts) probe,
+        bool requireAsr,
+        bool requireTts)
+        => (!requireAsr || probe.Asr.Ready) &&
+           (!requireTts || probe.Tts.Ready);
 
     private bool TryGetManagedBackendPort(out int port, out string? error)
     {

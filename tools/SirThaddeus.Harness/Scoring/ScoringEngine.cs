@@ -148,6 +148,13 @@ public sealed class ScoringEngine
         if (final.Contains("As an AI", StringComparison.OrdinalIgnoreCase))
             score -= 0.5;
 
+        // Personality-specific scoring dimensions. Only active when
+        // the test defines personality expectations (signature, verbosity,
+        // empathy, pushback, refusal, slang, structure).
+        score += PersonalityScoringHeuristics.ComputeAdjustment(
+            test.Expectations,
+            final);
+
         return Math.Clamp(score, 0, 10);
     }
 }

@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
     <ProjectReference Include="..\..\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
+    <ProjectReference Include="..\..\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
   </ItemGroup>
 
 </Project>

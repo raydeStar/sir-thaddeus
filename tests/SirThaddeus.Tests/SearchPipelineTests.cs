@@ -1521,6 +1521,175 @@ public class SearchPipelineGoldenTests
     }
 
     [Fact]
+    public async Task News_LocalQuery_InjectsProfileLocationHint()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson:  """{"query":"the local news latest","recency":"day"}""",
+            summaryText: "Here are local headlines.");
+
+        var searchResult =
+            "1. Local update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/local\",\"title\":\"Local update\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await agent.ProcessAsync("Can you look up the local news for me too?");
+
+        Assert.True(result.Success);
+        var webSearchCall = mcp.Calls.Last(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        // Query should be restructured to location-first format for
+        // better search engine locality (e.g. "Rexburg, ID news today")
+        Assert.Contains("rexburg", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("news today", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_WithExplicitLocation_DoesNotOverrideWithProfileLocationHint()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson:  """{"query":"local news in Boise, ID","recency":"day"}""",
+            summaryText: "Here are Boise headlines.");
+
+        var searchResult =
+            "1. Boise update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/boise\",\"title\":\"Boise update\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await agent.ProcessAsync("Can you get local news in Boise?");
+
+        Assert.True(result.Success);
+        var webSearchCall = mcp.Calls.Last(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("boise", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rexburg", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("hello! can you get me the local news?",
+                """{"query":"hello","recency":"any"}""")]
+    [InlineData("Hey whats up, how are you today? Can you pull up the local news? Anyway, gotta go, bye!",
+                """{"query":"hey pull up","recency":"any"}""")]
+    [InlineData("morning! local news please",
+                """{"query":"morning","recency":"day"}""")]
+    public async Task News_ConversationalGreeting_DoesNotPollutSearchQuery(
+        string userMessage, string queryJson)
+    {
+        // When a user wraps a news request in conversational English,
+        // the query builder should NOT extract the greeting as the
+        // search query. The noise tokens should be filtered, and the
+        // injection chain should detect "local news" in the original
+        // message even when the query itself is normalized.
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson:  queryJson,
+            summaryText: "Here are local headlines.");
+
+        var searchResult =
+            "1. Local update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/local\",\"title\":\"Local update\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await agent.ProcessAsync(userMessage);
+
+        Assert.True(result.Success);
+        var webSearchCalls = mcp.Calls.Where(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.NotEmpty(webSearchCalls);
+
+        // The search query should contain location, NOT the greeting
+        var lastSearch = webSearchCalls.Last();
+        Assert.Contains("rexburg", lastSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"query\":\"hello\"", lastSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"query\":\"hey", lastSearch.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"query\":\"morning\"", lastSearch.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_QueryBuilder_FiltersGreetingsAsNoise()
+    {
+        // Direct QueryBuilder test: greeting tokens should be treated
+        // as noise, causing the query to normalize to "top headlines"
+        // (or similar) instead of keeping the greeting as the query.
+        var fakeLlm = new FakeLlmClient((messages, _) =>
+            new LlmResponse
+            {
+                IsComplete = true,
+                Content = """{"query":"hello","recency":"any"}""",
+                FinishReason = "stop"
+            });
+        var audit = new TestAuditLogger();
+        var builder = new QueryBuilder(fakeLlm, audit);
+
+        var result = await builder.BuildAsync(
+            SearchMode.NewsAggregate,
+            "hello! can you get me the local news?",
+            entity: null,
+            session: new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        // "hello" should be stripped as noise — the query should NOT
+        // be "hello". It should be normalized to something generic
+        // like "top headlines" or the fallback topic.
+        Assert.DoesNotContain("hello", result.Query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_RecencyDefaultsToDay_WhenLlmReturnsAny()
+    {
+        // Test the QueryBuilder directly: when the LLM returns "any"
+        // for a news query, the resolver should override to "day" since
+        // news is inherently time-sensitive.
+        var fakeLlm = new FakeLlmClient((messages, _) =>
+            new LlmResponse
+            {
+                IsComplete = true,
+                Content = """{"query":"latest headlines","recency":"any"}""",
+                FinishReason = "stop"
+            });
+        var audit = new TestAuditLogger();
+        var builder = new QueryBuilder(fakeLlm, audit);
+
+        var result = await builder.BuildAsync(
+            SearchMode.NewsAggregate,
+            "What's going on in the news?",
+            entity: null,
+            session: new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        // Recency should be "day", not the LLM's "any"
+        Assert.Equal("day", result.Recency);
+    }
+
+    [Fact]
     public async Task NewsSearch_EntityResolution_ProducesGoodQuery()
     {
         var llm = MakePipelineLlm(

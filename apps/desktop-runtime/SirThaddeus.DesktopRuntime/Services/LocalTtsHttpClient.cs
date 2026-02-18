@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.IO;
 using System.Text;
@@ -74,11 +75,6 @@ public sealed class LocalTtsHttpClient : IDisposable
             sampleRate = 24000,
             sessionId
         });
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-        {
-            Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
-        };
-        request.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
         var startedAt = DateTimeOffset.UtcNow;
         RaiseTimingEvent(sessionId, requestId, TtsTimingStage.Start, startedAt);
         _auditLogger.Append(new AuditEvent
@@ -97,24 +93,90 @@ public sealed class LocalTtsHttpClient : IDisposable
             }
         });
 
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        var allowStartupRetries = voiceSettings.VoiceHostEnabled;
+        var retryDeadlineUtc = startedAt + TimeSpan.FromMilliseconds(
+            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 120_000));
+        var attempt = 0;
+        byte[]? audioBytes = null;
 
-        await using var bodyStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var buffer = new MemoryStream();
-        await bodyStream.CopyToAsync(buffer, cancellationToken);
-        var bodyBytes = buffer.ToArray();
-        if (!response.IsSuccessStatusCode)
+        while (true)
         {
-            var errorBody = TryDecodeUtf8(bodyBytes);
-            throw new InvalidOperationException(
-                $"TTS request failed ({(int)response.StatusCode}): {errorBody}");
+            attempt++;
+            using var retryRequest = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
+            };
+            retryRequest.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
+
+            try
+            {
+                using var response = await _httpClient.SendAsync(
+                    retryRequest,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                await using var bodyStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await using var buffer = new MemoryStream();
+                await bodyStream.CopyToAsync(buffer, cancellationToken);
+                var bodyBytes = buffer.ToArray();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = TryDecodeUtf8(bodyBytes);
+                    var shouldRetry =
+                        allowStartupRetries &&
+                        IsRetryableStartupStatusCode(response.StatusCode) &&
+                        IsRetryableStartupErrorBody(errorBody) &&
+                        DateTimeOffset.UtcNow < retryDeadlineUtc;
+                    if (shouldRetry)
+                    {
+                        _auditLogger.Append(new AuditEvent
+                        {
+                            Actor = "voice",
+                            Action = "VOICE_TTS_RETRY",
+                            Result = "retry",
+                            Details = new Dictionary<string, object>
+                            {
+                                ["sessionId"] = sessionId,
+                                ["requestId"] = requestId,
+                                ["attempt"] = attempt,
+                                ["statusCode"] = (int)response.StatusCode
+                            }
+                        });
+                        await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+                        continue;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"TTS request failed ({(int)response.StatusCode}): {errorBody}");
+                }
+
+                var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
+                audioBytes = TryExtractAudioPayload(bodyBytes, mediaType);
+                break;
+            }
+            catch (HttpRequestException) when (
+                allowStartupRetries &&
+                DateTimeOffset.UtcNow < retryDeadlineUtc &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "voice",
+                    Action = "VOICE_TTS_RETRY",
+                    Result = "retry",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["sessionId"] = sessionId,
+                        ["requestId"] = requestId,
+                        ["attempt"] = attempt,
+                        ["reason"] = "http_request_exception"
+                    }
+                });
+                await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+            }
         }
 
-        var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
-        var audioBytes = TryExtractAudioPayload(bodyBytes, mediaType);
         var completedAt = DateTimeOffset.UtcNow;
         RaiseTimingEvent(sessionId, requestId, TtsTimingStage.Final, completedAt);
 
@@ -137,6 +199,39 @@ public sealed class LocalTtsHttpClient : IDisposable
         });
 
         return audioBytes;
+    }
+
+    private static bool IsRetryableStartupStatusCode(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.ServiceUnavailable ||
+           statusCode == HttpStatusCode.BadGateway ||
+           statusCode == HttpStatusCode.GatewayTimeout;
+
+    private static bool IsRetryableStartupErrorBody(string errorBody)
+    {
+        if (string.IsNullOrWhiteSpace(errorBody))
+            return true;
+
+        var body = errorBody.ToLowerInvariant();
+
+        // Configuration / missing assets errors are not transient warmup states.
+        if (body.Contains("tts_voice_id_required", StringComparison.Ordinal) ||
+            body.Contains("tts_voice_missing", StringComparison.Ordinal) ||
+            body.Contains("voice id", StringComparison.Ordinal) ||
+            body.Contains("manifest_missing", StringComparison.Ordinal) ||
+            body.Contains("artifact_", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Everything else under retryable status codes is treated as startup turbulence.
+        return true;
+    }
+
+    private static TimeSpan GetRetryDelay(int attempt)
+    {
+        var boundedAttempt = Math.Clamp(attempt, 1, 6);
+        var delayMs = 150 * boundedAttempt;
+        return TimeSpan.FromMilliseconds(delayMs);
     }
 
     private void RaiseTimingEvent(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import hashlib
 import inspect
@@ -390,6 +391,19 @@ def verify_manifest_bundle(
                 )
 
     return FileProbeResult(installed=len(missing) == 0, missing=missing, last_error="")
+
+
+def build_silence_wav(seconds: float, sample_rate: int) -> bytes:
+    """Generate a minimal valid WAV file of silence for warmup probes."""
+    frame_count = max(1, int(seconds * sample_rate))
+    samples = b"\x00\x00" * frame_count
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(sample_rate)
+        writer.writeframes(samples)
+    return output.getvalue()
 
 
 class BaseProvider:
@@ -795,6 +809,25 @@ class FasterWhisperProvider(BaseProvider):
                     device=self._device,
                     compute_type=self._compute_type,
                 )
+
+                # Warmup run to pay JIT/cache cost at init, not on the first real request.
+                silence_wav = build_silence_wav(0.25, 16000)
+                fd, path = tempfile.mkstemp(suffix=".wav")
+                try:
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(silence_wav)
+                    warmup_kwargs: Dict[str, Any] = {"beam_size": 1, "condition_on_previous_text": False}
+                    if self._language:
+                        warmup_kwargs["language"] = self._language
+                    segments, _ = self._model.transcribe(path, **warmup_kwargs)
+                    _ = list(segments)
+                    logger.info("faster-whisper warmup complete for model '%s'", self.model_id)
+                finally:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
@@ -807,6 +840,7 @@ class FasterWhisperProvider(BaseProvider):
         if len(audio_bytes) < 100:
             return ""
 
+        started = time.perf_counter()
         fd, temp_path = tempfile.mkstemp(suffix=".wav")
         try:
             with os.fdopen(fd, "wb") as fh:
@@ -819,7 +853,8 @@ class FasterWhisperProvider(BaseProvider):
                 transcribe_kwargs["language"] = self._language
             segments, _info = self._model.transcribe(temp_path, **transcribe_kwargs)
             text = " ".join(segment.text for segment in segments).strip()
-            logger.info("ASR [%s] faster-whisper bytes=%d", request_id, len(audio_bytes))
+            elapsed_ms = int((time.perf_counter() - started) * 1000.0)
+            logger.info("ASR [%s] faster-whisper bytes=%d elapsed=%dms", request_id, len(audio_bytes), elapsed_ms)
             return text
         finally:
             try:
@@ -921,7 +956,7 @@ class Qwen3AsrProvider(BaseProvider):
                 )
 
                 # Tiny warmup run to verify inference path end-to-end.
-                silence_wav = self._build_silence_wav(0.25, 16000)
+                silence_wav = build_silence_wav(0.25, 16000)
                 fd, path = tempfile.mkstemp(suffix=".wav")
                 try:
                     with os.fdopen(fd, "wb") as fh:
@@ -984,19 +1019,6 @@ class Qwen3AsrProvider(BaseProvider):
                 kwargs.pop("language", None)
                 return self._runtime_model.transcribe(**kwargs)
             raise
-
-    @staticmethod
-    def _build_silence_wav(seconds: float, sample_rate: int) -> bytes:
-        frame_count = max(1, int(seconds * sample_rate))
-        samples = b"\x00\x00" * frame_count
-        output = io.BytesIO()
-        with wave.open(output, "wb") as writer:
-            writer.setnchannels(1)
-            writer.setsampwidth(2)
-            writer.setframerate(sample_rate)
-            writer.writeframes(samples)
-        return output.getvalue()
-
 
 def create_tts_provider(engine: str, model_id: str, voice_id: str) -> BaseProvider:
     normalized = normalize_tts_engine(engine)
@@ -1344,18 +1366,28 @@ def provider_unavailable_response(
 @app.on_event("startup")
 async def on_startup() -> None:
     # FileProbe + InitProbe warm-up for selected providers.
+    # Runs in a thread so model loading (which can take seconds) doesn't block
+    # the event loop and starve health-check responses during cold start.
     try:
         stt_provider = PROVIDERS.get_stt()
-        stt_provider.init_probe(force=False)
+        await asyncio.to_thread(stt_provider.init_probe, False)
     except Exception as exc:
         logger.error("STT init probe failed on startup: %s", exc)
 
     try:
         tts_provider = PROVIDERS.get_tts()
         if tts_provider.engine != "windows":
-            tts_provider.init_probe(force=False)
+            # Do not block backend startup on TTS warmup. ASR needs to come up
+            # as fast as possible for PTT latency.
+            async def warm_tts_async() -> None:
+                try:
+                    await asyncio.to_thread(tts_provider.init_probe, False)
+                except Exception as inner_exc:
+                    logger.error("TTS init probe failed on startup: %s", inner_exc)
+
+            asyncio.create_task(warm_tts_async())
     except Exception as exc:
-        logger.error("TTS init probe failed on startup: %s", exc)
+        logger.error("TTS init probe scheduling failed on startup: %s", exc)
 
     try:
         youtube_dep = YOUTUBE_JOBS.dependency_status()
@@ -1411,13 +1443,13 @@ async def asr(
     # the client sends.  Qwen ASR lives behind /api/youtube/transcribe.
     live_engine = normalize_live_stt_engine(engine)
     provider = PROVIDERS.get_stt(engine=live_engine, model_id=modelId, language=language)
-    init = provider.init_probe(force=False)
+    init = await asyncio.to_thread(provider.init_probe, False)
     status = provider.build_engine_status(run_init_probe=False)
     if not init.ready or not status.get("ready", False):
         return provider_unavailable_response(request_id, status, "STT")
 
     try:
-        transcript = provider.transcribe(audio_bytes, request_id)
+        transcript = await asyncio.to_thread(provider.transcribe, audio_bytes, request_id)
     except Exception as exc:
         status = provider.build_engine_status(run_init_probe=False)
         status["details"]["lastError"] = str(exc)
@@ -1455,13 +1487,13 @@ async def tts(payload: TtsRequest, request: Request):
         model_id=payload.modelId,
         voice_id=resolved_voice,
     )
-    init = provider.init_probe(force=False)
+    init = await asyncio.to_thread(provider.init_probe, False)
     status = provider.build_engine_status(run_init_probe=False)
     if not init.ready or not status.get("ready", False):
         return provider_unavailable_response(request_id, status, "TTS")
 
     try:
-        wav_bytes, sample_rate = provider.synthesize(payload.text.strip(), request_id)
+        wav_bytes, sample_rate = await asyncio.to_thread(provider.synthesize, payload.text.strip(), request_id)
     except Exception as exc:
         status = provider.build_engine_status(run_init_probe=False)
         status["details"]["lastError"] = str(exc)
@@ -1489,7 +1521,7 @@ async def tts_test(payload: TtsTestRequest, request: Request):
         model_id=payload.modelId,
         voice_id=payload.voiceId,
     )
-    provider.init_probe(force=payload.forceInit)
+    await asyncio.to_thread(provider.init_probe, payload.forceInit)
     status = provider.build_engine_status(run_init_probe=False)
     if not status.get("ready", False):
         return provider_unavailable_response(request_id, status, "TTS")
@@ -1499,7 +1531,7 @@ async def tts_test(payload: TtsTestRequest, request: Request):
         text = "Speech engine check."
 
     try:
-        wav_bytes, sample_rate = provider.synthesize(text, request_id)
+        wav_bytes, sample_rate = await asyncio.to_thread(provider.synthesize, text, request_id)
     except Exception as exc:
         status = provider.build_engine_status(run_init_probe=False)
         status["details"]["lastError"] = str(exc)
@@ -1532,7 +1564,7 @@ async def stt_test(
 ):
     request_id = resolve_request_id("stt-test", requestId, request.headers.get("X-Request-Id"))
     provider = PROVIDERS.get_stt(engine=engine, model_id=modelId, language=language)
-    provider.init_probe(force=False)
+    await asyncio.to_thread(provider.init_probe, False)
     status = provider.build_engine_status(run_init_probe=False)
     if not status.get("ready", False):
         return provider_unavailable_response(request_id, status, "STT")
@@ -1551,7 +1583,7 @@ async def stt_test(
         )
 
     audio_bytes = await upload.read()
-    transcript = provider.transcribe(audio_bytes, request_id)
+    transcript = await asyncio.to_thread(provider.transcribe, audio_bytes, request_id)
     return JSONResponse(
         {
             "ok": True,
@@ -1587,7 +1619,7 @@ async def stt_bench(
         )
 
     provider = PROVIDERS.get_stt(engine=engine, model_id=modelId, language=language)
-    provider.init_probe(force=False)
+    await asyncio.to_thread(provider.init_probe, False)
     status = provider.build_engine_status(run_init_probe=False)
     if not status.get("ready", False):
         return provider_unavailable_response(request_id, status, "STT")
@@ -1595,7 +1627,7 @@ async def stt_bench(
     audio_bytes = await upload.read()
     audio_seconds = audio_seconds_from_wav(audio_bytes)
     started = time.perf_counter()
-    transcript = provider.transcribe(audio_bytes, request_id)
+    transcript = await asyncio.to_thread(provider.transcribe, audio_bytes, request_id)
     wall_ms = int((time.perf_counter() - started) * 1000.0)
     rtf = (wall_ms / 1000.0) / audio_seconds if audio_seconds > 0 else 0.0
     startup_ms = int(((status.get("details") or {}).get("startupMs") or 0))

@@ -206,11 +206,13 @@ public partial class App
         {
             _orchestrator.UserLocationHint = null;
             _orchestrator.UserTimezone = null;
+            _orchestrator.PreferredUnits = settings.Weather.GetNormalizedUnitSystem();
             return;
         }
 
         _orchestrator.UserLocationHint = manualLocation;
         _orchestrator.UserTimezone = location.GetResolvedTimezone();
+        _orchestrator.PreferredUnits = settings.Weather.GetNormalizedUnitSystem();
 
         if (!emitAuditEvent)
             return;

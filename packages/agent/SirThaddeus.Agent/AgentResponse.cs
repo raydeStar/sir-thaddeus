@@ -72,6 +72,13 @@ public sealed record AgentResponse
     /// </summary>
     public DeepDiveBriefing? DeepDiveBriefing { get; init; }
 
+    /// <summary>
+    /// When true, tool-backed responses may apply personality presentation
+    /// formatting (for example, signature note) while still skipping any
+    /// content-altering reduction pass.
+    /// </summary>
+    public bool AllowToolResultPersonalityPresentation { get; init; }
+
     public static AgentResponse FromError(string error) => new()
     {
         Text = error,

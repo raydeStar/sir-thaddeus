@@ -204,11 +204,22 @@ public sealed class ValidateSlots
         if (string.IsNullOrWhiteSpace(value))
             return true;
 
-        return value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
-               value.Equals("null", StringComparison.OrdinalIgnoreCase) ||
-               value.Equals("unknown", StringComparison.OrdinalIgnoreCase) ||
-               value.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
-               value.Equals("na", StringComparison.OrdinalIgnoreCase) ||
-               value.Equals("(none)", StringComparison.OrdinalIgnoreCase);
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("null", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("unknown", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("na", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("(none)", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Prompt-echo artefacts: "currentLocation=none", "location = null", etc.
+        if (value.Contains('='))
+        {
+            var afterEquals = value[(value.LastIndexOf('=') + 1)..].Trim();
+            if (afterEquals.Length > 0 && IsNoneLikeLiteral(afterEquals))
+                return true;
+        }
+
+        return false;
     }
 }

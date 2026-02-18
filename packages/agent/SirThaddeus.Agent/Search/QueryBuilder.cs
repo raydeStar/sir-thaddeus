@@ -50,8 +50,18 @@ public sealed partial class QueryBuilder
 
     private static readonly HashSet<string> ConversationalNoiseTokens = new(StringComparer.OrdinalIgnoreCase)
     {
-        "wassup", "sup", "diggy", "bro", "dude", "homie", "home", "yo", "hey",
-        "pls", "please", "thanks", "thank", "you", "can", "could", "would", "will", "me"
+        // Greetings / farewells — these should never become search queries.
+        "hello", "hi", "hiya", "howdy", "hola", "greetings", "heya",
+        "hey", "yo", "sup", "wassup", "whassup",
+        "morning", "afternoon", "evening",
+        "bye", "goodbye", "farewell", "later", "cya", "seeya",
+        "anyway", "anyways", "alright", "gotta",
+        // Conversational filler
+        "bro", "dude", "homie", "home", "diggy",
+        "pls", "please", "thanks", "thank",
+        "you", "can", "could", "would", "will", "me",
+        "sure", "yeah", "yep", "ok", "okay", "cool", "great",
+        "get", "pull", "look", "up", "show"
     };
 
     public QueryBuilder(ILlmClient llm, IAuditLogger audit)
@@ -541,8 +551,12 @@ public sealed partial class QueryBuilder
         if (HasExplicitRecencyMarker(userMessage))
             return inferred;
 
-        // For news, keep "day" as default only when no explicit marker exists.
-        if (mode == SearchMode.NewsAggregate && string.IsNullOrWhiteSpace(normalizedLlmRecency))
+        // For news queries, an LLM-returned "any" is effectively "I have
+        // no opinion." News is inherently time-sensitive — default to the
+        // inferred window (usually "day") rather than a wide-open "any"
+        // that buries today's stories under evergreen content.
+        if (mode == SearchMode.NewsAggregate &&
+            (string.IsNullOrWhiteSpace(normalizedLlmRecency) || normalizedLlmRecency == "any"))
             return inferred;
 
         return normalizedLlmRecency;

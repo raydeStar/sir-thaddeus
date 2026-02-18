@@ -1,0 +1,29 @@
+id: personality_ambiguous_request_default
+name: Personality - Ambiguous request gets clarification under helpful_default
+personality_id: helpful_default
+user_message: "Can you help me with the thing?"
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+  max_response_chars: 400
+  expect_signature: false
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

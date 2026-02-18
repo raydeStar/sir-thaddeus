@@ -31,6 +31,15 @@ public sealed record HarnessTestCase
     [YamlMember(Alias = "mode")]
     public string Mode { get; init; } = "live";
 
+    /// <summary>
+    /// Optional per-test personality override. When set, the runner uses this
+    /// profile instead of the global setting, enabling cross-profile comparison
+    /// suites without separate harness invocations.
+    /// </summary>
+    [JsonPropertyName("personality_id")]
+    [YamlMember(Alias = "personality_id")]
+    public string? PersonalityId { get; init; }
+
     [JsonPropertyName("assertions")]
     [YamlMember(Alias = "assertions")]
     public HarnessAssertions Assertions { get; init; } = new();
@@ -88,6 +97,72 @@ public sealed record HarnessExpectations
     [JsonPropertyName("max_response_chars")]
     [YamlMember(Alias = "max_response_chars")]
     public int? MaxResponseChars { get; init; }
+
+    // ── Personality-specific scoring dimensions ──────────────────────
+
+    /// <summary>
+    /// When true, asserts the configured signature note appears in output.
+    /// When false, asserts it does not. Null = no check.
+    /// </summary>
+    [JsonPropertyName("expect_signature")]
+    [YamlMember(Alias = "expect_signature")]
+    public bool? ExpectSignature { get; init; }
+
+    /// <summary>
+    /// Caps average sentence length (in words). Responses exceeding this
+    /// threshold are penalized for verbosity. Null = no check.
+    /// </summary>
+    [JsonPropertyName("max_avg_sentence_words")]
+    [YamlMember(Alias = "max_avg_sentence_words")]
+    public int? MaxAvgSentenceWords { get; init; }
+
+    /// <summary>
+    /// Minimum average sentence length (in words). Responses below this
+    /// threshold are penalized for being too terse. Null = no check.
+    /// </summary>
+    [JsonPropertyName("min_avg_sentence_words")]
+    [YamlMember(Alias = "min_avg_sentence_words")]
+    public int? MinAvgSentenceWords { get; init; }
+
+    /// <summary>
+    /// When true, penalizes responses containing casual slang
+    /// (lol, lmao, btw, ngl, tbh, omg, imho).
+    /// </summary>
+    [JsonPropertyName("forbid_slang")]
+    [YamlMember(Alias = "forbid_slang")]
+    public bool ForbidSlang { get; init; }
+
+    /// <summary>
+    /// When true, asserts the response contains structured formatting
+    /// (numbered lists, bullet points, headers, or step markers).
+    /// </summary>
+    [JsonPropertyName("expect_structured_format")]
+    [YamlMember(Alias = "expect_structured_format")]
+    public bool ExpectStructuredFormat { get; init; }
+
+    /// <summary>
+    /// When true, asserts the response acknowledges user emotion
+    /// (contains empathy markers like "understand", "frustrating", "hear you").
+    /// </summary>
+    [JsonPropertyName("expect_empathy")]
+    [YamlMember(Alias = "expect_empathy")]
+    public bool ExpectEmpathy { get; init; }
+
+    /// <summary>
+    /// When true, asserts the response pushes back on the premise
+    /// rather than blindly complying. Checks for corrective language.
+    /// </summary>
+    [JsonPropertyName("expect_pushback")]
+    [YamlMember(Alias = "expect_pushback")]
+    public bool ExpectPushback { get; init; }
+
+    /// <summary>
+    /// When true, asserts the response is a refusal (safety boundary).
+    /// Checks for refusal markers and absence of compliance.
+    /// </summary>
+    [JsonPropertyName("expect_refusal")]
+    [YamlMember(Alias = "expect_refusal")]
+    public bool ExpectRefusal { get; init; }
 }
 
 public sealed record HarnessPatchTargets

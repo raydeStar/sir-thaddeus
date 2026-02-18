@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SirThaddeus.Agent.ConversationSegmentation;
 using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Agent;
@@ -60,6 +61,18 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         var canonical     = Canonicalize(toolName);
         var redactedInput = ToolCallRedactor.RedactInput(canonical, argumentsJson);
 
+        var segmentId = SegmentExecutionContext.CurrentSegmentId;
+        var startDetails = new Dictionary<string, object>
+        {
+            ["session_id"]           = _sessionId,
+            ["request_id"]           = requestId,
+            ["tool_name_requested"]  = toolName,
+            ["tool_name_canonical"]  = canonical,
+            ["input_summary"]        = redactedInput
+        };
+        if (!string.IsNullOrWhiteSpace(segmentId))
+            startDetails["segment_id"] = segmentId;
+
         // ── START event ──────────────────────────────────────────────
         _audit.Append(new AuditEvent
         {
@@ -67,14 +80,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             Action = "MCP_TOOL_CALL_START",
             Target = canonical,
             Result = "pending",
-            Details = new Dictionary<string, object>
-            {
-                ["session_id"]           = _sessionId,
-                ["request_id"]           = requestId,
-                ["tool_name_requested"]  = toolName,
-                ["tool_name_canonical"]  = canonical,
-                ["input_summary"]        = redactedInput
-            }
+            Details = startDetails
         });
 
         // ── Permission gate ──────────────────────────────────────────
@@ -131,6 +137,17 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         // ── END event (success) ──────────────────────────────────────
         var redactedOutput = ToolCallRedactor.RedactOutput(canonical, output);
 
+        var endDetails = new Dictionary<string, object>
+        {
+            ["session_id"]      = _sessionId,
+            ["request_id"]      = requestId,
+            ["permission"]      = FormatPermissionStatus(permission),
+            ["output_summary"]  = redactedOutput,
+            ["duration_ms"]     = sw.ElapsedMilliseconds
+        };
+        if (!string.IsNullOrWhiteSpace(segmentId))
+            endDetails["segment_id"] = segmentId;
+
         _audit.Append(new AuditEvent
         {
             Actor            = "agent",
@@ -138,14 +155,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             Target           = canonical,
             Result           = "ok",
             PermissionTokenId = permission.TokenId,
-            Details = new Dictionary<string, object>
-            {
-                ["session_id"]      = _sessionId,
-                ["request_id"]      = requestId,
-                ["permission"]      = FormatPermissionStatus(permission),
-                ["output_summary"]  = redactedOutput,
-                ["duration_ms"]     = sw.ElapsedMilliseconds
-            }
+            Details = endDetails
         });
 
         return output;
@@ -173,6 +183,9 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             ["request_id"]  = requestId,
             ["duration_ms"] = durationMs
         };
+        var segmentId = SegmentExecutionContext.CurrentSegmentId;
+        if (!string.IsNullOrWhiteSpace(segmentId))
+            details["segment_id"] = segmentId;
 
         if (permissionStatus is not null)
             details["permission"] = permissionStatus;

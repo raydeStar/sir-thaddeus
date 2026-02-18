@@ -196,7 +196,8 @@ app.MapPost("/asr", async (
     var requestId = ResolveRequestId(request.Headers["X-Request-Id"].ToString(), "");
     httpContext.Response.Headers["X-Request-Id"] = requestId;
 
-    var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
+    // Keep live transcription latency low: /asr should not wait on TTS readiness.
+    var ensure = await backendSupervisor.EnsureAsrReadyAsync(cancellationToken);
     if (!ensure.Success)
     {
         return Results.Json(new
@@ -245,7 +246,7 @@ app.MapPost("/tts", async (
     var requestId = ResolveRequestId(payload.RequestId, httpContext.Request.Headers["X-Request-Id"].ToString());
     httpContext.Response.Headers["X-Request-Id"] = requestId;
 
-    var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
+    var ensure = await backendSupervisor.EnsureTtsReadyAsync(cancellationToken);
     if (!ensure.Success)
     {
         return Results.Json(new

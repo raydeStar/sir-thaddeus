@@ -30,6 +30,68 @@ public static class SettingsManager
         Path.Combine(GetSettingsDirectory(), "settings.json");
 
     /// <summary>
+    /// Canonical personality profile directory for Windows builds.
+    /// </summary>
+    public static string GetPersonalityProfilesDirectory() =>
+        Path.Combine(GetSettingsDirectory(), "profiles");
+
+    /// <summary>
+    /// Legacy cross-platform profile directory used for migration reads.
+    /// </summary>
+    public static string GetLegacyPersonalityProfilesDirectory()
+    {
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userHome))
+            return Path.Combine(GetSettingsDirectory(), "profiles");
+
+        return Path.Combine(userHome, ".sir-thaddeus", "profiles");
+    }
+
+    /// <summary>
+    /// Resolves the active profile directory. Empty override values
+    /// resolve to the canonical local app data path.
+    /// </summary>
+    public static string ResolvePersonalityProfilesDirectory(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!string.IsNullOrWhiteSpace(settings.PersonalityProfilesDir))
+            return settings.PersonalityProfilesDir.Trim();
+
+        var canonical = GetPersonalityProfilesDirectory();
+        var legacy = GetLegacyPersonalityProfilesDirectory();
+
+        try
+        {
+            var canonicalHasFiles =
+                Directory.Exists(canonical) &&
+                Directory.EnumerateFiles(canonical, "*.json", SearchOption.TopDirectoryOnly).Any();
+
+            var legacyHasFiles =
+                Directory.Exists(legacy) &&
+                Directory.EnumerateFiles(legacy, "*.json", SearchOption.TopDirectoryOnly).Any();
+
+            if (!canonicalHasFiles && legacyHasFiles)
+            {
+                Directory.CreateDirectory(canonical);
+                foreach (var file in Directory.EnumerateFiles(legacy, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    var target = Path.Combine(canonical, Path.GetFileName(file));
+                    if (!File.Exists(target))
+                        File.Copy(file, target);
+                }
+            }
+        }
+        catch
+        {
+            // Keep settings resolution resilient. If migration fails,
+            // callers still receive the canonical path.
+        }
+
+        return canonical;
+    }
+
+    /// <summary>
     /// Loads settings from disk, creating defaults if the file doesn't exist.
     /// </summary>
     /// <returns>The loaded (or newly created) settings.</returns>

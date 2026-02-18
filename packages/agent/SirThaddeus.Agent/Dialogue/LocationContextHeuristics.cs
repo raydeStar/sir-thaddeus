@@ -73,6 +73,11 @@ internal static class LocationContextHeuristics
 
         // Layer 2 — structural guards.
 
+        // Contains '=' → prompt-echo artefact (e.g. "currentLocation=none").
+        // No geographic name ever contains '='.
+        if (trimmed.Contains('='))
+            return true;
+
         // Contains question/exclamation marks → not a place name.
         if (trimmed.Contains('?') || trimmed.Contains('!'))
             return true;

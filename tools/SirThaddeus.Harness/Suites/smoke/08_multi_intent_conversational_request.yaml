@@ -1,0 +1,41 @@
+id: smoke_multi_intent_conversational_request
+name: Smoke - Multi-Intent Conversational Request
+user_message: "Hey there! What's the weather in Seattle and can you pull local news in Boise, ID? Anyway, rough day."
+allowed_tools:
+  - memory_retrieve
+  - weather_geocode
+  - weather_forecast
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - weather_geocode
+    - web_search
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - seattle
+    - boise
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1800
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/ConversationSegmentation/
+    - packages/agent/SirThaddeus.Agent/AgentOrchestrator.cs
+    - packages/agent/SirThaddeus.Agent/AgentOrchestrator.Internal.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier3_targets:
+    - packages/
+

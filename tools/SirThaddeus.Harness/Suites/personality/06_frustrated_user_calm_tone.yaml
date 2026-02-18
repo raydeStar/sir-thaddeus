@@ -1,0 +1,34 @@
+id: personality_frustrated_user_calm
+name: Personality - Calm response to frustrated user (professional)
+personality_id: professional
+user_message: "This is so annoying!! Nothing is working and I've been at it for hours. Everything keeps breaking!"
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+    - calm down
+    - relax
+    - chill
+  max_response_chars: 600
+  expect_empathy: true
+  forbid_slang: true
+  expect_signature: false
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

@@ -9,10 +9,13 @@ using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.PostProcessing;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.ConversationSegmentation;
 using SirThaddeus.Agent.ToolLoop;
 using SirThaddeus.Agent.Tools;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine;
+using SirThaddeus.PersonalityEngine.Profiles;
 
 namespace SirThaddeus.Agent;
 
@@ -54,6 +57,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly ISearchFallbackExecutor _searchFallbackExecutor;
     private readonly IContextAnchoringService _contextAnchoringService;
     private readonly IUtilityIntentHandler _utilityIntentHandler;
+    private readonly IConversationSegmenter _conversationSegmenter;
+    private readonly MiniActionableExtractor _miniActionableExtractor;
+    private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
+    private readonly UnifiedResponseComposer _unifiedResponseComposer;
+
+    private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
     // Last resolved place from weather flow. Used to anchor short
     // follow-up weather/news prompts like "forecast for today?"
@@ -65,6 +74,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private DateTimeOffset _lastUtilityContextAt;
     private string _reasoningGuardrailsMode = "off";
     private string? _userLocationHint;
+    private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
     private DateTimeOffset _lastFirstPrinciplesAt;
 
@@ -241,6 +251,22 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public string? UserTimezone { get; set; }
 
     /// <summary>
+    /// Preferred unit system for weather/measurement responses.
+    /// Values: "imperial", "metric", or "auto".
+    /// Injected into system prompt so the LLM presents data in the
+    /// user's preferred units unless explicitly asked otherwise.
+    /// </summary>
+    public string? PreferredUnits
+    {
+        get => _preferredUnits;
+        set
+        {
+            _preferredUnits = NormalizeUnitPreference(value);
+            _searchOrchestrator.PreferredUnits = _preferredUnits;
+        }
+    }
+
+    /// <summary>
     /// First principles thinking mode:
     ///   - off: disable guardrail reasoning pipeline
     ///   - auto: run only when detector flags likely goal-conflict prompt
@@ -294,15 +320,36 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         ISelfMemorySummarizer? selfMemorySummarizer = null,
         ISearchFallbackExecutor? searchFallbackExecutor = null,
         IContextAnchoringService? contextAnchoringService = null,
-        IUtilityIntentHandler? utilityIntentHandler = null)
+        IUtilityIntentHandler? utilityIntentHandler = null,
+        IConversationSegmenter? conversationSegmenter = null,
+        MiniActionableExtractor? miniActionableExtractor = null,
+        SegmentExecutionCoordinator? segmentExecutionCoordinator = null,
+        UnifiedResponseComposer? unifiedResponseComposer = null,
+        IPersonalityRuntime? personalityRuntime = null,
+        string? activePersonalityId = null,
+        string? personalityProfilesDirectory = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _activePersonalityId = NormalizePersonalityId(activePersonalityId);
+        _personalityProfilesDirectory = string.IsNullOrWhiteSpace(personalityProfilesDirectory)
+            ? ResolveDefaultPersonalityProfilesDirectory()
+            : personalityProfilesDirectory.Trim();
+        _personalityRuntime = personalityRuntime ?? new PersonalityRuntime(
+            _activePersonalityId,
+            _personalityProfilesDirectory);
 
-        _searchOrchestrator = new SearchOrchestrator(llm, mcp, audit, systemPrompt);
+        _searchOrchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            audit,
+            _personalityRuntime.BuildSystemPrompt(_systemPrompt))
+        {
+            PreferredUnits = _preferredUnits
+        };
         _dialogueStore = dialogueStateStore ?? new DialogueStateStore(_timeProvider);
         _slotExtract = slotExtract ?? new SlotExtract(llm, audit);
         _mergeSlots = mergeSlots ?? new MergeSlots();
@@ -318,7 +365,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
         _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
-        _postProcessor = new DeterministicChatPostProcessor();
+        _postProcessor = new DeterministicChatPostProcessor(() => _personalityRuntime.Snapshot.Profile);
         _selfMemorySummarizer = selfMemorySummarizer ?? new SelfMemorySummarizer(mcp);
         _searchFallbackExecutor = searchFallbackExecutor ?? new SearchFallbackExecutor(_searchOrchestrator);
         _contextAnchoringService = contextAnchoringService ?? new ContextAnchoringService(
@@ -326,33 +373,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             _searchOrchestrator,
             _timeProvider);
         _utilityIntentHandler = utilityIntentHandler ?? new UtilityIntentHandler();
+        _conversationSegmenter = conversationSegmenter ?? new ConversationSegmenter();
+        _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
+        _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
+        _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
-    }
 
-    /// <summary>
-    /// Builds the effective system prompt by appending location context
-    /// when a user location hint is configured (opt-in).
-    /// </summary>
-    private string BuildEffectiveSystemPrompt()
-    {
-        if (string.IsNullOrWhiteSpace(UserLocationHint))
-            return _systemPrompt;
-
-        var locationBlock =
-            $"\n\n[USER LOCATION]\n" +
-            $"The user's home location is: {UserLocationHint.Trim()}." +
-            (string.IsNullOrWhiteSpace(UserTimezone)
-                ? ""
-                : $" Timezone: {UserTimezone.Trim()}.") +
-            " Use this as the default area when they ask about local " +
-            "businesses, weather, news, or places without specifying a " +
-            "location. Do NOT announce that you know their location — " +
-            "just use it naturally.\n" +
-            "[/USER LOCATION]";
-
-        return _systemPrompt + locationBlock;
+        var personalitySnapshot = _personalityRuntime.Snapshot;
+        EmitPersonalityAuditSnapshot(personalitySnapshot, _activePersonalityId);
     }
 
     /// <inheritdoc />
@@ -364,6 +394,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         if (string.IsNullOrWhiteSpace(userMessage))
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
+
+        _turnSequence++;
+        var personalityTurnTag = $"turn-{_turnSequence:000000}";
+        var personalityAnchor = _personalityRuntime.BuildAnchor(personalityTurnTag);
 
         var lowerIncoming = userMessage.Trim().ToLowerInvariant();
         if (!LooksLikeReasoningFollowUp(lowerIncoming))
@@ -379,6 +413,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         var toolCallsMade = new List<ToolCallRecord>();
         var roundTrips = 0;
+
+        if (!IsMultiIntentBypassActive())
+        {
+            var multiIntentResponse = await TryProcessMultiIntentTurnAsync(
+                userMessage,
+                toolCallsMade,
+                cancellationToken);
+            if (multiIntentResponse is not null)
+                return AttachContextSnapshot(multiIntentResponse, usageBaseline);
+        }
 
         // ── Route: classify intent + determine requirements ──────────
         var route = await _router.RouteAsync(
@@ -505,7 +549,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var mergedSlots = _mergeSlots.Run(stateBefore, extractedSlots, _timeProvider.GetUtcNow());
         var validatedSlots = _validateSlots.Run(stateBefore, mergedSlots);
         UpdateDialogueStateFromValidatedSlots(validatedSlots);
-        var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore);
+        var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore, UserLocationHint, PreferredUnits);
 
         var contextualUserMessage = string.IsNullOrWhiteSpace(validatedSlots.NormalizedMessage)
             ? userMessage
@@ -578,15 +622,22 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }, usageBaseline);
             }
 
+            var activePersonality = _personalityRuntime.Snapshot.Profile;
             var utilityResponse = await _utilityIntentHandler.TryHandleAsync(
                 new UtilityIntentExecutionRequest
                 {
                     UserMessage = contextualUserMessage,
                     Route = route,
                     ToolPlan = toolPlan,
+                    ActivePersonalityId = activePersonality.Id,
+                    ActivePersonalityDisplayName = activePersonality.DisplayName,
+                    ActivePersonalitySelfName = activePersonality.Identity.SelfName,
+                    ActivePersonalitySelfDescription = activePersonality.Identity.SelfDescription,
                     ValidatedSlots = validatedSlots,
                     ToolCallsMade = toolCallsMade,
                     RoundTrips = roundTrips,
+                    UserLocationHint = UserLocationHint,
+                    PreferredUnits = PreferredUnits,
                     TryDeterministicMatch = _deterministicUtilityEngine.TryMatch,
                     ToUtilityResult = ToUtilityResult,
                     BuildFromToolPlan = BuildUtilityResultFromToolPlan,
@@ -725,6 +776,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 // Inject memory context before search pipeline
                 if (!string.IsNullOrWhiteSpace(memoryPackText))
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
+                InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
                 var searchResponse = await _searchOrchestrator.ExecuteAsync(
                     contextualUserMessage,
@@ -747,6 +799,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // ── Inject memory context ─────────────────────────────────
             if (!string.IsNullOrWhiteSpace(memoryPackText))
                 InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
+            InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
             // ── Chat-only: skip tool loop entirely ───────────────────
             // No tools, no function-calling grammar. The LLM just
@@ -763,6 +816,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LogEvent("LOGIC_PUZZLE_SCAFFOLD",
                         "Injected first-principles decomposition scaffold for chat-only solve.");
                 }
+                InjectPersonalityAnchorIntoHistoryInPlace(messages, personalityAnchor, personalityTurnTag);
                 var response = await CallLlmWithRetrySafe(
                     messages, roundTrips, MaxTokensCasual, cancellationToken);
 

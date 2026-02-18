@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows.Input;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Core;
@@ -19,6 +20,8 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private readonly IToolRunner _toolRunner;
     private readonly Action _requestShutdown;
     private readonly IVoiceStateSource? _voiceStateSource;
+    private readonly Func<string>? _getActivePersonalityId;
+    private readonly Func<string>? _getActivePersonalityHash;
     
     private bool _isDrawerOpen;
     private string _stateLabel = "";
@@ -27,6 +30,8 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private int _simulatedStateIndex = 1;
     private string _permissionDemoStatus = "Ready";
     private int _activeTokenCount;
+    private string _activePersonalityLabel = "";
+    private string _activePersonalityHash = "";
 
     public OverlayViewModel(
         RuntimeController controller, 
@@ -34,7 +39,9 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         IPermissionBroker permissionBroker,
         IToolRunner toolRunner,
         Action requestShutdown,
-        IVoiceStateSource? voiceStateSource = null)
+        IVoiceStateSource? voiceStateSource = null,
+        Func<string>? getActivePersonalityId = null,
+        Func<string>? getActivePersonalityHash = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
@@ -42,6 +49,8 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         _toolRunner = toolRunner ?? throw new ArgumentNullException(nameof(toolRunner));
         _requestShutdown = requestShutdown ?? throw new ArgumentNullException(nameof(requestShutdown));
         _voiceStateSource = voiceStateSource;
+        _getActivePersonalityId = getActivePersonalityId;
+        _getActivePersonalityHash = getActivePersonalityHash;
 
         // Initialize commands
         ToggleDrawerCommand = new RelayCommand(ToggleDrawer);
@@ -59,6 +68,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         // Initialize state
         UpdateStateDisplay();
         UpdateActiveTokenCount();
+        UpdatePersonalityDisplay();
         RefreshAuditFeed();
     }
 
@@ -157,6 +167,20 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _activeTokenCount, value);
     }
 
+    public string ActivePersonalityLabel
+    {
+        get => _activePersonalityLabel;
+        private set => SetProperty(ref _activePersonalityLabel, value);
+    }
+
+    public string ActivePersonalityHash
+    {
+        get => _activePersonalityHash;
+        private set => SetProperty(ref _activePersonalityHash, value);
+    }
+
+    public void RefreshPersonality() => UpdatePersonalityDisplay();
+
     private void ToggleDrawer()
     {
         IsDrawerOpen = !IsDrawerOpen;
@@ -215,6 +239,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
         {
             UpdateStateDisplay();
+            UpdatePersonalityDisplay();
             RefreshAuditFeed();
         });
     }
@@ -224,6 +249,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
         {
             UpdateStateDisplay();
+            UpdatePersonalityDisplay();
             RefreshAuditFeed();
         });
     }
@@ -240,6 +266,18 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         var state = _controller.CurrentState;
         StateLabel = state.ToDisplayLabel();
         StateIcon = state.ToIconHint();
+    }
+
+    private void UpdatePersonalityDisplay()
+    {
+        var id = (_getActivePersonalityId?.Invoke() ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(id))
+            id = "helpful_default";
+
+        var label = id.Replace('_', ' ').Trim();
+        label = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(label);
+        ActivePersonalityLabel = $"Profile: {label}";
+        ActivePersonalityHash = (_getActivePersonalityHash?.Invoke() ?? "").Trim();
     }
 
     private static string VoiceStateToLabel(VoiceState state) => state switch
