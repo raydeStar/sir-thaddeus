@@ -1,5 +1,6 @@
 using SirThaddeus.Agent.Dialogue;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -8,6 +9,10 @@ namespace SirThaddeus.Agent.Search;
 /// </summary>
 public sealed class UtilityIntentHandler : IUtilityIntentHandler
 {
+    private static readonly Regex MultiSpaceRegex = new(
+        @"\s+",
+        RegexOptions.Compiled);
+
     public async Task<AgentResponse?> TryHandleAsync(
         UtilityIntentExecutionRequest request,
         CancellationToken cancellationToken = default)
@@ -21,6 +26,10 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             route.Intent,
             Intents.UtilityDeterministic,
             StringComparison.OrdinalIgnoreCase);
+
+        var identityResponse = TryBuildIdentityResponse(request, message);
+        if (identityResponse is not null)
+            return identityResponse;
 
         UtilityRouter.UtilityResult? utilityResult = null;
 
@@ -41,9 +50,9 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             utilityResult = request.BuildFromToolPlan(toolPlan, message);
 
         if (utilityResult is null && request.TryContextFollowUp is not null)
-            utilityResult = request.TryContextFollowUp(message) ?? UtilityRouter.TryHandle(message);
+            utilityResult = request.TryContextFollowUp(message) ?? UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
         else
-            utilityResult ??= UtilityRouter.TryHandle(message);
+            utilityResult ??= UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
 
         if (utilityResult is null &&
             !deterministicRouteRequested &&
@@ -201,6 +210,154 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             SuppressSourceCardsUi = suppressUiArtifacts,
             SuppressToolActivityUi = suppressUiArtifacts
         };
+    }
+
+    private static AgentResponse? TryBuildIdentityResponse(
+        UtilityIntentExecutionRequest request,
+        string message)
+    {
+        var normalized = NormalizeIdentityPrompt(message);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var asksName = IsNamePrompt(normalized);
+        var asksAboutSelf = !asksName && IsSelfDescriptionPrompt(normalized);
+        if (!asksName && !asksAboutSelf)
+            return null;
+
+        var assistantName = ResolveAssistantName(request);
+        var selfDescription = (request.ActivePersonalitySelfDescription ?? "").Trim();
+
+        var text = asksName
+            ? BuildNameAnswer(assistantName, selfDescription)
+            : BuildSelfDescriptionAnswer(assistantName, selfDescription);
+
+        request.LogEvent?.Invoke("UTILITY_BYPASS", "category=identity");
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = request.ToolCallsMade.ToList(),
+            LlmRoundTrips = request.RoundTrips,
+            SuppressSourceCardsUi = true,
+            SuppressToolActivityUi = true
+        };
+    }
+
+    private static string NormalizeIdentityPrompt(string message)
+    {
+        var normalized = (message ?? "").Trim().ToLowerInvariant();
+        if (normalized.Length == 0)
+            return "";
+
+        normalized = normalized
+            .Replace("?", " ", StringComparison.Ordinal)
+            .Replace("!", " ", StringComparison.Ordinal)
+            .Replace(".", " ", StringComparison.Ordinal)
+            .Replace(",", " ", StringComparison.Ordinal)
+            .Replace(":", " ", StringComparison.Ordinal)
+            .Replace(";", " ", StringComparison.Ordinal)
+            .Replace("-", " ", StringComparison.Ordinal);
+
+        normalized = MultiSpaceRegex.Replace(normalized, " ").Trim();
+
+        var leadIns = new[]
+        {
+            "hey ",
+            "hi ",
+            "hello ",
+            "can you ",
+            "could you ",
+            "would you ",
+            "please "
+        };
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var lead in leadIns)
+            {
+                if (!normalized.StartsWith(lead, StringComparison.Ordinal))
+                    continue;
+
+                normalized = normalized[lead.Length..].TrimStart();
+                changed = true;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static bool IsNamePrompt(string normalized)
+        => normalized is
+            "what is your name" or
+            "what s your name" or
+            "whats your name" or
+            "tell me your name" or
+            "your name";
+
+    private static bool IsSelfDescriptionPrompt(string normalized)
+        => normalized is
+            "who are you" or
+            "describe yourself" or
+            "tell me about yourself" or
+            "introduce yourself" or
+            "describe your personality" or
+            "what are you like";
+
+    private static string ResolveAssistantName(UtilityIntentExecutionRequest request)
+    {
+        var selfName = (request.ActivePersonalitySelfName ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(selfName))
+            return selfName;
+
+        var displayName = (request.ActivePersonalityDisplayName ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(displayName))
+            return displayName;
+
+        var profileId = (request.ActivePersonalityId ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(profileId))
+            return profileId.Replace("_", " ", StringComparison.Ordinal);
+
+        return "your assistant";
+    }
+
+    private static string BuildNameAnswer(string assistantName, string selfDescription)
+    {
+        var headline = $"My name is {assistantName}.";
+        var tagline = ExtractIdentityTagline(selfDescription);
+        if (string.IsNullOrWhiteSpace(tagline))
+            return headline;
+
+        return $"{headline}\n\n{tagline}";
+    }
+
+    private static string BuildSelfDescriptionAnswer(string assistantName, string selfDescription)
+    {
+        if (string.IsNullOrWhiteSpace(selfDescription))
+            return $"I am {assistantName}, and I focus on clear, practical help.";
+
+        if (selfDescription.StartsWith("I ", StringComparison.OrdinalIgnoreCase))
+            return selfDescription;
+
+        return $"I am {assistantName}. {selfDescription}";
+    }
+
+    private static string ExtractIdentityTagline(string selfDescription)
+    {
+        if (string.IsNullOrWhiteSpace(selfDescription))
+            return "";
+
+        var trimmed = selfDescription.Trim();
+        var sentenceEnd = trimmed.IndexOfAny(new[] { '.', '!', '?' });
+        if (sentenceEnd > 0 && sentenceEnd < 220)
+            return trimmed[..(sentenceEnd + 1)].Trim();
+
+        return trimmed.Length <= 220
+            ? trimmed
+            : trimmed[..220].TrimEnd() + "...";
     }
 
     private static string? BuildMetaCapabilitiesSummary(IList<ToolCallRecord> calls)

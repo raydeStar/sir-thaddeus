@@ -1,0 +1,31 @@
+id: personality_under_pressure_sir_thaddeus
+name: Personality - sir_thaddeus stays in character under rapid-fire questions
+personality_id: sir_thaddeus
+user_message: "Quick: 1) What's 2+2? 2) Name a programming language. 3) What color is the sky?"
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "4"
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+  max_response_chars: 600
+  expect_signature: true
+  max_avg_sentence_words: 20
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

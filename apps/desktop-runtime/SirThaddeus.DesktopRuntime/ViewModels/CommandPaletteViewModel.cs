@@ -41,6 +41,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private readonly IAuditLogger _audit;
     private readonly Action _closeWindow;
     private readonly IDialogueStatePersistence? _dialogueStatePersistence;
+    private readonly Services.ChatHistoryPersistence? _chatHistoryPersistence;
     // Voice PTT delegates are now set as public properties (VoiceMicDown, VoiceMicUp, VoiceShutup)
     // after construction — the ViewModel doesn't own the orchestrator.
 
@@ -88,7 +89,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         IToolExecutionHost host,
         IAuditLogger audit,
         Action closeWindow,
-        IDialogueStatePersistence? dialogueStatePersistence = null)
+        IDialogueStatePersistence? dialogueStatePersistence = null,
+        Services.ChatHistoryPersistence? chatHistoryPersistence = null)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _llmClient    = llmClient    ?? throw new ArgumentNullException(nameof(llmClient));
@@ -96,6 +98,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _audit        = audit        ?? throw new ArgumentNullException(nameof(audit));
         _closeWindow  = closeWindow  ?? throw new ArgumentNullException(nameof(closeWindow));
         _dialogueStatePersistence = dialogueStatePersistence;
+        _chatHistoryPersistence = chatHistoryPersistence;
 
         SendCommand   = new AsyncRelayCommand(SendAsync, CanSend);
         ClearCommand  = new RelayCommand(ClearConversation);
@@ -108,6 +111,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         BriefingPanel = new BriefingPanelViewModel();
         TryLoadBriefingFixture();
+        RestorePersistedHistory();
 
         // Check connection on construction (fire-and-forget, logged on failure)
         _ = CheckConnectionAsync();
@@ -498,6 +502,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     if (BriefingPanel.TrySetBriefing(result.DeepDiveBriefing, out var briefingErrors))
                     {
                         BriefingReady?.Invoke();
+                        PersistBriefingHistory();
                     }
                     else
                     {
@@ -667,6 +672,50 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         const int maxSessions = 30;
         while (ChatHistory.Count > maxSessions)
             ChatHistory.RemoveAt(ChatHistory.Count - 1);
+
+        PersistChatHistory();
+    }
+
+    /// <summary>
+    /// Flush current session + all history to disk.
+    /// Called during app shutdown to avoid data loss.
+    /// </summary>
+    public void SaveAllHistory()
+    {
+        SnapshotCurrentSession();
+        PersistChatHistory();
+        PersistBriefingHistory();
+    }
+
+    private void PersistChatHistory()
+    {
+        _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
+    }
+
+    private void PersistBriefingHistory()
+    {
+        _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
+    }
+
+    private void RestorePersistedHistory()
+    {
+        if (_chatHistoryPersistence is null) return;
+
+        var savedChats = _chatHistoryPersistence.LoadChatHistory();
+        foreach (var session in savedChats)
+            ChatHistory.Add(session);
+
+        var savedBriefings = _chatHistoryPersistence.LoadBriefingHistory();
+        foreach (var dto in savedBriefings)
+        {
+            if (dto.Briefing is null) continue;
+            BriefingPanel.History.Add(new BriefingHistoryEntry(
+                Title:      dto.Title,
+                Confidence: dto.Confidence,
+                StatusLine: dto.StatusLine,
+                Timestamp:  dto.Timestamp,
+                Briefing:   dto.Briefing));
+        }
     }
 
     private void LoadChatSession(object? parameter)

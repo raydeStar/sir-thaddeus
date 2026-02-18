@@ -19,7 +19,11 @@ public sealed record ToolPlanDecision
 
 public interface IToolPlanner
 {
-    ToolPlanDecision Plan(ValidatedSlots slots, DialogueState currentState);
+    ToolPlanDecision Plan(
+        ValidatedSlots slots,
+        DialogueState currentState,
+        string? userLocationHint = null,
+        string? preferredUnits = null);
 }
 
 /// <summary>
@@ -27,7 +31,11 @@ public interface IToolPlanner
 /// </summary>
 public sealed class ToolPlanner : IToolPlanner
 {
-    public ToolPlanDecision Plan(ValidatedSlots slots, DialogueState currentState)
+    public ToolPlanDecision Plan(
+        ValidatedSlots slots,
+        DialogueState currentState,
+        string? userLocationHint = null,
+        string? preferredUnits = null)
     {
         ArgumentNullException.ThrowIfNull(slots);
         ArgumentNullException.ThrowIfNull(currentState);
@@ -41,7 +49,10 @@ public sealed class ToolPlanner : IToolPlanner
             };
         }
 
-        var utility = UtilityRouter.TryHandle(slots.NormalizedMessage);
+        var utility = UtilityRouter.TryHandle(
+            slots.NormalizedMessage,
+            userLocationHint,
+            preferredUnits);
         if (utility is null)
             return new ToolPlanDecision { Category = "none" };
 
@@ -49,9 +60,10 @@ public sealed class ToolPlanner : IToolPlanner
         if ((utility.Category == "weather" || utility.Category == "time") &&
             !string.IsNullOrWhiteSpace(slots.LocationText))
         {
+            var resolvedPlace = UtilityRouter.ResolveProximityPlace(slots.LocationText, userLocationHint);
             var args = JsonSerializer.Serialize(new
             {
-                place = slots.LocationText,
+                place = resolvedPlace,
                 maxResults = 3
             });
 

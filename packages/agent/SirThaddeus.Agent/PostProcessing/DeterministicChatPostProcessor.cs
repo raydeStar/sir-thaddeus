@@ -1,5 +1,7 @@
 using static SirThaddeus.Agent.OrchestratorMessageHelpers;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.PersonalityEngine.Formatting;
+using SirThaddeus.PersonalityEngine.Profiles;
 using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Agent.PostProcessing;
@@ -10,6 +12,14 @@ namespace SirThaddeus.Agent.PostProcessing;
 /// </summary>
 public sealed class DeterministicChatPostProcessor
 {
+    private readonly Func<PersonalityProfile?> _resolveActiveProfile;
+    private readonly ResponseKindClassifier _responseKindClassifier = new();
+
+    public DeterministicChatPostProcessor(Func<PersonalityProfile?>? resolveActiveProfile = null)
+    {
+        _resolveActiveProfile = resolveActiveProfile ?? (() => null);
+    }
+
     public string ProcessChatOnlyDraft(
         string draftText,
         string userMessage,
@@ -62,7 +72,8 @@ public sealed class DeterministicChatPostProcessor
     public string SanitizeFinalResponse(
         string text,
         IReadOnlyList<ToolCallRecord> toolCallsMade,
-        string? latestUserMessage)
+        string? latestUserMessage,
+        bool allowToolResultPersonalityPresentation = false)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text ?? "";
@@ -124,6 +135,66 @@ public sealed class DeterministicChatPostProcessor
         if (IsBareResponse(sanitized) && IsLikelyQuestion(latestUserMessage))
             sanitized = EnrichBareResponse(sanitized);
 
+        var activeProfile = _resolveActiveProfile();
+        if (activeProfile is null)
+            return sanitized;
+
+        var responseKind = _responseKindClassifier.Classify(
+            sanitized,
+            hasToolEvidence: toolCallsMade.Count > 0);
+
+        // Safety refusals are semantically sensitive.
+        // Only allow deterministic cleanup; no signature, no reduction.
+        if (responseKind is ResponseKind.SafetyRefusal)
+            return sanitized;
+
+        var presentationOptions = PersonalityFormattingPolicy.BuildPresentationOptions(activeProfile);
+
+        // Tool-backed responses default to strict mode (no signature/reduction).
+        // For search/news style replies we can opt into presentation-only
+        // formatting so the selected personality remains visible.
+        if (responseKind is ResponseKind.ToolResult)
+        {
+            if (!allowToolResultPersonalityPresentation)
+                return sanitized;
+
+            var semanticKind = _responseKindClassifier.Classify(
+                sanitized,
+                hasToolEvidence: false);
+
+            // Keep sensitive shapes unchanged even when personality
+            // presentation is allowed for tool-backed responses.
+            if (semanticKind is ResponseKind.SafetyRefusal)
+                return sanitized;
+
+            if (semanticKind is ResponseKind.CodeHeavy or ResponseKind.NumericHeavy)
+            {
+                sanitized = PresentationFormatter.Apply(
+                    sanitized,
+                    presentationOptions with { IncludeSignatureNote = false });
+                return sanitized;
+            }
+
+            sanitized = PresentationFormatter.Apply(sanitized, presentationOptions);
+            return sanitized;
+        }
+
+        // Code-heavy and numeric-heavy output: allow whitespace normalization
+        // but suppress signature insertion to avoid polluting structured output.
+        if (responseKind is ResponseKind.CodeHeavy or ResponseKind.NumericHeavy)
+        {
+            sanitized = PresentationFormatter.Apply(
+                sanitized,
+                presentationOptions with { IncludeSignatureNote = false });
+            return sanitized;
+        }
+
+        sanitized = PresentationFormatter.Apply(sanitized, presentationOptions);
+
+        sanitized = ReductionFormatter.Apply(
+            sanitized,
+            PersonalityFormattingPolicy.BuildReductionOptions(activeProfile));
+
         return sanitized;
     }
 
@@ -176,6 +247,13 @@ public sealed class DeterministicChatPostProcessor
         return cleaned.TrimEnd(',', ';', ':', '-', '—').Trim();
     }
 
+    /// <summary>
+    /// Prompt block kind prefixes rendered by <c>DeterministicPromptRenderer</c>.
+    /// If the LLM echoes a system-prompt section tag, strip it.
+    /// </summary>
+    private static readonly string[] PromptBlockKindPrefixes =
+        ["Trust:", "Security:", "Personality:", "Task:", "Mode:", "MemoryAnchor:"];
+
     private static bool IsInternalMarkerLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -194,11 +272,19 @@ public sealed class DeterministicChatPostProcessor
         if (string.IsNullOrWhiteSpace(marker))
             return false;
 
+        // Match rendered prompt block tags: [Kind:id] / [/Kind:id]
+        foreach (var prefix in PromptBlockKindPrefixes)
+        {
+            if (marker.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
         if (marker.Contains("TOOL", StringComparison.OrdinalIgnoreCase) ||
             marker.Contains("INSTRUCTION", StringComparison.OrdinalIgnoreCase) ||
             marker.Contains("REFERENCE", StringComparison.OrdinalIgnoreCase) ||
             marker.Contains("ASSISTANT RESPONSE", StringComparison.OrdinalIgnoreCase) ||
             marker.Contains("PROFILE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("PERSONALITY_ANCHOR", StringComparison.OrdinalIgnoreCase) ||
             marker.Contains("MEMORY", StringComparison.OrdinalIgnoreCase))
         {
             return true;

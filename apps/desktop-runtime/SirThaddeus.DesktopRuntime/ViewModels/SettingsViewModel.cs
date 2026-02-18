@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -9,6 +10,7 @@ using SirThaddeus.Config;
 using SirThaddeus.DesktopRuntime.Services;
 using SirThaddeus.Memory;
 using SirThaddeus.Memory.Sqlite;
+using SirThaddeus.PersonalityEngine.Profiles;
 
 namespace SirThaddeus.DesktopRuntime.ViewModels;
 
@@ -99,6 +101,7 @@ public sealed class SettingsViewModel : ViewModelBase
     // Weather
     private string _weatherUserAgent =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
+    private string _weatherPreferredUnits = "imperial";
     private string _reasoningGuardrails = "off";
 
     // Location (manual city/ZIP)
@@ -121,7 +124,11 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // Profile
     private ProfileOption? _selectedProfile;
+    private PersonalityOption? _selectedPersonality;
+    private string _personalityProfilesDirectory = "";
+    private bool _suppressPersonalitySelectionSave;
     private string         _statusText = "";
+    private readonly PersonalityProfileStore _personalityStore = new();
 
     // ─── Public Properties ───────────────────────────────────────────
 
@@ -211,6 +218,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     // Weather
     public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
+    public string WeatherPreferredUnits    { get => _weatherPreferredUnits;    set { if (SetProperty(ref _weatherPreferredUnits, value))    MarkDirty(); } }
 
     // Location (manual city/ZIP)
     public string LocationLabel { get => _locationLabel; set { if (SetProperty(ref _locationLabel, value)) MarkDirty(); } }
@@ -308,9 +316,14 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand StartVoiceHostCommand    { get; }
     public ICommand StopVoiceHostCommand     { get; }
     public ICommand RefreshVoiceHostCommand  { get; }
+    public ICommand AddPersonalityCommand    { get; }
+    public ICommand EditPersonalityCommand   { get; }
+    public ICommand DuplicatePersonalityCommand { get; }
+    public ICommand ResetPersonalityCommand  { get; }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
+    public ObservableCollection<PersonalityOption> AvailablePersonalities { get; } = new();
 
     public ProfileOption? SelectedProfile
     {
@@ -323,6 +336,27 @@ public sealed class SettingsViewModel : ViewModelBase
                 SaveProfileSelectionOnly();
             }
         }
+    }
+
+    public PersonalityOption? SelectedPersonality
+    {
+        get => _selectedPersonality;
+        set
+        {
+            if (!SetProperty(ref _selectedPersonality, value))
+                return;
+
+            if (_suppressPersonalitySelectionSave)
+                return;
+
+            SavePersonalitySelectionOnly();
+        }
+    }
+
+    public string PersonalityProfilesDirectory
+    {
+        get => _personalityProfilesDirectory;
+        private set => SetProperty(ref _personalityProfilesDirectory, value);
     }
 
     public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
@@ -339,6 +373,11 @@ public sealed class SettingsViewModel : ViewModelBase
     /// can propagate the choice to the agent and MCP layers.
     /// </summary>
     public event Action<string?>? ActiveProfileChanged;
+
+    /// <summary>
+    /// Raised when the active personality changes.
+    /// </summary>
+    public event Action<string>? ActivePersonalityChanged;
 
     /// <summary>
     /// Raised after settings are saved so the runtime can swap the
@@ -375,9 +414,14 @@ public sealed class SettingsViewModel : ViewModelBase
         StartVoiceHostCommand    = new AsyncRelayCommand(StartVoiceHostAsync,  () => !VoiceHostIsBusy);
         StopVoiceHostCommand     = new AsyncRelayCommand(StopVoiceHostAsync,   () => !VoiceHostIsBusy);
         RefreshVoiceHostCommand  = new AsyncRelayCommand(RefreshVoiceHostHealthAsync, () => !VoiceHostIsBusy);
+        AddPersonalityCommand = new RelayCommand(_ => AddNewPersonality());
+        EditPersonalityCommand = new RelayCommand(_ => EditSelectedPersonality());
+        DuplicatePersonalityCommand = new RelayCommand(_ => DuplicateSelectedPersonality());
+        ResetPersonalityCommand = new RelayCommand(_ => ResetPersonalityToDefault());
 
         LoadFromSettings(settings);
         LoadAudioDevices();
+        LoadPersonalityProfiles();
     }
 
     // ─── Load / Save ─────────────────────────────────────────────────
@@ -390,6 +434,7 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         _settings = SettingsManager.Load();
         LoadFromSettings(_settings);
+        LoadPersonalityProfiles();
         LoadAudioDevices();
         await LoadProfilesAsync();
         ClearDirty();
@@ -441,8 +486,10 @@ public sealed class SettingsViewModel : ViewModelBase
         _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
         _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
         _weatherUserAgent         = s.Weather.UserAgent;
+        _weatherPreferredUnits    = s.Weather.PreferredUnits;
         _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
+        _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
         LoadLocationForProfile(s.ActiveProfileId);
 
         // Notify all bindings
@@ -482,9 +529,11 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(McpPermMemoryRead));
         OnPropertyChanged(nameof(McpPermMemoryWrite));
         OnPropertyChanged(nameof(WeatherUserAgent));
+        OnPropertyChanged(nameof(WeatherPreferredUnits));
         OnPropertyChanged(nameof(ReasoningGuardrails));
         OnPropertyChanged(nameof(InputGain));
         OnPropertyChanged(nameof(LocationLabel));
+        OnPropertyChanged(nameof(PersonalityProfilesDirectory));
 
         RefreshKokoroVoiceCatalog();
     }
@@ -528,6 +577,257 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             StatusText = $"Failed to load profiles: {ex.Message}";
         }
+    }
+
+    private void LoadPersonalityProfiles()
+    {
+        try
+        {
+            var profilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(_settings);
+            PersonalityProfilesDirectory = profilesDirectory;
+            _personalityStore.EnsureBuiltInsInstalled(profilesDirectory);
+
+            var profiles = _personalityStore.ListProfiles(profilesDirectory)
+                .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _suppressPersonalitySelectionSave = true;
+            AvailablePersonalities.Clear();
+            foreach (var profile in profiles)
+            {
+                AvailablePersonalities.Add(new PersonalityOption(
+                    profile.Id,
+                    profile.DisplayName,
+                    profile.SourcePath,
+                    profile.Hash));
+            }
+
+            if (AvailablePersonalities.Count == 0)
+            {
+                StatusText = "No valid personality profiles were found.";
+                return;
+            }
+
+            _selectedPersonality = AvailablePersonalities
+                .FirstOrDefault(p =>
+                    string.Equals(
+                        p.ProfileId,
+                        _settings.ActivePersonalityId,
+                        StringComparison.OrdinalIgnoreCase))
+                ?? AvailablePersonalities.FirstOrDefault(p =>
+                    string.Equals(p.ProfileId, BuiltInProfileCatalog.HelpfulDefaultId, StringComparison.OrdinalIgnoreCase))
+                ?? AvailablePersonalities[0];
+
+            OnPropertyChanged(nameof(SelectedPersonality));
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to load personalities: {ex.Message}";
+        }
+        finally
+        {
+            _suppressPersonalitySelectionSave = false;
+        }
+    }
+
+    private void AddNewPersonality()
+    {
+        try
+        {
+            var directory = PersonalityProfilesDirectory;
+            var baseId = $"custom_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}";
+            var candidateId = baseId;
+            var suffix = 2;
+
+            while (File.Exists(_personalityStore.ResolveProfilePath(directory, candidateId)))
+            {
+                candidateId = $"{baseId}_{suffix}";
+                suffix++;
+            }
+
+            var profile = new PersonalityProfile
+            {
+                Id = candidateId,
+                DisplayName = "New Personality",
+                Description = "Template profile. Edit description, identity, and tone values for your new style.",
+                Identity = new PersonalityIdentity
+                {
+                    SelfName = "New Personality",
+                    SelfDescription = "I am a new custom personality template. Edit identity.self_name and identity.self_description to define your assistant's voice, mission, and style."
+                },
+                Tone = new PersonalityTone
+                {
+                    Formality = 0.60,
+                    Warmth = 0.60,
+                    Humor = 0.20,
+                    Verbosity = 0.55,
+                    Directness = 0.82
+                },
+                BehaviorRules = new PersonalityBehaviorRules
+                {
+                    PushbackOnIllogic = true,
+                    AvoidFlattery = true,
+                    NeverOverridePermissions = true
+                },
+                SpeechPatterns = new PersonalitySpeechPatterns
+                {
+                    IncludeSignatureNote = false,
+                    AvoidModernSlang = true
+                },
+                CapabilityConstraints = new PersonalityCapabilityConstraints
+                {
+                    MaxMetaphorDensity = 0.22
+                },
+                ReductionRules = new PersonalityReductionRules
+                {
+                    Enabled = false,
+                    CollapseExactDuplicates = true,
+                    TrimTrailingFluff = true
+                }
+            };
+
+            var descriptor = _personalityStore.SaveProfile(directory, profile);
+            _settings = _settings with
+            {
+                ActivePersonalityId = descriptor.Id,
+                PersonalityProfilesDir = directory
+            };
+            SettingsManager.Save(_settings);
+
+            LoadPersonalityProfiles();
+            _selectedPersonality = AvailablePersonalities
+                .FirstOrDefault(p => string.Equals(p.ProfileId, descriptor.Id, StringComparison.OrdinalIgnoreCase))
+                ?? _selectedPersonality;
+            OnPropertyChanged(nameof(SelectedPersonality));
+
+            StatusText = $"Created personality '{descriptor.Id}'. Edit it and save.";
+            ActivePersonalityChanged?.Invoke(_settings.ActivePersonalityId);
+            SettingsChanged?.Invoke(_settings);
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "PERSONALITY_PROFILE_CREATED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["profileId"] = descriptor.Id,
+                    ["profileHash"] = descriptor.Hash
+                }
+            });
+
+            OpenPersonalityFile(descriptor.SourcePath);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not create personality: {ex.Message}";
+        }
+    }
+
+    private void EditSelectedPersonality()
+    {
+        if (SelectedPersonality is null)
+            return;
+
+        try
+        {
+            OpenPersonalityFile(SelectedPersonality.SourcePath);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not open personality profile: {ex.Message}";
+        }
+    }
+
+    private void DuplicateSelectedPersonality()
+    {
+        if (SelectedPersonality is null)
+            return;
+
+        try
+        {
+            var sourceId = SelectedPersonality.ProfileId;
+            var directory = PersonalityProfilesDirectory;
+            var baseId = $"{sourceId}_copy";
+            var candidateId = baseId;
+            var suffix = 2;
+
+            while (File.Exists(_personalityStore.ResolveProfilePath(directory, candidateId)))
+            {
+                candidateId = $"{baseId}{suffix}";
+                suffix++;
+            }
+
+            var descriptor = _personalityStore.DuplicateProfile(
+                directory,
+                sourceId,
+                candidateId);
+
+            _settings = _settings with
+            {
+                ActivePersonalityId = descriptor.Id,
+                PersonalityProfilesDir = directory
+            };
+            SettingsManager.Save(_settings);
+
+            LoadPersonalityProfiles();
+            _selectedPersonality = AvailablePersonalities
+                .FirstOrDefault(p => string.Equals(p.ProfileId, descriptor.Id, StringComparison.OrdinalIgnoreCase))
+                ?? _selectedPersonality;
+            OnPropertyChanged(nameof(SelectedPersonality));
+
+            StatusText = $"Personality duplicated as '{descriptor.Id}'.";
+            ActivePersonalityChanged?.Invoke(_settings.ActivePersonalityId);
+            SettingsChanged?.Invoke(_settings);
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "PERSONALITY_PROFILE_DUPLICATED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["sourceProfileId"] = sourceId,
+                    ["newProfileId"] = descriptor.Id,
+                    ["profileHash"] = descriptor.Hash
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not duplicate personality: {ex.Message}";
+        }
+    }
+
+    private void ResetPersonalityToDefault()
+    {
+        var defaultOption = AvailablePersonalities
+            .FirstOrDefault(p => string.Equals(p.ProfileId, BuiltInProfileCatalog.HelpfulDefaultId, StringComparison.OrdinalIgnoreCase));
+
+        if (defaultOption is null)
+        {
+            StatusText = "Default personality profile is not available.";
+            return;
+        }
+
+        _selectedPersonality = defaultOption;
+        OnPropertyChanged(nameof(SelectedPersonality));
+        SavePersonalitySelectionOnly();
+    }
+
+    private void OpenPersonalityFile(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+        {
+            StatusText = "Selected personality file was not found.";
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = sourcePath,
+            UseShellExecute = true
+        });
     }
 
     // ─── YouTube Job Flow ────────────────────────────────────────────
@@ -1185,7 +1485,10 @@ public sealed class SettingsViewModel : ViewModelBase
             {
                 UserAgent = string.IsNullOrWhiteSpace(_weatherUserAgent)
                     ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
-                    : _weatherUserAgent.Trim()
+                    : _weatherUserAgent.Trim(),
+                PreferredUnits = string.IsNullOrWhiteSpace(_weatherPreferredUnits)
+                    ? "imperial"
+                    : _weatherPreferredUnits.Trim()
             },
             Ui = _settings.Ui with
             {
@@ -1197,7 +1500,9 @@ public sealed class SettingsViewModel : ViewModelBase
                 LocationsByProfile = scopedLocations
             },
             Location = nextLocation,
-            ActiveProfileId = _selectedProfile?.ProfileId
+            ActiveProfileId = _selectedProfile?.ProfileId,
+            ActivePersonalityId = _selectedPersonality?.ProfileId ?? BuiltInProfileCatalog.HelpfulDefaultId,
+            PersonalityProfilesDir = PersonalityProfilesDirectory
         };
 
         SettingsManager.Save(updated);
@@ -1207,6 +1512,7 @@ public sealed class SettingsViewModel : ViewModelBase
         StatusText = "Settings saved.";
 
         ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);
 
         if (string.Equals(nextLocationMode, "manual", StringComparison.OrdinalIgnoreCase) &&
@@ -1244,9 +1550,7 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             Actor  = "user",
             Action = "SETTINGS_SAVED",
-            Result = _selectedProfile?.ProfileId is not null
-                ? $"activeProfile={_selectedProfile.ProfileId}"
-                : "activeProfile=none"
+            Result = $"{(_selectedProfile?.ProfileId is not null ? $"activeProfile={_selectedProfile.ProfileId}" : "activeProfile=none")};activePersonality={updated.ActivePersonalityId}"
         });
     }
 
@@ -1268,9 +1572,35 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             Actor = "user",
             Action = "SETTINGS_SAVED",
-            Result = _selectedProfile?.ProfileId is not null
-                ? $"activeProfile={_selectedProfile.ProfileId}"
-                : "activeProfile=none"
+            Result = $"{(_selectedProfile?.ProfileId is not null ? $"activeProfile={_selectedProfile.ProfileId}" : "activeProfile=none")};activePersonality={updated.ActivePersonalityId}"
+        });
+    }
+
+    private void SavePersonalitySelectionOnly()
+    {
+        var selectedId = _selectedPersonality?.ProfileId ?? BuiltInProfileCatalog.HelpfulDefaultId;
+        var updated = _settings with
+        {
+            ActivePersonalityId = selectedId,
+            PersonalityProfilesDir = PersonalityProfilesDirectory
+        };
+
+        SettingsManager.Save(updated);
+        _settings = updated;
+        StatusText = "Personality selected.";
+
+        ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
+        SettingsChanged?.Invoke(updated);
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "user",
+            Action = "PERSONALITY_SELECTED",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["profileId"] = selectedId
+            }
         });
     }
 
@@ -1354,6 +1684,18 @@ public sealed class SettingsViewModel : ViewModelBase
 /// <c>ProfileId == null</c> means "no profile selected."
 /// </summary>
 public sealed record ProfileOption(string? ProfileId, string DisplayLabel)
+{
+    public override string ToString() => DisplayLabel;
+}
+
+/// <summary>
+/// Represents one item in the active personality dropdown.
+/// </summary>
+public sealed record PersonalityOption(
+    string ProfileId,
+    string DisplayLabel,
+    string SourcePath,
+    string ProfileHash)
 {
     public override string ToString() => DisplayLabel;
 }

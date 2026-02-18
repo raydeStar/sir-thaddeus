@@ -1,0 +1,31 @@
+id: personality_short_answer_default
+name: Personality - Short answer stays concise under helpful_default
+personality_id: helpful_default
+user_message: "What is the capital of France?"
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - paris
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+  max_response_chars: 400
+  expect_signature: false
+  max_avg_sentence_words: 20
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

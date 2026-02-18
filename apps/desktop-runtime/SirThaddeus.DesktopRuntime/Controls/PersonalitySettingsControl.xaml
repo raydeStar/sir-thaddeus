@@ -1,0 +1,60 @@
+<UserControl x:Class="SirThaddeus.DesktopRuntime.Controls.PersonalitySettingsControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="260"
+             d:DesignWidth="560">
+
+    <StackPanel>
+        <TextBlock Text="PERSONALITY"
+                   FontSize="11"
+                   FontWeight="Bold"
+                   Foreground="{StaticResource TealBrush}"
+                   Margin="0,0,0,8"/>
+
+        <TextBlock Text="Choose the active response style profile. This layer affects presentation only and cannot override permissions or policy."
+                   FontSize="11.5"
+                   Foreground="{StaticResource Overlay0Brush}"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,8"/>
+
+        <ComboBox ItemsSource="{Binding AvailablePersonalities}"
+                  SelectedItem="{Binding SelectedPersonality, Mode=TwoWay}"
+                  DisplayMemberPath="DisplayLabel"
+                  Style="{StaticResource DarkComboBoxStyle}"
+                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                  Margin="0,0,0,8"/>
+
+        <TextBlock Text="{Binding SelectedPersonality.ProfileHash}"
+                   FontSize="11"
+                   Foreground="{StaticResource Subtext0Brush}"
+                   Margin="0,0,0,4"/>
+
+        <TextBlock Text="{Binding PersonalityProfilesDirectory}"
+                   FontSize="10.5"
+                   Foreground="{StaticResource Overlay1Brush}"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,10"/>
+
+        <WrapPanel>
+            <Button Content="+ Add New"
+                    Command="{Binding AddPersonalityCommand}"
+                    Style="{StaticResource MemoryActionButtonStyle}"
+                    Margin="0,0,8,8"/>
+            <Button Content="Edit"
+                    Command="{Binding EditPersonalityCommand}"
+                    Style="{StaticResource MemoryActionButtonStyle}"
+                    Margin="0,0,8,8"/>
+            <Button Content="Duplicate"
+                    Command="{Binding DuplicatePersonalityCommand}"
+                    Style="{StaticResource MemoryActionButtonStyle}"
+                    Margin="0,0,8,8"/>
+            <Button Content="Reset to Default"
+                    Command="{Binding ResetPersonalityCommand}"
+                    Style="{StaticResource MemoryActionButtonStyle}"
+                    Margin="0,0,0,8"/>
+        </WrapPanel>
+    </StackPanel>
+</UserControl>

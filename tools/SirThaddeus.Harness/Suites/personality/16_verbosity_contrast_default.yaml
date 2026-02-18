@@ -1,0 +1,33 @@
+id: personality_verbosity_contrast_default
+name: Verbosity contrast - helpful_default mid-length explanation
+personality_id: helpful_default
+user_message: "What is a hash table and when should I use one?"
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - hash
+    - key
+  forbidden_keywords:
+    - as an ai
+    - error
+  max_response_chars: 1200
+  expect_signature: false
+  expect_structured_format: true
+  max_avg_sentence_words: 28
+  min_avg_sentence_words: 8
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

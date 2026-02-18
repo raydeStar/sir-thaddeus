@@ -53,6 +53,20 @@ public sealed record AppSettings
     [JsonPropertyName("activeProfileId")]
     public string? ActiveProfileId { get; init; }
 
+    /// <summary>
+    /// Active personality profile id used for prompt composition and
+    /// deterministic response formatting.
+    /// </summary>
+    [JsonPropertyName("activePersonalityId")]
+    public string ActivePersonalityId { get; init; } = "helpful_default";
+
+    /// <summary>
+    /// Optional override directory for personality profiles.
+    /// Empty means use the runtime default path.
+    /// </summary>
+    [JsonPropertyName("personalityProfilesDir")]
+    public string PersonalityProfilesDir { get; init; } = "";
+
     public const string DefaultLocationProfileKey = "__default__";
 
     /// <summary>
@@ -676,6 +690,29 @@ public sealed record WeatherSettings
     [JsonPropertyName("userAgent")]
     public string UserAgent { get; init; } =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
+
+    /// <summary>
+    /// Preferred unit system for assistant responses that involve units
+    /// (weather, distance, speed, and measurements).
+    /// Values: "imperial", "metric", "auto" (infer from source defaults).
+    /// Explicit unit requests in the user message always take precedence.
+    /// </summary>
+    [JsonPropertyName("preferredUnits")]
+    public string PreferredUnits { get; init; } = "imperial";
+
+    /// <summary>
+    /// Returns the normalized unit label suitable for system prompt injection.
+    /// </summary>
+    public string GetNormalizedUnitSystem()
+    {
+        var lower = (PreferredUnits ?? "").Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "metric"   => "metric",
+            "imperial" => "imperial",
+            _          => "auto"
+        };
+    }
 }
 
 /// <summary>

@@ -40,7 +40,7 @@ public sealed class SearchOrchestrator
     private readonly ILlmClient       _llm;
     private readonly IMcpToolClient   _mcp;
     private readonly IAuditLogger     _audit;
-    private readonly string           _systemPrompt;
+    private string                    _systemPrompt;
     private readonly EntityResolver   _entityResolver;
     private readonly QueryBuilder     _queryBuilder;
     private readonly DeepDiveCoordinator _deepDiveCoordinator;
@@ -53,6 +53,13 @@ public sealed class SearchOrchestrator
     /// deep-dive place lookups. Set from the orchestrator's config.
     /// </summary>
     public string? UserLocationHint { get; set; }
+
+    /// <summary>
+    /// Optional global unit preference ("imperial", "metric", "auto").
+    /// Used to bias search query phrasing and summary formatting when the
+    /// user did not request explicit units.
+    /// </summary>
+    public string? PreferredUnits { get; set; }
 
     // ── Tool name conventions (try both casings) ─────────────────────
     private const string WebSearchToolName    = "web_search";
@@ -82,6 +89,21 @@ public sealed class SearchOrchestrator
         "Do NOT invent or guess details not in the results. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. bullet count, headings, numbered list), follow it exactly.";
+
+    private const string LocalNewsSummaryInstruction =
+        "\n\nSearch results are in the next message. The user asked for LOCAL news. " +
+        "PRIORITIZE stories that are regional, community-level, or specific " +
+        "to the user's area. Local school board decisions, community events, " +
+        "local business openings, regional weather, and city council votes " +
+        "are MORE valuable than national/international headlines. " +
+        "Present stories as individual items. " +
+        "For each item, give the headline followed by one sentence " +
+        "explaining why it matters locally. " +
+        "If the results contain ONLY national/international stories and no " +
+        "local content, say so honestly: note that no local stories were " +
+        "found in the results and present the top headlines instead. " +
+        "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT invent or guess details not in the results.";
 
     private const string FactFindSummaryInstruction =
         "\n\nSearch results and article content are in the next message. " +
@@ -139,6 +161,16 @@ public sealed class SearchOrchestrator
         _entityResolver = new EntityResolver(llm, mcp, audit);
         _queryBuilder   = new QueryBuilder(llm, audit);
         _deepDiveCoordinator = new DeepDiveCoordinator(mcp, audit);
+    }
+
+    /// <summary>
+    /// Effective base system prompt used when fallback paths cannot
+    /// reuse history system content.
+    /// </summary>
+    public string SystemPrompt
+    {
+        get => _systemPrompt;
+        set => _systemPrompt = value ?? "";
     }
 
     /// <summary>
@@ -223,7 +255,8 @@ public sealed class SearchOrchestrator
 
         // ── 3. web_search via MCP ────────────────────────────────────
         var toolResult = await CallWebSearchAsync(
-            query.Query, query.Recency, toolCallsMade, ct);
+            query.Query, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage);
 
         if (string.IsNullOrWhiteSpace(toolResult))
         {
@@ -236,7 +269,14 @@ public sealed class SearchOrchestrator
                 ct);
         }
         if (LooksLikeNoResultsPayload(toolResult))
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        {
+            return await BuildNoResultsFallbackAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                ct);
+        }
         if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } newsFailure)
         {
             return await BuildOfflineReasoningResponseAsync(
@@ -277,9 +317,15 @@ public sealed class SearchOrchestrator
         // ── 7. Summarize via LLM ─────────────────────────────────────
         var summaryInput = "[Search results — reference only, do not display to user]\n" +
                            StripSourcesJson(toolResult);
+
+        var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
+                          LocalNewsSignalRegex.IsMatch(userMessage);
+
         var instruction = isMarketQuoteRequest
             ? memoryPackText + FinanceQuoteSummaryInstruction
-            : memoryPackText + NewsSummaryInstruction;
+            : isLocalNews
+                ? memoryPackText + LocalNewsSummaryInstruction
+                : memoryPackText + NewsSummaryInstruction;
 
         return await SummarizeAndRespond(
             summaryInput, instruction,
@@ -318,7 +364,8 @@ public sealed class SearchOrchestrator
 
         // ── 3. web_search via MCP ────────────────────────────────────
         var toolResult = await CallWebSearchAsync(
-            query.Query, query.Recency, toolCallsMade, ct);
+            query.Query, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage);
 
         if (string.IsNullOrWhiteSpace(toolResult))
         {
@@ -331,7 +378,14 @@ public sealed class SearchOrchestrator
                 ct);
         }
         if (LooksLikeNoResultsPayload(toolResult))
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        {
+            return await BuildNoResultsFallbackAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                ct);
+        }
         if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
         {
             return await BuildOfflineReasoningResponseAsync(
@@ -550,7 +604,14 @@ public sealed class SearchOrchestrator
         var toolResult = await CallWebSearchAsync(
             query, recency, toolCallsMade, ct);
         if (LooksLikeNoResultsPayload(toolResult))
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        {
+            return await BuildNoResultsFallbackAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                ct);
+        }
         if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } moreSourcesFailure)
         {
             return await BuildOfflineReasoningResponseAsync(
@@ -674,16 +735,66 @@ public sealed class SearchOrchestrator
             ct);
     }
 
+    private Task<AgentResponse> BuildNoResultsFallbackAsync(
+        string userMessage,
+        string memoryPackText,
+        IReadOnlyList<ChatMessage> history,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (IsLocalBusinessNoResultsRequest(userMessage))
+            return Task.FromResult(BuildNoResultsResponse(userMessage, toolCallsMade));
+
+        return BuildNoResultsReasoningResponseAsync(
+            userMessage,
+            memoryPackText,
+            history,
+            toolCallsMade,
+            ct);
+    }
+
+    private async Task<AgentResponse> BuildNoResultsReasoningResponseAsync(
+        string userMessage,
+        string memoryPackText,
+        IReadOnlyList<ChatMessage> history,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var response = await BuildOfflineReasoningResponseAsync(
+            userMessage,
+            memoryPackText,
+            history,
+            toolCallsMade,
+            "Web search returned no results.",
+            ct);
+
+        var stripped = StripOfflineReasoningPrefix(response.Text);
+        if (!string.IsNullOrWhiteSpace(stripped) &&
+            !string.Equals(stripped, response.Text, StringComparison.Ordinal))
+        {
+            return response with { Text = stripped };
+        }
+
+        return response;
+    }
+
     /// <summary>
     /// Calls web_search via MCP with fallback to PascalCase tool name.
     /// Injects location context when the query contains proximity signals.
+    /// The optional <paramref name="originalUserMessage"/> carries the raw
+    /// user input so injection heuristics can detect intent signals (e.g.
+    /// "local news") even when the query builder has normalized them away.
     /// </summary>
     private async Task<string> CallWebSearchAsync(
         string query, string recency,
         List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? originalUserMessage = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
+        effectiveQuery = InjectLocationIntoLocalNewsQuery(effectiveQuery, originalUserMessage);
+        effectiveQuery = InjectLocationIntoDistanceQuery(effectiveQuery);
+        effectiveQuery = InjectUnitPreferenceIntoDistanceQuery(effectiveQuery);
 
         var args = JsonSerializer.Serialize(new
         {
@@ -731,6 +842,26 @@ public sealed class SearchOrchestrator
         @"\b(near\s*(?:me|by|here)|around\s*here|close\s*by|in\s+my\s+area)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex DistanceIntentRegex = new(
+        @"\bhow\s+far(?:\s+away)?\s+(?:is|are)\b|\bdistance\s+(?:to|between)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex DistanceHasOriginRegex = new(
+        @"\b(?:from|between)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex DistanceExplicitUnitRegex = new(
+        @"\b(?:km|kilometers?|kilometres?|miles?|mi|meters?|metres?|feet|ft)\b|\bin\s+m\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex LocalNewsSignalRegex = new(
+        @"\b(?:local\s+news|news\s+(?:for|near)\s+me|news\s+around\s+(?:here|me)|news\s+in\s+my\s+area|my\s+(?:local\s+)?news|(?:the\s+)?local\s+news|nearby\s+news|neighborhood\s+news|community\s+news)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ExplicitLocationScopeRegex = new(
+        @"\b(?:in|near|around|for)\s+(?!me\b|here\b|my\b|local\b)[a-z][a-z0-9\-\s,]{1,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
     /// When the user's query contains proximity language ("near me", "nearby")
     /// and a manual location hint is available, replaces the vague proximity
@@ -758,6 +889,125 @@ public sealed class SearchOrchestrator
                 ["original"] = query,
                 ["effective"] = result,
                 ["locationHint"] = UserLocationHint.Trim()
+            }
+        });
+
+        return result;
+    }
+
+    private string InjectLocationIntoDistanceQuery(string query)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return query;
+        if (!DistanceIntentRegex.IsMatch(query))
+            return query;
+        if (DistanceHasOriginRegex.IsMatch(query))
+            return query;
+
+        var location = UserLocationHint.Trim();
+        if (string.IsNullOrWhiteSpace(location))
+            return query;
+        if (query.Contains(location, StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        var result = $"{query.Trim().TrimEnd('?', '.', '!', ',')} from {location}";
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCATION_INJECTED_INTO_DISTANCE_QUERY",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["original"] = query,
+                ["effective"] = result,
+                ["locationHint"] = location
+            }
+        });
+
+        return result;
+    }
+
+    /// <summary>
+    /// Rewrites generic "local news" queries into location-first queries
+    /// that search engines handle far better. "local news recent" becomes
+    /// "Rexburg ID news today" — putting the location front and center
+    /// gives the engine the strongest possible locality signal.
+    ///
+    /// Checks both the constructed query AND the original user message for
+    /// local news signals — the query builder may normalize away the intent
+    /// (e.g. "hello! get me the local news" → query "top headlines") but
+    /// the user's words still carry the signal.
+    /// </summary>
+    private string InjectLocationIntoLocalNewsQuery(string query, string? originalUserMessage = null)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return query;
+
+        // Check both the query AND the original message for local news signals.
+        // The query builder may strip "local news" during normalization, but
+        // the user's original words are the ground truth for intent.
+        var hasSignalInQuery   = LocalNewsSignalRegex.IsMatch(query);
+        var hasSignalInMessage = !string.IsNullOrWhiteSpace(originalUserMessage) &&
+                                 LocalNewsSignalRegex.IsMatch(originalUserMessage);
+        if (!hasSignalInQuery && !hasSignalInMessage)
+            return query;
+
+        if (ExplicitLocationScopeRegex.IsMatch(query))
+            return query;
+        if (!string.IsNullOrWhiteSpace(originalUserMessage) &&
+            ExplicitLocationScopeRegex.IsMatch(originalUserMessage))
+            return query;
+
+        var location = UserLocationHint.Trim();
+        if (string.IsNullOrWhiteSpace(location))
+            return query;
+        if (query.Contains(location, StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        // Location-first queries outperform appended-location queries on
+        // every major search engine. "Rexburg ID news today" will surface
+        // the Standard Journal; "local news recent in Rexburg, ID" won't.
+        var result = $"{location} news today";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCATION_INJECTED_INTO_LOCAL_NEWS_QUERY",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["original"]     = query,
+                ["effective"]    = result,
+                ["locationHint"] = location
+            }
+        });
+
+        return result;
+    }
+
+    private string InjectUnitPreferenceIntoDistanceQuery(string query)
+    {
+        if (!DistanceIntentRegex.IsMatch(query))
+            return query;
+        if (DistanceExplicitUnitRegex.IsMatch(query))
+            return query;
+
+        var preferred = NormalizePreferredUnits(PreferredUnits);
+        if (preferred is not ("imperial" or "metric"))
+            return query;
+
+        var unitHint = preferred == "metric" ? "in kilometers" : "in miles";
+        var result = $"{query.Trim().TrimEnd('?', '.', '!', ',')} {unitHint}";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "UNITS_INJECTED_INTO_DISTANCE_QUERY",
+            Result = preferred,
+            Details = new Dictionary<string, object>
+            {
+                ["original"] = query,
+                ["effective"] = result
             }
         });
 
@@ -914,7 +1164,8 @@ public sealed class SearchOrchestrator
             }
         }
 
-        var messages = InjectInstruction(history, instruction);
+        var effectiveInstruction = instruction + BuildGlobalUnitsInstruction(originalRequest);
+        var messages = InjectInstruction(history, effectiveInstruction);
         messages.Add(ChatMessage.User(summaryInput));
 
         LlmResponse response;
@@ -930,7 +1181,7 @@ public sealed class SearchOrchestrator
             // LM Studio regex failure — try minimal context
             var minimal = new List<ChatMessage>
             {
-                ChatMessage.System(_systemPrompt + " " + instruction),
+                ChatMessage.System(_systemPrompt + " " + effectiveInstruction),
                 ChatMessage.User(summaryInput)
             };
 
@@ -993,6 +1244,42 @@ public sealed class SearchOrchestrator
             LlmRoundTrips = Math.Max(1, llmRoundTrips)
         };
     }
+
+    private string BuildGlobalUnitsInstruction(string? userRequest)
+    {
+        var preferred = NormalizePreferredUnits(PreferredUnits);
+        if (preferred is not ("imperial" or "metric"))
+            return "";
+
+        // If the user already requested explicit units, do not override.
+        if (!string.IsNullOrWhiteSpace(userRequest) &&
+            ExplicitUnitRequestRegex.IsMatch(userRequest))
+        {
+            return "";
+        }
+
+        var descriptor = preferred == "metric"
+            ? "metric units (kilometers, km/h, celsius)"
+            : "imperial units (miles, mph, fahrenheit)";
+
+        return "\nUse " + descriptor + " for distances, weather values, and measurements " +
+               "unless the user explicitly asks for a different unit.";
+    }
+
+    private static string NormalizePreferredUnits(string? preferredUnits)
+    {
+        var lower = (preferredUnits ?? "").Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "imperial" => "imperial",
+            "metric" => "metric",
+            _ => "auto"
+        };
+    }
+
+    private static readonly Regex ExplicitUnitRequestRegex = new(
+        @"\b(?:km|kilometers?|kilometres?|miles?|mi|meters?|metres?|feet|ft|km/h|mph|celsius|fahrenheit|cups?|pounds?|lbs?|kg|kilograms?)\b|\bin\s+m\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
     /// Selects the best source from the session for a follow-up.
@@ -1351,15 +1638,7 @@ public sealed class SearchOrchestrator
         string userMessage,
         IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
-        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
-        var isLocalBusinessRequest =
-            lower.Contains("restaurant", StringComparison.Ordinal) ||
-            lower.Contains("restaurants", StringComparison.Ordinal) ||
-            lower.Contains("florist", StringComparison.Ordinal) ||
-            lower.Contains("cafe", StringComparison.Ordinal) ||
-            lower.Contains("coffee", StringComparison.Ordinal) ||
-            lower.Contains("open", StringComparison.Ordinal) ||
-            lower.Contains("hours", StringComparison.Ordinal);
+        var isLocalBusinessRequest = IsLocalBusinessNoResultsRequest(userMessage);
 
         var text = isLocalBusinessRequest
             ? "I could not retrieve live local business results for that request right now. " +
@@ -1375,6 +1654,36 @@ public sealed class SearchOrchestrator
             ToolCallsMade = toolCallsMade.ToList(),
             LlmRoundTrips = 0
         };
+    }
+
+    private static bool IsLocalBusinessNoResultsRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        return
+            lower.Contains("restaurant", StringComparison.Ordinal) ||
+            lower.Contains("restaurants", StringComparison.Ordinal) ||
+            lower.Contains("florist", StringComparison.Ordinal) ||
+            lower.Contains("cafe", StringComparison.Ordinal) ||
+            lower.Contains("coffee", StringComparison.Ordinal) ||
+            lower.Contains("open", StringComparison.Ordinal) ||
+            lower.Contains("hours", StringComparison.Ordinal);
+    }
+
+    private static string StripOfflineReasoningPrefix(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text ?? "";
+
+        const string marker = "Here is a best-effort answer from built-in reasoning:";
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+                             .Replace('\r', '\n')
+                             .Trim();
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return normalized;
+
+        var afterMarker = normalized[(markerIndex + marker.Length)..].Trim();
+        return string.IsNullOrWhiteSpace(afterMarker) ? normalized : afterMarker;
     }
 
     private static IReadOnlyList<string> ExtractKeywords(string text)
@@ -1457,13 +1766,19 @@ public sealed class SearchOrchestrator
         {
             SearchMode.WebFactFind => response with
             {
+                AllowToolResultPersonalityPresentation = true,
                 SuppressSourceCardsUi = true,
                 SuppressToolActivityUi = true
             },
             SearchMode.NewsAggregate => response with
             {
+                AllowToolResultPersonalityPresentation = true,
                 SuppressSourceCardsUi = false,
                 SuppressToolActivityUi = false
+            },
+            SearchMode.FollowUp => response with
+            {
+                AllowToolResultPersonalityPresentation = true
             },
             SearchMode.DeepDiveBriefing => response with
             {

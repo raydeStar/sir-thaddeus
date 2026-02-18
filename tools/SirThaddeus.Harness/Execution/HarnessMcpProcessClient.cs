@@ -183,7 +183,8 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
     {
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? ""
+            ["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "",
+            ["ST_ACTIVE_PERSONALITY_ID"] = settings.ActivePersonalityId ?? "helpful_default"
         };
 
         if (settings.Memory.Enabled)

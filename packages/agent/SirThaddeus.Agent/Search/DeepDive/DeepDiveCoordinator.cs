@@ -161,9 +161,17 @@ public sealed partial class DeepDiveCoordinator
         // Strip conversational filler before building a search query.
         // "Can you tell me what the operating hours of Trader Joe's in Portland is?"
         // becomes "Trader Joe's Portland" — the kind of query that actually works.
+        //
+        // For web search (unlike Places API), always inject location context when
+        // no explicit city is in the query.  Search engines handle proximity
+        // gracefully — "Target near Rexburg, ID hours" is better than "Target hours".
+        var webLocationSuffix = !string.IsNullOrWhiteSpace(userLocationHint)
+            && !cleanedQuery.Contains(userLocationHint, StringComparison.OrdinalIgnoreCase)
+            ? $" near {userLocationHint}"
+            : "";
         var webArgs = JsonSerializer.Serialize(new
         {
-            query = $"{cleanedQuery} hours address phone",
+            query = $"{cleanedQuery}{webLocationSuffix} hours address phone",
             maxResults = 5,
             recency = "any"
         });

@@ -161,6 +161,7 @@ if ($IncludeUnitTests) {
 }
 
 Invoke-Step -Name "Harness smoke suite (live)" -Action { ./dev/harness.ps1 smoke --mode live }
+Invoke-Step -Name "Harness personality suite (live)" -Action { ./dev/harness.ps1 run --suite personality --mode live }
 Invoke-Step -Name "Harness web-search suite (live)" -Action { ./dev/harness.ps1 run --suite web-search --mode live }
 
 Write-Host ""

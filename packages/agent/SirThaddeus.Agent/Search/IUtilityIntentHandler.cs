@@ -7,9 +7,26 @@ public sealed record UtilityIntentExecutionRequest
     public string UserMessage { get; init; } = "";
     public RouterOutput Route { get; init; } = new() { Intent = Intents.ChatOnly };
     public ToolPlanDecision ToolPlan { get; init; } = new();
+    public string ActivePersonalityId { get; init; } = "";
+    public string ActivePersonalityDisplayName { get; init; } = "";
+    public string ActivePersonalitySelfName { get; init; } = "";
+    public string ActivePersonalitySelfDescription { get; init; } = "";
     public ValidatedSlots? ValidatedSlots { get; init; }
     public IList<ToolCallRecord> ToolCallsMade { get; init; } = [];
     public int RoundTrips { get; init; }
+
+    /// <summary>
+    /// Profile-resolved user location (e.g. "Rexburg, ID"). Passed to
+    /// UtilityRouter so proximity pronouns ("me", "here") resolve to
+    /// real coordinates instead of being geocoded literally.
+    /// </summary>
+    public string? UserLocationHint { get; init; }
+
+    /// <summary>
+    /// Global unit preference ("imperial", "metric", "auto") used by
+    /// deterministic utility responses when explicit units are absent.
+    /// </summary>
+    public string? PreferredUnits { get; init; }
 
     public Func<string, DeterministicUtilityMatch?>? TryDeterministicMatch { get; init; }
     public Func<DeterministicUtilityMatch, UtilityRouter.UtilityResult>? ToUtilityResult { get; init; }

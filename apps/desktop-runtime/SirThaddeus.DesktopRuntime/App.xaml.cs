@@ -53,6 +53,7 @@ public partial class App : System.Windows.Application
     private AgentOrchestrator? _orchestrator;
     private IAgentOrchestrator? _agentEntryPoint;
     private IDialogueStatePersistence? _dialogueStatePersistence;
+    private Services.ChatHistoryPersistence? _chatHistoryPersistence;
 
     // ─────────────────────────────────────────────────────────────────────
     // Layer 1: UI Surface & Audio
@@ -221,12 +222,20 @@ public partial class App : System.Windows.Application
             _dialogueStatePersistence = new FileDialogueStatePersistence(dialoguePath, _auditLogger);
         }
 
+        // Chat history + briefing persistence — always active.
+        var chatDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SirThaddeus");
+        _chatHistoryPersistence = new Services.ChatHistoryPersistence(chatDataDir, _auditLogger);
+
         _orchestrator = new AgentOrchestrator(
             _llmClient,
             _auditedMcpClient,
             _auditLogger,
             _settings.Llm.SystemPrompt,
-            geocodeMismatchMode: _settings.Dialogue.GeocodeMismatchMode);
+            geocodeMismatchMode: _settings.Dialogue.GeocodeMismatchMode,
+            activePersonalityId: _settings.ActivePersonalityId,
+            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings));
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
@@ -271,6 +280,9 @@ public partial class App : System.Windows.Application
 
                 _settings = updated;
                 _permissionGate?.UpdateSettings(updated);
+                Environment.SetEnvironmentVariable(
+                    "ST_ACTIVE_PERSONALITY_ID",
+                    updated.ActivePersonalityId ?? "");
                 ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
             },
             queueManualLocationPrompt: QueueManualLocationPromptFromConversation);
@@ -288,7 +300,6 @@ public partial class App : System.Windows.Application
         _localTtsClient.TimingUpdated += OnTtsTimingUpdated;
         _audioPlaybackService = new AudioPlaybackService(
             _auditLogger,
-            _ttsService,
             () => _settings.Voice,
             _localTtsClient)
         {
@@ -338,8 +349,8 @@ public partial class App : System.Windows.Application
         _hotkeyOwnerWindow = _overlayWindow ?? CreateHiddenHotkeyWindow();
         InitializeHotkeys(_hotkeyOwnerWindow);
 
-        // Start VoiceHost in the background so Kokoro is warm by first use.
-        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(6), startIfMissing: true);
+        // Start VoiceHost early so first-turn ASR avoids cold-start latency.
+        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
     }
 
     private void OnPttMicDown()
@@ -1734,7 +1745,13 @@ public partial class App : System.Windows.Application
             _permissionBroker!,
             _toolRunner!,
             RequestShutdown,
-            _voiceOrchestrator);
+            _voiceOrchestrator,
+            getActivePersonalityId: () =>
+                _orchestrator?.ActivePersonalityId ??
+                _settings?.ActivePersonalityId ??
+                "helpful_default",
+            getActivePersonalityHash: () =>
+                _orchestrator?.ActivePersonalityHash ?? "");
 
         _overlayWindow.SetViewModel(_overlayViewModel);
         _overlayWindow.Closing += OverlayWindow_Closing;
@@ -1827,6 +1844,7 @@ public partial class App : System.Windows.Application
         // "not configured" (env var absent) from "no profile selected"
         // (env var present but empty). Empty = don't load any profile.
         env["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "";
+        env["ST_ACTIVE_PERSONALITY_ID"] = settings.ActivePersonalityId ?? "";
 
         // Memory env vars are only needed when memory is enabled.
         if (settings.Memory.Enabled)
@@ -2022,7 +2040,8 @@ public partial class App : System.Windows.Application
             host,
             _auditLogger!,
             closeWindow: () => window.Hide(),
-            dialogueStatePersistence: _dialogueStatePersistence);
+            dialogueStatePersistence: _dialogueStatePersistence,
+            chatHistoryPersistence: _chatHistoryPersistence);
 
         // Wire PTT delegates so the UI button triggers the same path as the hotkey.
         viewModel.VoiceMicDown = OnPttMicDown;
@@ -2092,6 +2111,16 @@ public partial class App : System.Windows.Application
                     "ST_ACTIVE_PROFILE_ID", profileId ?? "");
             };
 
+            settingsVm.ActivePersonalityChanged += personalityId =>
+            {
+                if (_orchestrator is not null)
+                    _orchestrator.ActivePersonalityId = personalityId ?? "helpful_default";
+
+                Environment.SetEnvironmentVariable(
+                    "ST_ACTIVE_PERSONALITY_ID",
+                    personalityId ?? "helpful_default");
+            };
+
             // Propagate settings changes to the permission gate
             // so the immutable policy snapshot is swapped atomically
             settingsVm.SettingsChanged += updated =>
@@ -2104,6 +2133,11 @@ public partial class App : System.Windows.Application
                     _orchestrator.MemoryEnabled = updated.Memory.Enabled;
                 if (_orchestrator is not null)
                     _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                if (_orchestrator is not null)
+                    _orchestrator.ActivePersonalityId = updated.ActivePersonalityId;
+                if (_orchestrator is not null)
+                    _orchestrator.PersonalityProfilesDirectory =
+                        SettingsManager.ResolvePersonalityProfilesDirectory(updated);
                 if (_commandPaletteViewModel is not null)
                     _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
@@ -2124,6 +2158,7 @@ public partial class App : System.Windows.Application
                     _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
 
                 RebindPushToTalkInput(updated.Audio);
+                _overlayViewModel?.RefreshPersonality();
             };
 
             window.SetSettingsViewModel(settingsVm);
@@ -2543,6 +2578,9 @@ public partial class App : System.Windows.Application
 
         _trayIcon?.Dispose();
         _trayIcon = null;
+
+        // Flush chat + briefing history to disk before teardown.
+        _commandPaletteViewModel?.SaveAllHistory();
 
         _commandPaletteWindow?.Close();
         _commandPaletteWindow = null;

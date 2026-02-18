@@ -1,0 +1,35 @@
+id: personality_technical_explanation_default
+name: Personality - Technical explanation under helpful_default
+personality_id: helpful_default
+user_message: "Explain how TCP three-way handshake works and why it matters for reliability."
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_write
+    - system_execute
+    - screen_capture
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - syn
+    - ack
+  forbidden_keywords:
+    - as an ai
+    - error
+    - timeout
+  max_response_chars: 1200
+  expect_signature: false
+  expect_structured_format: true
+  forbid_slang: false
+  max_avg_sentence_words: 30
+  min_avg_sentence_words: 8
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/personality-engine/SirThaddeus.PersonalityEngine/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/
