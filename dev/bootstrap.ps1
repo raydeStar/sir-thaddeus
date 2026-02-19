@@ -24,6 +24,7 @@ Write-Section "Bootstrap (.NET)"
 # Ensure we're at repo root (script lives in /dev)
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
+$SlnFile = Join-Path $RepoRoot "SirThaddeus.sln"
 
 # ── Verify dotnet CLI ──────────────────────────────────────────
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -36,14 +37,19 @@ Write-Host "  OK  dotnet found: $($dotnet.Source)" -ForegroundColor Green
 # Print SDK info (helpful for CI + agent debugging)
 Write-Host ""
 Write-Host "  dotnet --info (abbrev):"
-$info = dotnet --info
+$info = & dotnet --info
+if ($LASTEXITCODE -ne 0) {
+    Fail "dotnet --info failed (exit code $LASTEXITCODE)." $LASTEXITCODE
+}
 $infoLines = $info -split "`n"
 $infoLines | Select-Object -First 25 | ForEach-Object { Write-Host "    $_" }
 
 # ── Prepare artifacts folder ───────────────────────────────────
 $Artifacts     = Join-Path $RepoRoot "artifacts"
-$TestArtifacts = Join-Path $Artifacts "test"
+$TestArtifacts = Join-Path $Artifacts "test-results"
+$LegacyTestArtifacts = Join-Path $Artifacts "test"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
+New-Item -ItemType Directory -Force -Path $LegacyTestArtifacts | Out-Null
 
 Write-Host ""
 Write-Host "  OK  artifacts folder ready: $TestArtifacts" -ForegroundColor Green
@@ -51,7 +57,7 @@ Write-Host "  OK  artifacts folder ready: $TestArtifacts" -ForegroundColor Green
 # ── Restore ────────────────────────────────────────────────────
 Write-Section "Restore"
 
-dotnet restore SirThaddeus.sln
+dotnet restore $SlnFile
 if ($LASTEXITCODE -ne 0) { Fail "dotnet restore failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
 
 Write-Host "  OK  Restore complete" -ForegroundColor Green

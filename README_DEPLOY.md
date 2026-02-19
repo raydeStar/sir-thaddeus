@@ -17,31 +17,31 @@ What it does:
 
 If preflight fails, do not package or distribute.
 
-## 2) Publish release artifacts
+## 2) Package release artifacts
 
-Publish the desktop runtime, MCP server, and VoiceHost into the same output
-directory. The desktop runtime discovers sibling executables automatically.
+Use the packaging script to run the preflight gate, publish all runtime binaries,
+archive the output, and emit SHA-256 checksums.
 
 ```powershell
-$out = ".\artifacts\publish\win-x64"
-
-dotnet publish .\apps\mcp-server\SirThaddeus.McpServer\SirThaddeus.McpServer.csproj `
-  -c Release -r win-x64 --self-contained false -o $out
-
-dotnet publish .\apps\voice-host\SirThaddeus.VoiceHost\SirThaddeus.VoiceHost.csproj `
-  -c Release -r win-x64 --self-contained false -o $out
-
-dotnet publish .\apps\desktop-runtime\SirThaddeus.DesktopRuntime\SirThaddeus.DesktopRuntime.csproj `
-  -c Release -r win-x64 --self-contained false -o $out
+.\dev\release-package.ps1
 ```
 
-Expected output examples:
+Useful variants:
 
-- `SirThaddeus.DesktopRuntime.exe`
-- `SirThaddeus.McpServer.exe`
-- `SirThaddeus.VoiceHost.exe`
-- `voice\voice-backend.exe` (when sidecar is bundled)
-- supporting `.dll` files for all runtimes
+```powershell
+# Skip preflight only if it was already run in this session
+.\dev\release-package.ps1 -SkipPreflight
+
+# Build a self-contained package
+.\dev\release-package.ps1 -SelfContained
+```
+
+Outputs:
+
+- publish directory: `.\artifacts\publish\win-x64\`
+- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-<timestamp>.zip`
+- zip checksum: `.\artifacts\release\*.zip.sha256.txt`
+- per-binary checksums: `.\artifacts\release\*-binaries.sha256.txt`
 
 ## 3) Smoke test checklist
 
@@ -73,12 +73,18 @@ Notes:
 
 Recommended:
 
-1. Zip the full publish directory.
+1. Attach the generated `.zip` package and matching `.sha256.txt` file.
 2. Include:
    - release notes
    - pinned SDK/runtime notes
    - checksum/hash for the archive
 3. Keep the previous known-good package available for rollback.
+
+## Optional code signing
+
+For organizations that require Authenticode-signed binaries, follow:
+
+- `project-notes/code-signing.md`
 
 ## 5) Post-deploy checks
 
