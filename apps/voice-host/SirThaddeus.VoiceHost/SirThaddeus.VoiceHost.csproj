@@ -22,6 +22,27 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('..\..\voice-backend\model_downloader.py')">
+    <None Include="..\..\voice-backend\model_downloader.py"
+          Link="voice\model_downloader.py"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\youtube_pipeline.py')">
+    <None Include="..\..\voice-backend\youtube_pipeline.py"
+          Link="voice\youtube_pipeline.py"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\model_registry.json')">
+    <None Include="..\..\voice-backend\model_registry.json"
+          Link="voice\model_registry.json"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup Condition="Exists('..\..\voice-backend\requirements.txt')">
     <None Include="..\..\voice-backend\requirements.txt"
           Link="voice\requirements.txt"

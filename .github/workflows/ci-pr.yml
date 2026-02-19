@@ -2,9 +2,12 @@ name: CI (PR)
 
 on:
   pull_request:
+    branches:
+      - master
+      - dev
   push:
     branches:
-      - main
+      - master
       - dev
 
 permissions:
