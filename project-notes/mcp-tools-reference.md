@@ -35,6 +35,30 @@ Permission tokens are **time-boxed** (60-second TTL) and **scope-boxed** (one ca
 
 In headless mode: all permission-required tools are auto-denied (safe default).
 
+### Runtime Safety Gates
+
+The runtime enforces two fail-closed safety modes before a tool call reaches MCP:
+
+| Mode | Effect |
+|---|---|
+| `panicMode` | Blocks side-effect groups (`system`, `web`, `memoryWrite`) while leaving read-only diagnostics available |
+| `safeMode` | Blocks all MCP tool execution until the runtime is recovered |
+
+Safe mode can be entered automatically (for example, startup handshake mismatch or settings corruption recovery). Panic mode can be toggled intentionally for incident response.
+
+### Tool Budgets
+
+When `toolBudgets.enabled=true`, the runtime enforces hard limits:
+
+| Budget | Default behavior |
+|---|---|
+| `maxToolCallsPerTurn` | Caps tool chatter per agent turn |
+| `maxToolCallsPerSession` | Caps total tool calls for the runtime session |
+| `maxWebPullsPerTurn` | Caps weather/search/feed web pulls in a turn |
+| `maxFileOpsPerMinute` | Caps file group calls in a rolling minute window |
+
+Exceeded budgets return a deterministic `budget_exceeded` error payload and are audited as blocked.
+
 ### Redaction Policy
 
 The audit log never stores raw sensitive data:
@@ -340,6 +364,23 @@ flowchart TD
 
 ---
 
+### File Preview/Apply Pairs
+
+**Tool name(s):**
+- `FileReadPreview`, `file_read_preview`
+- `FileReadApply`, `file_read_apply`
+- `FileListPreview`, `file_list_preview`
+- `FileListApply`, `file_list_apply`
+
+**What they do:** Support a two-step flow where the first call validates and snapshots request context (`preview_id`), and the second call executes only that preview.
+
+**Safety model:**
+- Preview calls are read-only and do not execute side effects.
+- Apply calls require a valid unexpired `preview_id`.
+- Both stages are audited so reviewers can correlate intent (`preview`) to execution (`apply`).
+
+---
+
 ## System Tools
 
 ### SystemExecute
@@ -406,6 +447,19 @@ flowchart TD
   Cmd --> SystemTool
   SystemTool -->|"exit code + stdout/stderr"| Agent
 ```
+
+---
+
+### SystemExecutePreview / SystemExecuteApply
+
+**Tool name(s):** `SystemExecutePreview`, `system_execute_preview`, `SystemExecuteApply`, `system_execute_apply`
+
+**What they do:** Apply the same allowlist/argument validation as `system_execute`, but split planning from execution.
+
+- `system_execute_preview` validates command + arguments and returns a `preview_id`.
+- `system_execute_apply` executes the validated preview only when `confirm=true` and `preview_id` is valid.
+
+This gives a deterministic dry-run contract without opening raw shell power.
 
 ---
 
@@ -528,6 +582,38 @@ flowchart TD
 
 ---
 
+### health.check
+
+**Tool name(s):** `health.check`, `HealthCheck`
+
+Read-only control-plane health snapshot (runtime status, readiness flags, version details). Designed for monitoring and startup diagnostics.
+
+### capabilities.describe
+
+**Tool name(s):** `capabilities.describe`, `CapabilitiesDescribe`
+
+Read-only capability descriptor for tool categories, limits, and risk metadata. Useful for audits and support tooling.
+
+### policy.get_state
+
+**Tool name(s):** `policy.get_state`, `PolicyGetState`
+
+Read-only snapshot of runtime safety and permission posture (panic/safe mode, budgets, tool-group policies).
+
+### policy.set_panic_mode
+
+**Tool name(s):** `policy.set_panic_mode`, `PolicySetPanicMode`
+
+Control-plane write hook to toggle panic mode. Requires explicit `confirm=true` and is fully audited.
+
+### audit.export_bundle
+
+**Tool name(s):** `audit.export_bundle`, `AuditExportBundle`
+
+Control-plane write hook that builds a redacted diagnostics bundle (settings snapshot, audit excerpts, manifests). Requires explicit `confirm=true`.
+
+---
+
 ## Time Tool
 
 ### TimeNow
@@ -567,11 +653,22 @@ flowchart TD
 | BrowserNavigate / browser_navigate | Web | Read | No (triggered by question) |
 | FileRead / file_read | Files | Read | **Yes** (FileAccess capability) |
 | FileList / file_list | Files | Read | **Yes** (FileAccess capability) |
+| FileReadPreview / file_read_preview | Files | Read | **Yes** (FileAccess capability) |
+| FileReadApply / file_read_apply | Files | Read | **Yes** (FileAccess capability) |
+| FileListPreview / file_list_preview | Files | Read | **Yes** (FileAccess capability) |
+| FileListApply / file_list_apply | Files | Read | **Yes** (FileAccess capability) |
 | SystemExecute / system_execute | System | Read | **Yes** (SystemExecute capability) |
+| SystemExecutePreview / system_execute_preview | System | Read | **Yes** (SystemExecute capability) |
+| SystemExecuteApply / system_execute_apply | System | Write | **Yes** (SystemExecute capability) |
 | ScreenCapture / screen_capture | Screen | Read | **Yes** (ScreenRead capability) |
 | GetActiveWindow / get_active_window | Screen | Read | **Yes** (ScreenRead capability) |
 | ToolPing / tool_ping | Meta | Read | No |
 | ToolListCapabilities / tool_list_capabilities | Meta | Read | No |
+| health.check | Meta | Read | No |
+| capabilities.describe | Meta | Read | No |
+| policy.get_state | Meta | Read | **Yes** |
+| policy.set_panic_mode | Meta | Write | **Yes** (`confirm=true`) |
+| audit.export_bundle | Meta | Write | **Yes** (`confirm=true`) |
 | TimeNow / time_now | Time | Read | No |
 
 ---

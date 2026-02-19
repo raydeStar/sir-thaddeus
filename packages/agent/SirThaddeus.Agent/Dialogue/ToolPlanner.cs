@@ -14,6 +14,9 @@ public sealed record ToolPlanDecision
     public string Category { get; init; } = "none";
     public string? InlineAnswer { get; init; }
     public IReadOnlyList<PlannedToolCall> ToolCalls { get; init; } = Array.Empty<PlannedToolCall>();
+    public string PlannerMessage { get; init; } = "";
+    public bool InjectionMitigationApplied { get; init; }
+    public string InjectionMitigationReason { get; init; } = "";
     public bool RequiresToolExecution => ToolCalls.Count > 0;
 }
 
@@ -45,16 +48,44 @@ public sealed class ToolPlanner : IToolPlanner
             return new ToolPlanDecision
             {
                 Category = "confirm",
-                InlineAnswer = slots.MismatchWarning ?? "Please confirm the location before I continue."
+                InlineAnswer = slots.MismatchWarning ?? "Please confirm the location before I continue.",
+                PlannerMessage = slots.NormalizedMessage
+            };
+        }
+
+        var injectionAssessment = PromptInjectionGuard.Assess(slots.NormalizedMessage);
+        var plannerMessage = injectionAssessment.IsUntrusted
+            ? injectionAssessment.FilteredMessage
+            : slots.NormalizedMessage;
+
+        if (injectionAssessment.IsUntrusted && string.IsNullOrWhiteSpace(plannerMessage))
+        {
+            return new ToolPlanDecision
+            {
+                Category = "security",
+                InlineAnswer =
+                    "I filtered untrusted instruction content and could not find a safe request to execute. " +
+                    "Please restate your request plainly.",
+                PlannerMessage = plannerMessage,
+                InjectionMitigationApplied = true,
+                InjectionMitigationReason = injectionAssessment.Reason
             };
         }
 
         var utility = UtilityRouter.TryHandle(
-            slots.NormalizedMessage,
+            plannerMessage,
             userLocationHint,
             preferredUnits);
         if (utility is null)
-            return new ToolPlanDecision { Category = "none" };
+        {
+            return new ToolPlanDecision
+            {
+                Category = "none",
+                PlannerMessage = plannerMessage,
+                InjectionMitigationApplied = injectionAssessment.IsUntrusted,
+                InjectionMitigationReason = injectionAssessment.Reason
+            };
+        }
 
         // Enforce validated slot source-of-truth for location-sensitive args.
         if ((utility.Category == "weather" || utility.Category == "time") &&
@@ -70,6 +101,9 @@ public sealed class ToolPlanner : IToolPlanner
             return new ToolPlanDecision
             {
                 Category = utility.Category,
+                PlannerMessage = plannerMessage,
+                InjectionMitigationApplied = injectionAssessment.IsUntrusted,
+                InjectionMitigationReason = injectionAssessment.Reason,
                 ToolCalls =
                 [
                     new PlannedToolCall
@@ -87,6 +121,9 @@ public sealed class ToolPlanner : IToolPlanner
             return new ToolPlanDecision
             {
                 Category = utility.Category,
+                PlannerMessage = plannerMessage,
+                InjectionMitigationApplied = injectionAssessment.IsUntrusted,
+                InjectionMitigationReason = injectionAssessment.Reason,
                 ToolCalls =
                 [
                     new PlannedToolCall
@@ -101,7 +138,10 @@ public sealed class ToolPlanner : IToolPlanner
         return new ToolPlanDecision
         {
             Category = utility.Category,
-            InlineAnswer = utility.Answer
+            InlineAnswer = utility.Answer,
+            PlannerMessage = plannerMessage,
+            InjectionMitigationApplied = injectionAssessment.IsUntrusted,
+            InjectionMitigationReason = injectionAssessment.Reason
         };
     }
 }

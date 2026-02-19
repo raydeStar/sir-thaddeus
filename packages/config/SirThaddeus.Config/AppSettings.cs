@@ -6,7 +6,7 @@ namespace SirThaddeus.Config;
 /// Top-level settings object. Serialized to/from
 /// %LOCALAPPDATA%/SirThaddeus/settings.json.
 /// </summary>
-public sealed record AppSettings
+public sealed partial record AppSettings
 {
     [JsonPropertyName("llm")]
     public LlmSettings Llm { get; init; } = new();

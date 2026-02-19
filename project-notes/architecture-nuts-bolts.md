@@ -12,6 +12,7 @@ This doc is intentionally implementation-forward. For vision-level context, see 
 - Desktop runtime (UI + wiring)
 - Agent orchestration (routing + tool loop)
 - Permissions + audit (single enforcement point)
+- Runtime safety controls (panic/safe/handshake/budgets)
 - MCP server (tools boundary)
 - Web “pull the news” pipeline (deep dive)
 - Memory system
@@ -79,6 +80,7 @@ flowchart TD
   - Spawned by `apps/desktop-runtime/.../Services/McpProcessClient.cs`.
   - Protocol: JSON-RPC 2.0 on stdin/stdout; logs go to stderr.
   - `StartAsync()` sends `initialize` then `notifications/initialized`.
+  - Startup validates protocol version, server contract version, and manifest hash; strict mismatch enters safe mode (fail closed).
 - **Agent wiring**
   - The desktop runtime wraps the raw MCP client with:
     - `AuditedMcpToolClient` (audit + redaction + permission gate)
@@ -87,6 +89,7 @@ flowchart TD
 - **Settings persistence**
   - Settings shape is `packages/config/SirThaddeus.Config/AppSettings.cs`.
   - Loaded/saved via `packages/config/.../SettingsManager.cs`.
+  - Loader returns diagnostics + migration state and persists normalized settings when migration/safe-mode recovery is applied.
   - `memory.enabled` is a **master switch** (when false, the agent must not read/write memory).
 - **Web search UI cards**
   - `CommandPaletteViewModel` parses the `<!-- SOURCES_JSON -->` section from `web_search` tool output and builds `SourceCardViewModel` items for the chat UI.
@@ -151,6 +154,7 @@ flowchart LR
 - Every tool call flows through `AuditedMcpToolClient` first.
 - Permission policy is **per tool-group** (`off | ask | always`) with a **developer override** for dangerous groups.
 - Audit logging is **append-only** and always on.
+- Runtime safety (`panicMode`/`safeMode`) and tool budgets are enforced in the same tool-call enforcement path.
 
 **Nuts & bolts**
 - **Settings model**
@@ -178,6 +182,32 @@ flowchart LR
   - `AuditedMcpToolClient` writes:
     - `MCP_TOOL_CALL_START` (redacted input summary)
     - `MCP_TOOL_CALL_END` (redacted output summary + duration)
+  - Permission prompts emit first-class consent receipts including session id, tool name, risk tier, and decision.
+
+---
+
+## Runtime safety controls (panic/safe/handshake/budgets)
+
+**Overview**
+- Runtime safety is fail-closed and centralized: if startup compatibility checks fail, the app enters safe mode and blocks all tool execution.
+- Panic mode is a runtime kill switch for side-effect groups.
+- Tool budgets cap loop behavior per turn/session/time window.
+
+**Nuts & bolts**
+- **State model**: `packages/agent/.../RuntimeControlState.cs`
+  - Derived from settings on startup and refreshed on settings save.
+- **Fail-closed startup**
+  - `McpProcessClient` handshake validates protocol + contract + manifest hash.
+  - Strict mismatch writes safe-mode state to settings and continues without tool execution.
+- **Budget enforcement**
+  - `AuditedMcpToolClient.TryConsumeBudget(...)` enforces:
+    - max tool calls per turn/session
+    - max web pulls per turn
+    - max file ops per minute
+  - Exceeded budget returns deterministic `budget_exceeded` payload and emits audit event.
+- **UI surfaces**
+  - Tray menu shows runtime safety summary, panic toggle, diagnostics export.
+  - Command palette header shows panic/safe banner state.
 
 ---
 
@@ -206,10 +236,11 @@ flowchart TD
   - Examples:
     - `WebSearchTools.cs` (web_search)
     - `BrowserTools.cs` (browser_navigate)
-    - `FileTools.cs` (file_read / file_list)
-    - `SystemTools.cs` (system_execute)
+    - `FileTools.cs` (file_read / file_list + preview/apply)
+    - `SystemTools.cs` (system_execute + preview/apply)
     - `ScreenTools.cs` (screen_capture)
     - `MemoryTools.cs` (memory_* tools)
+    - `MetaTools.cs` (health.check, capabilities.describe, policy.get_state, policy.set_panic_mode, audit.export_bundle)
 - Naming: depending on MCP client, tools may appear as `web_search` or `WebSearch`; the agent canonicalizes names to snake_case for consistent policy + audit.
 
 ---
@@ -384,10 +415,15 @@ flowchart LR
 **Overview**
 - Settings are a single JSON file loaded at startup and updated via the Settings UI.
 - Permission policies are persisted in settings and swapped atomically at runtime.
+- Settings use versioned schema + migration; startup records diagnostics when defaults/migrations/safe-mode recoveries occur.
 
 **Nuts & bolts**
 - Shape: `packages/config/.../AppSettings.cs`
 - Loader/saver: `packages/config/.../SettingsManager.cs`
+- Runtime safety: `runtimeSafety.*`
+  - `panicMode`, `safeMode`, `safeModeReason`, `strictHandshake`, required protocol/contract versions
+- Tool budgets: `toolBudgets.*`
+  - `enabled`, `maxToolCallsPerTurn`, `maxToolCallsPerSession`, `maxWebPullsPerTurn`, `maxFileOpsPerMinute`
 - Key toggles relevant to “news”
   - `mcp.permissions.web` controls `web_search` + `browser_navigate`
   - `mcp.permissions.developerOverride` can force web tools to ask/off/always (dangerous groups only)

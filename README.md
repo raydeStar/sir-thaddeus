@@ -19,6 +19,9 @@
 - **Tool routing pipeline**: Intent Router (`RouterOutput`) → Policy Gate (`PolicyDecision`) → conflict resolution matrix → tool loop executor.
 - **Web search**: DuckDuckGo HTML, Google News RSS, and SearXNG providers with smart query extraction.
 - **Conflict detection**: Memory storage checks for duplicates, single-vs-multi-valued predicates, and antonym contradictions before writing.
+- **Runtime safety controls**: global panic mode, fail-closed safe mode, strict MCP handshake validation, and configurable tool budgets.
+- **Control-plane MCP hooks**: `health.check`, `capabilities.describe`, `policy.get_state`, `policy.set_panic_mode`, `audit.export_bundle`.
+- **Preview/apply contract**: file and system tools support `_preview` + `_apply` pairs for explicit dry-run style execution.
 - **Headless mode**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
 - **PTT voice pipeline**: push-to-talk capture → local ASR (`faster-whisper`) → agent response → local TTS playback via VoiceHost.
 - **Audit log is always-on**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
@@ -165,6 +168,9 @@ Notes:
 - `mcp.serverPath = "auto"` resolves to the built `SirThaddeus.McpServer.exe` in the repo output folders.
 - `memory.dbPath = "auto"` resolves to `%LOCALAPPDATA%\SirThaddeus\memory.db`.
 - `memory.embeddingsModel` defaults to the chat model if left empty.
+- `runtimeSafety.strictHandshake` enforces protocol/contract/manifest compatibility at startup (fail closed).
+- `runtimeSafety.panicMode` blocks side-effect tool groups at runtime.
+- `toolBudgets` applies hard per-turn/per-session/per-minute caps to reduce runaway tool loops.
 
 ## Privacy model
 
@@ -260,6 +266,11 @@ dotnet run --project apps/mcp-server/SirThaddeus.McpServer
 | `FileList` | Lists up to 100 entries in a directory. |
 | `SystemExecute` | Runs allowlisted commands only. No raw shell execution. |
 | `ScreenCapture` | Captures full screen or active window (explicit permission required). |
+| `health.check` | Read-only control-plane health snapshot with dependency readiness. |
+| `capabilities.describe` | Read-only manifest and capability summary for MCP tools. |
+| `policy.get_state` | Read-only policy/runtime safety snapshot from current settings. |
+| `policy.set_panic_mode` | Explicitly toggles panic mode (`confirm=true` required). |
+| `audit.export_bundle` | Creates a redacted diagnostics bundle (`confirm=true` required). |
 
 ## Architecture Review Index
 

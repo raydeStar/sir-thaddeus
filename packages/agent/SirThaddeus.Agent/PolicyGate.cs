@@ -218,7 +218,10 @@ public static class PolicyGate
     /// Looks up the policy for a given router output. Returns the
     /// general_tool fallback if the intent is unknown.
     /// </summary>
-    public static PolicyDecision Evaluate(RouterOutput router)
+    public static PolicyDecision Evaluate(
+        RouterOutput router,
+        bool panicModeEnabled = false,
+        bool safeModeEnabled = false)
     {
         var decision = PolicyTable.TryGetValue(router.Intent, out var byIntent)
             ? byIntent
@@ -236,7 +239,8 @@ public static class PolicyGate
         if (router.RequiredCapabilities.Count > 0)
             allowedCapabilities.IntersectWith(router.RequiredCapabilities);
 
-        return decision with { AllowedCapabilities = allowedCapabilities.ToList() };
+        var resolved = decision with { AllowedCapabilities = allowedCapabilities.ToList() };
+        return ApplyRuntimeSafety(resolved, panicModeEnabled, safeModeEnabled);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -297,4 +301,46 @@ public static class PolicyGate
     private static bool IsGeneralToolIntent(string intent)
         => intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase)
            || !PolicyTable.ContainsKey(intent);
+
+    private static PolicyDecision ApplyRuntimeSafety(
+        PolicyDecision decision,
+        bool panicModeEnabled,
+        bool safeModeEnabled)
+    {
+        if (safeModeEnabled)
+        {
+            return decision with
+            {
+                AllowedCapabilities = [],
+                UseToolLoop = false
+            };
+        }
+
+        if (!panicModeEnabled)
+            return decision;
+
+        var blockedByPanic = new HashSet<ToolCapability>
+        {
+            ToolCapability.SystemExecute,
+            ToolCapability.MemoryWrite,
+            ToolCapability.WebSearch,
+            ToolCapability.BrowserNavigate
+        };
+
+        var allowed = decision.AllowedCapabilities
+            .Where(cap => !blockedByPanic.Contains(cap))
+            .ToList();
+
+        var forbidden = decision.ForbiddenCapabilities
+            .Concat(blockedByPanic)
+            .Distinct()
+            .ToList();
+
+        return decision with
+        {
+            AllowedCapabilities = allowed,
+            ForbiddenCapabilities = forbidden,
+            UseToolLoop = decision.UseToolLoop && allowed.Count > 0
+        };
+    }
 }
