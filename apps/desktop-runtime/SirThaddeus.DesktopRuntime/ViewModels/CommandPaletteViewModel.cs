@@ -733,24 +733,21 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public void SaveAllHistory()
     {
         SnapshotCurrentSession();
-        PersistChatHistory();
-        PersistBriefingHistory();
+        
+        // Ensure we always save even if empty to clear deleted entries,
+        // unless we failed to load earlier and are preventing corruption.
+        _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
+        _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
     }
 
     private void PersistChatHistory()
     {
-        if (ChatHistory.Count > 0)
-        {
-            _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
-        }
+        _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
     }
 
     private void PersistBriefingHistory()
     {
-        if (BriefingPanel.History.Count > 0)
-        {
-            _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
-        }
+        _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
     }
 
     private void RestorePersistedHistory()
@@ -758,21 +755,27 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         if (_chatHistoryPersistence is null) return;
 
         var savedChats = _chatHistoryPersistence.LoadChatHistory();
-        foreach (var session in savedChats)
-            ChatHistory.Add(session);
+        if (savedChats != null)
+        {
+            foreach (var session in savedChats)
+                ChatHistory.Add(session);
+        }
 
         var savedBriefings = _chatHistoryPersistence.LoadBriefingHistory();
-        foreach (var dto in savedBriefings)
+        if (savedBriefings != null)
         {
-            if (dto.Briefing is null) continue;
-            BriefingPanel.History.Add(new BriefingHistoryEntry
+            foreach (var dto in savedBriefings)
             {
-                Title      = dto.Title,
-                Confidence = dto.Confidence,
-                StatusLine = dto.StatusLine,
-                Timestamp  = dto.Timestamp,
-                Briefing   = dto.Briefing
-            });
+                if (dto.Briefing is null) continue;
+                BriefingPanel.History.Add(new BriefingHistoryEntry
+                {
+                    Title      = dto.Title,
+                    Confidence = dto.Confidence,
+                    StatusLine = dto.StatusLine,
+                    Timestamp  = dto.Timestamp,
+                    Briefing   = dto.Briefing
+                });
+            }
         }
     }
 
