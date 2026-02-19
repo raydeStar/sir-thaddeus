@@ -51,3 +51,44 @@ jobs:
             artifacts/test/**/*.trx
             **/TestResults/**/*.trx
           if-no-files-found: ignore
+
+  package:
+    name: Package Build Artifact
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package build zip + checksums
+        shell: pwsh
+        run: |
+          $branchName = "${{ github.ref_name }}"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "$branchName-$shortSha"
+
+      - name: Upload build package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-package-assets-${{ github.ref_name }}
+          path: |
+            artifacts/release/*.zip
+            artifacts/release/*.zip.sha256.txt
+          if-no-files-found: error
