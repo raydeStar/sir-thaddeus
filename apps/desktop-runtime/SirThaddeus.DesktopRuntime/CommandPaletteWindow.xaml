@@ -70,6 +70,30 @@
                             </Style>
                         </Ellipse.Style>
                     </Ellipse>
+                    
+                    <Ellipse Width="8" Height="8"
+                             Margin="0,0,8,0"
+                             ToolTip="Backend Health (ASR/TTS)"
+                             VerticalAlignment="Center">
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse">
+                                <Setter Property="Fill" Value="{StaticResource Surface1Brush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding VoiceHostIsRunning}" Value="True">
+                                        <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                    </DataTrigger>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding VoiceHostIsRunning}" Value="False"/>
+                                            <Condition Binding="{Binding IsVoiceEnabled}" Value="True"/>
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+
                     <TextBlock Text="{Binding ConnectionStatus}"
                                FontSize="12"
                                Foreground="{StaticResource Subtext0Brush}"
@@ -2289,6 +2313,9 @@
                                                     <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="True">
                                                         <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
                                                     </DataTrigger>
+                                                    <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="False">
+                                                        <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </Ellipse.Style>
@@ -2309,6 +2336,9 @@
                                                     <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="True">
                                                         <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
                                                     </DataTrigger>
+                                                    <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="False">
+                                                        <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </Ellipse.Style>
@@ -2327,9 +2357,28 @@
                             <!-- Status message -->
                             <TextBlock Text="{Binding VoiceHostMessage}"
                                        FontSize="11"
-                                       Foreground="{StaticResource Overlay0Brush}"
                                        TextWrapping="Wrap"
-                                       Margin="0,0,0,10"/>
+                                       Margin="0,0,0,10">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding VoiceHostIsRunning}" Value="False">
+                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="Health check timed out.">
+                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="VoiceHost is not running.">
+                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="Process manager unavailable.">
+                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
 
                             <!-- Action buttons -->
                             <StackPanel Orientation="Horizontal">

@@ -26,22 +26,38 @@ archive the output, and emit SHA-256 checksums.
 .\dev\release-package.ps1
 ```
 
+Release packaging defaults to a **self-contained** build in Release mode.
+
 Useful variants:
 
 ```powershell
 # Skip preflight only if it was already run in this session
 .\dev\release-package.ps1 -SkipPreflight
 
-# Build a self-contained package
-.\dev\release-package.ps1 -SelfContained
+# Build deterministic versioned file names (recommended for releases)
+.\dev\release-package.ps1 -Version v0.1.0
 ```
 
 Outputs:
 
 - publish directory: `.\artifacts\publish\win-x64\`
-- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-<timestamp>.zip`
-- zip checksum: `.\artifacts\release\*.zip.sha256.txt`
-- per-binary checksums: `.\artifacts\release\*-binaries.sha256.txt`
+- staged package directory: `.\artifacts\stage\win-x64\`
+- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>.zip`
+- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>.zip.sha256.txt`
+- per-binary checksums: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>-binaries.sha256.txt`
+
+### Required ZIP contents
+
+- `SirThaddeus.DesktopRuntime.exe` (primary app executable)
+- `SirThaddeus.McpServer.exe` (MCP sidecar process)
+- `SirThaddeus.VoiceHost.exe` (voice sidecar process)
+- required runtime DLLs and support files from publish output
+- `README_FIRST_RUN.md` (first-run instructions)
+
+### Recommended ZIP contents
+
+- `SirThaddeus.Settings.template.json` (starter settings template)
+- matching `.zip.sha256.txt` checksum file distributed beside the ZIP
 
 ## 3) Smoke test checklist
 
@@ -79,6 +95,18 @@ Recommended:
    - pinned SDK/runtime notes
    - checksum/hash for the archive
 3. Keep the previous known-good package available for rollback.
+
+Tag-based GitHub release flow:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Expected release assets:
+
+- `sir-thaddeus-win-x64-v0.1.0.zip`
+- `sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
 
 ## Optional code signing
 
