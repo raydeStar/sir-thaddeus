@@ -26,6 +26,13 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$isCi = [string]::Equals($env:CI, 'true', [System.StringComparison]::OrdinalIgnoreCase)
+$effectiveRestore = $Restore
+
+if (-not $effectiveRestore -and $isCi) {
+    # GitHub runners start clean; force restore so obj/project.assets.json exists.
+    $effectiveRestore = $true
+}
 
 function Write-Section([string]$Title) {
     Write-Host "`n══════════════════════════════════════════════════════════════"
@@ -54,7 +61,10 @@ $stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
 $trxName = "test-$stamp.trx"
 
 Write-Host "  Configuration : $Configuration"
-Write-Host "  Restore       : $Restore"
+Write-Host "  Restore       : $effectiveRestore"
+if ($isCi -and -not $Restore) {
+    Write-Host "  CI override   : enabled (restore forced)"
+}
 if ($Filter) { Write-Host "  Filter        : $Filter" }
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
@@ -64,7 +74,7 @@ Write-Section "Policy Guard (No Device Geolocation)"
 if ($LASTEXITCODE -ne 0) { Fail "Device geolocation policy guard failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
 
 # ── Optional restore ──────────────────────────────────────────
-if ($Restore) {
+if ($effectiveRestore) {
     Write-Section "Restore"
     dotnet restore $SlnFile
     if ($LASTEXITCODE -ne 0) { Fail "dotnet restore failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
