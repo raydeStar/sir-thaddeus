@@ -36,6 +36,8 @@ bld/
 
 # Build artifacts (dev/test.ps1 output)
 artifacts/
+!tools/SirThaddeus.Harness/Artifacts/
+!tools/SirThaddeus.Harness/Artifacts/*.cs
 dev/build-temp/
 audit.jsonl
 
