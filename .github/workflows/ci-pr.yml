@@ -35,7 +35,7 @@ jobs:
       - name: Run test gate (dev/test.ps1)
         shell: pwsh
         run: |
-          ./dev/test.ps1
+          ./dev/test.ps1 -Restore $true
 
       - name: Upload test results (TRX)
         if: always()
