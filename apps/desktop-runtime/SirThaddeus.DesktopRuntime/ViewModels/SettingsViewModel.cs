@@ -162,7 +162,18 @@ public sealed class SettingsViewModel : ViewModelBase
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
     public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) MarkDirty(); } }
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
-    public string VoiceTtsVoiceId { get => _voiceTtsVoiceId; set { if (SetProperty(ref _voiceTtsVoiceId, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
+    public string VoiceTtsVoiceId 
+    { 
+        get => _voiceTtsVoiceId; 
+        set 
+        { 
+            if (SetProperty(ref _voiceTtsVoiceId, value)) 
+            { 
+                MarkDirty(); 
+                OnPropertyChanged(nameof(SelectedKokoroVoice)); 
+            } 
+        } 
+    }
     public string VoiceSttEngine { get => _voiceSttEngine; set { if (SetProperty(ref _voiceSttEngine, value)) MarkDirty(); } }
     public string VoiceSttModelId { get => _voiceSttModelId; set { if (SetProperty(ref _voiceSttModelId, value)) MarkDirty(); } }
     public bool VoicePreferLocalTts { get => _voicePreferLocalTts; set { if (SetProperty(ref _voicePreferLocalTts, value)) MarkDirty(); } }
@@ -280,12 +291,13 @@ public sealed class SettingsViewModel : ViewModelBase
     /// </summary>
     public string? SelectedKokoroVoice
     {
-        get => string.IsNullOrWhiteSpace(_voiceTtsVoiceId) ? null : _voiceTtsVoiceId;
+        get => string.IsNullOrWhiteSpace(_voiceTtsVoiceId) ? "" : _voiceTtsVoiceId;
         set
         {
             var normalized = (value ?? "").Trim();
-            VoiceTtsVoiceId = normalized;
-            OnPropertyChanged();
+            if (SetProperty(ref _voiceTtsVoiceId, normalized))
+                MarkDirty();
+            OnPropertyChanged(nameof(VoiceTtsVoiceId));
         }
     }
 
@@ -487,6 +499,14 @@ public sealed class SettingsViewModel : ViewModelBase
         _voiceTtsEngine = s.Voice.GetNormalizedTtsEngine();
         _voiceTtsModelId = s.Voice.GetResolvedTtsModelId();
         _voiceTtsVoiceId = s.Voice.GetResolvedTtsVoiceId();
+        _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
+        if (string.IsNullOrWhiteSpace(_voiceTtsVoiceId))
+        {
+            _voiceTtsVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
+                _personalityStore,
+                _personalityProfilesDirectory,
+                s.ActivePersonalityId);
+        }
         // Front-end ASR stays pinned to faster-whisper.
         _voiceSttEngine = "faster-whisper";
         _voiceSttModelId = ResolveFrontendSttModelIdForUi(s.Voice);
@@ -527,14 +547,6 @@ public sealed class SettingsViewModel : ViewModelBase
         _weatherPreferredUnits    = s.Weather.PreferredUnits;
         _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
-        _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
-        if (string.IsNullOrWhiteSpace(_voiceTtsVoiceId))
-        {
-            _voiceTtsVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
-                _personalityStore,
-                _personalityProfilesDirectory,
-                s.ActivePersonalityId);
-        }
         LoadLocationForProfile(s.ActiveProfileId);
 
         // Notify all bindings

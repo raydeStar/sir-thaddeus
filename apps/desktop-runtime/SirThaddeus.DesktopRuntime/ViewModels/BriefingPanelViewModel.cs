@@ -281,11 +281,12 @@ public sealed class BriefingPanelViewModel : ViewModelBase
             return;
 
         CurrentBriefing = entry.Briefing;
-        State = entry.Briefing.Hero.Confidence.Equals(
-            DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase)
+        State = entry.Briefing?.Hero.Confidence.Equals(
+            DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase) == true
                 ? BriefingPanelState.Partial
                 : BriefingPanelState.Success;
-        StatusMessage = BuildStatusMessage(entry.Briefing);
+        if (entry.Briefing is not null)
+            StatusMessage = BuildStatusMessage(entry.Briefing);
     }
 
     // ────────────────────────────────────────────
@@ -299,12 +300,14 @@ public sealed class BriefingPanelViewModel : ViewModelBase
             History[0].Title.Equals(briefing.Hero.Title, StringComparison.OrdinalIgnoreCase))
             return;
 
-        History.Insert(0, new BriefingHistoryEntry(
-            Title:      briefing.Hero.Title,
-            Confidence: briefing.Hero.Confidence,
-            StatusLine: briefing.Hero.StatusLine,
-            Timestamp:  DateTime.Now,
-            Briefing:   briefing));
+        History.Insert(0, new BriefingHistoryEntry
+        {
+            Title      = briefing.Hero.Title,
+            Confidence = briefing.Hero.Confidence,
+            StatusLine = briefing.Hero.StatusLine,
+            Timestamp  = DateTime.Now,
+            Briefing   = briefing
+        });
 
         // Keep a reasonable cap.
         const int maxHistory = 50;
@@ -317,12 +320,24 @@ public sealed class BriefingPanelViewModel : ViewModelBase
 /// Lightweight entry for the briefing history sidebar.
 /// Retains the full briefing for instant reload without re-querying.
 /// </summary>
-public sealed record BriefingHistoryEntry(
-    string           Title,
-    string           Confidence,
-    string           StatusLine,
-    DateTime         Timestamp,
-    DeepDiveBriefing Briefing)
+public sealed class BriefingHistoryEntry
 {
+    public string Title { get; set; } = "";
+    public string Confidence { get; set; } = "";
+    public string StatusLine { get; set; } = "";
+    public DateTime Timestamp { get; set; }
+    public DeepDiveBriefing? Briefing { get; set; }
+
     public string TimestampDisplay => Timestamp.ToString("MMM d, h:mm tt");
+
+    public BriefingHistoryEntry() { }
+
+    public BriefingHistoryEntry(string title, string confidence, string statusLine, DateTime timestamp, DeepDiveBriefing briefing)
+    {
+        Title = title;
+        Confidence = confidence;
+        StatusLine = statusLine;
+        Timestamp = timestamp;
+        Briefing = briefing;
+    }
 }
