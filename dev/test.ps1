@@ -2,7 +2,7 @@
 
 # ═══════════════════════════════════════════════════════════════
 #  test.ps1 — Build + run tests with deterministic output.
-#  Writes a TRX report to ./artifacts/test/ each run.
+#  Writes a TRX report to ./artifacts/test-results/ each run.
 #
 #  Usage:
 #    .\dev\test.ps1                          # defaults
@@ -46,7 +46,7 @@ Set-Location $RepoRoot
 
 $SlnFile       = Join-Path $RepoRoot "SirThaddeus.sln"
 $Artifacts     = Join-Path $RepoRoot "artifacts"
-$TestArtifacts = Join-Path $Artifacts "test"
+$TestArtifacts = Join-Path $Artifacts "test-results"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
