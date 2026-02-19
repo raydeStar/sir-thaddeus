@@ -21,7 +21,15 @@ public sealed class PersonalityProfileStore
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    private static readonly JsonDocumentOptions JsonDocumentReadOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
     };
 
     private readonly PersonalityProfileValidator _validator;
@@ -84,14 +92,12 @@ public sealed class PersonalityProfileStore
             try
             {
                 var text = File.ReadAllText(file);
-                using var doc = JsonDocument.Parse(text);
+                using var doc = JsonDocument.Parse(text, JsonDocumentReadOptions);
                 var validation = _validator.ValidateJson(doc.RootElement);
                 if (!validation.IsValid)
                     continue;
 
-                var profile = doc.RootElement.Deserialize<PersonalityProfile>();
-                if (profile is null)
-                    continue;
+                var profile = PersonalityProfileProjection.FromJson(doc.RootElement, JsonOptions);
 
                 output.Add(new PersonalityProfileDescriptor
                 {
@@ -181,6 +187,53 @@ public sealed class PersonalityProfileStore
         };
     }
 
+    public PersonalityProfileDescriptor SaveProfileTemplate(
+        string profilesDirectory,
+        PersonalityProfile profile,
+        string templateJsonWithComments)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (string.IsNullOrWhiteSpace(templateJsonWithComments))
+            throw new ArgumentException("Template JSON is required.", nameof(templateJsonWithComments));
+
+        var profileValidation = _validator.ValidateProfile(profile);
+        if (!profileValidation.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"Profile validation failed ({profileValidation.ReasonCode}): {profileValidation.Detail}");
+        }
+
+        using var doc = JsonDocument.Parse(templateJsonWithComments, JsonDocumentReadOptions);
+        var jsonValidation = _validator.ValidateJson(doc.RootElement);
+        if (!jsonValidation.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"Template validation failed ({jsonValidation.ReasonCode}): {jsonValidation.Detail}");
+        }
+
+        var parsedProfile = PersonalityProfileProjection.FromJson(doc.RootElement, JsonOptions);
+
+        if (!string.Equals(parsedProfile.Id, profile.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Template id '{parsedProfile.Id}' did not match expected id '{profile.Id}'.");
+        }
+
+        var dir = EnsureProfileDirectory(profilesDirectory);
+        var path = ResolveProfilePath(dir, profile.Id);
+        File.WriteAllText(path, templateJsonWithComments, Encoding.UTF8);
+
+        return new PersonalityProfileDescriptor
+        {
+            Id = parsedProfile.Id,
+            DisplayName = parsedProfile.DisplayName,
+            Description = parsedProfile.Description,
+            Hash = CanonicalJsonHasher.ComputeHash(doc.RootElement),
+            SourcePath = path
+        };
+    }
+
     public PersonalityProfileDescriptor DuplicateProfile(
         string profilesDirectory,
         string sourceProfileId,
@@ -211,7 +264,7 @@ public sealed class PersonalityProfileStore
         try
         {
             var json = File.ReadAllText(path);
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json, JsonDocumentReadOptions);
 
             var validation = _validator.ValidateJson(doc.RootElement);
             if (!validation.IsValid)
@@ -232,9 +285,7 @@ public sealed class PersonalityProfileStore
                 };
             }
 
-            var profile = doc.RootElement.Deserialize<PersonalityProfile>();
-            if (profile is null)
-                return null;
+            var profile = PersonalityProfileProjection.FromJson(doc.RootElement, JsonOptions);
 
             // Hard invariant: permissions are never overridable by personality. Force true regardless of file content.
             profile = profile with { BehaviorRules = profile.BehaviorRules with { NeverOverridePermissions = true } };

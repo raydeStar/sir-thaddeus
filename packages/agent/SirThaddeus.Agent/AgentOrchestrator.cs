@@ -397,7 +397,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";
-        var personalityAnchor = _personalityRuntime.BuildAnchor(personalityTurnTag);
+        var personalityTurnContext = _personalityRuntime.BuildTurnContext(userMessage);
+        var personalityAnchor = _personalityRuntime.BuildAnchor(personalityTurnTag, userMessage);
+        LogEvent(
+            "PERSONALITY_CONTEXT",
+            $"persona={_personalityRuntime.Snapshot.Profile.Id}, " +
+            $"tags=[{string.Join(", ", personalityTurnContext.Tags)}], " +
+            $"tone_effective={{formality={personalityTurnContext.EffectiveTone.Formality:0.00}," +
+            $"warmth={personalityTurnContext.EffectiveTone.Warmth:0.00}," +
+            $"humor={personalityTurnContext.EffectiveTone.Humor:0.00}," +
+            $"verbosity={personalityTurnContext.EffectiveTone.Verbosity:0.00}," +
+            $"directness={personalityTurnContext.EffectiveTone.Directness:0.00}}}, " +
+            $"reduction={{mode={personalityTurnContext.Reduction.Mode},applied={personalityTurnContext.Reduction.Applied}}}");
 
         var lowerIncoming = userMessage.Trim().ToLowerInvariant();
         if (!LooksLikeReasoningFollowUp(lowerIncoming))

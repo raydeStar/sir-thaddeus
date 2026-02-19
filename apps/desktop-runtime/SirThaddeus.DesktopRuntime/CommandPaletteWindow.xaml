@@ -1925,9 +1925,10 @@
                                    VerticalAlignment="Center"/>
                         <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding AvailableKokoroVoices}"
-                                  SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay}"
+                                  SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   IsEditable="True"
-                                  Text="{Binding VoiceTtsVoiceId, UpdateSourceTrigger=LostFocus}"
+                                  Text="{Binding VoiceTtsVoiceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  IsTextSearchEnabled="True"
                                   Style="{StaticResource DarkComboBoxStyle}"
                                   ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
                                   ToolTip="Select an installed Kokoro voice pack or type a custom voice ID"/>
