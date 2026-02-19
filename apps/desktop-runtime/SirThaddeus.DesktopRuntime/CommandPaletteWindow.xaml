@@ -58,6 +58,7 @@
                             Margin="0,0,16,0">
                     <Ellipse Width="8" Height="8"
                              Margin="0,0,8,0"
+                             ToolTip="LLM Connection Status"
                              VerticalAlignment="Center">
                         <Ellipse.Style>
                             <Style TargetType="Ellipse">
@@ -73,7 +74,7 @@
                     
                     <Ellipse Width="8" Height="8"
                              Margin="0,0,8,0"
-                             ToolTip="Backend Health (ASR/TTS)"
+                             ToolTip="Local Voice Backend Health (ASR/TTS)"
                              VerticalAlignment="Center">
                         <Ellipse.Style>
                             <Style TargetType="Ellipse">
@@ -2117,7 +2118,8 @@
                         <TextBlock Text="TTS Voice"
                                    FontSize="12"
                                    Foreground="{StaticResource Subtext0Brush}"
-                                   VerticalAlignment="Center"/>
+                                   VerticalAlignment="Center"
+                                   ToolTip="Select an installed voice. Defaults to personality's preferred voice if blank."/>
                         <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding AvailableKokoroVoices}"
                                   SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -2125,8 +2127,13 @@
                                   Text="{Binding VoiceTtsVoiceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   IsTextSearchEnabled="True"
                                   Style="{StaticResource DarkComboBoxStyle}"
-                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
-                                  ToolTip="Select an installed Kokoro voice pack or type a custom voice ID"/>
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBox.ToolTip>
+                                <ToolTip>
+                                    <TextBlock Text="Select an installed Kokoro voice pack or type a custom voice ID.&#x0a;Leave blank to automatically use the selected personality's preferred voice."/>
+                                </ToolTip>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
                     </Grid>
 
                     <Grid Margin="0,0,0,8">

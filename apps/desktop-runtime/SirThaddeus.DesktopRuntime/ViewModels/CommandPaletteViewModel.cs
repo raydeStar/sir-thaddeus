@@ -705,10 +705,16 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             ? firstUserMsg[..57] + "..."
             : firstUserMsg;
 
-        var snapshot = new ChatSessionSnapshot(
-            Title:     title,
-            Timestamp: DateTime.Now,
-            Messages:  Messages.Select(m => new ChatSessionMessage(m.Role.ToString(), m.Content)).ToList());
+        var snapshot = new ChatSessionSnapshot
+        {
+            Title     = title,
+            Timestamp = DateTime.Now,
+            Messages  = Messages.Select(m => new ChatSessionMessage
+            {
+                Role    = m.Role.ToString(),
+                Content = m.Content
+            }).ToList()
+        };
 
         ChatHistory.Insert(0, snapshot);
 
@@ -753,12 +759,14 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         foreach (var dto in savedBriefings)
         {
             if (dto.Briefing is null) continue;
-            BriefingPanel.History.Add(new BriefingHistoryEntry(
-                Title:      dto.Title,
-                Confidence: dto.Confidence,
-                StatusLine: dto.StatusLine,
-                Timestamp:  dto.Timestamp,
-                Briefing:   dto.Briefing));
+            BriefingPanel.History.Add(new BriefingHistoryEntry
+            {
+                Title      = dto.Title,
+                Confidence = dto.Confidence,
+                StatusLine = dto.StatusLine,
+                Timestamp  = dto.Timestamp,
+                Briefing   = dto.Briefing
+            });
         }
     }
 
