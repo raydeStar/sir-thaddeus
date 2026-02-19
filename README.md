@@ -16,11 +16,11 @@
 - **Command Palette** with three tabs: **Chat**, **Memory Browser**, and **Profile/Nuggets**.
 - **Memory system**: facts, events, and text chunks stored in SQLite with hybrid BM25 + optional embeddings retrieval.
 - **Shallow memory personalization**: Profile Cards for the user and people they mention, plus Memory Nuggets (atomic personal facts) injected into context at greeting and in-conversation.
-- **Tool routing pipeline**: Intent Router → Policy Gate → Executor → Post-hooks. Prevents tool hallucination and enforces strict allowlists.
+- **Tool routing pipeline**: Intent Router (`RouterOutput`) → Policy Gate (`PolicyDecision`) → conflict resolution matrix → tool loop executor.
 - **Web search**: DuckDuckGo HTML, Google News RSS, and SearXNG providers with smart query extraction.
 - **Conflict detection**: Memory storage checks for duplicates, single-vs-multi-valued predicates, and antonym contradictions before writing.
 - **Headless mode**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
-- **PTT → agent → TTS pipeline**: transcription is still a placeholder, but the end-to-end pipeline is testable.
+- **PTT voice pipeline**: push-to-talk capture → local ASR (`faster-whisper`) → agent response → local TTS playback via VoiceHost.
 - **Audit log is always-on**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
 
 ## Architecture (4 layers)
@@ -88,6 +88,8 @@ sir-thaddeus/
 │   │   ├── Converters/               # XAML value converters (Markdown, Base64, etc.)
 │   │   ├── Services/                 # Hotkey, MCP process, PTT, TTS, tray icon
 │   │   └── ViewModels/               # MVVM view models (Chat, Memory, Profile browsers)
+│   ├── voice-host/                   # Local VoiceHost process (ASR/TTS HTTP surface)
+│   ├── voice-backend/                # Python ASR/TTS backend + model/voice assets
 │   └── mcp-server/                   # MCP tool server (stdio)
 │       └── Tools/                    # Memory, Browser, File, System, Screen, WebSearch
 ├── packages/
@@ -259,18 +261,28 @@ dotnet run --project apps/mcp-server/SirThaddeus.McpServer
 | `SystemExecute` | Runs allowlisted commands only. No raw shell execution. |
 | `ScreenCapture` | Captures full screen or active window (explicit permission required). |
 
+## Architecture Review Index
+
+Use this list when you want reviewers to focus on architecture first, not implementation details:
+
+- [project-notes/architecture-review-index.md](project-notes/architecture-review-index.md) - quick index of design docs + review order
+- [project-notes/architecture-nuts-bolts.md](project-notes/architecture-nuts-bolts.md) - current runtime architecture, trust boundaries, wiring paths
+- [project-notes/mcp-tools-reference.md](project-notes/mcp-tools-reference.md) - current MCP tool contracts, permission model, and audit guarantees
+- [project-notes/tool-conflict-matrix.md](project-notes/tool-conflict-matrix.md) - deterministic tool conflict resolution rules
+- [project-notes/tool-routing-v2.md](project-notes/tool-routing-v2.md) - current routing pipeline notes + MCP hook points
+- [project-notes/architectural-design.md](project-notes/architectural-design.md) - product-level architecture strategy
+
 ## Known gaps (intentionally called out)
 
-- **Transcription**: PTT creates a minimal WAV placeholder; Whisper transcription is not integrated yet.
-- **Permission enforcement**: MCP tool calls are not yet gated by permission tokens (legacy ToolRunner path has them).
 - **Playwright via MCP**: Playwright tool exists, but MCP uses a simpler HTTP navigation tool for now.
+- **Voice cold-start latency**: first-turn ASR/TTS may be slower while local models warm up.
 - **Nugget auto-suggest**: V1 nuggets are manual-only. Two-sighting auto-suggest (V1.1+) is designed but deferred.
 
 ## More docs
 
 - [README_TESTING.md](README_TESTING.md) - test harness usage and troubleshooting
 - [README_DEPLOY.md](README_DEPLOY.md) - production preflight and deployment checklist
-- [project-notes/architectural-design.md](project-notes/architectural-design.md) - architecture reference
+- [project-notes/architecture-review-index.md](project-notes/architecture-review-index.md) - architecture docs index for review
 
 ## License
 

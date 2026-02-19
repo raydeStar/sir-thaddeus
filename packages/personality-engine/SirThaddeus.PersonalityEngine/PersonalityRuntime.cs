@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using SirThaddeus.PersonalityEngine.Context;
 using SirThaddeus.PersonalityEngine.Formatting;
 using SirThaddeus.PersonalityEngine.Profiles;
 using SirThaddeus.PersonalityEngine.Prompting;
@@ -11,7 +12,8 @@ public interface IPersonalityRuntime
     PersonalityRuntimeSnapshot Snapshot { get; }
     PersonalityRuntimeSnapshot Reload(string activeProfileId, string profilesDirectory);
     string BuildSystemPrompt(string taskInstruction, IEnumerable<PromptBlock>? extraBlocks = null);
-    string BuildAnchor(string turnTag);
+    PersonalityTurnContext BuildTurnContext(string? latestUserMessage);
+    string BuildAnchor(string turnTag, string? latestUserMessage = null);
 }
 
 public sealed record PersonalityRuntimeSnapshot
@@ -129,17 +131,29 @@ public sealed class PersonalityRuntime : IPersonalityRuntime
         return DeterministicPromptRenderer.Render(blocks);
     }
 
-    public string BuildAnchor(string turnTag)
+    public PersonalityTurnContext BuildTurnContext(string? latestUserMessage)
+    {
+        var snapshot = Snapshot;
+        return PersonalityTurnContextBuilder.Build(snapshot.Profile, latestUserMessage);
+    }
+
+    public string BuildAnchor(string turnTag, string? latestUserMessage = null)
     {
         var snapshot = Snapshot;
         var profile = snapshot.Profile;
         var tag = string.IsNullOrWhiteSpace(turnTag) ? "turn" : turnTag.Trim();
+        var turnContext = BuildTurnContext(latestUserMessage);
+        var tags = turnContext.Tags.Count == 0
+            ? "none"
+            : string.Join(", ", turnContext.Tags);
 
         var selfName = ResolveIdentityName(profile);
         var anchorBody =
             $"You are {selfName}. {profile.Description}. " +
-            $"Prioritize clarity (directness {profile.Tone.Directness:0.00}) and stable tone (warmth {profile.Tone.Warmth:0.00}, humor {profile.Tone.Humor:0.00}). " +
-            "You do not bypass permissions, hide system state, or alter policy logic.";
+            $"Context={tags} ({turnContext.Confidence:0.00}). " +
+            $"Tone targets: directness={turnContext.EffectiveTone.Directness:0.00}, warmth={turnContext.EffectiveTone.Warmth:0.00}, humor={turnContext.EffectiveTone.Humor:0.00}, verbosity={turnContext.EffectiveTone.Verbosity:0.00}. " +
+            $"Epistemic: no_invention={profile.EpistemicRules.NeverInventCapabilities}, admit_uncertainty={profile.EpistemicRules.AdmitUncertaintyExplicitly}. " +
+            "Never bypass permissions, hide system state, or alter policy logic.";
 
         return
             $"[PERSONALITY_ANCHOR system:personality_anchor:v1:{tag}]\n" +
@@ -150,22 +164,31 @@ public sealed class PersonalityRuntime : IPersonalityRuntime
     private static string BuildPersonalityBlock(PersonalityProfile profile, string hash)
     {
         var signature = profile.SpeechPatterns.IncludeSignatureNote ? "enabled" : "disabled";
-        var reduction = profile.ReductionRules.Enabled ? "enabled" : "disabled";
+        var reduction = ResolveReductionMode(profile.ReductionRules);
         var selfName = ResolveIdentityName(profile);
+        var coreIdentity = ResolveCoreIdentity(profile);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Profile id: {profile.Id}");
         sb.AppendLine($"Profile hash: {hash}");
         sb.AppendLine($"Your name: {selfName}");
 
+        if (!string.IsNullOrWhiteSpace(coreIdentity))
+            sb.AppendLine($"Core identity: {coreIdentity}");
+
         if (!string.IsNullOrWhiteSpace(profile.Identity.SelfDescription))
             sb.AppendLine($"Who you are (in your own words): {profile.Identity.SelfDescription}");
 
+        sb.AppendLine($"Priority order: {FormatPriorityOrder(profile.Instructions.ResponsePriorityOrder)}");
         sb.AppendLine($"Tone: formality={profile.Tone.Formality:0.00}, warmth={profile.Tone.Warmth:0.00}, humor={profile.Tone.Humor:0.00}, verbosity={profile.Tone.Verbosity:0.00}, directness={profile.Tone.Directness:0.00}");
         // never_override_permissions is a runtime invariant, not a personality setting—enforced in Trust/Security blocks.
         sb.AppendLine($"Behavior: pushback_on_illogic={profile.BehaviorRules.PushbackOnIllogic}, avoid_flattery={profile.BehaviorRules.AvoidFlattery}");
+        sb.AppendLine($"Epistemic: never_invent_capabilities={profile.EpistemicRules.NeverInventCapabilities}, admit_uncertainty_explicitly={profile.EpistemicRules.AdmitUncertaintyExplicitly}, ask_minimum_questions={profile.EpistemicRules.AskMinimumQuestions}");
         sb.AppendLine($"Speech: include_signature_note={signature}, avoid_modern_slang={profile.SpeechPatterns.AvoidModernSlang}");
-        sb.Append($"Constraints: max_metaphor_density={profile.CapabilityConstraints.MaxMetaphorDensity:0.00}, reduction={reduction}");
+        sb.AppendLine($"Constraints: max_metaphor_density={profile.CapabilityConstraints.MaxMetaphorDensity:0.00}, reduction={reduction}");
+        AppendBulletList(sb, "Conflict rules", profile.Instructions.ConflictResolution, maxItems: 3);
+        AppendBulletList(sb, "Failure behavior", profile.Instructions.FailureBehavior, maxItems: 2);
+        AppendBulletList(sb, "Style rules", profile.Instructions.StyleRules, maxItems: 3);
 
         return sb.ToString();
     }
@@ -174,6 +197,54 @@ public sealed class PersonalityRuntime : IPersonalityRuntime
         string.IsNullOrWhiteSpace(profile.Identity.SelfName)
             ? profile.DisplayName
             : profile.Identity.SelfName;
+
+    private static string ResolveCoreIdentity(PersonalityProfile profile)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.Instructions.CoreIdentity))
+            return profile.Instructions.CoreIdentity.Trim();
+
+        return profile.Description;
+    }
+
+    private static string FormatPriorityOrder(IReadOnlyList<string> priorities)
+    {
+        var cleaned = priorities
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Select(static item => item.Trim())
+            .ToList();
+
+        return cleaned.Count == 0
+            ? "safety > truth > clarity > agency > efficiency > tone"
+            : string.Join(" > ", cleaned);
+    }
+
+    private static string ResolveReductionMode(PersonalityReductionRules rules)
+    {
+        var mode = (rules.Mode ?? "").Trim().ToLowerInvariant();
+        if (mode is "adaptive" or "always" or "never")
+            return mode;
+
+        return rules.Enabled ? "always" : "never";
+    }
+
+    private static void AppendBulletList(
+        StringBuilder sb,
+        string heading,
+        IReadOnlyList<string> items,
+        int maxItems)
+    {
+        var cleaned = items
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Select(static item => item.Trim())
+            .Take(maxItems)
+            .ToList();
+        if (cleaned.Count == 0)
+            return;
+
+        sb.AppendLine($"{heading}:");
+        foreach (var item in cleaned)
+            sb.AppendLine($"- {item}");
+    }
 
     private static string ComputeTextHash(string value)
     {

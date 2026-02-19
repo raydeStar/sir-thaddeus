@@ -490,6 +490,13 @@ public sealed class SettingsViewModel : ViewModelBase
         _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
         _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
+        if (string.IsNullOrWhiteSpace(_voiceTtsVoiceId))
+        {
+            _voiceTtsVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
+                _personalityStore,
+                _personalityProfilesDirectory,
+                s.ActivePersonalityId);
+        }
         LoadLocationForProfile(s.ActiveProfileId);
 
         // Notify all bindings
@@ -645,48 +652,9 @@ public sealed class SettingsViewModel : ViewModelBase
                 suffix++;
             }
 
-            var profile = new PersonalityProfile
-            {
-                Id = candidateId,
-                DisplayName = "New Personality",
-                Description = "Template profile. Edit description, identity, and tone values for your new style.",
-                Identity = new PersonalityIdentity
-                {
-                    SelfName = "New Personality",
-                    SelfDescription = "I am a new custom personality template. Edit identity.self_name and identity.self_description to define your assistant's voice, mission, and style."
-                },
-                Tone = new PersonalityTone
-                {
-                    Formality = 0.60,
-                    Warmth = 0.60,
-                    Humor = 0.20,
-                    Verbosity = 0.55,
-                    Directness = 0.82
-                },
-                BehaviorRules = new PersonalityBehaviorRules
-                {
-                    PushbackOnIllogic = true,
-                    AvoidFlattery = true,
-                    NeverOverridePermissions = true
-                },
-                SpeechPatterns = new PersonalitySpeechPatterns
-                {
-                    IncludeSignatureNote = false,
-                    AvoidModernSlang = true
-                },
-                CapabilityConstraints = new PersonalityCapabilityConstraints
-                {
-                    MaxMetaphorDensity = 0.22
-                },
-                ReductionRules = new PersonalityReductionRules
-                {
-                    Enabled = false,
-                    CollapseExactDuplicates = true,
-                    TrimTrailingFluff = true
-                }
-            };
-
-            var descriptor = _personalityStore.SaveProfile(directory, profile);
+            var profile = PersonalityProfileTemplateFactory.CreateAverageTemplate(candidateId);
+            var templateJson = PersonalityProfileTemplateFactory.RenderMinimalTemplateJson(profile);
+            var descriptor = _personalityStore.SaveProfileTemplate(directory, profile, templateJson);
             _settings = _settings with
             {
                 ActivePersonalityId = descriptor.Id,
@@ -700,7 +668,7 @@ public sealed class SettingsViewModel : ViewModelBase
                 ?? _selectedPersonality;
             OnPropertyChanged(nameof(SelectedPersonality));
 
-            StatusText = $"Created personality '{descriptor.Id}'. Edit it and save.";
+            StatusText = $"Created personality '{descriptor.Id}' using the minimal profile template.";
             ActivePersonalityChanged?.Invoke(_settings.ActivePersonalityId);
             SettingsChanged?.Invoke(_settings);
 
@@ -1579,15 +1547,33 @@ public sealed class SettingsViewModel : ViewModelBase
     private void SavePersonalitySelectionOnly()
     {
         var selectedId = _selectedPersonality?.ProfileId ?? BuiltInProfileCatalog.HelpfulDefaultId;
-        var updated = _settings with
+        var baseUpdated = _settings with
         {
             ActivePersonalityId = selectedId,
             PersonalityProfilesDir = PersonalityProfilesDirectory
         };
 
+        var voicePreferenceResult = PersonalityVoicePreferenceResolver.ApplyPreferredTtsVoiceIfMissing(
+            baseUpdated,
+            _personalityStore,
+            PersonalityProfilesDirectory,
+            selectedId);
+        var updated = voicePreferenceResult.Settings;
+
         SettingsManager.Save(updated);
         _settings = updated;
-        StatusText = "Personality selected.";
+        if (voicePreferenceResult.Applied)
+        {
+            _voiceTtsVoiceId = voicePreferenceResult.AppliedVoiceId;
+            OnPropertyChanged(nameof(VoiceTtsVoiceId));
+            OnPropertyChanged(nameof(SelectedKokoroVoice));
+            RefreshKokoroVoiceCatalog();
+            StatusText = $"Personality selected. Applied preferred voice '{voicePreferenceResult.AppliedVoiceId}'.";
+        }
+        else
+        {
+            StatusText = "Personality selected.";
+        }
 
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);

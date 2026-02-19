@@ -25,11 +25,23 @@ public sealed record PersonalityProfile
     [JsonPropertyName("behavior_rules")]
     public PersonalityBehaviorRules BehaviorRules { get; init; } = new();
 
+    [JsonPropertyName("epistemic_rules")]
+    public PersonalityEpistemicRules EpistemicRules { get; init; } = new();
+
     [JsonPropertyName("speech_patterns")]
     public PersonalitySpeechPatterns SpeechPatterns { get; init; } = new();
 
     [JsonPropertyName("capability_constraints")]
     public PersonalityCapabilityConstraints CapabilityConstraints { get; init; } = new();
+
+    [JsonPropertyName("instructions")]
+    public PersonalityInstructions Instructions { get; init; } = new();
+
+    [JsonPropertyName("context_modifiers")]
+    public PersonalityContextModifiers ContextModifiers { get; init; } = new();
+
+    [JsonPropertyName("voice_preferences")]
+    public PersonalityVoicePreferences VoicePreferences { get; init; } = new();
 
     [JsonPropertyName("reduction_rules")]
     public PersonalityReductionRules ReductionRules { get; init; } = new();
@@ -68,6 +80,18 @@ public sealed record PersonalityBehaviorRules
     public bool NeverOverridePermissions { get; init; } = true;
 }
 
+public sealed record PersonalityEpistemicRules
+{
+    [JsonPropertyName("never_invent_capabilities")]
+    public bool NeverInventCapabilities { get; init; } = true;
+
+    [JsonPropertyName("admit_uncertainty_explicitly")]
+    public bool AdmitUncertaintyExplicitly { get; init; } = true;
+
+    [JsonPropertyName("ask_minimum_questions")]
+    public bool AskMinimumQuestions { get; init; } = true;
+}
+
 public sealed record PersonalitySpeechPatterns
 {
     [JsonPropertyName("include_signature_note")]
@@ -83,6 +107,78 @@ public sealed record PersonalityCapabilityConstraints
     public double MaxMetaphorDensity { get; init; } = 0.3;
 }
 
+public sealed record PersonalityInstructions
+{
+    [JsonPropertyName("core_identity")]
+    public string CoreIdentity { get; init; } = "";
+
+    [JsonPropertyName("response_priority_order")]
+    public IReadOnlyList<string> ResponsePriorityOrder { get; init; } = [];
+
+    [JsonPropertyName("conflict_resolution")]
+    public IReadOnlyList<string> ConflictResolution { get; init; } = [];
+
+    [JsonPropertyName("failure_behavior")]
+    public IReadOnlyList<string> FailureBehavior { get; init; } = [];
+
+    [JsonPropertyName("style_rules")]
+    public IReadOnlyList<string> StyleRules { get; init; } = [];
+}
+
+public sealed record PersonalityContextModifiers
+{
+    [JsonPropertyName("emotional_user")]
+    public PersonalityContextModifier EmotionalUser { get; init; } = new();
+
+    [JsonPropertyName("technical_mode")]
+    public PersonalityContextModifier TechnicalMode { get; init; } = new();
+
+    [JsonPropertyName("brainstorming")]
+    public PersonalityContextModifier Brainstorming { get; init; } = new();
+
+    [JsonPropertyName("boundary_testing")]
+    public PersonalityContextModifier BoundaryTesting { get; init; } = new();
+}
+
+public sealed record PersonalityContextModifier
+{
+    [JsonPropertyName("formality")]
+    public double Formality { get; init; }
+
+    [JsonPropertyName("warmth")]
+    public double Warmth { get; init; }
+
+    [JsonPropertyName("humor")]
+    public double Humor { get; init; }
+
+    [JsonPropertyName("verbosity")]
+    public double Verbosity { get; init; }
+
+    [JsonPropertyName("directness")]
+    public double Directness { get; init; }
+
+    // Backward/forward compatible aliases for metaphor tuning.
+    [JsonPropertyName("metaphor_density")]
+    public double MetaphorDensityDelta { get; init; }
+
+    [JsonPropertyName("max_metaphor_density_delta")]
+    public double MaxMetaphorDensityDelta { get; init; }
+
+    [JsonIgnore]
+    public double ResolvedMetaphorDensityDelta => MetaphorDensityDelta + MaxMetaphorDensityDelta;
+}
+
+public sealed record PersonalityVoicePreferences
+{
+    [JsonPropertyName("preferred_tts_voice_id")]
+    public string PreferredTtsVoiceId { get; init; } = "";
+
+    public string GetResolvedPreferredTtsVoiceId() =>
+        string.IsNullOrWhiteSpace(PreferredTtsVoiceId)
+            ? ""
+            : PreferredTtsVoiceId.Trim();
+}
+
 public sealed record PersonalityReductionRules
 {
     /// <summary>
@@ -90,6 +186,9 @@ public sealed record PersonalityReductionRules
     /// </summary>
     [JsonPropertyName("enabled")]
     public bool Enabled { get; init; }
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "";
 
     /// <summary>
     /// If true, remove exact duplicate paragraphs only.
@@ -102,6 +201,21 @@ public sealed record PersonalityReductionRules
     /// </summary>
     [JsonPropertyName("trim_trailing_fluff")]
     public bool TrimTrailingFluff { get; init; } = true;
+
+    [JsonPropertyName("adaptive")]
+    public PersonalityAdaptiveReduction Adaptive { get; init; } = new();
+}
+
+public sealed record PersonalityAdaptiveReduction
+{
+    [JsonPropertyName("simple_query_max_chars")]
+    public int SimpleQueryMaxChars { get; init; } = 900;
+
+    [JsonPropertyName("complex_query_min_chars")]
+    public int ComplexQueryMinChars { get; init; } = 700;
+
+    [JsonPropertyName("prefer_short_if_user_asked_simple")]
+    public bool PreferShortIfUserAskedSimple { get; init; } = true;
 }
 
 public sealed record PersonalityIdentity

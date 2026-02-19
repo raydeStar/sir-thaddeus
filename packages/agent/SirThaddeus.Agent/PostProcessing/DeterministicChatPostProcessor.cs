@@ -193,7 +193,7 @@ public sealed class DeterministicChatPostProcessor
 
         sanitized = ReductionFormatter.Apply(
             sanitized,
-            PersonalityFormattingPolicy.BuildReductionOptions(activeProfile));
+            PersonalityFormattingPolicy.BuildReductionOptions(activeProfile, latestUserMessage));
 
         return sanitized;
     }
