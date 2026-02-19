@@ -1,0 +1,20 @@
+{
+  "llm": {
+    "baseUrl": "http://localhost:1234",
+    "model": "local-model",
+    "maxTokens": 2048,
+    "contextWindowTokens": 8192,
+    "temperature": 0.7
+  },
+  "mcp": {
+    "serverPath": "auto"
+  },
+  "audio": {
+    "ttsEnabled": true
+  },
+  "memory": {
+    "enabled": true,
+    "dbPath": "auto"
+  },
+  "activePersonalityId": "helpful_default"
+}
