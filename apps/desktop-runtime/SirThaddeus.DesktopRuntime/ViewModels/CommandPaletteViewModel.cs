@@ -739,12 +739,18 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
     private void PersistChatHistory()
     {
-        _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
+        if (ChatHistory.Count > 0)
+        {
+            _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
+        }
     }
 
     private void PersistBriefingHistory()
     {
-        _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
+        if (BriefingPanel.History.Count > 0)
+        {
+            _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
+        }
     }
 
     private void RestorePersistedHistory()
