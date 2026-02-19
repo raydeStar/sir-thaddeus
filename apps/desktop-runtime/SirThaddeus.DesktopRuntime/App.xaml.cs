@@ -2666,7 +2666,10 @@ public partial class App : System.Windows.Application
         _trayIcon = null;
 
         // Flush chat + briefing history to disk before teardown.
-        _commandPaletteViewModel?.SaveAllHistory();
+        if (_commandPaletteViewModel is not null)
+        {
+            _commandPaletteViewModel.SaveAllHistory();
+        }
 
         _commandPaletteWindow?.Close();
         _commandPaletteWindow = null;
