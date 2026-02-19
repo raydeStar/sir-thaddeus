@@ -18,7 +18,7 @@ alwaysApply: true
 
 - Re-run `./dev/test.ps1` after every code change until it exits 0.
 - If tests fail, read the console output and fix the code.
-- TRX reports are in `./artifacts/test/` for detailed inspection.
+- TRX reports are in `./artifacts/test-results/` for detailed inspection.
 
 ## Test Discipline
 
