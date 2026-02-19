@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Concurrent;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 
 namespace SirThaddeus.McpServer.Tools;
@@ -22,6 +24,8 @@ namespace SirThaddeus.McpServer.Tools;
 [McpServerToolType]
 public static class SystemTools
 {
+    private sealed record SystemPreview(string Command, string? ResolvedCwd, DateTimeOffset ExpiresAtUtc);
+
     // ─────────────────────────────────────────────────────────────────
     // Allowlist: commands that are safe to run
     // ─────────────────────────────────────────────────────────────────
@@ -50,6 +54,13 @@ public static class SystemTools
         "--info", "--version", "restore", "build", "test"
     };
 
+    private static readonly ConcurrentDictionary<string, SystemPreview> PreviewCache = new();
+    private static readonly TimeSpan PreviewTtl = TimeSpan.FromMinutes(5);
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = false
+    };
+
     [McpServerTool, Description(
         "Execute a system command and return its output. " +
         "Only allowlisted commands are permitted. " +
@@ -63,68 +74,159 @@ public static class SystemTools
         string? cwd = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(command))
-            return "Error: command is required.";
+        if (!TryValidateRequest(command, cwd, out var resolvedCwd, out var validationError))
+            return validationError;
 
-        // ── Guard: shell metacharacters ──────────────────────────────
+        return await RunCommandAsync(command, resolvedCwd, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "system_execute_preview",
+        ReadOnly = true,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Builds a dry-run preview for system_execute and returns a preview_id.")]
+    public static string SystemExecutePreview(
+        [Description("The command to validate and stage for execution")] string command,
+        [Description("Optional working directory for the command")] string? cwd = null)
+    {
+        if (!TryValidateRequest(command, cwd, out var resolvedCwd, out var validationError))
+            return JsonSerializer.Serialize(new { ok = false, error = validationError }, JsonOpts);
+
+        var previewId = CreatePreview(command, resolvedCwd);
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            preview_id = previewId,
+            tool = "system_execute",
+            command = command.Trim(),
+            cwd = resolvedCwd ?? "",
+            expires_at_utc = DateTimeOffset.UtcNow.Add(PreviewTtl).ToString("O")
+        }, JsonOpts);
+    }
+
+    [McpServerTool(
+        Name = "system_execute_apply",
+        ReadOnly = false,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Executes a previously previewed command. Requires confirm=true.")]
+    public static async Task<string> SystemExecuteApply(
+        [Description("Preview identifier returned by system_execute_preview")] string previewId,
+        [Description("Explicit confirmation gate. Must be true to execute.")] bool confirm = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!confirm)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                error = "confirm_required",
+                message = "Set confirm=true to execute system_execute_apply."
+            }, JsonOpts);
+        }
+
+        if (!TryGetPreview(previewId, out var preview))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                error = "preview_not_found_or_expired"
+            }, JsonOpts);
+        }
+
+        var result = await RunCommandAsync(preview!.Command, preview.ResolvedCwd, cancellationToken);
+        return JsonSerializer.Serialize(new
+        {
+            ok = !result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase),
+            preview_id = previewId,
+            tool = "system_execute",
+            result
+        }, JsonOpts);
+    }
+
+    private static bool TryValidateRequest(
+        string command,
+        string? cwd,
+        out string? resolvedCwd,
+        out string error)
+    {
+        resolvedCwd = null;
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            error = "Error: command is required.";
+            return false;
+        }
+
         if (command.IndexOfAny(BlockedMetachars) >= 0)
         {
-            return "Error: Command contains blocked shell metacharacters " +
-                   $"({string.Join(' ', BlockedMetachars.Select(c => $"'{c}'"))}). " +
-                   "Use structured tool calls instead of shell chaining.";
+            error = "Error: Command contains blocked shell metacharacters " +
+                    $"({string.Join(' ', BlockedMetachars.Select(c => $"'{c}'"))}). " +
+                    "Use structured tool calls instead of shell chaining.";
+            return false;
         }
 
-        // ── Guard: allowlist ─────────────────────────────────────────
         var tokens = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var baseCommand = tokens.FirstOrDefault() ?? "";
-
         if (!SafeCommands.Contains(baseCommand))
         {
-            return $"Error: Command '{baseCommand}' is not in the allowlist. " +
-                   $"Permitted commands: {string.Join(", ", SafeCommands.Order())}";
+            error = $"Error: Command '{baseCommand}' is not in the allowlist. " +
+                    $"Permitted commands: {string.Join(", ", SafeCommands.Order())}";
+            return false;
         }
 
-        // ── Guard: dotnet verb restrictions ──────────────────────────
         if (string.Equals(baseCommand, "dotnet", StringComparison.OrdinalIgnoreCase))
         {
             var verb = tokens.Length > 1 ? tokens[1] : "";
             if (string.IsNullOrEmpty(verb))
             {
-                return "Error: 'dotnet' requires a subcommand. " +
-                       $"Allowed: {string.Join(", ", AllowedDotnetVerbs.Order())}";
+                error = "Error: 'dotnet' requires a subcommand. " +
+                        $"Allowed: {string.Join(", ", AllowedDotnetVerbs.Order())}";
+                return false;
             }
 
             if (!AllowedDotnetVerbs.Contains(verb))
             {
-                return $"Error: 'dotnet {verb}' is not permitted. " +
-                       $"Allowed dotnet verbs: {string.Join(", ", AllowedDotnetVerbs.Order())}";
+                error = $"Error: 'dotnet {verb}' is not permitted. " +
+                        $"Allowed dotnet verbs: {string.Join(", ", AllowedDotnetVerbs.Order())}";
+                return false;
             }
         }
 
-        // ── Guard: working directory ─────────────────────────────────
-        string? resolvedCwd = null;
         if (!string.IsNullOrWhiteSpace(cwd))
         {
             resolvedCwd = Path.GetFullPath(cwd);
             if (!Directory.Exists(resolvedCwd))
             {
-                return $"Error: Working directory does not exist: {resolvedCwd}";
+                error = $"Error: Working directory does not exist: {resolvedCwd}";
+                return false;
             }
         }
 
-        // ── Execute ──────────────────────────────────────────────────
+        return true;
+    }
+
+    private static async Task<string> RunCommandAsync(
+        string command,
+        string? resolvedCwd,
+        CancellationToken cancellationToken)
+    {
         try
         {
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
-                FileName               = "cmd.exe",
-                Arguments              = $"/c {command}",
+                FileName = "cmd.exe",
+                Arguments = $"/c {command}",
                 RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-                WorkingDirectory       = resolvedCwd ?? ""
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = resolvedCwd ?? ""
             };
 
             process.Start();
@@ -145,6 +247,48 @@ public static class SystemTools
         catch (Exception ex)
         {
             return $"Error executing command: {ex.Message}";
+        }
+    }
+
+    private static string CreatePreview(string command, string? resolvedCwd)
+    {
+        PruneExpiredPreviews();
+        var previewId = $"preview-{Guid.NewGuid():N}";
+        PreviewCache[previewId] = new SystemPreview(
+            command.Trim(),
+            string.IsNullOrWhiteSpace(resolvedCwd) ? null : resolvedCwd,
+            DateTimeOffset.UtcNow.Add(PreviewTtl));
+        return previewId;
+    }
+
+    private static bool TryGetPreview(string previewId, out SystemPreview? preview)
+    {
+        preview = null;
+        if (string.IsNullOrWhiteSpace(previewId))
+            return false;
+
+        PruneExpiredPreviews();
+        var key = previewId.Trim();
+        if (!PreviewCache.TryGetValue(key, out var existing))
+            return false;
+
+        if (existing.ExpiresAtUtc < DateTimeOffset.UtcNow)
+        {
+            PreviewCache.TryRemove(key, out _);
+            return false;
+        }
+
+        preview = existing;
+        return true;
+    }
+
+    private static void PruneExpiredPreviews()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var pair in PreviewCache)
+        {
+            if (pair.Value.ExpiresAtUtc < now)
+                PreviewCache.TryRemove(pair.Key, out _);
         }
     }
 }

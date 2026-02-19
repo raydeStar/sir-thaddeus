@@ -228,6 +228,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public bool MemoryEnabled { get; set; } = true;
 
     /// <summary>
+    /// Global kill switch for side-effecting tools.
+    /// </summary>
+    public bool PanicModeEnabled { get; set; }
+
+    /// <summary>
+    /// Fail-closed runtime mode where tool execution is disabled.
+    /// </summary>
+    public bool SafeModeEnabled { get; set; }
+
+    /// <summary>
     /// User's configured location hint (e.g. "Portland, OR").
     /// Set from the active profile's manual location value.
     /// Injected into the system prompt so location-dependent queries
@@ -452,7 +462,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
 
         // ── Policy: determine which tools the executor may see ───────
-        var policy = PolicyGate.Evaluate(route);
+        var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
         LogEvent("POLICY_DECISION",
             $"allowedCaps=[{string.Join(", ", policy.AllowedCapabilities)}], " +
             $"forbiddenCaps=[{string.Join(", ", policy.ForbiddenCapabilities)}], " +
@@ -475,46 +485,53 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var memoryPackText = "";
         var onboardingNeeded = false;
         var memoryError = "";
-        try
+        if (SafeModeEnabled)
         {
-            var memoryContext = await _memoryContextProvider.GetContextAsync(
-                new MemoryContextRequest
-                {
-                    UserMessage = userMessage,
-                    MemoryEnabled = MemoryEnabled,
-                    IsColdGreeting = IsColdGreeting(userMessage),
-                    ActiveProfileId = ActiveProfileId,
-                    Timeout = MemoryRetrievalTimeout
-                },
-                cancellationToken);
-
-            memoryPackText = memoryContext.PackText;
-            onboardingNeeded = memoryContext.OnboardingNeeded;
-            memoryError = memoryContext.Error ?? "";
-
-            if (!MemoryEnabled)
-            {
-                LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
-            }
-            else if (memoryContext.Provenance.TimedOut)
-            {
-                LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
-            }
-
-            if (MemoryEnabled)
-            {
-                toolCallsMade.Add(new ToolCallRecord
-                {
-                    ToolName = "MemoryRetrieve",
-                    Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
-                    Result = memoryContext.Provenance.Summary,
-                    Success = memoryContext.Provenance.Success
-                });
-            }
+            LogEvent("SAFE_MODE_MEMORY_DISABLED", "Safe mode active - skipping memory retrieval.");
         }
-        catch
+        else
         {
-            // Swallow — memory is best-effort
+            try
+            {
+                var memoryContext = await _memoryContextProvider.GetContextAsync(
+                    new MemoryContextRequest
+                    {
+                        UserMessage = userMessage,
+                        MemoryEnabled = MemoryEnabled,
+                        IsColdGreeting = IsColdGreeting(userMessage),
+                        ActiveProfileId = ActiveProfileId,
+                        Timeout = MemoryRetrievalTimeout
+                    },
+                    cancellationToken);
+
+                memoryPackText = memoryContext.PackText;
+                onboardingNeeded = memoryContext.OnboardingNeeded;
+                memoryError = memoryContext.Error ?? "";
+
+                if (!MemoryEnabled)
+                {
+                    LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
+                }
+                else if (memoryContext.Provenance.TimedOut)
+                {
+                    LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
+                }
+
+                if (MemoryEnabled)
+                {
+                    toolCallsMade.Add(new ToolCallRecord
+                    {
+                        ToolName = "MemoryRetrieve",
+                        Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
+                        Result = memoryContext.Provenance.Summary,
+                        Success = memoryContext.Provenance.Success
+                    });
+                }
+            }
+            catch
+            {
+                // Swallow — memory is best-effort
+            }
         }
 
         // ── Onboarding injection ──────────────────────────────────────
@@ -546,13 +563,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             {
                 route = DefaultRouter.MakeRoute(Intents.MemoryWrite, confidence: 0.9,
                     needsMemoryWrite: true);
-                policy = PolicyGate.Evaluate(route);
+                policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
                 intent = MapRouteToLegacyIntent(route);
             }
 
-            LogEvent("ONBOARDING_INJECTED",
-                isFirstTurn ? "First turn — introducing and asking who the user is."
-                            : "Follow-up — passively capturing info.");
+            LogEvent("ONBOARDING_INJECTED", isFirstTurn ? "First turn — introducing and asking who the user is." : "Follow-up — passively capturing info.");
         }
 
         var stateBefore = _dialogueStore.Get();
@@ -561,7 +576,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var validatedSlots = _validateSlots.Run(stateBefore, mergedSlots);
         UpdateDialogueStateFromValidatedSlots(validatedSlots);
         var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore, UserLocationHint, PreferredUnits);
-
+        if (toolPlan.InjectionMitigationApplied)
+            LogEvent("PROMPT_INJECTION_FILTER_APPLIED", $"reason={toolPlan.InjectionMitigationReason}");
         var contextualUserMessage = string.IsNullOrWhiteSpace(validatedSlots.NormalizedMessage)
             ? userMessage
             : validatedSlots.NormalizedMessage;
@@ -569,8 +585,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         if (!string.Equals(contextualUserMessage, userMessage, StringComparison.Ordinal))
         {
-            LogEvent("PLACE_CONTEXT_INFERRED",
-                $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
+            LogEvent("PLACE_CONTEXT_INFERRED", $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
         }
 
         var hasLoadedProfileContext =
@@ -930,6 +945,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // gate. The executor only sees what the policy allows.
             var allTools = await _toolDefinitionBuilder.BuildAsync(
                 MemoryEnabled,
+                PanicModeEnabled,
+                SafeModeEnabled,
                 LogEvent,
                 cancellationToken);
             var tools = PolicyGate.FilterTools(allTools, policy);

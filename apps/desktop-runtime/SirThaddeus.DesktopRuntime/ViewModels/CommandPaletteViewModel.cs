@@ -53,6 +53,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _isProcessing;
     private bool _isLlmConnected;
     private string _connectionStatus = "Checking...";
+    private bool _panicModeEnabled;
+    private bool _safeModeEnabled;
+    private string _runtimeSafetyText = "";
     private bool _contextLocked;
     private int _tokensIn;
     private int _tokensOut;
@@ -188,6 +191,34 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _connectionStatus;
         private set => SetProperty(ref _connectionStatus, value);
+    }
+
+    public bool PanicModeEnabled
+    {
+        get => _panicModeEnabled;
+        private set
+        {
+            if (SetProperty(ref _panicModeEnabled, value))
+                OnPropertyChanged(nameof(HasRuntimeSafetyBanner));
+        }
+    }
+
+    public bool SafeModeEnabled
+    {
+        get => _safeModeEnabled;
+        private set
+        {
+            if (SetProperty(ref _safeModeEnabled, value))
+                OnPropertyChanged(nameof(HasRuntimeSafetyBanner));
+        }
+    }
+
+    public bool HasRuntimeSafetyBanner => SafeModeEnabled || PanicModeEnabled;
+
+    public string RuntimeSafetyText
+    {
+        get => _runtimeSafetyText;
+        private set => SetProperty(ref _runtimeSafetyText, value);
     }
 
     /// <summary>
@@ -326,6 +357,19 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// was set on <see cref="BriefingPanel"/> and the tab should activate.
     /// </summary>
     public void RaiseBriefingReady() => BriefingReady?.Invoke();
+
+    public void UpdateRuntimeSafety(bool panicModeEnabled, bool safeModeEnabled, string? safeModeReason)
+    {
+        PanicModeEnabled = panicModeEnabled;
+        SafeModeEnabled = safeModeEnabled;
+        RuntimeSafetyText = safeModeEnabled
+            ? string.IsNullOrWhiteSpace(safeModeReason)
+                ? "SAFE MODE"
+                : $"SAFE MODE: {safeModeReason}"
+            : panicModeEnabled
+                ? "PANIC MODE"
+                : "";
+    }
 
     /// <summary>
     /// One-click deep-dive entry point from clickable recommendation links.

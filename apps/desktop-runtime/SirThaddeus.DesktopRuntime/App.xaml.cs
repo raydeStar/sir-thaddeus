@@ -12,6 +12,7 @@ using SirThaddeus.DesktopRuntime.ViewModels;
 using SirThaddeus.Invocation;
 using SirThaddeus.LlmClient;
 using SirThaddeus.LocalTools.Playwright;
+using SirThaddeus.McpShared;
 using SirThaddeus.PermissionBroker;
 using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.ToolRunner;
@@ -31,6 +32,8 @@ public partial class App : System.Windows.Application
     // ─────────────────────────────────────────────────────────────────────
 
     private AppSettings? _settings;
+    private RuntimeControlState _runtimeControls = new();
+    private string _runtimeSafeModeReason = "";
     private JsonLineAuditLogger? _auditLogger;
     private RuntimeController? _runtimeController;
     private InMemoryPermissionBroker? _permissionBroker;
@@ -125,7 +128,10 @@ public partial class App : System.Windows.Application
             a.Equals("--headless", StringComparison.OrdinalIgnoreCase));
 
         // ── 1. Load config ───────────────────────────────────────────
-        _settings = SettingsManager.Load();
+        var settingsLoad = SettingsManager.LoadWithDiagnostics();
+        _settings = settingsLoad.Settings;
+        _runtimeControls = RuntimeControlState.FromSettings(_settings);
+        _runtimeSafeModeReason = settingsLoad.SafeModeReason ?? _settings.RuntimeSafety.SafeModeReason;
 
         // ── 2. Core infrastructure ───────────────────────────────────
         _auditLogger = JsonLineAuditLogger.CreateDefault();
@@ -134,6 +140,19 @@ public partial class App : System.Windows.Application
         _toolRunner = new EnforcingToolRunner(_permissionBroker, _auditLogger);
         RegisterTools(_toolRunner);
         _runtimeController.StateChanged += OnRuntimeStateChanged;
+        _auditLogger.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "SETTINGS_LOAD_DIAGNOSTICS",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["created_defaults"] = settingsLoad.CreatedDefaults,
+                ["recovered_from_corruption"] = settingsLoad.RecoveredFromCorruption,
+                ["migrated_schema"] = settingsLoad.MigratedSchema,
+                ["safe_mode_reason"] = settingsLoad.SafeModeReason ?? ""
+            }
+        });
 
         LogStartup();
         InitializeLocationServices();
@@ -163,8 +182,19 @@ public partial class App : System.Windows.Application
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
         var mcpServerPath = ResolveMcpServerPath(_settings.Mcp.ServerPath);
-        var mcpEnvVars    = BuildMcpEnvironmentVariables(_settings);
-        _mcpClient = new McpProcessClient(mcpServerPath, _auditLogger, mcpEnvVars);
+        var mcpEnvVars = BuildMcpEnvironmentVariables(_settings);
+        var handshakeOptions = new McpHandshakeOptions
+        {
+            Strict = _settings.RuntimeSafety.StrictHandshake,
+            RequiredProtocolVersion = _settings.RuntimeSafety.RequiredProtocolVersion,
+            RequiredServerContractVersion = _settings.RuntimeSafety.RequiredServerContractVersion,
+            RequiredManifestHashSha256 = ToolManifest.ManifestHashSha256
+        };
+        _mcpClient = new McpProcessClient(
+            mcpServerPath,
+            _auditLogger,
+            mcpEnvVars,
+            handshakeOptions);
 
         _auditLogger.Append(new AuditEvent
         {
@@ -196,6 +226,25 @@ public partial class App : System.Windows.Application
                 }
             });
 
+            if (_settings.RuntimeSafety.StrictHandshake)
+            {
+                var safeReason = ex.Message.Contains("Handshake failed", StringComparison.OrdinalIgnoreCase)
+                    ? "mcp_handshake_failed"
+                    : "mcp_start_failed";
+                _settings = _settings with
+                {
+                    RuntimeSafety = _settings.RuntimeSafety with
+                    {
+                        SafeMode = true,
+                        SafeModeReason = safeReason,
+                        SafeModeSinceUtc = DateTimeOffset.UtcNow.ToString("O")
+                    }
+                };
+                SettingsManager.Save(_settings);
+                _runtimeControls = RuntimeControlState.FromSettings(_settings);
+                _runtimeSafeModeReason = safeReason;
+            }
+
             // Continue without MCP — orchestrator will degrade gracefully
             // but the chat UI will now show "0 tools (MCP offline)"
         }
@@ -204,9 +253,13 @@ public partial class App : System.Windows.Application
         var sessionId = Guid.NewGuid().ToString("N")[..12];
         var wpfPrompter = new WpfPermissionPrompter(this);
         _permissionGate = new WpfPermissionGate(
-            _permissionBroker!, wpfPrompter, _auditLogger, _settings);
+            _permissionBroker!, wpfPrompter, _auditLogger, _settings, sessionId);
         _auditedMcpClient = new AuditedMcpToolClient(
-            _mcpClient, _auditLogger, _permissionGate, sessionId);
+            _mcpClient,
+            _auditLogger,
+            _permissionGate,
+            sessionId,
+            runtimeControls: () => _runtimeControls);
 
         // "Allow always" from the permission prompt — persist the
         // group policy change to settings.json and swap the snapshot
@@ -244,6 +297,8 @@ public partial class App : System.Windows.Application
         // Propagate memory master off — when disabled, orchestrator
         // skips retrieval and filters out memory_* tool definitions
         _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
+        _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
+        _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
         _orchestrator.ReasoningGuardrailsMode = _settings.Ui.ReasoningGuardrails;
 
         // Apply manual location (if configured) as the default hint
@@ -279,7 +334,14 @@ public partial class App : System.Windows.Application
                     return;
 
                 _settings = updated;
+                _runtimeControls = RuntimeControlState.FromSettings(updated);
+                _runtimeSafeModeReason = updated.RuntimeSafety.SafeModeReason;
                 _permissionGate?.UpdateSettings(updated);
+                if (_orchestrator is not null)
+                {
+                    _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
+                    _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
+                }
                 Environment.SetEnvironmentVariable(
                     "ST_ACTIVE_PERSONALITY_ID",
                     updated.ActivePersonalityId ?? "");
@@ -339,8 +401,11 @@ public partial class App : System.Windows.Application
             _auditLogger,
             isOverlayVisible: () => _overlayWindow?.IsVisible == true,
             getReasoningGuardrails: () => _settings?.Ui.ReasoningGuardrails ?? "off",
+            getRuntimeSafetySummary: GetRuntimeSafetySummary,
             toggleOverlay: ToggleOverlayVisibility,
             cycleReasoningGuardrails: CycleReasoningGuardrailsMode,
+            togglePanicMode: TogglePanicModeFromTray,
+            exportDiagnostics: ExportDiagnosticsBundleFromTray,
             showCommandPalette: ShowCommandPalette,
             stopAll: StopAllAndShutdown,
             exit: RequestShutdown);
@@ -1845,6 +1910,13 @@ public partial class App : System.Windows.Application
         // (env var present but empty). Empty = don't load any profile.
         env["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "";
         env["ST_ACTIVE_PERSONALITY_ID"] = settings.ActivePersonalityId ?? "";
+        env["ST_SETTINGS_PATH"] = SettingsManager.GetSettingsPath();
+        env["ST_AUDIT_PATH"] = JsonLineAuditLogger.GetDefaultPath();
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appDataDir = Path.Combine(localAppData, "SirThaddeus");
+        env["ST_CHAT_HISTORY_PATH"] = Path.Combine(appDataDir, "chat-history.json");
+        env["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(appDataDir, "briefing-history.json");
 
         // Memory env vars are only needed when memory is enabled.
         if (settings.Memory.Enabled)
@@ -2051,6 +2123,10 @@ public partial class App : System.Windows.Application
 
         _commandPaletteViewModel = viewModel;
         _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
+        _commandPaletteViewModel.UpdateRuntimeSafety(
+            _runtimeControls.PanicModeEnabled,
+            _runtimeControls.SafeModeEnabled,
+            _runtimeSafeModeReason);
         FlushPendingVoiceUi();
         window.SetViewModel(viewModel);
 
@@ -2126,11 +2202,17 @@ public partial class App : System.Windows.Application
             settingsVm.SettingsChanged += updated =>
             {
                 _settings = updated;
+                _runtimeControls = RuntimeControlState.FromSettings(updated);
+                _runtimeSafeModeReason = updated.RuntimeSafety.SafeModeReason;
                 _permissionGate?.UpdateSettings(updated);
 
                 // Propagate memory master off to orchestrator
                 if (_orchestrator is not null)
                     _orchestrator.MemoryEnabled = updated.Memory.Enabled;
+                if (_orchestrator is not null)
+                    _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
+                if (_orchestrator is not null)
+                    _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
                 if (_orchestrator is not null)
                     _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 if (_orchestrator is not null)
@@ -2140,6 +2222,10 @@ public partial class App : System.Windows.Application
                         SettingsManager.ResolvePersonalityProfilesDirectory(updated);
                 if (_commandPaletteViewModel is not null)
                     _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                _commandPaletteViewModel?.UpdateRuntimeSafety(
+                    _runtimeControls.PanicModeEnabled,
+                    _runtimeControls.SafeModeEnabled,
+                    _runtimeSafeModeReason);
                 ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
 
                 if (_ttsService is not null)

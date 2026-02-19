@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Text.Json;
 using SirThaddeus.Agent.ConversationSegmentation;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Config;
 
 namespace SirThaddeus.Agent;
 
@@ -36,6 +38,13 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
     private readonly IAuditLogger       _audit;
     private readonly IToolPermissionGate _gate;
     private readonly string             _sessionId;
+    private readonly Func<RuntimeControlState> _getRuntimeControls;
+    private readonly object _budgetGate = new();
+    private long _sessionToolCalls;
+    private string _activeTurnKey = "";
+    private int _turnToolCalls;
+    private int _turnWebCalls;
+    private readonly Queue<DateTimeOffset> _fileOpsWindow = new();
 
     /// <param name="inner">The real MCP tool client to wrap.</param>
     /// <param name="audit">Audit logger for event recording.</param>
@@ -45,12 +54,14 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         IMcpToolClient     inner,
         IAuditLogger       audit,
         IToolPermissionGate gate,
-        string             sessionId)
+        string             sessionId,
+        Func<RuntimeControlState>? runtimeControls = null)
     {
         _inner     = inner     ?? throw new ArgumentNullException(nameof(inner));
         _audit     = audit     ?? throw new ArgumentNullException(nameof(audit));
         _gate      = gate      ?? throw new ArgumentNullException(nameof(gate));
         _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
+        _getRuntimeControls = runtimeControls ?? (() => new RuntimeControlState());
     }
 
     /// <inheritdoc />
@@ -60,6 +71,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         var requestId     = Guid.NewGuid().ToString("N")[..12];
         var canonical     = Canonicalize(toolName);
         var redactedInput = ToolCallRedactor.RedactInput(canonical, argumentsJson);
+        var runtimeControls = _getRuntimeControls();
 
         var segmentId = SegmentExecutionContext.CurrentSegmentId;
         var startDetails = new Dictionary<string, object>
@@ -68,7 +80,9 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             ["request_id"]           = requestId,
             ["tool_name_requested"]  = toolName,
             ["tool_name_canonical"]  = canonical,
-            ["input_summary"]        = redactedInput
+            ["input_summary"]        = redactedInput,
+            ["panic_mode"]           = runtimeControls.PanicModeEnabled,
+            ["safe_mode"]            = runtimeControls.SafeModeEnabled
         };
         if (!string.IsNullOrWhiteSpace(segmentId))
             startDetails["segment_id"] = segmentId;
@@ -82,6 +96,40 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             Result = "pending",
             Details = startDetails
         });
+
+        if (runtimeControls.SafeModeEnabled)
+        {
+            const string reason = "Safe mode is active.";
+            LogEnd(requestId, canonical, "blocked", "not_required", null, 0, reason);
+            return "Error: Tool call blocked — safe mode is active.";
+        }
+
+        if (runtimeControls.PanicModeEnabled && IsBlockedByPanic(canonical))
+        {
+            const string reason = "Blocked by panic mode.";
+            LogEnd(requestId, canonical, "blocked", "not_required", null, 0, reason);
+            return "Error: Tool call blocked — panic mode blocks side-effect tools.";
+        }
+
+        if (!TryConsumeBudget(runtimeControls.ToolBudgets, canonical, segmentId, out var budgetErrorJson))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MCP_TOOL_BUDGET_EXCEEDED",
+                Target = canonical,
+                Result = "blocked",
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["request_id"] = requestId,
+                    ["segment_id"] = segmentId ?? "",
+                    ["budget_error"] = budgetErrorJson
+                }
+            });
+            LogEnd(requestId, canonical, "blocked", "not_required", null, 0, "Tool budget exceeded");
+            return budgetErrorJson;
+        }
 
         // ── Permission gate ──────────────────────────────────────────
         ToolPermissionResult permission;
@@ -227,6 +275,106 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             sb.Append(char.ToLowerInvariant(c));
         }
         return sb.ToString();
+    }
+
+    private static bool IsBlockedByPanic(string canonicalToolName)
+    {
+        var group = ToolGroupPolicy.ResolveGroup(canonicalToolName);
+        if (string.Equals(group, "unknown", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return ToolGroupPolicy.SideEffectGroups.Contains(group);
+    }
+
+    private bool TryConsumeBudget(
+        ToolBudgetSettings budgets,
+        string canonicalToolName,
+        string? segmentId,
+        out string budgetErrorJson)
+    {
+        budgetErrorJson = "";
+        if (!budgets.Enabled)
+            return true;
+
+        var normalized = budgets.Normalize();
+        var group = ToolGroupPolicy.ResolveGroup(canonicalToolName);
+        var turnKey = string.IsNullOrWhiteSpace(segmentId) ? "turn:default" : $"segment:{segmentId}";
+        var now = DateTimeOffset.UtcNow;
+
+        lock (_budgetGate)
+        {
+            if (!string.Equals(_activeTurnKey, turnKey, StringComparison.Ordinal))
+            {
+                _activeTurnKey = turnKey;
+                _turnToolCalls = 0;
+                _turnWebCalls = 0;
+            }
+
+            while (_fileOpsWindow.Count > 0 &&
+                   now - _fileOpsWindow.Peek() > TimeSpan.FromMinutes(1))
+            {
+                _fileOpsWindow.Dequeue();
+            }
+
+            if (_sessionToolCalls >= normalized.MaxToolCallsPerSession)
+            {
+                budgetErrorJson = BuildBudgetErrorJson(
+                    "max_tool_calls_per_session",
+                    normalized.MaxToolCallsPerSession,
+                    canonicalToolName);
+                return false;
+            }
+
+            if (_turnToolCalls >= normalized.MaxToolCallsPerTurn)
+            {
+                budgetErrorJson = BuildBudgetErrorJson(
+                    "max_tool_calls_per_turn",
+                    normalized.MaxToolCallsPerTurn,
+                    canonicalToolName);
+                return false;
+            }
+
+            if (string.Equals(group, "web", StringComparison.OrdinalIgnoreCase) &&
+                _turnWebCalls >= normalized.MaxWebPullsPerTurn)
+            {
+                budgetErrorJson = BuildBudgetErrorJson(
+                    "max_web_pulls_per_turn",
+                    normalized.MaxWebPullsPerTurn,
+                    canonicalToolName);
+                return false;
+            }
+
+            if (string.Equals(group, "files", StringComparison.OrdinalIgnoreCase) &&
+                normalized.MaxFileOpsPerMinute >= 0 &&
+                _fileOpsWindow.Count >= normalized.MaxFileOpsPerMinute)
+            {
+                budgetErrorJson = BuildBudgetErrorJson(
+                    "max_file_ops_per_minute",
+                    normalized.MaxFileOpsPerMinute,
+                    canonicalToolName);
+                return false;
+            }
+
+            _sessionToolCalls++;
+            _turnToolCalls++;
+            if (string.Equals(group, "web", StringComparison.OrdinalIgnoreCase))
+                _turnWebCalls++;
+            if (string.Equals(group, "files", StringComparison.OrdinalIgnoreCase))
+                _fileOpsWindow.Enqueue(now);
+        }
+
+        return true;
+    }
+
+    private static string BuildBudgetErrorJson(string budgetName, int limit, string toolName)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            error = "tool_budget_exceeded",
+            budget = budgetName,
+            limit,
+            tool = toolName
+        });
     }
 
     private static string FormatPermissionStatus(ToolPermissionResult p) =>

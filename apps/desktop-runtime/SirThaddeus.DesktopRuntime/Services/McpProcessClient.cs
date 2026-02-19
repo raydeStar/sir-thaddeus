@@ -21,6 +21,7 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
     private readonly string _serverPath;
     private readonly IAuditLogger _audit;
     private readonly IReadOnlyDictionary<string, string>? _envVars;
+    private readonly McpHandshakeOptions _handshakeOptions;
 
     private Process? _serverProcess;
     private StreamWriter? _stdin;
@@ -45,11 +46,13 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
     public McpProcessClient(
         string serverPath,
         IAuditLogger audit,
-        IReadOnlyDictionary<string, string>? environmentVariables = null)
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
+        McpHandshakeOptions? handshakeOptions = null)
     {
         _serverPath = serverPath ?? throw new ArgumentNullException(nameof(serverPath));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _envVars = environmentVariables;
+        _handshakeOptions = handshakeOptions ?? new McpHandshakeOptions();
     }
 
     /// <summary>
@@ -94,25 +97,40 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
             }
         });
 
-        // Send MCP initialize request
-        var initResult = await SendRequestAsync<JsonElement>("initialize", new
+        try
         {
-            protocolVersion = "2024-11-05",
-            capabilities = new { },
-            clientInfo = new { name = "DesktopRuntime", version = "0.1.0" }
-        }, ct);
+            // Send MCP initialize request
+            var initResult = await SendRequestAsync<JsonElement>("initialize", new
+            {
+                protocolVersion = _handshakeOptions.RequiredProtocolVersion,
+                capabilities = new { },
+                clientInfo = new { name = "DesktopRuntime", version = "0.1.0" }
+            }, ct);
 
-        // Send initialized notification (no response expected)
-        await SendNotificationAsync("notifications/initialized", new { }, ct);
+            // Send initialized notification (no response expected)
+            await SendNotificationAsync("notifications/initialized", new { }, ct);
 
-        _initialized = true;
+            if (_handshakeOptions.Strict)
+                await ValidateHandshakeAsync(initResult, ct);
 
-        _audit.Append(new AuditEvent
+            _initialized = true;
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "MCP_SERVER_INITIALIZED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["strict_handshake"] = _handshakeOptions.Strict
+                }
+            });
+        }
+        catch
         {
-            Actor = "runtime",
-            Action = "MCP_SERVER_INITIALIZED",
-            Result = "ok"
-        });
+            TerminateServerProcess();
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -162,7 +180,86 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
             arguments = args
         }, ct);
 
-        // Extract text content from the MCP tool result
+        return ExtractTextContent(result);
+    }
+
+    private async Task ValidateHandshakeAsync(JsonElement initializeResult, CancellationToken ct)
+    {
+        if (!initializeResult.TryGetProperty("protocolVersion", out var protocolEl) ||
+            protocolEl.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException("Handshake failed: server did not return protocolVersion.");
+        }
+
+        var negotiatedProtocol = protocolEl.GetString() ?? "";
+        if (!string.Equals(
+                negotiatedProtocol,
+                _handshakeOptions.RequiredProtocolVersion,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Handshake failed: protocol mismatch (expected {_handshakeOptions.RequiredProtocolVersion}, got {negotiatedProtocol}).");
+        }
+
+        if (!initializeResult.TryGetProperty("serverInfo", out var serverInfo) ||
+            serverInfo.ValueKind != JsonValueKind.Object ||
+            !serverInfo.TryGetProperty("version", out var serverVersionEl) ||
+            serverVersionEl.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException("Handshake failed: missing serverInfo.version.");
+        }
+
+        var pingResult = await SendRequestAsync<JsonElement>("tools/call", new
+        {
+            name = "tool_ping",
+            arguments = new { }
+        }, ct);
+
+        var pingText = ExtractTextContent(pingResult);
+        using var pingDoc = JsonDocument.Parse(pingText);
+        var pingRoot = pingDoc.RootElement;
+
+        var contractVersion = pingRoot.TryGetProperty("contract_version", out var contractEl)
+            ? contractEl.GetString() ?? ""
+            : "";
+        if (!string.Equals(
+                contractVersion,
+                _handshakeOptions.RequiredServerContractVersion,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Handshake failed: contract mismatch (expected {_handshakeOptions.RequiredServerContractVersion}, got {contractVersion}).");
+        }
+
+        var manifestHash = pingRoot.TryGetProperty("manifest_hash", out var hashEl)
+            ? hashEl.GetString() ?? ""
+            : "";
+        if (!string.IsNullOrWhiteSpace(_handshakeOptions.RequiredManifestHashSha256) &&
+            !string.Equals(
+                manifestHash,
+                _handshakeOptions.RequiredManifestHashSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Handshake failed: manifest hash mismatch (expected {_handshakeOptions.RequiredManifestHashSha256}, got {manifestHash}).");
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "MCP_HANDSHAKE_VALIDATED",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["protocol_version"] = negotiatedProtocol,
+                ["contract_version"] = contractVersion,
+                ["manifest_hash"] = manifestHash
+            }
+        });
+    }
+
+    private static string ExtractTextContent(JsonElement result)
+    {
         if (result.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
         {
             var texts = new List<string>();
@@ -171,6 +268,7 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
                 if (item.TryGetProperty("text", out var text))
                     texts.Add(text.GetString() ?? "");
             }
+
             return string.Join("\n", texts);
         }
 
@@ -267,11 +365,8 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
             throw new InvalidOperationException("MCP client is not initialized. Call StartAsync() first.");
     }
 
-    public void Dispose()
+    private void TerminateServerProcess()
     {
-        if (_disposed) return;
-        _disposed = true;
-
         try
         {
             if (_serverProcess is { HasExited: false })
@@ -280,7 +375,22 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
                 _serverProcess.WaitForExit(3000);
             }
         }
-        catch { /* Best effort cleanup */ }
+        catch
+        {
+            // Best effort cleanup
+        }
+        finally
+        {
+            _initialized = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        TerminateServerProcess();
 
         _stdin?.Dispose();
         _stdout?.Dispose();

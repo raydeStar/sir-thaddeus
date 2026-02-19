@@ -96,28 +96,90 @@ public static class SettingsManager
     /// </summary>
     /// <returns>The loaded (or newly created) settings.</returns>
     public static AppSettings Load()
+        => LoadWithDiagnostics().Settings;
+
+    /// <summary>
+    /// Loads settings with migration/corruption diagnostics for safe-mode boot.
+    /// </summary>
+    public static SettingsLoadResult LoadWithDiagnostics()
     {
         var path = GetSettingsPath();
 
         if (!File.Exists(path))
         {
-            var defaults = new AppSettings();
+            var defaults = Normalize(new AppSettings());
             Save(defaults);
-            return defaults;
+            return new SettingsLoadResult
+            {
+                Settings = defaults,
+                CreatedDefaults = true
+            };
         }
 
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
-                   ?? new AppSettings();
+            var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
+                         ?? new AppSettings();
+
+            var requiresMigration =
+                loaded.SchemaVersion <= 0 ||
+                loaded.SchemaVersion < AppSettings.CurrentSchemaVersion;
+
+            var normalized = Normalize(loaded);
+            if (requiresMigration)
+            {
+                normalized = normalized with
+                {
+                    SchemaVersion = AppSettings.CurrentSchemaVersion
+                };
+            }
+
+            string? safeModeReason = null;
+            if (loaded.SchemaVersion > AppSettings.CurrentSchemaVersion)
+            {
+                // Future schema detected: run fail-closed until user updates.
+                safeModeReason = $"unsupported_settings_schema_v{loaded.SchemaVersion}";
+                normalized = normalized with
+                {
+                    RuntimeSafety = normalized.RuntimeSafety with
+                    {
+                        SafeMode = true,
+                        SafeModeReason = safeModeReason,
+                        SafeModeSinceUtc = DateTimeOffset.UtcNow.ToString("O")
+                    }
+                };
+            }
+
+            if (requiresMigration || safeModeReason is not null)
+                Save(normalized);
+
+            return new SettingsLoadResult
+            {
+                Settings = normalized,
+                MigratedSchema = requiresMigration,
+                SafeModeReason = safeModeReason
+            };
         }
         catch (JsonException)
         {
             // Corrupted file; recreate with defaults.
-            var defaults = new AppSettings();
+            var defaults = Normalize(new AppSettings()) with
+            {
+                RuntimeSafety = new RuntimeSafetySettings
+                {
+                    SafeMode = true,
+                    SafeModeReason = "settings_json_corrupt",
+                    SafeModeSinceUtc = DateTimeOffset.UtcNow.ToString("O")
+                }
+            };
             Save(defaults);
-            return defaults;
+            return new SettingsLoadResult
+            {
+                Settings = defaults,
+                RecoveredFromCorruption = true,
+                SafeModeReason = "settings_json_corrupt"
+            };
         }
     }
 
@@ -132,7 +194,40 @@ public static class SettingsManager
         if (!Directory.Exists(dir))
             Directory.CreateDirectory(dir);
 
-        var json = JsonSerializer.Serialize(settings, JsonOptions);
+        var json = JsonSerializer.Serialize(Normalize(settings), JsonOptions);
         File.WriteAllText(GetSettingsPath(), json);
+    }
+
+    private static AppSettings Normalize(AppSettings settings)
+    {
+        var normalizedBudgets = settings.ToolBudgets.Normalize();
+        var safeReason = settings.RuntimeSafety.SafeMode
+            ? (settings.RuntimeSafety.SafeModeReason ?? "").Trim()
+            : "";
+
+        var safeSince = settings.RuntimeSafety.SafeMode
+            ? string.IsNullOrWhiteSpace(settings.RuntimeSafety.SafeModeSinceUtc)
+                ? DateTimeOffset.UtcNow.ToString("O")
+                : settings.RuntimeSafety.SafeModeSinceUtc.Trim()
+            : "";
+
+        return settings with
+        {
+            SchemaVersion = settings.SchemaVersion <= 0
+                ? AppSettings.CurrentSchemaVersion
+                : settings.SchemaVersion,
+            RuntimeSafety = settings.RuntimeSafety with
+            {
+                SafeModeReason = safeReason,
+                SafeModeSinceUtc = safeSince,
+                RequiredProtocolVersion = string.IsNullOrWhiteSpace(settings.RuntimeSafety.RequiredProtocolVersion)
+                    ? "2024-11-05"
+                    : settings.RuntimeSafety.RequiredProtocolVersion.Trim(),
+                RequiredServerContractVersion = string.IsNullOrWhiteSpace(settings.RuntimeSafety.RequiredServerContractVersion)
+                    ? "1.0"
+                    : settings.RuntimeSafety.RequiredServerContractVersion.Trim()
+            },
+            ToolBudgets = normalizedBudgets
+        };
     }
 }

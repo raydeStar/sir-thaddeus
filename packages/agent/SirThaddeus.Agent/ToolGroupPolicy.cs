@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.Config;
@@ -24,6 +23,8 @@ public sealed record PolicySnapshot
     public required IReadOnlyDictionary<string, string> GroupPolicies  { get; init; }
     public required string DeveloperOverride  { get; init; }
     public required bool   MemoryEnabled      { get; init; }
+    public required bool   PanicModeEnabled   { get; init; }
+    public required bool   SafeModeEnabled    { get; init; }
     public required string UnknownToolDefault  { get; init; }
 }
 
@@ -47,9 +48,15 @@ public static class ToolGroupPolicy
         // Files
         ["file_read"]            = "files",
         ["file_list"]            = "files",
+        ["file_read_preview"]    = "files",
+        ["file_read_apply"]      = "files",
+        ["file_list_preview"]    = "files",
+        ["file_list_apply"]      = "files",
 
         // System
         ["system_execute"]       = "system",
+        ["system_execute_preview"] = "system",
+        ["system_execute_apply"] = "system",
 
         // Web
         ["web_search"]           = "web",
@@ -76,7 +83,19 @@ public static class ToolGroupPolicy
         // Meta / Time — always allowed
         ["tool_ping"]              = "meta",
         ["tool_list_capabilities"] = "meta",
+        ["health.check"]           = "meta",
+        ["health_check"]           = "meta",
+        ["capabilities.describe"]  = "meta",
+        ["capabilities_describe"]  = "meta",
+        ["policy.get_state"]       = "meta",
+        ["policy_get_state"]       = "meta",
         ["time_now"]               = "meta",
+
+        // Control-plane side effects
+        ["audit.export_bundle"]    = "files",
+        ["audit_export_bundle"]    = "files",
+        ["policy.set_panic_mode"]  = "system",
+        ["policy_set_panic_mode"]  = "system",
     };
 
     /// <summary>
@@ -86,6 +105,13 @@ public static class ToolGroupPolicy
     public static readonly HashSet<string> DangerousGroups =
         new(StringComparer.OrdinalIgnoreCase)
         { "screen", "files", "system", "web" };
+
+    /// <summary>
+    /// Groups that should be blocked in panic mode.
+    /// </summary>
+    public static readonly HashSet<string> SideEffectGroups =
+        new(StringComparer.OrdinalIgnoreCase)
+        { "system", "web", "memoryWrite" };
 
     // ─────────────────────────────────────────────────────────────────
     // Group Resolution
@@ -113,6 +139,15 @@ public static class ToolGroupPolicy
     /// </summary>
     public static string ResolveEffectivePolicy(string group, PolicySnapshot snapshot)
     {
+        // Safe mode fail-closed: no MCP tools should execute.
+        if (snapshot.SafeModeEnabled)
+            return "off";
+
+        // Panic mode blocks side-effect groups while preserving
+        // read-only troubleshooting pathways.
+        if (snapshot.PanicModeEnabled && SideEffectGroups.Contains(group))
+            return "off";
+
         // Meta / Time → always allowed
         if (group == "meta")
             return "always";
@@ -164,6 +199,8 @@ public static class ToolGroupPolicy
             GroupPolicies      = policies,
             DeveloperOverride  = NormalizeDeveloperOverride(perms.DeveloperOverride),
             MemoryEnabled      = settings.Memory.Enabled,
+            PanicModeEnabled   = settings.RuntimeSafety.PanicMode,
+            SafeModeEnabled    = settings.RuntimeSafety.SafeMode,
             UnknownToolDefault = isDebugBuild ? "ask" : "off"
         };
     }

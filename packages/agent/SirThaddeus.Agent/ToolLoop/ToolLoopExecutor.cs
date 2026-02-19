@@ -111,6 +111,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             var successfulPayloadCount = 0;
             var timeoutErrorCount = 0;
             var unavailableErrorCount = 0;
+            var budgetExceededCount = 0;
 
             foreach (var toolCall in conflictResolution.Winners)
             {
@@ -143,6 +144,8 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                     timeoutErrorCount++;
                 if (IsUnavailableLikeResult(result))
                     unavailableErrorCount++;
+                if (IsBudgetExceededResult(result))
+                    budgetExceededCount++;
 
                 request.ToolCallsMade.Add(new ToolCallRecord
                 {
@@ -188,6 +191,23 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                     return new AgentResponse
                     {
                         Text = unavailableMsg,
+                        Success = true,
+                        ToolCallsMade = request.ToolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    };
+                }
+
+                if (budgetExceededCount > 0)
+                {
+                    const string budgetMsg =
+                        "I reached the safety budget for tool calls in this turn. " +
+                        "Please retry with a narrower request or increase tool budgets in settings.";
+                    request.History.Add(ChatMessage.Assistant(budgetMsg));
+                    log("AGENT_BUDGET_FALLBACK", budgetMsg);
+
+                    return new AgentResponse
+                    {
+                        Text = budgetMsg,
                         Success = true,
                         ToolCallsMade = request.ToolCallsMade,
                         LlmRoundTrips = roundTrips
@@ -315,6 +335,29 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         catch
         {
             return payload.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsBudgetExceededResult(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                return false;
+            }
+
+            return errorEl.ValueKind == JsonValueKind.String &&
+                   string.Equals(errorEl.GetString(), "tool_budget_exceeded", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return payload.Contains("tool_budget_exceeded", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

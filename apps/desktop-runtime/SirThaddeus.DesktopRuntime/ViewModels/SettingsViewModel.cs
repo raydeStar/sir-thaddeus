@@ -89,6 +89,19 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool   _memoryEnabled     = true;
     private bool   _embeddingsEnabled = true;
 
+    // Runtime safety + tool budgets
+    private bool _runtimePanicMode;
+    private bool _runtimeSafeMode;
+    private string _runtimeSafeModeReason = "";
+    private bool _strictHandshake = true;
+    private string _requiredProtocolVersion = "2024-11-05";
+    private string _requiredServerContractVersion = "1.0";
+    private bool _toolBudgetsEnabled = true;
+    private int _maxToolCallsPerTurn = 8;
+    private int _maxToolCallsPerSession = 200;
+    private int _maxWebPullsPerTurn = 3;
+    private int _maxFileOpsPerMinute = 30;
+
     // MCP Permissions
     private string _mcpPermDeveloperOverride = "none";
     private string _mcpPermScreen            = "ask";
@@ -206,6 +219,19 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
     public bool   EmbeddingsEnabled { get => _embeddingsEnabled; set { if (SetProperty(ref _embeddingsEnabled, value)) MarkDirty(); } }
+
+    // Runtime safety + tool budgets
+    public bool RuntimePanicMode { get => _runtimePanicMode; set { if (SetProperty(ref _runtimePanicMode, value)) MarkDirty(); } }
+    public bool RuntimeSafeMode { get => _runtimeSafeMode; private set => SetProperty(ref _runtimeSafeMode, value); }
+    public string RuntimeSafeModeReason { get => _runtimeSafeModeReason; private set => SetProperty(ref _runtimeSafeModeReason, value); }
+    public bool StrictHandshake { get => _strictHandshake; set { if (SetProperty(ref _strictHandshake, value)) MarkDirty(); } }
+    public string RequiredProtocolVersion { get => _requiredProtocolVersion; set { if (SetProperty(ref _requiredProtocolVersion, value)) MarkDirty(); } }
+    public string RequiredServerContractVersion { get => _requiredServerContractVersion; set { if (SetProperty(ref _requiredServerContractVersion, value)) MarkDirty(); } }
+    public bool ToolBudgetsEnabled { get => _toolBudgetsEnabled; set { if (SetProperty(ref _toolBudgetsEnabled, value)) MarkDirty(); } }
+    public int MaxToolCallsPerTurn { get => _maxToolCallsPerTurn; set { if (SetProperty(ref _maxToolCallsPerTurn, value)) MarkDirty(); } }
+    public int MaxToolCallsPerSession { get => _maxToolCallsPerSession; set { if (SetProperty(ref _maxToolCallsPerSession, value)) MarkDirty(); } }
+    public int MaxWebPullsPerTurn { get => _maxWebPullsPerTurn; set { if (SetProperty(ref _maxWebPullsPerTurn, value)) MarkDirty(); } }
+    public int MaxFileOpsPerMinute { get => _maxFileOpsPerMinute; set { if (SetProperty(ref _maxFileOpsPerMinute, value)) MarkDirty(); } }
 
     // MCP Permissions
     public string McpPermDeveloperOverride { get => _mcpPermDeveloperOverride; set { if (SetProperty(ref _mcpPermDeveloperOverride, value)) MarkDirty(); } }
@@ -476,6 +502,18 @@ public sealed class SettingsViewModel : ViewModelBase
 
         _memoryEnabled     = s.Memory.Enabled;
         _embeddingsEnabled = s.Memory.UseEmbeddings;
+        _runtimePanicMode = s.RuntimeSafety.PanicMode;
+        _runtimeSafeMode = s.RuntimeSafety.SafeMode;
+        _runtimeSafeModeReason = s.RuntimeSafety.SafeModeReason;
+        _strictHandshake = s.RuntimeSafety.StrictHandshake;
+        _requiredProtocolVersion = s.RuntimeSafety.RequiredProtocolVersion;
+        _requiredServerContractVersion = s.RuntimeSafety.RequiredServerContractVersion;
+        var normalizedBudgets = s.ToolBudgets.Normalize();
+        _toolBudgetsEnabled = normalizedBudgets.Enabled;
+        _maxToolCallsPerTurn = normalizedBudgets.MaxToolCallsPerTurn;
+        _maxToolCallsPerSession = normalizedBudgets.MaxToolCallsPerSession;
+        _maxWebPullsPerTurn = normalizedBudgets.MaxWebPullsPerTurn;
+        _maxFileOpsPerMinute = normalizedBudgets.MaxFileOpsPerMinute;
 
         // MCP Permissions
         _mcpPermDeveloperOverride = s.Mcp.Permissions.DeveloperOverride;
@@ -528,6 +566,17 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(YouTubeKeepAudio));
         OnPropertyChanged(nameof(MemoryEnabled));
         OnPropertyChanged(nameof(EmbeddingsEnabled));
+        OnPropertyChanged(nameof(RuntimePanicMode));
+        OnPropertyChanged(nameof(RuntimeSafeMode));
+        OnPropertyChanged(nameof(RuntimeSafeModeReason));
+        OnPropertyChanged(nameof(StrictHandshake));
+        OnPropertyChanged(nameof(RequiredProtocolVersion));
+        OnPropertyChanged(nameof(RequiredServerContractVersion));
+        OnPropertyChanged(nameof(ToolBudgetsEnabled));
+        OnPropertyChanged(nameof(MaxToolCallsPerTurn));
+        OnPropertyChanged(nameof(MaxToolCallsPerSession));
+        OnPropertyChanged(nameof(MaxWebPullsPerTurn));
+        OnPropertyChanged(nameof(MaxFileOpsPerMinute));
         OnPropertyChanged(nameof(McpPermDeveloperOverride));
         OnPropertyChanged(nameof(McpPermScreen));
         OnPropertyChanged(nameof(McpPermFiles));
@@ -1436,6 +1485,30 @@ public sealed class SettingsViewModel : ViewModelBase
                 Enabled       = _memoryEnabled,
                 UseEmbeddings = _embeddingsEnabled
             },
+            RuntimeSafety = _settings.RuntimeSafety with
+            {
+                PanicMode = _runtimePanicMode,
+                // Safe mode is runtime-managed fail-closed state, not a
+                // front-facing toggle in normal settings workflows.
+                SafeMode = _settings.RuntimeSafety.SafeMode,
+                SafeModeReason = _settings.RuntimeSafety.SafeModeReason,
+                SafeModeSinceUtc = _settings.RuntimeSafety.SafeModeSinceUtc,
+                StrictHandshake = _strictHandshake,
+                RequiredProtocolVersion = string.IsNullOrWhiteSpace(_requiredProtocolVersion)
+                    ? "2024-11-05"
+                    : _requiredProtocolVersion.Trim(),
+                RequiredServerContractVersion = string.IsNullOrWhiteSpace(_requiredServerContractVersion)
+                    ? "1.0"
+                    : _requiredServerContractVersion.Trim()
+            },
+            ToolBudgets = new ToolBudgetSettings
+            {
+                Enabled = _toolBudgetsEnabled,
+                MaxToolCallsPerTurn = _maxToolCallsPerTurn,
+                MaxToolCallsPerSession = _maxToolCallsPerSession,
+                MaxWebPullsPerTurn = _maxWebPullsPerTurn,
+                MaxFileOpsPerMinute = _maxFileOpsPerMinute
+            }.Normalize(),
             Mcp = _settings.Mcp with
             {
                 Permissions = new Config.McpPermissionsSettings

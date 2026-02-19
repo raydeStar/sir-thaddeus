@@ -45,6 +45,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -116,8 +117,37 @@
                                   Style="{StaticResource ViewTabStyle}"/>
                 </StackPanel>
 
-                <!-- Token usage ticker -->
                 <Border Grid.Column="2"
+                        Margin="12,0,12,0"
+                        Padding="8,4"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        Visibility="{Binding HasRuntimeSafetyBanner, Converter={StaticResource BoolToVis}}">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource YellowBrush}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding PanicModeEnabled}" Value="True">
+                                    <Setter Property="Background" Value="#33FAB387"/>
+                                    <Setter Property="BorderBrush" Value="{StaticResource YellowBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding SafeModeEnabled}" Value="True">
+                                    <Setter Property="Background" Value="#33F38BA8"/>
+                                    <Setter Property="BorderBrush" Value="{StaticResource RedBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding RuntimeSafetyText}"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center"/>
+                </Border>
+
+                <!-- Token usage ticker -->
+                <Border Grid.Column="3"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Margin="16,0,12,0"
@@ -156,14 +186,14 @@
                 </Border>
 
                 <!-- Context lock -->
-                <ToggleButton Grid.Column="3"
+                <ToggleButton Grid.Column="4"
                               Content="Lock Context"
                               IsChecked="{Binding ContextLocked, Mode=TwoWay}"
                               Style="{StaticResource HeaderToggleButtonStyle}"
                               Margin="0,0,8,0"/>
 
                 <!-- New Chat (only visible in Chat mode) -->
-                <Button Grid.Column="4"
+                <Button Grid.Column="5"
                         x:Name="NewChatButton"
                         Content="New Chat"
                         Command="{Binding ClearCommand}"
@@ -1388,6 +1418,147 @@
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,20"/>
+
+                    <!-- ── Runtime Safety + Budgets ───────────────────── -->
+                    <TextBlock Text="RUNTIME SAFETY"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource RedBrush}"
+                               Margin="0,0,0,6"/>
+                    <CheckBox Content="Enable panic mode (block side-effect tools)"
+                              IsChecked="{Binding RuntimePanicMode}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,4"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Safe mode status"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding RuntimeSafeMode, StringFormat=Active: {0}}"
+                                   FontSize="12"
+                                   Foreground="{StaticResource TextBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock Text="{Binding RuntimeSafeModeReason}"
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Safe mode is fail-closed and runtime-managed. Use diagnostics to investigate and clear root causes."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"/>
+                    <CheckBox Content="Strict MCP handshake (fail closed on mismatch)"
+                              IsChecked="{Binding StrictHandshake}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,8"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Protocol version"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding RequiredProtocolVersion, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Server contract"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding RequiredServerContractVersion, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
+
+                    <TextBlock Text="TOOL BUDGETS"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource YellowBrush}"
+                               Margin="0,0,0,6"/>
+                    <CheckBox Content="Enable tool-call safety budgets"
+                              IsChecked="{Binding ToolBudgetsEnabled}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,8"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Tool calls per turn"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding MaxToolCallsPerTurn, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Tool calls per session"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding MaxToolCallsPerSession, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Web pulls per turn"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding MaxWebPullsPerTurn, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="File ops per minute"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding MaxFileOpsPerMinute, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"/>
+                    </Grid>
 
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"

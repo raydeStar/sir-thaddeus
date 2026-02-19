@@ -2904,7 +2904,11 @@ public sealed partial class AgentOrchestrator
         if (plan is null || string.Equals(plan.Category, "none", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var utility = UtilityRouter.TryHandle(normalizedMessage, UserLocationHint, PreferredUnits);
+        var plannerMessage = string.IsNullOrWhiteSpace(plan.PlannerMessage)
+            ? normalizedMessage
+            : plan.PlannerMessage;
+
+        var utility = UtilityRouter.TryHandle(plannerMessage, UserLocationHint, PreferredUnits);
         if (utility is null)
         {
             utility = new UtilityRouter.UtilityResult

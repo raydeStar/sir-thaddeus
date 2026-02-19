@@ -30,6 +30,7 @@ public sealed class WpfPermissionGate : IToolPermissionGate
     private readonly IPermissionBroker   _broker;
     private readonly IPermissionPrompter _prompter;
     private readonly IAuditLogger        _audit;
+    private readonly string _sessionId;
 
     /// <summary>
     /// Immutable policy snapshot. Swapped atomically via
@@ -56,11 +57,13 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         IPermissionBroker   broker,
         IPermissionPrompter prompter,
         IAuditLogger        audit,
-        AppSettings         initialSettings)
+        AppSettings         initialSettings,
+        string?             sessionId = null)
     {
         _broker   = broker   ?? throw new ArgumentNullException(nameof(broker));
         _prompter = prompter ?? throw new ArgumentNullException(nameof(prompter));
         _audit    = audit    ?? throw new ArgumentNullException(nameof(audit));
+        _sessionId = string.IsNullOrWhiteSpace(sessionId) ? "runtime" : sessionId.Trim();
 
         _snapshot = ToolGroupPolicy.BuildSnapshot(initialSettings, IsDebugBuild);
     }
@@ -117,22 +120,37 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         var snapshot  = _snapshot; // capture once for consistency
         var group     = ToolGroupPolicy.ResolveGroup(canonical);
         var effective = ToolGroupPolicy.ResolveEffectivePolicy(group, snapshot);
+        var riskTier  = ResolveRiskTier(group);
 
         // ── Off → hard block, no prompt ──────────────────────────
         if (effective == "off")
         {
+            var denyReason = snapshot.SafeModeEnabled
+                ? "safe_mode_enabled"
+                : snapshot.PanicModeEnabled && ToolGroupPolicy.SideEffectGroups.Contains(group)
+                    ? "panic_mode_side_effect_blocked"
+                    : "disabled_in_settings";
+
             _audit.Append(new AuditEvent
             {
                 Actor  = "gate",
                 Action = "MCP_PERMISSION_BLOCKED",
-                Result = "disabled_in_settings",
+                Result = denyReason,
                 Details = new Dictionary<string, object>
                 {
-                    ["tool"]  = canonical,
-                    ["group"] = group
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
                 }
             });
-            return ToolPermissionResult.Deny("Disabled in Settings");
+            var message = denyReason switch
+            {
+                "safe_mode_enabled" => "Blocked by Safe Mode",
+                "panic_mode_side_effect_blocked" => "Blocked by Panic Mode",
+                _ => "Disabled in Settings"
+            };
+            return ToolPermissionResult.Deny(message);
         }
 
         // ── Always → auto-approve ────────────────────────────────
@@ -153,6 +171,21 @@ public sealed class WpfPermissionGate : IToolPermissionGate
             Requester  = "agent"
         };
 
+        _audit.Append(new AuditEvent
+        {
+            Actor = "gate",
+            Action = "CONSENT_PROMPT_SHOWN",
+            Result = "pending",
+            Target = canonical,
+            Details = new Dictionary<string, object>
+            {
+                ["session_id"] = _sessionId,
+                ["tool"] = canonical,
+                ["group"] = group,
+                ["risk_tier"] = riskTier
+            }
+        });
+
         PermissionDecision decision;
         try
         {
@@ -160,6 +193,20 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         }
         catch (OperationCanceledException)
         {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "CONSENT_DENIED",
+                Result = "cancelled",
+                Target = canonical,
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
+                }
+            });
             return ToolPermissionResult.Deny("Permission prompt cancelled");
         }
 
@@ -167,22 +214,71 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         {
             _audit.Append(new AuditEvent
             {
+                Actor = "user",
+                Action = "CONSENT_DENIED",
+                Result = decision.DenialReason ?? "Denied by user",
+                Target = canonical,
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
+                }
+            });
+
+            _audit.Append(new AuditEvent
+            {
                 Actor  = "user",
                 Action = "MCP_PERMISSION_DENIED",
                 Result = decision.DenialReason ?? "Denied by user",
                 Details = new Dictionary<string, object>
                 {
-                    ["tool"]  = canonical,
-                    ["group"] = group
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
                 }
             });
             return ToolPermissionResult.Deny(
                 decision.DenialReason ?? "Denied by user");
         }
 
+        _audit.Append(new AuditEvent
+        {
+            Actor = "user",
+            Action = "CONSENT_APPROVED",
+            Result = "granted",
+            Target = canonical,
+            Details = new Dictionary<string, object>
+            {
+                ["session_id"] = _sessionId,
+                ["tool"] = canonical,
+                ["group"] = group,
+                ["risk_tier"] = riskTier,
+                ["remember_for_session"] = decision.RememberForSession,
+                ["persist_as_always"] = decision.PersistAsAlways
+            }
+        });
+
         // ── Persist as "always" if requested ──────────────────────
         if (decision.PersistAsAlways)
         {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "CONSENT_REMEMBERED",
+                Result = "persisted_always",
+                Target = canonical,
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
+                }
+            });
+
             _audit.Append(new AuditEvent
             {
                 Actor  = "user",
@@ -190,8 +286,10 @@ public sealed class WpfPermissionGate : IToolPermissionGate
                 Result = "persisted",
                 Details = new Dictionary<string, object>
                 {
-                    ["tool"]  = canonical,
-                    ["group"] = group
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
                 }
             });
             PersistGroupAsAlways?.Invoke(group);
@@ -199,6 +297,20 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         // ── Cache session grant if requested ─────────────────────
         else if (decision.RememberForSession)
         {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "CONSENT_REMEMBERED",
+                Result = "remembered_for_session",
+                Target = canonical,
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool"] = canonical,
+                    ["group"] = group,
+                    ["risk_tier"] = riskTier
+                }
+            });
             _sessionGrants[(group, epoch)] = true;
         }
 
@@ -220,6 +332,18 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         "memoryRead"  => Capability.MemoryRead,
         "memoryWrite" => Capability.MemoryWrite,
         _             => Capability.SystemExecute // safe fallback: prompts
+    };
+
+    private static string ResolveRiskTier(string group) => group switch
+    {
+        "meta" => "low",
+        "memoryRead" => "low",
+        "files" => "medium",
+        "screen" => "medium",
+        "system" => "high",
+        "web" => "high",
+        "memoryWrite" => "high",
+        _ => "high"
     };
 
     // ─────────────────────────────────────────────────────────────────

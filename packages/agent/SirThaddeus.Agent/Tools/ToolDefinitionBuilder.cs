@@ -18,9 +18,17 @@ public sealed class ToolDefinitionBuilder
 
     public async Task<IReadOnlyList<ToolDefinition>> BuildAsync(
         bool memoryEnabled,
+        bool panicModeEnabled,
+        bool safeModeEnabled,
         Action<string, string>? logEvent,
         CancellationToken cancellationToken)
     {
+        if (safeModeEnabled)
+        {
+            logEvent?.Invoke("AGENT_TOOLS_DISABLED", "Safe mode is active. Tool discovery skipped.");
+            return [];
+        }
+
         try
         {
             var mcpTools = await _mcp.ListToolsAsync(cancellationToken);
@@ -33,6 +41,18 @@ public sealed class ToolDefinitionBuilder
                         !t.Name.StartsWith("memory_", StringComparison.OrdinalIgnoreCase) &&
                         !t.Name.StartsWith("Memory", StringComparison.Ordinal))
                     .ToList();
+
+            if (panicModeEnabled)
+            {
+                filteredTools = filteredTools
+                    .Where(t =>
+                    {
+                        var canonical = AuditedMcpToolClient.Canonicalize(t.Name);
+                        var group = ToolGroupPolicy.ResolveGroup(canonical);
+                        return !ToolGroupPolicy.SideEffectGroups.Contains(group);
+                    })
+                    .ToList();
+            }
 
             var definitions = filteredTools.Select(t => new ToolDefinition
             {

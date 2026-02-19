@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace SirThaddeus.McpShared;
 
@@ -28,10 +30,128 @@ public static class ToolManifest
     public static IReadOnlyList<ToolDescriptor> All { get; } = BuildManifest();
 
     /// <summary>
+    /// Deterministic manifest hash used for startup compatibility checks.
+    /// </summary>
+    public static string ManifestHashSha256 { get; } = ComputeManifestHash();
+
+    private static readonly IReadOnlyDictionary<string, ToolDescriptor> ByName =
+        BuildLookup(All);
+
+    /// <summary>
     /// Serializes the manifest to a bounded JSON string.
     /// </summary>
     public static string ToJson()
         => JsonSerializer.Serialize(All, JsonOpts);
+
+    /// <summary>
+    /// Finds a tool descriptor by canonical name or alias.
+    /// </summary>
+    public static bool TryGetTool(string toolName, out ToolDescriptor descriptor)
+    {
+        var canonical = Canonicalize(toolName);
+        if (ByName.TryGetValue(canonical, out descriptor!))
+            return true;
+
+        descriptor = default!;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true when the tool can mutate local or remote state.
+    /// Unknown tools fail closed as side-effecting.
+    /// </summary>
+    public static bool IsSideEffecting(string toolName)
+    {
+        var canonical = Canonicalize(toolName);
+
+        if (canonical.EndsWith("_preview", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (canonical.EndsWith("_apply", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (canonical is "policy.set_panic_mode" or "audit.export_bundle")
+            return true;
+
+        if (!TryGetTool(canonical, out var descriptor))
+            return true;
+
+        if (descriptor.ReadWrite.Equals("write", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (canonical.Equals("system_execute", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (canonical.StartsWith("memory_store_", StringComparison.OrdinalIgnoreCase) ||
+            canonical.StartsWith("memory_update_", StringComparison.OrdinalIgnoreCase) ||
+            canonical.StartsWith("memory_delete_", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Outbound web access is treated as side-effecting for panic mode.
+        return descriptor.Category.Equals("web", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string ResolveRiskTier(string toolName)
+    {
+        var canonical = Canonicalize(toolName);
+        if (!TryGetTool(canonical, out var descriptor))
+            return "high";
+
+        if (IsSideEffecting(canonical))
+            return "high";
+
+        if (descriptor.Category.Equals("meta", StringComparison.OrdinalIgnoreCase) ||
+            descriptor.Category.Equals("time", StringComparison.OrdinalIgnoreCase))
+        {
+            return "low";
+        }
+
+        return "medium";
+    }
+
+    private static string ComputeManifestHash()
+    {
+        var bytes = Encoding.UTF8.GetBytes(ToJson());
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static IReadOnlyDictionary<string, ToolDescriptor> BuildLookup(
+        IReadOnlyList<ToolDescriptor> tools)
+    {
+        var lookup = new Dictionary<string, ToolDescriptor>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in tools)
+        {
+            lookup[Canonicalize(tool.Name)] = tool;
+            foreach (var alias in tool.Aliases)
+                lookup[Canonicalize(alias)] = tool;
+        }
+
+        return lookup;
+    }
+
+    private static string Canonicalize(string? toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return "";
+
+        var value = toolName.Trim();
+        if (value.Contains('_') || value.Contains('.'))
+            return value.ToLowerInvariant();
+
+        var sb = new StringBuilder(value.Length + 4);
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (char.IsUpper(c) && i > 0)
+                sb.Append('_');
+            sb.Append(char.ToLowerInvariant(c));
+        }
+
+        return sb.ToString();
+    }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -219,6 +339,26 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "file_read_preview",
+            Aliases     = ["FileReadPreview"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Builds a deterministic preview plan for file_read.",
+            Limits      = "Returns preview_id + file metadata only."
+        },
+        new()
+        {
+            Name        = "file_read_apply",
+            Aliases     = ["FileReadApply"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Executes file_read for a previously created preview_id.",
+            Limits      = "Preview must be unexpired and valid."
+        },
+        new()
+        {
             Name        = "file_list",
             Aliases     = ["FileList"],
             Category    = "file",
@@ -227,6 +367,26 @@ public static class ToolManifest
             Description = "Lists files and directories in a folder.",
             Limits      = "Max 100 entries per call."
         },
+        new()
+        {
+            Name        = "file_list_preview",
+            Aliases     = ["FileListPreview"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Builds a deterministic preview plan for file_list.",
+            Limits      = "Returns preview_id + path metadata only."
+        },
+        new()
+        {
+            Name        = "file_list_apply",
+            Aliases     = ["FileListApply"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Executes file_list for a previously created preview_id.",
+            Limits      = "Preview must be unexpired and valid."
+        },
 
         // ── System Tools ─────────────────────────────────────────────
         new()
@@ -234,10 +394,30 @@ public static class ToolManifest
             Name        = "system_execute",
             Aliases     = ["SystemExecute"],
             Category    = "system",
-            ReadWrite   = "read",
+            ReadWrite   = "write",
             Permission  = "required",
             Description = "Executes an allowlisted system command.",
             Limits      = "Strict allowlist. No shell metacharacters. dotnet verb restrictions."
+        },
+        new()
+        {
+            Name        = "system_execute_preview",
+            Aliases     = ["SystemExecutePreview"],
+            Category    = "system",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Builds a deterministic execution preview for system_execute.",
+            Limits      = "No process launch. Returns preview_id and validation details."
+        },
+        new()
+        {
+            Name        = "system_execute_apply",
+            Aliases     = ["SystemExecuteApply"],
+            Category    = "system",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Executes a previously previewed command by preview_id.",
+            Limits      = "Requires confirm=true and unexpired preview."
         },
 
         // ── Screen Tools ─────────────────────────────────────────────
@@ -282,6 +462,56 @@ public static class ToolManifest
             Permission  = "none",
             Description = "Returns the full tool manifest (name, aliases, category, permissions, limits).",
             Limits      = "Bounded manifest. Deterministic output."
+        },
+        new()
+        {
+            Name        = "health.check",
+            Aliases     = ["HealthCheck"],
+            Category    = "meta",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Control-plane health check with dependency readiness.",
+            Limits      = "Bounded JSON response."
+        },
+        new()
+        {
+            Name        = "capabilities.describe",
+            Aliases     = ["CapabilitiesDescribe"],
+            Category    = "meta",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Expanded capability catalog with risk and preview/apply metadata.",
+            Limits      = "Bounded deterministic JSON response."
+        },
+        new()
+        {
+            Name        = "policy.get_state",
+            Aliases     = ["PolicyGetState"],
+            Category    = "meta",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Returns panic/safe mode state, budgets, and policy group settings.",
+            Limits      = "Read-only, bounded snapshot."
+        },
+        new()
+        {
+            Name        = "audit.export_bundle",
+            Aliases     = ["AuditExportBundle"],
+            Category    = "meta",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Exports a redacted diagnostics bundle for support.",
+            Limits      = "Requires explicit confirm=true."
+        },
+        new()
+        {
+            Name        = "policy.set_panic_mode",
+            Aliases     = ["PolicySetPanicMode"],
+            Category    = "meta",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Sets persistent panic-mode state with explicit confirmation.",
+            Limits      = "Requires explicit confirm=true."
         },
 
         // ── Time Tool ────────────────────────────────────────────────
