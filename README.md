@@ -216,6 +216,23 @@ Sir Thaddeus is local-first by design.
 
 Testing details and filters are documented in `README_TESTING.md`.
 
+### Optional git pre-push gate
+
+To run the local test gate automatically before each push:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+This enables `.githooks/pre-push.cmd`, which runs `.\dev\test.ps1` and blocks pushes on failure.
+
+### GitHub automation baseline
+
+- PR gate: `.github/workflows/ci-pr.yml` (runs `.\dev\test.ps1`, uploads TRX artifacts)
+- Release gate: `.github/workflows/ci-release.yml` (runs `.\dev\preflight.ps1`, uploads TRX artifacts)
+- SBOM gate: `.github/workflows/ci-sbom.yml` (manual/tag-triggered SPDX SBOM artifact)
+- Dependency updates: `.github/dependabot.yml`
+
 ## Running
 
 ### Desktop runtime (overlay + tray)
@@ -294,6 +311,8 @@ Use this list when you want reviewers to focus on architecture first, not implem
 - [README_TESTING.md](README_TESTING.md) - test harness usage and troubleshooting
 - [README_DEPLOY.md](README_DEPLOY.md) - production preflight and deployment checklist
 - [project-notes/architecture-review-index.md](project-notes/architecture-review-index.md) - architecture docs index for review
+- [project-notes/github-branch-protection.md](project-notes/github-branch-protection.md) - required status checks and merge guard setup
+- [project-notes/code-signing.md](project-notes/code-signing.md) - optional Authenticode signing guidance
 
 ## License
 

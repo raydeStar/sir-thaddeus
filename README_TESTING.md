@@ -16,7 +16,7 @@ folder, and runs `dotnet restore` against the solution.
 ```
 
 Builds in Debug, runs all tests, and writes a TRX report to
-`./artifacts/test/`.
+`./artifacts/test-results/`.
 
 ## Run a focused subset
 
@@ -44,8 +44,18 @@ Runs bootstrap + full Release test suite as a single gate before packaging.
 
 ## Outputs
 
-- TRX results are written to `./artifacts/test/`
+- TRX results are written to `./artifacts/test-results/`
 - Each run produces a timestamped `.trx` file (e.g. `test-20260208-151200.trx`)
+
+## Optional pre-push hook
+
+Enable the repo-managed git hooks to run tests before pushes:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+The configured pre-push hook runs `.\dev\test.ps1` and blocks pushes when the test gate fails.
 
 ## Pinned SDK
 
