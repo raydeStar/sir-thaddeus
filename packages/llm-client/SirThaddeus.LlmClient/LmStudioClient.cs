@@ -12,7 +12,8 @@ namespace SirThaddeus.LlmClient;
 public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
     private readonly HttpClient _http;
-    private readonly LlmClientOptions _options;
+    private readonly object _optionsGate = new();
+    private LlmClientOptions _options;
     private readonly JsonSerializerOptions _json;
     private long _promptTokensTotal;
     private long _completionTokensTotal;
@@ -31,6 +32,24 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             PropertyNameCaseInsensitive = true
         };
+    }
+
+    /// <summary>
+    /// Applies updated transport/model settings at runtime.
+    /// This avoids requiring a full app restart after saving Settings.
+    /// </summary>
+    public void UpdateOptions(LlmClientOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        lock (_optionsGate)
+        {
+            _options = options;
+
+            var targetBase = options.BaseUrl.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(targetBase))
+                _http.BaseAddress = new Uri(targetBase);
+        }
     }
 
     /// <inheritdoc />
@@ -208,12 +227,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         int? maxTokensOverride,
         bool includeExtras)
     {
+        var options = GetOptionsSnapshot();
         var body = new Dictionary<string, object>
         {
-            ["model"]       = _options.Model,
+            ["model"]       = options.Model,
             ["messages"]    = messages,
-            ["max_tokens"]  = maxTokensOverride ?? _options.MaxTokens,
-            ["temperature"] = _options.Temperature,
+            ["max_tokens"]  = maxTokensOverride ?? options.MaxTokens,
+            ["temperature"] = options.Temperature,
             ["stream"]      = false
         };
 
@@ -221,12 +241,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         {
             // Repetition penalty — not part of the OpenAI spec, but
             // supported by llama.cpp / LM Studio for most models.
-            if (_options.RepetitionPenalty is > 0 and not 1.0)
-                body["repetition_penalty"] = _options.RepetitionPenalty;
+            if (options.RepetitionPenalty is > 0 and not 1.0)
+                body["repetition_penalty"] = options.RepetitionPenalty;
 
             // Stop sequences — plain-text only (no template tokens).
-            if (_options.StopSequences is { Length: > 0 })
-                body["stop"] = _options.StopSequences;
+            if (options.StopSequences is { Length: > 0 })
+                body["stop"] = options.StopSequences;
         }
 
         if (tools is { Count: > 0 })
@@ -280,8 +300,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
     public LlmUsageSnapshot GetUsageSnapshot()
     {
-        var contextWindow = _options.ContextWindowTokens > 0
-            ? _options.ContextWindowTokens
+        var options = GetOptionsSnapshot();
+        var contextWindow = options.ContextWindowTokens > 0
+            ? options.ContextWindowTokens
             : 8192;
 
         return new LlmUsageSnapshot
@@ -327,6 +348,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+    }
+
+    private LlmClientOptions GetOptionsSnapshot()
+    {
+        lock (_optionsGate)
+            return _options;
     }
 
     private void TrackUsage(TokenUsage? usage)
