@@ -249,47 +249,75 @@
                             Padding="10,10"
                             BorderBrush="{StaticResource Surface0Brush}"
                             BorderThickness="0,0,0,1">
-                        <TextBlock Text="Chat History"
-                                   FontSize="13"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" />
+                        <Grid>
+                            <TextBlock Text="Chat History"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right"
+                                    Content="New Chat"
+                                    Command="{Binding ClearCommand}"
+                                    Style="{StaticResource HeaderButtonStyle}"
+                                    FontSize="11"
+                                    ToolTip="Create a new chat" />
+                        </Grid>
                     </Border>
                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <ItemsControl ItemsSource="{Binding ChatHistory}" Padding="6">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Margin="0,0,0,4"
-                                            Padding="8,6"
-                                            CornerRadius="6"
-                                            Background="{StaticResource Surface0Brush}"
-                                            BorderBrush="{StaticResource Surface1Brush}"
-                                            BorderThickness="1"
-                                            Cursor="Hand"
-                                            MouseLeftButtonUp="ChatHistoryItem_Click">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Title}"
-                                                       FontSize="11"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource TextBrush}"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       MaxWidth="160" />
-                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                                <TextBlock Text="{Binding MessageCount, StringFormat={}{0} msgs}"
-                                                           FontSize="9"
-                                                           Foreground="{StaticResource Subtext0Brush}" />
-                                                <TextBlock Text=" · "
-                                                           FontSize="9"
-                                                           Foreground="{StaticResource Overlay0Brush}" />
-                                                <TextBlock Text="{Binding TimestampDisplay}"
-                                                           FontSize="9"
-                                                           Foreground="{StaticResource Overlay0Brush}" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,0,4"
+                                                Padding="8,6"
+                                                CornerRadius="6"
+                                                Background="{StaticResource Surface0Brush}"
+                                                BorderBrush="{StaticResource Surface1Brush}"
+                                                BorderThickness="1"
+                                                Cursor="Hand"
+                                                MouseLeftButtonUp="ChatHistoryItem_Click">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{Binding Title}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextBrush}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxWidth="160" />
+                                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                        <TextBlock Text="{Binding MessageCount, StringFormat={}{0} msgs}"
+                                                                   FontSize="9"
+                                                                   Foreground="{StaticResource Subtext0Brush}" />
+                                                        <TextBlock Text=" · "
+                                                                   FontSize="9"
+                                                                   Foreground="{StaticResource Overlay0Brush}" />
+                                                        <TextBlock Text="{Binding TimestampDisplay}"
+                                                                   FontSize="9"
+                                                                   Foreground="{StaticResource Overlay0Brush}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <Button Grid.Column="1"
+                                                        Content="✕"
+                                                        VerticalAlignment="Top"
+                                                        HorizontalAlignment="Right"
+                                                        Command="{Binding DataContext.DeleteChatSessionCommand, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"
+                                                        CommandParameter="{Binding}"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Foreground="{StaticResource Overlay0Brush}"
+                                                        FontSize="10"
+                                                        Padding="4,2"
+                                                        Cursor="Hand"
+                                                        ToolTip="Delete this chat" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                     </ScrollViewer>
                 </DockPanel>
             </Border>
