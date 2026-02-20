@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload test results (TRX)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: preflight-test-results-trx
           path: |
@@ -79,7 +79,7 @@ jobs:
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ github.ref_name }}"
 
       - name: Upload release package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-package-assets
           path: |
