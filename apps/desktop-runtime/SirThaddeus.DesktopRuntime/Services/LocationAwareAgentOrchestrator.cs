@@ -88,7 +88,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 "",
                 profileKey));
 
-            return BuildPromptResponse(NearMePrompt);
+            return BuildManualLocationPromptResponse();
         }
 
         if (IsLocationStale(effectiveLocation))
@@ -149,8 +149,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                     "",
                     pending.ProfileKey));
 
-                return BuildPromptResponse(
-                    NearMePrompt);
+                return BuildManualLocationPromptResponse();
             }
 
             if (TryExtractManualLocation(message, out var newLocation))
@@ -182,8 +181,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 return await ContinuePendingQueryAsync(pending.OriginalQuery, cancellationToken);
             }
 
-            return BuildPromptResponse(
-                NearMePrompt);
+            return BuildManualLocationPromptResponse();
         }
 
         return await _inner.ProcessAsync(message, cancellationToken);
@@ -345,6 +343,12 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
             ToolCallsMade = [],
             LlmRoundTrips = 0
         };
+    }
+
+    private AgentResponse BuildManualLocationPromptResponse()
+    {
+        _queueManualLocationPrompt?.Invoke();
+        return BuildPromptResponse(NearMePrompt);
     }
 
     private PendingLocationState ReadPendingState()
