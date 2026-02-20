@@ -233,10 +233,10 @@ public sealed record AudioSettings
     public string PttKey { get; init; } = "F13";
 
     [JsonPropertyName("pttChord")]
-    public string PttChord { get; init; } = "Ctrl+Shift+Space";
+    public string PttChord { get; init; } = "Ctrl+Alt+M";
 
     [JsonPropertyName("shutupChord")]
-    public string ShutupChord { get; init; } = "Ctrl+Shift+Escape";
+    public string ShutupChord { get; init; } = "Ctrl+Alt+Escape";
 
     [JsonPropertyName("ttsEnabled")]
     public bool TtsEnabled { get; init; } = true;
@@ -283,13 +283,13 @@ public sealed record VoiceSettings
     public string VoiceHostHealthPath { get; init; } = "/health";
 
     [JsonPropertyName("ttsEngine")]
-    public string TtsEngine { get; init; } = "windows";
+    public string TtsEngine { get; init; } = "kokoro";
 
     [JsonPropertyName("ttsModelId")]
     public string TtsModelId { get; init; } = "";
 
     [JsonPropertyName("ttsVoiceId")]
-    public string TtsVoiceId { get; init; } = "";
+    public string TtsVoiceId { get; init; } = "bm_lewis";
 
     [JsonPropertyName("sttEngine")]
     public string SttEngine { get; init; } = "faster-whisper";
@@ -482,7 +482,13 @@ public sealed record UiSettings
     ///   - "always": run first-principles checks on every non-utility turn
     /// </summary>
     [JsonPropertyName("reasoningGuardrails")]
-    public string ReasoningGuardrails { get; init; } = "off";
+    public string ReasoningGuardrails { get; init; } = "auto";
+
+    /// <summary>
+    /// If true, use 24-hour time formatting instead of 12-hour AM/PM.
+    /// </summary>
+    [JsonPropertyName("use24HourTime")]
+    public bool Use24HourTime { get; init; } = false;
 }
 
 /// <summary>

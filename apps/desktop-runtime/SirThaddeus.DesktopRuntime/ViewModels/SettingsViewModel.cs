@@ -42,15 +42,15 @@ public sealed class SettingsViewModel : ViewModelBase
     // Audio
     private bool   _ttsEnabled   = true;
     private string _pttKey       = "F13";
-    private string _pttChord     = "Ctrl+Shift+Space";
-    private string _shutupChord  = "Ctrl+Shift+Escape";
+    private string _pttChord     = "Ctrl+Alt+M";
+    private string _shutupChord  = "Ctrl+Alt+Escape";
     private bool   _voiceHostEnabled = true;
     private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
     private int    _voiceHostStartupTimeoutMs = 20000;
     private string _voiceHostHealthPath = "/health";
-    private string _voiceTtsEngine = "windows";
+    private string _voiceTtsEngine = "kokoro";
     private string _voiceTtsModelId = "";
-    private string _voiceTtsVoiceId = "";
+    private string _voiceTtsVoiceId = "bm_lewis";
     private string _voiceSttEngine = "faster-whisper";
     private string _voiceSttModelId = "base";
     private bool   _voicePreferLocalTts = true;
@@ -115,7 +115,8 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _weatherUserAgent =
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
     private string _weatherPreferredUnits = "imperial";
-    private string _reasoningGuardrails = "off";
+    private bool _use24HourTime;
+    private string _reasoningGuardrails = "auto";
 
     // Location (manual city/ZIP)
     private string _locationLabel = "";
@@ -256,6 +257,7 @@ public sealed class SettingsViewModel : ViewModelBase
     // Weather
     public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
     public string WeatherPreferredUnits    { get => _weatherPreferredUnits;    set { if (SetProperty(ref _weatherPreferredUnits, value))    MarkDirty(); } }
+    public bool Use24HourTime              { get => _use24HourTime;            set { if (SetProperty(ref _use24HourTime, value))            MarkDirty(); } }
 
     // Location (manual city/ZIP)
     public string LocationLabel { get => _locationLabel; set { if (SetProperty(ref _locationLabel, value)) MarkDirty(); } }
@@ -545,6 +547,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
         _weatherUserAgent         = s.Weather.UserAgent;
         _weatherPreferredUnits    = s.Weather.PreferredUnits;
+        _use24HourTime            = s.Ui.Use24HourTime;
         _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
         LoadLocationForProfile(s.ActiveProfileId);
@@ -598,6 +601,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(McpPermMemoryWrite));
         OnPropertyChanged(nameof(WeatherUserAgent));
         OnPropertyChanged(nameof(WeatherPreferredUnits));
+        OnPropertyChanged(nameof(Use24HourTime));
         OnPropertyChanged(nameof(ReasoningGuardrails));
         OnPropertyChanged(nameof(InputGain));
         OnPropertyChanged(nameof(LocationLabel));
@@ -1201,7 +1205,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
         try
         {
-            var deviceNumber = _selectedInputDevice?.DeviceNumber ?? 0;
+            var deviceNumber = _selectedInputDevice?.DeviceNumber ?? -1;
 
             _testRecordingBytes = null;
             OnPropertyChanged(nameof(HasTestRecording));
@@ -1545,7 +1549,8 @@ public sealed class SettingsViewModel : ViewModelBase
             },
             Ui = _settings.Ui with
             {
-                ReasoningGuardrails = NormalizeReasoningGuardrailsMode(_reasoningGuardrails)
+                ReasoningGuardrails = NormalizeReasoningGuardrailsMode(_reasoningGuardrails),
+                Use24HourTime = _use24HourTime
             },
             UserProfile = _settings.UserProfile with
             {

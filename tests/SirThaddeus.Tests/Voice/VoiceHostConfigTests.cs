@@ -124,7 +124,7 @@ public sealed class VoiceHostConfigTests
     {
         var settings = new VoiceSettings();
 
-        Assert.Equal("windows", settings.GetNormalizedTtsEngine());
+        Assert.Equal("kokoro", settings.GetNormalizedTtsEngine());
         Assert.Equal("faster-whisper", settings.GetNormalizedSttEngine());
         Assert.Equal("base", settings.GetResolvedSttModelId());
         Assert.Equal("en", settings.GetResolvedSttLanguage());

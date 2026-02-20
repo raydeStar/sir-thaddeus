@@ -13,108 +13,78 @@ public sealed class TrayIconService : IDisposable
 {
     private readonly IAuditLogger _auditLogger;
     private readonly System.Windows.Threading.Dispatcher _dispatcher;
+    private readonly RuntimeStateStore _stateStore;
     private readonly NotifyIcon _notifyIcon;
-    private readonly ToolStripMenuItem _toggleOverlayItem;
-    private readonly ToolStripMenuItem _reasoningGuardrailsItem;
-    private readonly ToolStripMenuItem _runtimeSafetyItem;
-    private readonly ToolStripMenuItem _panicModeItem;
-    private readonly Func<bool> _isOverlayVisible;
-    private readonly Func<string> _getReasoningGuardrails;
-    private readonly Func<string> _getRuntimeSafetySummary;
-    private readonly Action _toggleOverlay;
-    private readonly Action _cycleReasoningGuardrails;
-    private readonly Action _togglePanicMode;
-    private readonly Action _exportDiagnostics;
-    private readonly Action _showCommandPalette;
+    private readonly Action _openSirThaddeus;
+    private readonly Action _pauseServiceJobs;
     private readonly Action _stopAll;
+    private readonly Action _openSettings;
     private readonly Action _exit;
     private bool _disposed;
 
     public TrayIconService(
         IAuditLogger auditLogger,
-        Func<bool> isOverlayVisible,
-        Func<string> getReasoningGuardrails,
-        Func<string> getRuntimeSafetySummary,
-        Action toggleOverlay,
-        Action cycleReasoningGuardrails,
-        Action togglePanicMode,
-        Action exportDiagnostics,
-        Action showCommandPalette,
+        RuntimeStateStore stateStore,
+        Action openSirThaddeus,
+        Action pauseServiceJobs,
         Action stopAll,
+        Action openSettings,
         Action exit)
     {
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
+        _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _dispatcher = WpfApplication.Current?.Dispatcher
             ?? throw new InvalidOperationException("WPF dispatcher is not available (tray icon requires UI thread).");
 
-        _isOverlayVisible = isOverlayVisible ?? throw new ArgumentNullException(nameof(isOverlayVisible));
-        _getReasoningGuardrails = getReasoningGuardrails ?? throw new ArgumentNullException(nameof(getReasoningGuardrails));
-        _getRuntimeSafetySummary = getRuntimeSafetySummary ?? throw new ArgumentNullException(nameof(getRuntimeSafetySummary));
-        _toggleOverlay = toggleOverlay ?? throw new ArgumentNullException(nameof(toggleOverlay));
-        _cycleReasoningGuardrails = cycleReasoningGuardrails ?? throw new ArgumentNullException(nameof(cycleReasoningGuardrails));
-        _togglePanicMode = togglePanicMode ?? throw new ArgumentNullException(nameof(togglePanicMode));
-        _exportDiagnostics = exportDiagnostics ?? throw new ArgumentNullException(nameof(exportDiagnostics));
-        _showCommandPalette = showCommandPalette ?? throw new ArgumentNullException(nameof(showCommandPalette));
+        _openSirThaddeus = openSirThaddeus ?? throw new ArgumentNullException(nameof(openSirThaddeus));
+        _pauseServiceJobs = pauseServiceJobs ?? throw new ArgumentNullException(nameof(pauseServiceJobs));
         _stopAll = stopAll ?? throw new ArgumentNullException(nameof(stopAll));
+        _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
         _exit = exit ?? throw new ArgumentNullException(nameof(exit));
 
-        _toggleOverlayItem = new ToolStripMenuItem("Show Overlay");
-        _toggleOverlayItem.Click += (_, _) => InvokeOnUiThread(_toggleOverlay);
-
-        var openPaletteItem = new ToolStripMenuItem("Command Palette (Ctrl+Space)");
-        openPaletteItem.Click += (_, _) => InvokeOnUiThread(_showCommandPalette);
-
-        _reasoningGuardrailsItem = new ToolStripMenuItem("First Principles: Off");
-        _reasoningGuardrailsItem.Click += (_, _) => InvokeOnUiThread(_cycleReasoningGuardrails);
-
-        _runtimeSafetyItem = new ToolStripMenuItem("Runtime: normal")
-        {
-            Enabled = false
-        };
-
-        _panicModeItem = new ToolStripMenuItem("Enable Panic Mode");
-        _panicModeItem.Click += (_, _) => InvokeOnUiThread(_togglePanicMode);
-
-        var exportDiagnosticsItem = new ToolStripMenuItem("Export Diagnostics Bundle");
-        exportDiagnosticsItem.Click += (_, _) => InvokeOnUiThread(_exportDiagnostics);
-
+        var openItem = new ToolStripMenuItem("Open Sir Thaddeus");
+        openItem.Click += (_, _) => InvokeOnUiThread(_openSirThaddeus);
+        
+        var pauseServiceItem = new ToolStripMenuItem("Pause Service Jobs");
+        pauseServiceItem.Click += (_, _) => InvokeOnUiThread(_pauseServiceJobs);
+        pauseServiceItem.Enabled = false; // Stubbed for V0
+        
         var stopAllItem = new ToolStripMenuItem("STOP ALL");
         stopAllItem.Click += (_, _) => InvokeOnUiThread(_stopAll);
+
+        var settingsItem = new ToolStripMenuItem("Settings");
+        settingsItem.Click += (_, _) => InvokeOnUiThread(_openSettings);
 
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => InvokeOnUiThread(_exit);
 
         var menu = new ContextMenuStrip();
-        menu.Opening += (_, _) => UpdateMenuText();
-        menu.Items.Add(_toggleOverlayItem);
-        menu.Items.Add(openPaletteItem);
-        menu.Items.Add(_reasoningGuardrailsItem);
-        menu.Items.Add(_runtimeSafetyItem);
-        menu.Items.Add(_panicModeItem);
-        menu.Items.Add(exportDiagnosticsItem);
+        menu.Items.Add(openItem);
+        menu.Items.Add(pauseServiceItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(stopAllItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(settingsItem);
         menu.Items.Add(exitItem);
 
         _notifyIcon = new NotifyIcon
         {
             Visible = true,
-            // 63-char max; keep short.
             Text = "Sir Thaddeus",
             Icon = BrandIcon.TrayIcon,
             ContextMenuStrip = menu
         };
 
-        UpdateMenuText();
-
         _notifyIcon.MouseClick += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
             {
-                InvokeOnUiThread(_toggleOverlay);
+                InvokeOnUiThread(_openSirThaddeus);
             }
         };
+
+        _stateStore.StateChanged += OnStateChanged;
+        UpdateTrayState(_stateStore.CurrentState);
 
         _auditLogger.Append(new AuditEvent
         {
@@ -129,50 +99,18 @@ public sealed class TrayIconService : IDisposable
         });
     }
 
-    private void UpdateMenuText()
+    private void OnStateChanged(object? sender, RuntimeState state)
     {
-        _toggleOverlayItem.Text = _isOverlayVisible() ? "Hide Overlay" : "Show Overlay";
-        var mode = NormalizeMode(_getReasoningGuardrails());
-        _reasoningGuardrailsItem.Text = mode switch
-        {
-            "always" => "First Principles: Always",
-            "auto" => "First Principles: Auto",
-            _ => "First Principles: Off"
-        };
-
-        var safetySummary = _getRuntimeSafetySummary();
-        _runtimeSafetyItem.Text = $"Runtime: {safetySummary}";
-        _panicModeItem.Text = safetySummary.Contains("PANIC MODE", StringComparison.OrdinalIgnoreCase)
-            ? "Disable Panic Mode"
-            : "Enable Panic Mode";
-        _notifyIcon.Text = BuildTooltip(safetySummary);
+        UpdateTrayState(state);
     }
 
-    private static string NormalizeMode(string? mode)
+    private void UpdateTrayState(RuntimeState state)
     {
-        var normalized = (mode ?? "").Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "always" => "always",
-            "auto" => "auto",
-            _ => "off"
-        };
-    }
+        var label = state.ToDisplayLabel();
+        var tooltip = $"Sir Thaddeus - {label}";
+        _notifyIcon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip;
 
-    private static string BuildTooltip(string runtimeSummary)
-    {
-        const string baseText = "Sir Thaddeus";
-        if (string.IsNullOrWhiteSpace(runtimeSummary) ||
-            runtimeSummary.Equals("normal", StringComparison.OrdinalIgnoreCase))
-        {
-            return baseText;
-        }
-
-        var suffix = runtimeSummary.Length > 40
-            ? runtimeSummary[..40] + "…"
-            : runtimeSummary;
-        var tooltip = $"{baseText} - {suffix}";
-        return tooltip.Length > 63 ? tooltip[..63] : tooltip;
+        // In the future, this can swap _notifyIcon.Icon to reflect states (e.g. Red for Stopped, Blue for Active).
     }
 
     private void InvokeOnUiThread(Action action)
@@ -198,20 +136,12 @@ public sealed class TrayIconService : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-
+        if (_disposed) return;
         _disposed = true;
 
-        try
-        {
-            _notifyIcon.Visible = false;
-            _notifyIcon.Dispose();
-        }
-        catch
-        {
-            // Best-effort cleanup; tray icon disposal shouldn't crash shutdown.
-        }
+        _stateStore.StateChanged -= OnStateChanged;
+        
+        _notifyIcon.Visible = false;
+        _notifyIcon.Dispose();
     }
 }
-

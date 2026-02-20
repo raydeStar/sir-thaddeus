@@ -24,12 +24,8 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
 
     private readonly object _gate = new();
     private PendingLocationState _pending = PendingLocationState.None;
-    private readonly HashSet<string> _vettingAskedProfileKeys = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly TimeSpan StaleLocationWindow = TimeSpan.FromDays(30);
-    private const string VettingQuestion =
-        "Where are you located? This is so I can answer 'near me' questions and is not mandatory. " +
-        "This information will never be shared with anyone.";
     private const string NearMePrompt =
         "Where are you located? Share your city, state, or ZIP and I can look nearby.";
 
@@ -81,21 +77,6 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         if (pending.Mode != PendingLocationMode.None)
             return await HandlePendingStateAsync(trimmed, lower, pending, cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(manualLocation) &&
-            !HasAskedVettingForProfile(profileKey) &&
-            ShouldRunFirstTurnVetting(lower))
-        {
-            MarkVettingAskedForProfile(profileKey);
-            WritePendingState(new PendingLocationState(
-                PendingLocationMode.AwaitingVettingLocation,
-                trimmed,
-                "",
-                profileKey));
-
-            _queueManualLocationPrompt?.Invoke();
-            return BuildPromptResponse(VettingQuestion);
-        }
-
         if (!LooksLikeLocationDependentRequest(lower))
             return await _inner.ProcessAsync(userMessage, cancellationToken);
 
@@ -107,7 +88,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 "",
                 profileKey));
 
-            return BuildPromptResponse(NearMePrompt);
+            return BuildManualLocationPromptResponse();
         }
 
         if (IsLocationStale(effectiveLocation))
@@ -150,36 +131,6 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         PendingLocationState pending,
         CancellationToken cancellationToken)
     {
-        if (pending.Mode == PendingLocationMode.AwaitingVettingLocation)
-        {
-            if (IsSkipOrOptOut(lower) || IsNegative(lower))
-            {
-                WritePendingState(PendingLocationState.None);
-                return await ContinuePendingQueryThroughWrapperAsync(pending.OriginalQuery, cancellationToken);
-            }
-
-            if (TryExtractManualLocation(message, out var vettingLocation))
-            {
-                var updated = _saveManualLocation(vettingLocation);
-                _applySettings(updated);
-                WritePendingState(PendingLocationState.None);
-                return await ContinuePendingQueryThroughWrapperAsync(pending.OriginalQuery, cancellationToken);
-            }
-
-            if (LooksLikeLocationDependentRequest(lower))
-            {
-                WritePendingState(new PendingLocationState(
-                    PendingLocationMode.AwaitingManualLocation,
-                    message,
-                    "",
-                    pending.ProfileKey));
-                return BuildPromptResponse(NearMePrompt);
-            }
-
-            WritePendingState(PendingLocationState.None);
-            return await _inner.ProcessAsync(message, cancellationToken);
-        }
-
         if (pending.Mode == PendingLocationMode.AwaitingStaleConfirmation)
         {
             if (IsAffirmative(lower))
@@ -198,8 +149,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                     "",
                     pending.ProfileKey));
 
-                return BuildPromptResponse(
-                    NearMePrompt);
+                return BuildManualLocationPromptResponse();
             }
 
             if (TryExtractManualLocation(message, out var newLocation))
@@ -231,8 +181,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 return await ContinuePendingQueryAsync(pending.OriginalQuery, cancellationToken);
             }
 
-            return BuildPromptResponse(
-                NearMePrompt);
+            return BuildManualLocationPromptResponse();
         }
 
         return await _inner.ProcessAsync(message, cancellationToken);
@@ -256,28 +205,6 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                lower.Contains("closest ", StringComparison.Ordinal) ||
                (lower.Contains("restaurant", StringComparison.Ordinal) &&
                 lower.Contains("near", StringComparison.Ordinal));
-    }
-
-    private static bool ShouldRunFirstTurnVetting(string lower)
-    {
-        if (LooksLikeLocationDependentRequest(lower))
-            return true;
-
-        var normalized = NormalizeLooseText(lower);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return false;
-
-        if (normalized.StartsWith("hello ", StringComparison.Ordinal) ||
-            normalized.StartsWith("hi ", StringComparison.Ordinal) ||
-            normalized.StartsWith("hey ", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return normalized is "hi" or "hello" or "hey" or "yo" or
-            "hello there" or "hey there" or
-            "good morning" or "good afternoon" or "good evening" or
-            "how are you" or "whats up" or "what is up";
     }
 
     private bool IsLocationStale(LocationSettings location)
@@ -418,6 +345,12 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         };
     }
 
+    private AgentResponse BuildManualLocationPromptResponse()
+    {
+        _queueManualLocationPrompt?.Invoke();
+        return BuildPromptResponse(NearMePrompt);
+    }
+
     private PendingLocationState ReadPendingState()
     {
         lock (_gate)
@@ -430,22 +363,9 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
             _pending = state;
     }
 
-    private bool HasAskedVettingForProfile(string profileKey)
-    {
-        lock (_gate)
-            return _vettingAskedProfileKeys.Contains(profileKey);
-    }
-
-    private void MarkVettingAskedForProfile(string profileKey)
-    {
-        lock (_gate)
-            _vettingAskedProfileKeys.Add(profileKey);
-    }
-
     private enum PendingLocationMode
     {
         None,
-        AwaitingVettingLocation,
         AwaitingManualLocation,
         AwaitingStaleConfirmation
     }
