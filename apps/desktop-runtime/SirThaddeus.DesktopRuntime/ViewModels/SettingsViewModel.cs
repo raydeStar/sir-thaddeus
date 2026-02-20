@@ -22,7 +22,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 /// profile selection is persisted so the assistant knows who it's
 /// talking to across sessions — no "who is this?" required.
 /// </summary>
-public sealed class SettingsViewModel : ViewModelBase
+public sealed partial class SettingsViewModel : ViewModelBase
 {
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
@@ -374,6 +374,7 @@ public sealed class SettingsViewModel : ViewModelBase
             {
                 LoadLocationForProfile(value?.ProfileId);
                 SaveProfileSelectionOnly();
+                CommandManager.InvalidateRequerySuggested();
             }
         }
     }
@@ -458,6 +459,7 @@ public sealed class SettingsViewModel : ViewModelBase
         EditPersonalityCommand = new RelayCommand(_ => EditSelectedPersonality());
         DuplicatePersonalityCommand = new RelayCommand(_ => DuplicateSelectedPersonality());
         ResetPersonalityCommand = new RelayCommand(_ => ResetPersonalityToDefault());
+        InitializeActiveProfileCommands();
 
         LoadFromSettings(settings);
         LoadAudioDevices();
@@ -616,7 +618,10 @@ public sealed class SettingsViewModel : ViewModelBase
 
         try
         {
+            await _store.EnsureSchemaAsync();
+            await EnsureDefaultUserProfilesAsync();
             var profiles = await _store.ListProfilesAsync();
+            EnsureActiveProfileSelection(profiles);
 
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
@@ -635,6 +640,10 @@ public sealed class SettingsViewModel : ViewModelBase
 
                     AvailableProfiles.Add(new ProfileOption(p.ProfileId, label));
                 }
+
+                _profilesById.Clear();
+                foreach (var profile in profiles)
+                    _profilesById[profile.ProfileId] = profile;
 
                 // Restore saved selection
                 _selectedProfile = AvailableProfiles
