@@ -88,8 +88,8 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var speechText = SanitizeTextForSpeech(text);
-        if (string.IsNullOrWhiteSpace(speechText))
+        var textChunks = ChunkTextForSpeech(text);
+        if (textChunks.Count == 0)
         {
             _auditLogger.Append(new AuditEvent
             {
@@ -133,25 +133,43 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
             try
             {
-                var audioBytes = await _localTtsClient.SynthesizeAsync(speechText, sessionId, cancellationToken);
-                if (audioBytes is null || audioBytes.Length == 0)
-                {
-                    _auditLogger.Append(new AuditEvent
-                    {
-                        Actor = "voice",
-                        Action = "VOICE_TTS_SKIPPED",
-                        Result = "warn",
-                        Details = new Dictionary<string, object>
-                        {
-                            ["sessionId"] = sessionId,
-                            ["engine"] = selectedTtsEngine,
-                            ["reason"] = "empty_audio_response"
-                        }
-                    });
-                    return;
-                }
+                Task<byte[]?>? nextAudioTask = null;
 
-                await PlayWaveBytesAsync(audioBytes, sessionId, cancellationToken);
+                for (int i = 0; i < textChunks.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var chunkText = textChunks[i];
+                    var currentAudioTask = nextAudioTask ?? _localTtsClient.SynthesizeAsync(chunkText, sessionId, cancellationToken);
+                    
+                    if (i + 1 < textChunks.Count)
+                    {
+                        nextAudioTask = _localTtsClient.SynthesizeAsync(textChunks[i + 1], sessionId, cancellationToken);
+                    }
+
+                    var audioBytes = await currentAudioTask;
+                    if (audioBytes is null || audioBytes.Length == 0)
+                    {
+                        if (i == 0) // Log if the very first chunk fails
+                        {
+                            _auditLogger.Append(new AuditEvent
+                            {
+                                Actor = "voice",
+                                Action = "VOICE_TTS_SKIPPED",
+                                Result = "warn",
+                                Details = new Dictionary<string, object>
+                                {
+                                    ["sessionId"] = sessionId,
+                                    ["engine"] = selectedTtsEngine,
+                                    ["reason"] = "empty_audio_response"
+                                }
+                            });
+                        }
+                        continue;
+                    }
+
+                    await PlayWaveBytesAsync(audioBytes, sessionId, cancellationToken);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -271,23 +289,45 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         _ = StopAsync(CancellationToken.None);
     }
 
-    private static string SanitizeTextForSpeech(string text)
+    /// <summary>
+    /// Chunks incoming text into readable segments to enable overlapped TTS synthesis.
+    /// By breaking text at logical sentence boundaries, the pipeline can begin 
+    /// playback of the first chunk while asynchronously generating subsequent chunks,
+    /// drastically reducing the time-to-first-audio metric.
+    /// </summary>
+    /// <param name="text">The raw LLM output text.</param>
+    /// <returns>An ordered collection of sanitized, chunked text segments.</returns>
+    private static IReadOnlyList<string> ChunkTextForSpeech(string text)
     {
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         normalized = normalized.Replace("(truncated)", "", StringComparison.OrdinalIgnoreCase);
-
-        // Preserve markdown link labels while removing their URLs.
         normalized = MarkdownLinkRegex.Replace(normalized, "$1");
         normalized = UrlRegex.Replace(normalized, " ");
 
-        var spokenLines = new List<string>();
+        var chunks = new List<string>();
+        var currentChunk = new System.Text.StringBuilder();
+
+        // Helper to flush current chunk if it has enough content
+        void FlushChunk(bool force = false)
+        {
+            var chunkText = MultiWhitespaceRegex.Replace(currentChunk.ToString(), " ").Trim();
+            if (chunkText.Length > 0)
+            {
+                // Avoid flushing tiny chunks unless forced
+                if (force || chunkText.Length > 40 || chunkText.EndsWith('.') || chunkText.EndsWith('!') || chunkText.EndsWith('?'))
+                {
+                    chunks.Add(chunkText);
+                    currentChunk.Clear();
+                }
+            }
+        }
+
         foreach (var rawLine in normalized.Split('\n'))
         {
             var line = rawLine.Trim();
             if (line.Length == 0)
                 continue;
 
-            // Drop markdown-only separators that sound noisy when read aloud.
             if (HorizontalRuleRegex.IsMatch(line) || TableDividerRegex.IsMatch(line))
                 continue;
 
@@ -301,13 +341,36 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             line = StandaloneFormattingTokenRegex.Replace(line, " ");
             line = MultiWhitespaceRegex.Replace(line, " ").Trim();
 
-            if (line.Length > 0)
-                spokenLines.Add(line);
+            if (line.Length == 0)
+                continue;
+
+            // Split line into sentences for finer chunking
+            // Match punctuation followed by space and uppercase letter/number, or end of line.
+            var sentenceMatches = Regex.Matches(line, @"(.+?(?:[\.\!\?]+(?=\s+[A-Z0-9])|$)|\n)");
+            
+            foreach (Match match in sentenceMatches)
+            {
+                var sentence = match.Value.Trim();
+                if (sentence.Length > 0)
+                {
+                    if (currentChunk.Length > 0)
+                        currentChunk.Append(' ');
+                    currentChunk.Append(sentence);
+
+                    // Flush if chunk gets reasonably large
+                    if (currentChunk.Length > 80)
+                    {
+                        FlushChunk();
+                    }
+                }
+            }
+
+            // Always ensure lines (like bullet points) have a slight pause / boundary
+            FlushChunk(force: true);
         }
 
-        return spokenLines.Count == 0
-            ? ""
-            : MultiWhitespaceRegex.Replace(string.Join(" ", spokenLines), " ").Trim();
+        FlushChunk(force: true);
+        return chunks;
     }
 
     private VoiceSettings GetVoiceSettingsSnapshot()

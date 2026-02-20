@@ -61,6 +61,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private int _tokensOut;
     private int _contextFillPercent;
     private CancellationTokenSource? _processingCts;
+    private Guid? _currentSessionId;
 
     // ── Voice debug state ────────────────────────────────────────────
     private string _voiceStatusText = "";
@@ -108,6 +109,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         CancelCommand = new RelayCommand(CancelProcessing, () => _isProcessing);
         ToggleContextLockCommand = new RelayCommand(_ => ContextLocked = !ContextLocked);
         LoadChatSessionCommand = new RelayCommand(LoadChatSession);
+        DeleteChatSessionCommand = new RelayCommand(DeleteChatSession);
 
         _contextLocked = _orchestrator.ContextLocked;
         ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
@@ -115,6 +117,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         BriefingPanel = new BriefingPanelViewModel();
         TryLoadBriefingFixture();
         RestorePersistedHistory();
+
+        Messages.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasActiveSession));
 
         // Check connection on construction (fire-and-forget, logged on failure)
         _ = CheckConnectionAsync();
@@ -150,6 +154,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public ObservableCollection<ChatSessionSnapshot> ChatHistory { get; } = [];
 
     public ICommand LoadChatSessionCommand { get; }
+    public ICommand DeleteChatSessionCommand { get; }
+
+    public bool HasActiveSession => Messages.Count > 0;
 
     /// <summary>
     /// Current text in the input box.
@@ -654,6 +661,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             _processingCts?.Dispose();
             _processingCts = null;
             _expectingBriefingPayload = false;
+
+            SnapshotCurrentSession();
         }
     }
 
@@ -667,12 +676,15 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         // Save current session to history if it has substantive content.
         SnapshotCurrentSession();
 
+        _currentSessionId = null;
+
         Messages.Clear();
         ActivityLog.Clear();
         ContextChips.Clear();
         UpdateTokenUsageTicker(0, 0, 0);
         _orchestrator.ResetConversation();
         ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
+        OnPropertyChanged(nameof(HasActiveSession));
 
         _audit.Append(new AuditEvent
         {
@@ -705,10 +717,27 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             ? firstUserMsg[..57] + "..."
             : firstUserMsg;
 
-        var snapshot = new ChatSessionSnapshot(
-            Title:     title,
-            Timestamp: DateTime.Now,
-            Messages:  Messages.Select(m => new ChatSessionMessage(m.Role.ToString(), m.Content)).ToList());
+        if (_currentSessionId == null)
+            _currentSessionId = Guid.NewGuid();
+
+        var snapshot = new ChatSessionSnapshot
+        {
+            Id        = _currentSessionId.Value,
+            Title     = title,
+            Timestamp = DateTime.Now,
+            Messages  = Messages.Select(m => new ChatSessionMessage
+            {
+                Role    = m.Role.ToString(),
+                Content = m.Content
+            }).ToList()
+        };
+
+        // Remove existing snapshot if it's already in history
+        var existing = ChatHistory.FirstOrDefault(s => s.Id == _currentSessionId.Value);
+        if (existing != null)
+        {
+            ChatHistory.Remove(existing);
+        }
 
         ChatHistory.Insert(0, snapshot);
 
@@ -727,8 +756,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public void SaveAllHistory()
     {
         SnapshotCurrentSession();
-        PersistChatHistory();
-        PersistBriefingHistory();
+        
+        // Ensure we always save even if empty to clear deleted entries,
+        // unless we failed to load earlier and are preventing corruption.
+        _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
+        _chatHistoryPersistence?.SaveBriefingHistory(BriefingPanel.History);
     }
 
     private void PersistChatHistory()
@@ -746,19 +778,27 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         if (_chatHistoryPersistence is null) return;
 
         var savedChats = _chatHistoryPersistence.LoadChatHistory();
-        foreach (var session in savedChats)
-            ChatHistory.Add(session);
+        if (savedChats != null)
+        {
+            foreach (var session in savedChats)
+                ChatHistory.Add(session);
+        }
 
         var savedBriefings = _chatHistoryPersistence.LoadBriefingHistory();
-        foreach (var dto in savedBriefings)
+        if (savedBriefings != null)
         {
-            if (dto.Briefing is null) continue;
-            BriefingPanel.History.Add(new BriefingHistoryEntry(
-                Title:      dto.Title,
-                Confidence: dto.Confidence,
-                StatusLine: dto.StatusLine,
-                Timestamp:  dto.Timestamp,
-                Briefing:   dto.Briefing));
+            foreach (var dto in savedBriefings)
+            {
+                if (dto.Briefing is null) continue;
+                BriefingPanel.History.Add(new BriefingHistoryEntry
+                {
+                    Title      = dto.Title,
+                    Confidence = dto.Confidence,
+                    StatusLine = dto.StatusLine,
+                    Timestamp  = dto.Timestamp,
+                    Briefing   = dto.Briefing
+                });
+            }
         }
     }
 
@@ -766,7 +806,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         if (parameter is not ChatSessionSnapshot session) return;
 
-        // Clear current without re-saving (already in history).
+        // Save current session BEFORE switching to the requested one
+        SnapshotCurrentSession();
+
+        _currentSessionId = session.Id;
+
         Messages.Clear();
         ActivityLog.Clear();
 
@@ -782,7 +826,19 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             }
         }
 
+        OnPropertyChanged(nameof(HasActiveSession));
         MessageAdded?.Invoke();
+    }
+
+    private void DeleteChatSession(object? parameter)
+    {
+        if (parameter is not ChatSessionSnapshot session) return;
+        
+        if (_currentSessionId == session.Id)
+            _currentSessionId = null;
+
+        ChatHistory.Remove(session);
+        PersistChatHistory();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -864,6 +920,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Role    = role,
             Content = content
         });
+        OnPropertyChanged(nameof(HasActiveSession));
         MessageAdded?.Invoke();
     }
 
@@ -895,6 +952,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             ThoughtContent = displayParts.ThinkingText,
             RetryPrompt = ResolveMostRecentUserPrompt()
         });
+        
+        SnapshotCurrentSession();
         MessageAdded?.Invoke();
     }
 

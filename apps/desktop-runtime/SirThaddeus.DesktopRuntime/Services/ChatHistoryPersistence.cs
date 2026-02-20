@@ -76,7 +76,7 @@ public sealed class ChatHistoryPersistence
             StatusLine = e.StatusLine,
             Timestamp  = e.Timestamp,
             Briefing   = e.Briefing
-        });
+        }).ToList();
 
         SaveJsonList(_briefingHistoryPath, dtos, "BRIEFING_HISTORY");
     }

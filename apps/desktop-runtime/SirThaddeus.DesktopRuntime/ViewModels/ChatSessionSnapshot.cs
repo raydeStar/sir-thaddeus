@@ -2,18 +2,40 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 
 /// <summary>
 /// Lightweight snapshot of a completed chat session for history display.
-/// Messages are stored as role/content pairs to avoid ViewModel coupling.
 /// </summary>
-public sealed record ChatSessionSnapshot(
-    string                           Title,
-    DateTime                         Timestamp,
-    IReadOnlyList<ChatSessionMessage> Messages)
+public sealed class ChatSessionSnapshot
 {
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = "";
+    public DateTime Timestamp { get; set; }
+    public List<ChatSessionMessage> Messages { get; set; } = [];
+
     public string TimestampDisplay => Timestamp.ToString("MMM d, h:mm tt");
-    public int    MessageCount     => Messages.Count;
+    public int MessageCount => Messages?.Count ?? 0;
+
+    public ChatSessionSnapshot() { }
+
+    public ChatSessionSnapshot(string title, DateTime timestamp, List<ChatSessionMessage> messages)
+    {
+        Title = title;
+        Timestamp = timestamp;
+        Messages = messages;
+    }
 }
 
 /// <summary>
 /// Serializable message pair — role name + content text.
 /// </summary>
-public sealed record ChatSessionMessage(string Role, string Content);
+public sealed class ChatSessionMessage
+{
+    public string Role { get; set; } = "";
+    public string Content { get; set; } = "";
+
+    public ChatSessionMessage() { }
+
+    public ChatSessionMessage(string role, string content)
+    {
+        Role = role;
+        Content = content;
+    }
+}
