@@ -5,6 +5,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 /// </summary>
 public sealed class ChatSessionSnapshot
 {
+    public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "";
     public DateTime Timestamp { get; set; }
     public List<ChatSessionMessage> Messages { get; set; } = [];
