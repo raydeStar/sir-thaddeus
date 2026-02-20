@@ -26,11 +26,14 @@ public static class AudioDeviceEnumerator
 
     /// <summary>
     /// Returns all available recording devices.
-    /// Device 0 is the system default input and is labeled accordingly.
+    /// Device -1 (WAVE_MAPPER) is always included as "System Default".
     /// </summary>
     public static IReadOnlyList<AudioDeviceInfo> GetInputDevices()
     {
-        var devices = new List<AudioDeviceInfo>();
+        var devices = new List<AudioDeviceInfo>
+        {
+            new(-1, "", "System Default")
+        };
 
         try
         {
@@ -40,10 +43,7 @@ public static class AudioDeviceEnumerator
                 try
                 {
                     var caps = WaveIn.GetCapabilities(i);
-                    var display = i == 0
-                        ? $"{caps.ProductName} (Default)"
-                        : caps.ProductName;
-                    devices.Add(new AudioDeviceInfo(i, caps.ProductName, display));
+                    devices.Add(new AudioDeviceInfo(i, caps.ProductName, caps.ProductName));
                 }
                 catch
                 {
@@ -107,12 +107,12 @@ public static class AudioDeviceEnumerator
 
     /// <summary>
     /// Resolves a persisted device name to a NAudio device number for input.
-    /// Returns 0 (system default) when the name is empty or no match is found.
+    /// Returns -1 (system default) when the name is empty or no match is found.
     /// </summary>
     public static int ResolveInputDeviceNumber(string? deviceName)
     {
         if (string.IsNullOrWhiteSpace(deviceName))
-            return 0;
+            return -1;
 
         try
         {
@@ -130,7 +130,7 @@ public static class AudioDeviceEnumerator
         }
         catch { /* enumeration unavailable */ }
 
-        return 0;
+        return -1;
     }
 
     /// <summary>

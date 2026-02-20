@@ -69,6 +69,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _isVoiceActive;
     private string _reasoningGuardrailsMode = "off";
     private bool _expectingBriefingPayload;
+    
+    private readonly System.Windows.Threading.DispatcherTimer _auditTimer;
+    private DateTimeOffset _lastAuditSync = DateTimeOffset.MinValue;
+    
+    public bool Use24HourTime { get; set; }
     // Old voice test fields removed — replaced by VoiceStatusText / VoiceTranscriptText / IsVoiceActive.
 
     private static readonly Regex TaggedThinkingRegex = new(
@@ -122,6 +127,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         // Check connection on construction (fire-and-forget, logged on failure)
         _ = CheckConnectionAsync();
+
+        _auditTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(2)
+        };
+        _auditTimer.Tick += (s, e) => SyncAuditLogs();
+        _auditTimer.Start();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -447,7 +459,6 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     : "no tools (MCP offline)";
 
                 ConnectionStatus = $"Connected \u2022 {modelName} \u2022 {toolStatus}";
-                AddStatus($"Ready \u2014 {modelName} \u2022 {toolStatus}");
 
                 // Log to activity pane
                 AddLog(LogEntryKind.Info, $"LLM: {modelName}");
@@ -456,15 +467,14 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
                 if (toolCount == 0)
                 {
-                    AddStatus("\u26A0 MCP server not reachable. Tool calls will not work. " +
-                              "Rebuild the solution and restart.");
+                    // Warning handled in logs
                 }
             }
             else
             {
                 IsLlmConnected = false;
                 ConnectionStatus = "Disconnected";
-                AddStatus("Cannot reach LLM. Is LM Studio running on localhost:1234?");
+                // AddStatus removed
             }
         }
         catch
@@ -514,6 +524,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         var thinkingMsg = new ChatMessageViewModel
         {
+            Use24HourTime = Use24HourTime,
             Role    = ChatMessageRole.Status,
             Content = "Thinking\u2026"
         };
@@ -535,6 +546,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 var displayParts = ParseAssistantDisplayParts(result.Text);
                 var assistantMsg = new ChatMessageViewModel
                 {
+                    Use24HourTime = Use24HourTime,
                     Role    = ChatMessageRole.Assistant,
                     Content = displayParts.DisplayText,
                     ThoughtContent = displayParts.ThinkingText,
@@ -679,8 +691,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _currentSessionId = null;
 
         Messages.Clear();
-        ActivityLog.Clear();
         ContextChips.Clear();
+        AddLog(LogEntryKind.Info, "--- Started new chat session ---");
         UpdateTokenUsageTicker(0, 0, 0);
         _orchestrator.ResetConversation();
         ApplyContextSnapshot(_orchestrator.GetContextSnapshot());
@@ -812,7 +824,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _currentSessionId = session.Id;
 
         Messages.Clear();
-        ActivityLog.Clear();
+
+        AddLog(LogEntryKind.Info, $"--- Loaded chat session: {session.Title} ---");
 
         foreach (var msg in session.Messages)
         {
@@ -820,6 +833,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             {
                 Messages.Add(new ChatMessageViewModel
                 {
+                    Use24HourTime = Use24HourTime,
                     Role    = role,
                     Content = msg.Content
                 });
@@ -1026,8 +1040,53 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
     private void AddLog(LogEntryKind kind, string text)
     {
-        ActivityLog.Add(new LogEntry { Kind = kind, Text = text });
-        LogEntryAdded?.Invoke();
+        App.Current.Dispatcher.Invoke(() =>
+        {
+            ActivityLog.Insert(0, new LogEntry { Kind = kind, Text = text });
+            LogEntryAdded?.Invoke();
+        });
+    }
+
+    private void SyncAuditLogs()
+    {
+        try
+        {
+            var recent = _audit.ReadTail(20);
+            var newEvents = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(recent, e => e.Timestamp > _lastAuditSync));
+            if (newEvents.Count == 0) return;
+
+            _lastAuditSync = System.Linq.Enumerable.Max(newEvents, e => e.Timestamp);
+            
+            App.Current.Dispatcher.Invoke(() =>
+            {
+                foreach (var ev in newEvents)
+                {
+                    var txt = $"[{ev.Action}] {ev.Result}";
+                    if (ev.Details != null && ev.Details.Count > 0)
+                    {
+                        try { txt += " " + JsonSerializer.Serialize(ev.Details); }
+                        catch { txt += " [Details omitted]"; }
+                    }
+
+                    var kind = ev.Result == "error" ? LogEntryKind.Error : LogEntryKind.Info;
+                    if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) kind = LogEntryKind.ToolOutput;
+
+                    ActivityLog.Insert(0, new LogEntry { Kind = kind, Text = txt, Timestamp = ev.Timestamp.DateTime });
+                }
+                
+                while (ActivityLog.Count > 100)
+                {
+                    ActivityLog.RemoveAt(ActivityLog.Count - 1);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            App.Current.Dispatcher.Invoke(() =>
+            {
+                ActivityLog.Insert(0, new LogEntry { Kind = LogEntryKind.Error, Text = $"Log Sync Error: {ex.Message}" });
+            });
+        }
     }
 
     private string ResolveRetryPrompt(ChatMessageViewModel message)

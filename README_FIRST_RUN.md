@@ -4,18 +4,21 @@ This package is a self-contained Windows build. You do not need to install the .
 
 ## 1) Extract and launch
 
+**What do I run?** Normal user flow is **one-step**: launch `SirThaddeus.DesktopRuntime.exe` only. Do not try to start MCP/VoiceHost manually.
+
 1. Extract the ZIP to a local folder, for example `C:\Apps\SirThaddeus\`.
 2. Open the extracted folder.
 3. Double-click `SirThaddeus.DesktopRuntime.exe`.
 
 If Windows SmartScreen appears, use **More info -> Run anyway** after you verify the source.
+*Note: Unsigned binaries may trigger AV heuristics; verify checksum and source.*
 
 ## 2) (Recommended) Verify checksum
 
 From PowerShell in the extracted parent folder:
 
 ```powershell
-Get-FileHash ".\sir-thaddeus-win-x64-<version>.zip" -Algorithm SHA256
+Get-FileHash ".\sir-thaddeus-win-x64-v0.1.0.zip" -Algorithm SHA256
 ```
 
 Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
@@ -25,6 +28,7 @@ Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 1. Start LM Studio.
 2. Start the local OpenAI-compatible server in LM Studio.
 3. In the app settings, set `llm.baseUrl` to your local endpoint (default is usually `http://localhost:1234`).
+   *(Tip: A known good model to start with is `qwen2.5-coder-7b-instruct` or similar instruction-tuned models).*
 4. Save settings and run a quick test message.
 
 ## 4) Validate first interaction

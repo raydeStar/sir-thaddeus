@@ -5,7 +5,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/CatppuccinMocha.xaml"/>
+                <ResourceDictionary Source="Themes/ThemeResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Apply accent focus ring to all focusable controls for keyboard nav -->

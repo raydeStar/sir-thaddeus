@@ -17,6 +17,8 @@ public sealed class PushToTalkService : IDisposable
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_SYSKEYUP = 0x0105;
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -164,12 +166,12 @@ public sealed class PushToTalkService : IDisposable
             var vkCode = (uint)Marshal.ReadInt32(lParam);
             var message = (int)wParam;
 
-            if (message == WM_KEYDOWN)
+            if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
             {
                 _pressedKeys.Add(vkCode);
                 HandleKeyDown(vkCode);
             }
-            else if (message == WM_KEYUP)
+            else if (message == WM_KEYUP || message == WM_SYSKEYUP)
             {
                 HandleKeyUp(vkCode);
                 _pressedKeys.Remove(vkCode);
@@ -265,15 +267,15 @@ public sealed class PushToTalkService : IDisposable
     private bool AreModifiersPressed(KeyModifiers required)
     {
         if (required.HasFlag(KeyModifiers.Control) &&
-            !(IsPressed(0xA2) || IsPressed(0xA3)))
+            !(IsPressed(0xA2) || IsPressed(0xA3) || IsPressed(0x11)))
             return false;
 
         if (required.HasFlag(KeyModifiers.Shift) &&
-            !(IsPressed(0xA0) || IsPressed(0xA1)))
+            !(IsPressed(0xA0) || IsPressed(0xA1) || IsPressed(0x10)))
             return false;
 
         if (required.HasFlag(KeyModifiers.Alt) &&
-            !(IsPressed(0xA4) || IsPressed(0xA5)))
+            !(IsPressed(0xA4) || IsPressed(0xA5) || IsPressed(0x12)))
             return false;
 
         if (required.HasFlag(KeyModifiers.Win) &&

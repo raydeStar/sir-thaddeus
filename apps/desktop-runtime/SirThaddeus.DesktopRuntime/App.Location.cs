@@ -67,9 +67,9 @@ public partial class App
 
         var prompt = new LocationPromptWindow
         {
-            Owner = _commandPaletteWindow?.IsVisible == true
-                ? _commandPaletteWindow
-                : _overlayWindow
+            Owner = _mainWindow?.IsVisible == true
+                ? _mainWindow
+                : null
         };
 
         var accepted = prompt.ShowDialog() == true &&
