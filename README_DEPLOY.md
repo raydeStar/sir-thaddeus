@@ -42,9 +42,9 @@ Outputs:
 
 - publish directory: `.\artifacts\publish\win-x64\`
 - staged package directory: `.\artifacts\stage\win-x64\`
-- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>.zip`
-- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>.zip.sha256.txt`
-- per-binary checksums: `.\artifacts\release\sir-thaddeus-win-x64-<version-or-timestamp>-binaries.sha256.txt`
+- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip`
+- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
+- per-binary checksums: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-binaries.sha256.txt`
 
 ### Required ZIP contents
 
@@ -69,16 +69,14 @@ Run from the publish output folder:
 
 Verify:
 
-1. LLM connection status is healthy.
-2. MCP tools are discoverable (non-zero tool count).
-3. Chat response works for:
-   - normal prompt
-   - memory-aware personalization prompt
-4. No internal markers appear in user-visible output (for example, tool/reference markers).
-5. No unsupported capability claims appear (for example, email/send promises when no such tool exists).
-6. Audit log continues to append entries in `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
-7. VoiceHost launches on first voice use (check audit for `VOICEHOST_READY`).
-8. VoiceHost health endpoint responds at `http://127.0.0.1:17845/health` with `ready: true`.
+* [ ] LLM connection status is healthy.
+* [ ] MCP tools are discoverable (non-zero tool count).
+* [ ] Chat response works for normal prompt and memory-aware personalization prompt.
+* [ ] No internal markers appear in user-visible output (e.g. tool/reference markers).
+* [ ] No unsupported capability claims appear (e.g. email/send promises when no such tool exists).
+* [ ] Audit log continues to append entries in `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
+* [ ] VoiceHost launches on first voice use (check audit for `VOICEHOST_READY`).
+* [ ] VoiceHost health endpoint responds at `http://127.0.0.1:17845/health` with `ready: true`.
 
 Notes:
 

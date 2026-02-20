@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows.Input;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Core;
+using SirThaddeus.DesktopRuntime.Services;
 using SirThaddeus.PermissionBroker;
 using SirThaddeus.ToolRunner;
 using SirThaddeus.Voice;
@@ -15,11 +16,11 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 public sealed class OverlayViewModel : ViewModelBase, IDisposable
 {
     private readonly RuntimeController _controller;
+    private readonly RuntimeStateStore _stateStore;
     private readonly IAuditLogger _auditLogger;
     private readonly IPermissionBroker _permissionBroker;
     private readonly IToolRunner _toolRunner;
     private readonly Action _requestShutdown;
-    private readonly IVoiceStateSource? _voiceStateSource;
     private readonly Func<string>? _getActivePersonalityId;
     private readonly Func<string>? _getActivePersonalityHash;
     
@@ -39,7 +40,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         IPermissionBroker permissionBroker,
         IToolRunner toolRunner,
         Action requestShutdown,
-        IVoiceStateSource? voiceStateSource = null,
+        RuntimeStateStore stateStore,
         Func<string>? getActivePersonalityId = null,
         Func<string>? getActivePersonalityHash = null)
     {
@@ -48,7 +49,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         _permissionBroker = permissionBroker ?? throw new ArgumentNullException(nameof(permissionBroker));
         _toolRunner = toolRunner ?? throw new ArgumentNullException(nameof(toolRunner));
         _requestShutdown = requestShutdown ?? throw new ArgumentNullException(nameof(requestShutdown));
-        _voiceStateSource = voiceStateSource;
+        _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _getActivePersonalityId = getActivePersonalityId;
         _getActivePersonalityHash = getActivePersonalityHash;
 
@@ -61,9 +62,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         DemoPermissionCommand = new AsyncRelayCommand(DemoPermissionFlow);
 
         // Subscribe to state changes
-        _controller.StateChanged += OnStateChanged;
-        if (_voiceStateSource is not null)
-            _voiceStateSource.StateChanged += OnVoiceStateChanged;
+        _stateStore.StateChanged += OnStateChanged;
         
         // Initialize state
         UpdateStateDisplay();
@@ -230,7 +229,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         RefreshAuditFeed();
     }
 
-    private void OnStateChanged(object? sender, StateChangedEventArgs e)
+    private void OnStateChanged(object? sender, RuntimeState newState)
     {
         // Must be InvokeAsync (non-blocking) — these handlers fire on the voice
         // orchestrator's single event-loop thread. Synchronous Dispatcher.Invoke
@@ -244,26 +243,9 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         });
     }
 
-    private void OnVoiceStateChanged(object? sender, VoiceStateChangedEventArgs e)
-    {
-        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
-        {
-            UpdateStateDisplay();
-            UpdatePersonalityDisplay();
-            RefreshAuditFeed();
-        });
-    }
-
     private void UpdateStateDisplay()
     {
-        if (_voiceStateSource is not null && _voiceStateSource.CurrentState != VoiceState.Idle)
-        {
-            StateLabel = VoiceStateToLabel(_voiceStateSource.CurrentState);
-            StateIcon = VoiceStateToIcon(_voiceStateSource.CurrentState);
-            return;
-        }
-
-        var state = _controller.CurrentState;
+        var state = _stateStore.CurrentState;
         StateLabel = state.ToDisplayLabel();
         StateIcon = state.ToIconHint();
     }
@@ -279,26 +261,6 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         ActivePersonalityLabel = $"Profile: {label}";
         ActivePersonalityHash = (_getActivePersonalityHash?.Invoke() ?? "").Trim();
     }
-
-    private static string VoiceStateToLabel(VoiceState state) => state switch
-    {
-        VoiceState.Listening => "Listening",
-        VoiceState.Transcribing => "Transcribing",
-        VoiceState.Thinking => "Thinking",
-        VoiceState.Speaking => "Speaking",
-        VoiceState.Faulted => "Faulted",
-        _ => "Idle"
-    };
-
-    private static string VoiceStateToIcon(VoiceState state) => state switch
-    {
-        VoiceState.Listening => "Ear",
-        VoiceState.Transcribing => "Waveform",
-        VoiceState.Thinking => "Brain",
-        VoiceState.Speaking => "Speaker",
-        VoiceState.Faulted => "Error",
-        _ => "Idle"
-    };
 
     private void UpdateActiveTokenCount()
     {
@@ -389,8 +351,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
             return;
 
         _disposed = true;
-        _controller.StateChanged -= OnStateChanged;
-        if (_voiceStateSource is not null)
-            _voiceStateSource.StateChanged -= OnVoiceStateChanged;
+        _stateStore.StateChanged -= OnStateChanged;
+        _stateStore.Dispose();
     }
 }

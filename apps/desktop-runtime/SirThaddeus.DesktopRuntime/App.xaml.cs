@@ -74,12 +74,13 @@ public partial class App : System.Windows.Application
     private AgentVoiceService? _voiceAgentService;
     private VoiceSessionOrchestrator? _voiceOrchestrator;
     private TrayIconService? _trayIcon;
-    private MainWindow? _overlayWindow;
+    private RuntimeStateStore? _stateStore;
+    private MainWindow? _mainWindow;
     private OverlayViewModel? _overlayViewModel;
-    private CommandPaletteWindow? _commandPaletteWindow;
     private CommandPaletteViewModel? _commandPaletteViewModel;
     private int _commandPaletteHotkeyId = -1;
     private int _reasoningGuardrailsHotkeyId = -1;
+    private int _stopAllHotkeyId = -1;
     private bool _isShuttingDown;
     private bool _isHeadless;
     private readonly object _liveAsrPreviewGate = new();
@@ -390,28 +391,27 @@ public partial class App : System.Windows.Application
 
         RebindPushToTalkInput(_settings.Audio);
 
+        // Initialize the unified runtime state store
+        _stateStore = new RuntimeStateStore(_runtimeController!, _voiceOrchestrator);
+
         // ── 8. UI surface (Layer 1) ──────────────────────────────────
         if (!_isHeadless && _settings.Ui.ShowOverlay)
         {
-            InitializeOverlayWindow(showImmediately: !_settings.Ui.StartMinimized);
+            InitializeMainWindow(showImmediately: !_settings.Ui.StartMinimized);
         }
 
         // Tray icon is always active (headless or not)
         _trayIcon = new TrayIconService(
-            _auditLogger,
-            isOverlayVisible: () => _overlayWindow?.IsVisible == true,
-            getReasoningGuardrails: () => _settings?.Ui.ReasoningGuardrails ?? "off",
-            getRuntimeSafetySummary: GetRuntimeSafetySummary,
-            toggleOverlay: ToggleOverlayVisibility,
-            cycleReasoningGuardrails: CycleReasoningGuardrailsMode,
-            togglePanicMode: TogglePanicModeFromTray,
-            exportDiagnostics: ExportDiagnosticsBundleFromTray,
-            showCommandPalette: ShowCommandPalette,
+            _auditLogger!,
+            _stateStore,
+            openSirThaddeus: ShowCommandPalette, // Assuming this is now MainWindow
+            pauseServiceJobs: () => { },
             stopAll: StopAllAndShutdown,
+            openSettings: () => { /* TODO: show settings tab */ ShowCommandPalette(); },
             exit: RequestShutdown);
 
         // Hotkeys need a window handle; use the overlay if available, otherwise use a hidden helper window.
-        _hotkeyOwnerWindow = _overlayWindow ?? CreateHiddenHotkeyWindow();
+        _hotkeyOwnerWindow = _mainWindow ?? CreateHiddenHotkeyWindow();
         InitializeHotkeys(_hotkeyOwnerWindow);
 
         // Start VoiceHost early so first-turn ASR avoids cold-start latency.
@@ -453,6 +453,9 @@ public partial class App : System.Windows.Application
 
     private void OnPttShutup()
     {
+        if (_audioPlaybackService?.IsPlaying != true)
+            return;
+
         _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
         PublishVoiceStatus("Canceled.");
         _voiceOrchestrator?.EnqueueShutup();
@@ -1798,19 +1801,31 @@ public partial class App : System.Windows.Application
     // Overlay Window Setup
     // ─────────────────────────────────────────────────────────────────────
 
-    private void InitializeOverlayWindow(bool showImmediately = true)
+    private void InitializeMainWindow(bool showImmediately = true)
     {
-        if (_overlayWindow != null)
+        if (_mainWindow != null)
             return;
 
-        _overlayWindow = new MainWindow();
-        _overlayViewModel = new OverlayViewModel(
+        var window = new MainWindow();
+        var host = new RuntimeControllerHost(_runtimeController!);
+
+        // Create view models
+        var chatVm = new CommandPaletteViewModel(
+            _agentEntryPoint ?? _orchestrator!,
+            _llmClient!,
+            host,
+            _auditLogger!,
+            closeWindow: () => window.Hide(),
+            dialogueStatePersistence: _dialogueStatePersistence,
+            chatHistoryPersistence: _chatHistoryPersistence);
+
+        var overlayVm = new OverlayViewModel(
             _runtimeController!,
             _auditLogger!,
             _permissionBroker!,
             _toolRunner!,
             RequestShutdown,
-            _voiceOrchestrator,
+            _stateStore!,
             getActivePersonalityId: () =>
                 _orchestrator?.ActivePersonalityId ??
                 _settings?.ActivePersonalityId ??
@@ -1818,20 +1833,210 @@ public partial class App : System.Windows.Application
             getActivePersonalityHash: () =>
                 _orchestrator?.ActivePersonalityHash ?? "");
 
-        _overlayWindow.SetViewModel(_overlayViewModel);
-        _overlayWindow.Closing += OverlayWindow_Closing;
-        MainWindow = _overlayWindow;
+        // Wire delegates
+        chatVm.VoiceMicDown = OnPttMicDown;
+        chatVm.VoiceMicUp  = OnPttMicUp;
+        chatVm.VoiceShutup = OnPttShutup;
+        chatVm.ReadAloudRequestedAsync = ReadChatMessageAloudAsync;
+
+        _commandPaletteViewModel = chatVm;
+        _overlayViewModel = overlayVm;
+
+        _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
+        _commandPaletteViewModel.Use24HourTime = _settings?.Ui.Use24HourTime ?? false;
+        _commandPaletteViewModel.UpdateRuntimeSafety(
+            _runtimeControls.PanicModeEnabled,
+            _runtimeControls.SafeModeEnabled,
+            _runtimeSafeModeReason);
+        FlushPendingVoiceUi();
+
+        window.SetViewModel(chatVm);
+        window.SetOverlayViewModel(overlayVm);
+        window.Closing += MainWindow_Closing;
+
+        // Clear session-scoped permission grants on "New Chat"
+        chatVm.ConversationCleared += () =>
+        {
+            _permissionGate?.ClearSessionGrants();
+            if (_dialogueStatePersistence is not null)
+                _ = _dialogueStatePersistence.ClearAsync();
+        };
+
+        // ── Memory + Profile Browsers ────────────────────────────────
+        SqliteMemoryStore? settingsStore = null;
+        if (_settings!.Memory.Enabled)
+        {
+            try
+            {
+                var dbPath = ResolveMemoryDbPath(_settings);
+                settingsStore = new SqliteMemoryStore(dbPath);
+                var memVm  = new MemoryBrowserViewModel(settingsStore, _auditLogger!);
+                window.SetMemoryBrowserViewModel(memVm);
+
+                var profileVm = new ProfileBrowserViewModel(settingsStore, _auditLogger!);
+                window.SetProfileBrowserViewModel(profileVm);
+            }
+            catch (Exception ex)
+            {
+                _auditLogger!.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "MEMORY_BROWSER_INIT_FAILED",
+                    Result = "error",
+                    Details = new Dictionary<string, object> { ["error"] = ex.Message }
+                });
+            }
+        }
+
+        // ── Settings View ────────────────────────────────────────────
+        var settingsVm = new SettingsViewModel(
+            _settings!,
+            settingsStore,
+            _auditLogger!,
+            youtubeJobsClient: null,
+            voiceHostProcessManager: _voiceHostProcessManager);
+        
+        settingsVm.ActiveProfileChanged += profileId =>
+        {
+            if (_orchestrator is not null)
+                _orchestrator.ActiveProfileId = profileId;
+            Environment.SetEnvironmentVariable("ST_ACTIVE_PROFILE_ID", profileId ?? "");
+        };
+
+        settingsVm.ActivePersonalityChanged += personalityId =>
+        {
+            if (_orchestrator is not null)
+                _orchestrator.ActivePersonalityId = personalityId ?? "helpful_default";
+            Environment.SetEnvironmentVariable("ST_ACTIVE_PERSONALITY_ID", personalityId ?? "helpful_default");
+        };
+
+        settingsVm.SettingsChanged += updated =>
+        {
+            _settings = updated;
+            _runtimeControls = RuntimeControlState.FromSettings(updated);
+            _runtimeSafeModeReason = updated.RuntimeSafety.SafeModeReason;
+            _permissionGate?.UpdateSettings(updated);
+
+            if (_orchestrator is not null)
+            {
+                _orchestrator.MemoryEnabled = updated.Memory.Enabled;
+                _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
+                _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
+                _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                _orchestrator.ActivePersonalityId = updated.ActivePersonalityId;
+                _orchestrator.PersonalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(updated);
+            }
+
+            if (_commandPaletteViewModel is not null)
+            {
+                _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
+                _commandPaletteViewModel.Use24HourTime = updated.Ui.Use24HourTime;
+                _commandPaletteViewModel.UpdateRuntimeSafety(
+                    _runtimeControls.PanicModeEnabled,
+                    _runtimeControls.SafeModeEnabled,
+                    _runtimeSafeModeReason);
+            }
+
+            ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
+
+            if (_ttsService is not null)
+                _ttsService.Enabled = updated.Audio.TtsEnabled;
+
+            _voiceHostProcessManager?.UpdateSettings(updated.Voice);
+
+            if (_audioCaptureService is not null)
+            {
+                _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
+                _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
+            }
+            if (_audioPlaybackService is not null)
+                _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
+
+            RebindPushToTalkInput(updated.Audio);
+            _overlayViewModel?.RefreshPersonality();
+        };
+
+        window.SetSettingsViewModel(settingsVm);
+
+        _mainWindow = window;
+        MainWindow = _mainWindow;
 
         if (showImmediately)
         {
-            _overlayWindow.Show();
-            _overlayWindow.Activate();
+            _mainWindow.Show();
+            _mainWindow.Activate();
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // MCP Server Path Resolution
-    // ─────────────────────────────────────────────────────────────────────
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // Discord style: minimize to tray instead of exiting
+        if (!_isShuttingDown)
+        {
+            e.Cancel = true;
+            _mainWindow?.Hide();
+        }
+    }
+
+    private void ToggleMainWindowVisibility()
+    {
+        if (_mainWindow is null)
+        {
+            InitializeMainWindow(showImmediately: true);
+            return;
+        }
+
+        if (_mainWindow.IsVisible)
+        {
+            _mainWindow.Hide();
+        }
+        else
+        {
+            _mainWindow.Show();
+            _mainWindow.Activate();
+            _mainWindow.Reset();
+        }
+    }
+
+    private void ShowCommandPalette()
+    {
+        if (_runtimeController != null && _runtimeController.IsStopped)
+            return;
+
+        Dispatcher.Invoke(() =>
+        {
+            try
+            {
+                // Do not steal focus if a permission prompt is currently open
+                if (System.Windows.Application.Current.Windows.OfType<PermissionPromptWindow>().Any(w => w.IsVisible))
+                    return;
+
+                if (_mainWindow == null)
+                    InitializeMainWindow(showImmediately: true);
+                else
+                {
+                    _mainWindow.Show();
+                    _mainWindow.Activate();
+                    _mainWindow.Reset();
+                }
+            }
+            catch (Exception ex)
+            {
+                _auditLogger?.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "MAIN_WINDOW_OPEN_FAILED",
+                    Result = "error",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["message"] = ex.Message,
+                        ["errorType"] = ex.GetType().FullName ?? "unknown"
+                    }
+                });
+            }
+        });
+    }
+
 
     /// <summary>
     /// Resolves the MCP server executable path. "auto" searches the build
@@ -2007,6 +2212,11 @@ public partial class App : System.Windows.Application
             GlobalHotkeyService.VirtualKeys.R,
             CycleReasoningGuardrailsMode);
 
+        _stopAllHotkeyId = _hotkeyService.Register(
+            GlobalHotkeyService.Modifiers.Control | GlobalHotkeyService.Modifiers.Alt,
+            GlobalHotkeyService.VirtualKeys.Escape,
+            StopAllAndShutdown);
+
         _auditLogger?.Append(new AuditEvent
         {
             Actor = "runtime",
@@ -2056,211 +2266,7 @@ public partial class App : System.Windows.Application
     // Command Palette
     // ─────────────────────────────────────────────────────────────────────
 
-    private void ShowCommandPalette()
-    {
-        Dispatcher.Invoke(() =>
-        {
-            try
-            {
-                if (_commandPaletteWindow == null || !_commandPaletteWindow.IsLoaded)
-                {
-                    _commandPaletteWindow = CreateCommandPaletteWindow();
-                }
 
-                if (_commandPaletteWindow.IsVisible)
-                {
-                    _commandPaletteWindow.Activate();
-                }
-                else
-                {
-                    _commandPaletteWindow.Reset();
-                    _commandPaletteWindow.Show();
-                }
-
-                _auditLogger?.Append(new AuditEvent
-                {
-                    Actor = "user",
-                    Action = "COMMAND_PALETTE_OPENED",
-                    Result = "ok"
-                });
-            }
-            catch (Exception ex)
-            {
-                _auditLogger?.Append(new AuditEvent
-                {
-                    Actor = "runtime",
-                    Action = "COMMAND_PALETTE_OPEN_FAILED",
-                    Result = "error",
-                    Details = new Dictionary<string, object>
-                    {
-                        ["message"] = ex.Message,
-                        ["errorType"] = ex.GetType().FullName ?? "unknown"
-                    }
-                });
-            }
-        });
-    }
-
-    private CommandPaletteWindow CreateCommandPaletteWindow()
-    {
-        var window = new CommandPaletteWindow();
-        var host = new RuntimeControllerHost(_runtimeController!);
-
-        var viewModel = new CommandPaletteViewModel(
-            _agentEntryPoint ?? _orchestrator!,
-            _llmClient!,
-            host,
-            _auditLogger!,
-            closeWindow: () => window.Hide(),
-            dialogueStatePersistence: _dialogueStatePersistence,
-            chatHistoryPersistence: _chatHistoryPersistence);
-
-        // Wire PTT delegates so the UI button triggers the same path as the hotkey.
-        viewModel.VoiceMicDown = OnPttMicDown;
-        viewModel.VoiceMicUp  = OnPttMicUp;
-        viewModel.VoiceShutup = OnPttShutup;
-        viewModel.ReadAloudRequestedAsync = ReadChatMessageAloudAsync;
-
-        _commandPaletteViewModel = viewModel;
-        _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
-        _commandPaletteViewModel.UpdateRuntimeSafety(
-            _runtimeControls.PanicModeEnabled,
-            _runtimeControls.SafeModeEnabled,
-            _runtimeSafeModeReason);
-        FlushPendingVoiceUi();
-        window.SetViewModel(viewModel);
-
-        // Clear session-scoped permission grants on "New Chat"
-        viewModel.ConversationCleared += () =>
-        {
-            _permissionGate?.ClearSessionGrants();
-            if (_dialogueStatePersistence is not null)
-                _ = _dialogueStatePersistence.ClearAsync();
-        };
-
-        // ── Memory + Profile Browsers ────────────────────────────────
-        // Open a direct connection to the SQLite memory DB for the
-        // user's browsing panels. This is user-initiated data management,
-        // not agent-driven, so it bypasses MCP intentionally.
-        SqliteMemoryStore? settingsStore = null;
-        if (_settings!.Memory.Enabled)
-        {
-            try
-            {
-                var dbPath = ResolveMemoryDbPath(_settings);
-                settingsStore = new SqliteMemoryStore(dbPath);
-                var memVm  = new MemoryBrowserViewModel(settingsStore, _auditLogger!);
-                window.SetMemoryBrowserViewModel(memVm);
-
-                // Profile Browser shares the same DB connection
-                var profVm = new ProfileBrowserViewModel(settingsStore, _auditLogger!);
-                window.SetProfileBrowserViewModel(profVm);
-            }
-            catch (Exception ex)
-            {
-                _auditLogger?.Append(new AuditEvent
-                {
-                    Actor  = "system",
-                    Action = "MEMORY_BROWSER_INIT_FAILED",
-                    Result = ex.Message
-                });
-            }
-        }
-
-        // Settings panel — always available, even when memory is disabled.
-        // When memory is off, profile list features are no-op.
-        try
-        {
-            var settingsVm = new SettingsViewModel(
-                _settings, settingsStore, _auditLogger!,
-                voiceHostProcessManager: _voiceHostProcessManager);
-            settingsVm.ActiveProfileChanged += profileId =>
-            {
-                // Propagate to orchestrator for runtime tool calls
-                // (env vars can't cross process boundaries at runtime,
-                // so we pass the profile ID in the tool call args instead)
-                if (_orchestrator is not null)
-                    _orchestrator.ActiveProfileId = profileId;
-
-                // Also set env var for future MCP restarts
-                Environment.SetEnvironmentVariable(
-                    "ST_ACTIVE_PROFILE_ID", profileId ?? "");
-            };
-
-            settingsVm.ActivePersonalityChanged += personalityId =>
-            {
-                if (_orchestrator is not null)
-                    _orchestrator.ActivePersonalityId = personalityId ?? "helpful_default";
-
-                Environment.SetEnvironmentVariable(
-                    "ST_ACTIVE_PERSONALITY_ID",
-                    personalityId ?? "helpful_default");
-            };
-
-            // Propagate settings changes to the permission gate
-            // so the immutable policy snapshot is swapped atomically
-            settingsVm.SettingsChanged += updated =>
-            {
-                _settings = updated;
-                _runtimeControls = RuntimeControlState.FromSettings(updated);
-                _runtimeSafeModeReason = updated.RuntimeSafety.SafeModeReason;
-                _permissionGate?.UpdateSettings(updated);
-
-                // Propagate memory master off to orchestrator
-                if (_orchestrator is not null)
-                    _orchestrator.MemoryEnabled = updated.Memory.Enabled;
-                if (_orchestrator is not null)
-                    _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
-                if (_orchestrator is not null)
-                    _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
-                if (_orchestrator is not null)
-                    _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
-                if (_orchestrator is not null)
-                    _orchestrator.ActivePersonalityId = updated.ActivePersonalityId;
-                if (_orchestrator is not null)
-                    _orchestrator.PersonalityProfilesDirectory =
-                        SettingsManager.ResolvePersonalityProfilesDirectory(updated);
-                if (_commandPaletteViewModel is not null)
-                    _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
-                _commandPaletteViewModel?.UpdateRuntimeSafety(
-                    _runtimeControls.PanicModeEnabled,
-                    _runtimeControls.SafeModeEnabled,
-                    _runtimeSafeModeReason);
-                ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
-
-                if (_ttsService is not null)
-                    _ttsService.Enabled = updated.Audio.TtsEnabled;
-
-                _voiceHostProcessManager?.UpdateSettings(updated.Voice);
-
-                // Propagate audio device selections to capture/playback services.
-                // New device numbers take effect on the next recording/playback call.
-                if (_audioCaptureService is not null)
-                {
-                    _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
-                    _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
-                }
-                if (_audioPlaybackService is not null)
-                    _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
-
-                RebindPushToTalkInput(updated.Audio);
-                _overlayViewModel?.RefreshPersonality();
-            };
-
-            window.SetSettingsViewModel(settingsVm);
-        }
-        catch (Exception ex)
-        {
-            _auditLogger?.Append(new AuditEvent
-            {
-                Actor = "system",
-                Action = "SETTINGS_VIEWMODEL_INIT_FAILED",
-                Result = ex.Message
-            });
-        }
-
-        return window;
-    }
 
     private async Task ReadChatMessageAloudAsync(string text, CancellationToken cancellationToken)
     {
@@ -2420,18 +2426,18 @@ public partial class App : System.Windows.Application
     {
         Dispatcher.Invoke(() =>
         {
-            if (_overlayWindow == null)
+            if (_mainWindow == null)
             {
                 // Headless mode: lazily create the overlay on first toggle
-                InitializeOverlayWindow();
-                _overlayWindow!.Show();
-                _overlayWindow.Activate();
+                InitializeMainWindow();
+                _mainWindow!.Show();
+                _mainWindow.Activate();
                 return;
             }
 
-            if (_overlayWindow.IsVisible)
+            if (_mainWindow.IsVisible)
             {
-                _overlayWindow.Hide();
+                _mainWindow.Hide();
                 _auditLogger?.Append(new AuditEvent
                 {
                     Actor = "user",
@@ -2441,8 +2447,8 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                _overlayWindow.Show();
-                _overlayWindow.Activate();
+                _mainWindow.Show();
+                _mainWindow.Activate();
                 _auditLogger?.Append(new AuditEvent
                 {
                     Actor = "user",
@@ -2521,7 +2527,7 @@ public partial class App : System.Windows.Application
             return;
 
         e.Cancel = true;
-        _overlayWindow?.Hide();
+        _mainWindow?.Hide();
         _auditLogger?.Append(new AuditEvent
         {
             Actor = "user",
@@ -2569,6 +2575,7 @@ public partial class App : System.Windows.Application
                 _hotkeyService.UnregisterAll();
                 _commandPaletteHotkeyId = -1;
                 _reasoningGuardrailsHotkeyId = -1;
+                _stopAllHotkeyId = -1;
 
                 _auditLogger?.Append(new AuditEvent
                 {
@@ -2582,7 +2589,7 @@ public partial class App : System.Windows.Application
                 });
             }
 
-            Dispatcher.Invoke(() => { _commandPaletteWindow?.Hide(); });
+            Dispatcher.Invoke(() => { _mainWindow?.Hide(); });
         }
     }
 
@@ -2653,7 +2660,7 @@ public partial class App : System.Windows.Application
         _ttsService?.Dispose();
         _ttsService = null;
 
-        if (_hotkeyOwnerWindow != null && _hotkeyOwnerWindow != _overlayWindow)
+        if (_hotkeyOwnerWindow != null && _hotkeyOwnerWindow != _mainWindow)
         {
             try { _hotkeyOwnerWindow.Close(); } catch { /* best effort */ }
         }
@@ -2671,8 +2678,8 @@ public partial class App : System.Windows.Application
             _commandPaletteViewModel.SaveAllHistory();
         }
 
-        _commandPaletteWindow?.Close();
-        _commandPaletteWindow = null;
+        _mainWindow?.Close();
+        _mainWindow = null;
         _commandPaletteViewModel = null;
 
         // Tear down orchestrator layers in reverse order
