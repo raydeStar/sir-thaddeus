@@ -29,7 +29,7 @@ public class ReasoningGuardrailsModeTests
     [Fact]
     public async Task GuardrailsAuto_TriggersOnGoalConflictPrompt()
     {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
+        var llm = MakeGuardrailsAwareLlm(normalReply: "Based on the goal and constraints, complete the prerequisite before proceeding.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
@@ -42,11 +42,10 @@ public class ReasoningGuardrailsModeTests
 
         Assert.True(result.Success);
         Assert.True(result.GuardrailsUsed);
-        Assert.Contains("pay at the kiosk first", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.True(result.GuardrailsRationale.Count >= 3);
+        Assert.False(string.IsNullOrWhiteSpace(result.Text));
+        Assert.True(result.GuardrailsRationale.Count >= 2);
         Assert.StartsWith("Goal:", result.GuardrailsRationale[0], StringComparison.Ordinal);
         Assert.StartsWith("Constraint:", result.GuardrailsRationale[1], StringComparison.Ordinal);
-        Assert.StartsWith("Decision:", result.GuardrailsRationale[2], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -71,8 +70,10 @@ public class ReasoningGuardrailsModeTests
     }
 
     [Fact]
-    public async Task GuardrailsAlways_SectionHeadingOptions_FallsBackToNormalPath()
+    public async Task GuardrailsAlways_SectionHeadingOptions_SucceedsWithGenericAnswer()
     {
+        // Section headings like "Preconditions"/"Action options" used to cause fallback;
+        // pipeline now completes and returns synthesis. Verify we get a non-empty answer.
         var llm = new FakeLlmClient((messages, _) =>
         {
             var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
@@ -92,7 +93,7 @@ public class ReasoningGuardrailsModeTests
             if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return Respond("chat");
 
-            return Respond("Normal assistant fallback.");
+            return Respond("Choose the option that satisfies the goal.");
         });
 
         var mcp = new FakeMcpClient(returnValue: "unused");
@@ -105,15 +106,15 @@ public class ReasoningGuardrailsModeTests
         var result = await agent.ProcessAsync("Hello, how are you today?");
 
         Assert.True(result.Success);
-        Assert.False(result.GuardrailsUsed);
-        Assert.Equal("Normal assistant fallback.", result.Text);
-        Assert.Empty(result.GuardrailsRationale);
+        Assert.True(result.GuardrailsUsed);
+        Assert.False(string.IsNullOrWhiteSpace(result.Text));
+        Assert.True(result.GuardrailsRationale.Count >= 2);
     }
 
     [Fact]
     public async Task GuardrailsRationale_DoesNotLeakChainOfThought()
     {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
+        var llm = MakeGuardrailsAwareLlm(normalReply: "Choose the option that satisfies the required preconditions.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
@@ -126,6 +127,7 @@ public class ReasoningGuardrailsModeTests
 
         Assert.True(result.Success);
         Assert.True(result.GuardrailsUsed);
+        Assert.True(result.GuardrailsRationale.Count >= 2);
         foreach (var line in result.GuardrailsRationale)
         {
             Assert.DoesNotContain("analysis", line, StringComparison.OrdinalIgnoreCase);
@@ -136,19 +138,17 @@ public class ReasoningGuardrailsModeTests
 
     [Theory]
     [InlineData(
-        "A man is looking at a photograph of someone. His friend asks who it is. The man replies, \"Brothers and sisters, I have none. But that man's father is my father's son.\" Who is in the photograph?",
-        "his son")]
+        "A man is looking at a photograph of someone. His friend asks who it is. The man replies, \"Brothers and sisters, I have none. But that man's father is my father's son.\" Who is in the photograph?")]
     [InlineData(
-        "A woman is looking at a photograph of someone. Her friend asks who it is. She replies, \"I am an only child. But that woman's mother is my mother's daughter.\" Who is in the photograph?",
-        "her daughter")]
+        "A woman is looking at a photograph of someone. Her friend asks who it is. She replies, \"I am an only child. But that woman's mother is my mother's daughter.\" Who is in the photograph?")]
     [InlineData(
-        "A man is pointing to a photograph of someone. His friend asks who it is. He replies, \"I have no siblings. That man's son is my father's son.\" Who is in the photograph?",
-        "his father")]
-    public async Task FamilyPhotoPuzzle_AlwaysMode_ResolvesDeterministically(
-        string prompt,
-        string expectedFragment)
+        "A man is pointing to a photograph of someone. His friend asks who it is. He replies, \"I have no siblings. That man's son is my father's son.\" Who is in the photograph?")]
+    public async Task FamilyPhotoPuzzle_AlwaysMode_ProducesNonNullAnswer_NoDeterministicSolver(
+        string prompt)
     {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
+        // No deterministic solver for logic puzzles. Pipeline runs (goal/entity/constraint from LLM);
+        // MakeGuardrailsAwareLlm returns valid JSON for entity extraction, so pipeline completes.
+        var llm = MakeGuardrailsAwareLlm(normalReply: "The person in the photograph can be determined from the clues.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
@@ -160,14 +160,15 @@ public class ReasoningGuardrailsModeTests
 
         Assert.True(result.Success);
         Assert.True(result.GuardrailsUsed);
-        Assert.Contains(expectedFragment, result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.True(result.GuardrailsRationale.Count >= 3);
+        Assert.False(string.IsNullOrWhiteSpace(result.Text));
+        Assert.True(result.GuardrailsRationale.Count >= 2);
     }
 
     [Fact]
-    public async Task FamilyPhotoPuzzle_ConflictingClues_AsksForClarification()
+    public async Task FamilyPhotoPuzzle_ConflictingClues_ProducesNonNullAnswer_NoDeterministicSolver()
     {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
+        // Conflicting clues logic puzzle; no deterministic solver. Pipeline completes with generic answer.
+        var llm = MakeGuardrailsAwareLlm(normalReply: "The clues may be ambiguous; additional context would help.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
@@ -180,7 +181,7 @@ public class ReasoningGuardrailsModeTests
 
         Assert.True(result.Success);
         Assert.True(result.GuardrailsUsed);
-        Assert.Contains("cannot be resolved", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(result.Text));
     }
 
     [Fact]
@@ -222,8 +223,9 @@ public class ReasoningGuardrailsModeTests
     }
 
     [Fact]
-    public async Task CompletedTaskDurationTrick_AutoMode_ReturnsZeroTime()
+    public async Task CompletedTaskDurationTrick_AutoMode_FallsBack_NoDeterministicSolver()
     {
+        // Zero-time trick had a deterministic solver; removed. No choice pattern, so guardrails don't trigger.
         var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
@@ -236,8 +238,8 @@ public class ReasoningGuardrailsModeTests
             "If it takes 8 hours for 10 men to build a wall, how long does it take for 5 men to build the wall that is already built?");
 
         Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
-        Assert.Contains("zero time", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.GuardrailsUsed);
+        Assert.Equal("Normal assistant fallback.", result.Text);
     }
 
     private static FakeLlmClient MakeGuardrailsAwareLlm(
@@ -292,17 +294,16 @@ public class ReasoningGuardrailsModeTests
 public class ReasoningGuardrailsBenchTests
 {
     [Theory]
-    [InlineData("My library hold expires tonight. Should I call the book home or go pick it up?", "go pick it up")]
-    [InlineData("The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?", "pay at the kiosk first")]
-    [InlineData("Car wash is 50 meters away. Should I walk or drive?", "drive")]
-    [InlineData("My vehicle is here and the wash is 50 meters away. Should I walk or drive?", "drive")]
-    [InlineData("My laptop repair is ready at the shop. Should I text 'fixed' or bring the device and collect it?", "bring the device and collect it")]
-    [InlineData("Hotel check-in needs ID at the desk. Should I wait in the room or bring ID downstairs?", "bring id downstairs")]
-    [InlineData("I need a key cut at the hardware store. Should I email the key or take the key there?", "take the key there")]
-    [InlineData("I have dry-cleaning pickup before close. Should I call my jacket over or go collect it?", "go collect it")]
-    public async Task TrickQuestionBench_AlwaysMode_SelectsGoalAlignedOption(
-        string prompt,
-        string expectedDecisionFragment)
+    [InlineData("My library hold expires tonight. Should I call the book home or go pick it up?")]
+    [InlineData("The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?")]
+    [InlineData("Car wash is 50 meters away. Should I walk or drive?")]
+    [InlineData("My vehicle is here and the wash is 50 meters away. Should I walk or drive?")]
+    [InlineData("My laptop repair is ready at the shop. Should I text 'fixed' or bring the device and collect it?")]
+    [InlineData("Hotel check-in needs ID at the desk. Should I wait in the room or bring ID downstairs?")]
+    [InlineData("I need a key cut at the hardware store. Should I email the key or take the key there?")]
+    [InlineData("I have dry-cleaning pickup before close. Should I call my jacket over or go collect it?")]
+    public async Task TrickQuestionBench_AlwaysMode_ProducesNonNullAnswer(
+        string prompt)
     {
         var llm = MakeBenchLlm();
         var mcp = new FakeMcpClient(returnValue: "unused");
@@ -316,8 +317,8 @@ public class ReasoningGuardrailsBenchTests
 
         Assert.True(result.Success);
         Assert.True(result.GuardrailsUsed);
-        Assert.Contains(expectedDecisionFragment, result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.True(result.GuardrailsRationale.Count >= 3);
+        Assert.False(string.IsNullOrWhiteSpace(result.Text));
+        Assert.True(result.GuardrailsRationale.Count >= 2);
     }
 
     private static FakeLlmClient MakeBenchLlm()
@@ -326,19 +327,18 @@ public class ReasoningGuardrailsBenchTests
         {
             var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
             if (system.Contains("Infer the practical real-world goal", StringComparison.OrdinalIgnoreCase))
-            {
                 return Respond("""{"primary_goal":"Choose the action that actually completes the real-world task.","alternative_goals":[],"confidence":0.9}""");
-            }
+
+            if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"entities":[],"options":[{"label":"option A","preconditions":[],"effects":[]},{"label":"option B","preconditions":[],"effects":[]}]}""");
 
             if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
-            {
                 return Respond("""{"constraints":["Pick the option that satisfies required real-world preconditions."]}""");
-            }
 
             if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return Respond("chat");
 
-            return Respond("Normal assistant fallback.");
+            return Respond("Choose the option that completes the real-world task.");
         });
     }
 

@@ -22,66 +22,12 @@ public sealed class ReasoningGuardrailsPipeline
     private readonly GoalInferencer _goalInferencer;
     private readonly EntityExtractor _entityExtractor;
     private readonly ConstraintBuilder _constraintBuilder;
-    private readonly OptionEvaluator _optionEvaluator;
+    private readonly ILlmClient _llm;
     private readonly IAuditLogger _audit;
 
     private static readonly TimeSpan DetectorStepTimeout = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ExtractionStepTimeout = TimeSpan.FromMilliseconds(850);
-    private static readonly Regex WeightComparisonRegex = new(
-        @"^\s*which\s+(?:(?:weighs\s+(?<cmp>more|less))|(?:(?:is|weighs)\s+(?<cmp>heavier|lighter)))\s*:?\s*(?<left>.+?)\s+or\s+(?<right>.+?)\s*\??\s*$",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex MassQuantityRegex = new(
-        @"(?<num>\d+(?:\.\d+)?|[a-z]+(?:[-\s][a-z]+){0,5})\s*(?<unit>pounds?|lbs?|ounces?|oz|kilograms?|kgs?|grams?|g)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ProperNameRegex = new(
-        @"\b[A-Z][A-Za-z'\-]*\b",
-        RegexOptions.Compiled);
-    private static readonly Regex TimeRangeRegex = new(
-        @"(?<start>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|to)\s*(?<end>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FamilyPhotoRelationRegex = new(
-        @"that\s+(?<photoGender>man|woman|person|boy|girl)['’]s\s+(?<lhsRel>father|mother|son|daughter)\s+is\s+my\s+(?<rhsParent>father|mother)['’]s\s+(?<rhsOnly>only\s+)?(?<rhsChild>son|daughter)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SpeakerGenderRegex = new(
-        @"\ba\s+(?<gender>man|woman|boy|girl)\s+is\s+(?:looking|pointing)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly HashSet<string> NonNameTokens = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "A", "An", "The",
-        "I", "You", "We", "He", "She", "They", "It",
-        "Who", "Because", "If", "When", "Then", "And", "Or", "But"
-    };
-    private static readonly Dictionary<string, int> NumberWords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["zero"] = 0,
-        ["one"] = 1,
-        ["two"] = 2,
-        ["three"] = 3,
-        ["four"] = 4,
-        ["five"] = 5,
-        ["six"] = 6,
-        ["seven"] = 7,
-        ["eight"] = 8,
-        ["nine"] = 9,
-        ["ten"] = 10,
-        ["eleven"] = 11,
-        ["twelve"] = 12,
-        ["thirteen"] = 13,
-        ["fourteen"] = 14,
-        ["fifteen"] = 15,
-        ["sixteen"] = 16,
-        ["seventeen"] = 17,
-        ["eighteen"] = 18,
-        ["nineteen"] = 19,
-        ["twenty"] = 20,
-        ["thirty"] = 30,
-        ["forty"] = 40,
-        ["fifty"] = 50,
-        ["sixty"] = 60,
-        ["seventy"] = 70,
-        ["eighty"] = 80,
-        ["ninety"] = 90
-    };
+    private static readonly TimeSpan SynthesisStepTimeout = TimeSpan.FromMilliseconds(3000);
 
     public ReasoningGuardrailsPipeline(ILlmClient llm, IAuditLogger audit)
     {
@@ -89,7 +35,7 @@ public sealed class ReasoningGuardrailsPipeline
         _goalInferencer = new GoalInferencer(llm);
         _entityExtractor = new EntityExtractor(llm);
         _constraintBuilder = new ConstraintBuilder(llm);
-        _optionEvaluator = new OptionEvaluator();
+        _llm = llm;
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     }
 
@@ -109,19 +55,6 @@ public sealed class ReasoningGuardrailsPipeline
             return null;
 
         var llmRoundTrips = 0;
-        var deterministicSpecialCase = TryRunDeterministicSpecialCase(userMessage);
-        if (deterministicSpecialCase is not null)
-        {
-            return deterministicSpecialCase with
-            {
-                TriggerRisk = string.IsNullOrWhiteSpace(deterministicSpecialCase.TriggerRisk)
-                    ? "medium"
-                    : deterministicSpecialCase.TriggerRisk,
-                TriggerWhy = deterministicSpecialCase.TriggerWhy,
-                TriggerSource = deterministicSpecialCase.TriggerSource,
-                LlmRoundTrips = llmRoundTrips
-            };
-        }
 
         GuardrailsTriggerDecision triggerDecision;
 
@@ -196,14 +129,38 @@ public sealed class ReasoningGuardrailsPipeline
 
         llmRoundTrips += constraints.LlmRoundTrips;
 
-        var evaluation = _optionEvaluator.Evaluate(userMessage, goal, entities, constraints);
-        if (evaluation is null)
+        var entitySummary = entities.Entities.Count > 0
+            ? string.Join(", ", entities.Entities.Select(e => e.Name))
+            : "none extracted";
+
+        var finalMessages = new List<ChatMessage>
         {
-            WriteFallback("option_evaluation_failed");
+            ChatMessage.System(
+                "You are a precise reasoning engine. Answer the question using ONLY the decomposed " +
+                "first-principles context below. Walk through the logic step by step, then state " +
+                "your final answer clearly. Do NOT use any tools or external lookups. " +
+                "Do NOT hedge or say you cannot answer. Be concise but complete."),
+            ChatMessage.User(
+                $"Question:\n{userMessage}\n\n" +
+                $"Decomposed Context:\n" +
+                $"- Goal: {goal.PrimaryGoal}\n" +
+                $"- Key entities: {entitySummary}\n" +
+                $"- Constraints: {string.Join("; ", constraints.Constraints)}\n\n" +
+                "Reason step by step, then give your answer.")
+        };
+
+        var finalLlm = await RunBoundedAsync(
+            ct => _llm.ChatAsync(finalMessages, tools: null, maxTokensOverride: 400, ct),
+            SynthesisStepTimeout,
+            cancellationToken);
+
+        if (finalLlm is null || string.IsNullOrWhiteSpace(finalLlm.Content))
+        {
+            WriteFallback("final_synthesis_failed");
             return null;
         }
 
-        var answer = AnswerComposer.Compose(goal, constraints, evaluation);
+        llmRoundTrips++;
 
         _audit.Append(new AuditEvent
         {
@@ -213,16 +170,17 @@ public sealed class ReasoningGuardrailsPipeline
             Details = new Dictionary<string, object>
             {
                 ["goal"] = goal.PrimaryGoal,
-                ["selectedAction"] = evaluation.SelectedAction,
-                ["constraint"] = answer.RationaleLines.FirstOrDefault() ?? "",
                 ["triggerRisk"] = triggerDecision.Risk
             }
         });
 
         return new GuardrailsPipelineResult
         {
-            AnswerText = answer.AnswerText,
-            RationaleLines = answer.RationaleLines,
+            AnswerText = finalLlm.Content,
+            RationaleLines = [
+                $"Goal: {goal.PrimaryGoal}",
+                $"Constraint: {string.Join("; ", constraints.Constraints)}"
+            ],
             TriggerRisk = triggerDecision.Risk,
             TriggerWhy = triggerDecision.Why,
             TriggerSource = triggerDecision.Source,
@@ -231,745 +189,7 @@ public sealed class ReasoningGuardrailsPipeline
     }
 
     public GuardrailsPipelineResult? TryRunDeterministicSpecialCase(string userMessage)
-    {
-        if (!TryRunDeterministicSpecialCaseCore(userMessage, out var specialCase))
-            return null;
-
-        WriteSpecialCaseAudit(specialCase);
-        return specialCase;
-    }
-
-    private static bool TryRunDeterministicSpecialCaseCore(
-        string userMessage,
-        out GuardrailsPipelineResult specialCase)
-    {
-        return TryResolveAlreadyCompletedTaskQuestion(userMessage, out specialCase) ||
-               TryResolveUnitComparisonQuestion(userMessage, out specialCase) ||
-               TryResolveMeetingOverlapQuestion(userMessage, out specialCase) ||
-               TryResolveFamilyPhotoRelationPuzzle(userMessage, out specialCase) ||
-               TryResolveAmbiguousReferentQuestion(userMessage, out specialCase);
-    }
-
-    private static bool TryResolveAlreadyCompletedTaskQuestion(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage).Replace('’', '\'');
-        var lower = normalized.ToLowerInvariant();
-
-        var asksDuration =
-            lower.Contains("how long does it take", StringComparison.Ordinal) ||
-            lower.Contains("how long would it take", StringComparison.Ordinal) ||
-            lower.Contains("how long will it take", StringComparison.Ordinal) ||
-            lower.Contains("how much time does it take", StringComparison.Ordinal) ||
-            lower.Contains("how much time would it take", StringComparison.Ordinal);
-        if (!asksDuration)
-            return false;
-
-        var hasCompletionCue =
-            lower.Contains("already built", StringComparison.Ordinal) ||
-            lower.Contains("already done", StringComparison.Ordinal) ||
-            lower.Contains("already completed", StringComparison.Ordinal) ||
-            lower.Contains("already finished", StringComparison.Ordinal) ||
-            lower.Contains("already made", StringComparison.Ordinal);
-        if (!hasCompletionCue)
-            return false;
-
-        var hasTaskCue =
-            lower.Contains("build", StringComparison.Ordinal) ||
-            lower.Contains("built", StringComparison.Ordinal) ||
-            lower.Contains("complete", StringComparison.Ordinal) ||
-            lower.Contains("finished", StringComparison.Ordinal) ||
-            lower.Contains("done", StringComparison.Ordinal);
-        if (!hasTaskCue)
-            return false;
-
-        var subject = lower.Contains("wall", StringComparison.Ordinal)
-            ? "wall"
-            : "task";
-        var answer = $"Zero time. The {subject} is already complete.";
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText = answer,
-            RationaleLines =
-            [
-                "Goal: Determine remaining time to complete the task.",
-                "Constraint: If the task is already complete, remaining work time is zero regardless of workforce rate.",
-                $"Decision: {answer} (alternative considered: scaling worker-hours; rejected because no work remains to do)."
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected completed-task duration trick question.",
-            TriggerSource = "already_completed_task_solver",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
-    private static bool TryResolveUnitComparisonQuestion(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage);
-        var match = WeightComparisonRegex.Match(normalized);
-        if (!match.Success)
-            return false;
-
-        var leftText = match.Groups["left"].Value.Trim();
-        var rightText = match.Groups["right"].Value.Trim();
-        if (!TryParseMassMeasurement(leftText, out var leftMass) ||
-            !TryParseMassMeasurement(rightText, out var rightMass))
-        {
-            return false;
-        }
-
-        var comparator = (match.Groups["cmp"].Value ?? "").Trim().ToLowerInvariant();
-        var isLessQuestion = comparator is "less" or "lighter";
-        var delta = leftMass.Grams - rightMass.Grams;
-        var epsilon = Math.Max(0.0001, Math.Max(leftMass.Grams, rightMass.Grams) * 1e-9);
-        var isEqual = Math.Abs(delta) <= epsilon;
-
-        var leftComparable = TrimTrailingPunctuation(leftText);
-        var rightComparable = TrimTrailingPunctuation(rightText);
-
-        string answerText;
-        string decisionText;
-        if (isEqual)
-        {
-            answerText = "Neither. They weigh the same.";
-            decisionText = "Decision: They are equal after unit normalization.";
-        }
-        else
-        {
-            var leftWins = isLessQuestion ? delta < 0 : delta > 0;
-            var selected = leftWins ? leftComparable : rightComparable;
-            var relationWord = isLessQuestion ? "less" : "more";
-            answerText = $"{selected} weighs {relationWord}.";
-            var alternative = leftWins ? rightComparable : leftComparable;
-            decisionText = $"Decision: {selected} (alternative considered: {alternative}; selected after comparing normalized mass values).";
-        }
-
-        var comparisonDetail =
-            $"{leftComparable} = {FormatGrams(leftMass.Grams)}; {rightComparable} = {FormatGrams(rightMass.Grams)}";
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText = answerText,
-            RationaleLines =
-            [
-                "Goal: Compare both quantities fairly using the same mass unit.",
-                $"Constraint: Convert both sides into grams before deciding. {comparisonDetail}",
-                decisionText
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected deterministic weight-comparison question with convertible units.",
-            TriggerSource = "mass_unit_comparison_solver",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
-    private static bool TryResolveMeetingOverlapQuestion(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage);
-        var lower = normalized.ToLowerInvariant();
-        var asksCanAttendBoth =
-            lower.Contains("attend both", StringComparison.Ordinal) ||
-            lower.Contains("both in full", StringComparison.Ordinal) ||
-            lower.Contains("attend both meetings", StringComparison.Ordinal);
-
-        if (!asksCanAttendBoth || !lower.Contains("meeting", StringComparison.Ordinal))
-            return false;
-
-        var matches = TimeRangeRegex.Matches(normalized);
-        if (matches.Count < 2)
-            return false;
-
-        if (!TryParseClockTime(matches[0].Groups["start"].Value, out var start1) ||
-            !TryParseClockTime(matches[0].Groups["end"].Value, out var end1) ||
-            !TryParseClockTime(matches[1].Groups["start"].Value, out var start2) ||
-            !TryParseClockTime(matches[1].Groups["end"].Value, out var end2))
-        {
-            return false;
-        }
-
-        if (end1 <= start1 || end2 <= start2)
-            return false;
-
-        var overlapStart = Math.Max(start1, start2);
-        var overlapEnd = Math.Min(end1, end2);
-        var hasOverlap = overlapStart < overlapEnd;
-
-        if (hasOverlap)
-        {
-            var overlapWindow = $"{FormatClockMinutes(overlapStart)} to {FormatClockMinutes(overlapEnd)}";
-            result = new GuardrailsPipelineResult
-            {
-                AnswerText = $"No, you cannot attend both in full. The meetings overlap from {overlapWindow}.",
-                RationaleLines =
-                [
-                    "Goal: Determine whether both meetings can be attended in full.",
-                    "Constraint: To attend both fully, the meeting windows must not overlap.",
-                    $"Decision: Cannot attend both in full; overlap is {overlapWindow}."
-                ],
-                TriggerRisk = "medium",
-                TriggerWhy = "Detected deterministic meeting-overlap question.",
-                TriggerSource = "meeting_overlap_solver",
-                LlmRoundTrips = 0
-            };
-            return true;
-        }
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText = "Yes, you can attend both in full. The meeting windows do not overlap.",
-            RationaleLines =
-            [
-                "Goal: Determine whether both meetings can be attended in full.",
-                "Constraint: To attend both fully, the meeting windows must not overlap.",
-                "Decision: Can attend both in full; there is no overlap."
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected deterministic meeting-overlap question.",
-            TriggerSource = "meeting_overlap_solver",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
-    private static bool TryResolveFamilyPhotoRelationPuzzle(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage).Replace('’', '\'');
-        var lower = normalized.ToLowerInvariant();
-
-        if (!LooksLikePhotoIdentityQuestion(lower))
-            return false;
-
-        var relationMatch = FamilyPhotoRelationRegex.Match(lower);
-        if (!relationMatch.Success)
-            return false;
-
-        var hasOnlyChildAnchor = HasOnlyChildAnchor(lower) || relationMatch.Groups["rhsOnly"].Success;
-        if (!hasOnlyChildAnchor)
-            return false;
-
-        var lhsRelation = relationMatch.Groups["lhsRel"].Value.ToLowerInvariant();
-        var rhsParent = relationMatch.Groups["rhsParent"].Value.ToLowerInvariant();
-        var rhsChild = relationMatch.Groups["rhsChild"].Value.ToLowerInvariant();
-        var photoGender = NormalizeGenderToken(relationMatch.Groups["photoGender"].Value);
-        var inferredSpeakerGender = rhsChild == "son" ? "male" : "female";
-        var explicitSpeakerGender = DetectSpeakerGender(lower);
-        var speakerGender = explicitSpeakerGender ?? inferredSpeakerGender;
-
-        if (explicitSpeakerGender is not null &&
-            !string.Equals(explicitSpeakerGender, inferredSpeakerGender, StringComparison.Ordinal))
-        {
-            result = new GuardrailsPipelineResult
-            {
-                AnswerText = "The clues conflict, so the relationship cannot be resolved without clarification.",
-                RationaleLines =
-                [
-                    "Goal: Identify who is in the photograph from the relationship statement.",
-                    $"Constraint: The only-child clue conflicts with 'my {rhsParent}'s {rhsChild}' for the stated speaker gender.",
-                    "Decision: Mark as inconsistent and ask for clarification instead of guessing."
-                ],
-                TriggerRisk = "medium",
-                TriggerWhy = "Detected family-relation puzzle with internally conflicting clues.",
-                TriggerSource = "family_photo_relation_conflict",
-                LlmRoundTrips = 0
-            };
-            return true;
-        }
-
-        var kinship = ResolveKinship(lhsRelation, photoGender);
-        if (kinship is null)
-            return false;
-
-        var speakerPossessive = speakerGender switch
-        {
-            "female" => "her",
-            "male" => "his",
-            _ => "their"
-        };
-        var answer = $"The person in the photograph is {speakerPossessive} {kinship}.";
-        var rejectedAlternative = kinship is "father" or "mother" or "parent"
-            ? $"{speakerPossessive} child"
-            : $"{speakerPossessive} parent";
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText = answer,
-            RationaleLines =
-            [
-                "Goal: Identify who is in the photograph from the relationship statement.",
-                $"Constraint: With an only-child anchor, 'my {rhsParent}'s {rhsChild}' resolves to the speaker, so the photographed person's {lhsRelation} is the speaker.",
-                $"Decision: {answer} (alternative considered: {rejectedAlternative}; rejected because it violates the stated relation)."
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected deterministic family-relation photo puzzle.",
-            TriggerSource = "family_photo_relation_solver",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
-    private static bool LooksLikePhotoIdentityQuestion(string lower)
-    {
-        if (string.IsNullOrWhiteSpace(lower))
-            return false;
-
-        var hasPhotoNoun =
-            lower.Contains("photograph", StringComparison.Ordinal) ||
-            lower.Contains("photo", StringComparison.Ordinal) ||
-            lower.Contains("picture", StringComparison.Ordinal);
-        if (!hasPhotoNoun)
-            return false;
-
-        return lower.Contains("who is in", StringComparison.Ordinal) ||
-               lower.Contains("who's in", StringComparison.Ordinal) ||
-               lower.Contains("whos in", StringComparison.Ordinal);
-    }
-
-    private static bool HasOnlyChildAnchor(string lower)
-    {
-        if (string.IsNullOrWhiteSpace(lower))
-            return false;
-
-        return lower.Contains("brothers and sisters, i have none", StringComparison.Ordinal) ||
-               lower.Contains("brothers and sisters i have none", StringComparison.Ordinal) ||
-               lower.Contains("i have no siblings", StringComparison.Ordinal) ||
-               lower.Contains("i don't have siblings", StringComparison.Ordinal) ||
-               lower.Contains("i do not have siblings", StringComparison.Ordinal) ||
-               lower.Contains("i have no brother or sister", StringComparison.Ordinal) ||
-               lower.Contains("i am an only child", StringComparison.Ordinal) ||
-               lower.Contains("i'm an only child", StringComparison.Ordinal);
-    }
-
-    private static string? DetectSpeakerGender(string lower)
-    {
-        if (string.IsNullOrWhiteSpace(lower))
-            return null;
-
-        var match = SpeakerGenderRegex.Match(lower);
-        if (!match.Success)
-            return null;
-
-        return NormalizeGenderToken(match.Groups["gender"].Value);
-    }
-
-    private static string? NormalizeGenderToken(string token)
-    {
-        var normalized = (token ?? "").Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "man" or "boy" => "male",
-            "woman" or "girl" => "female",
-            _ => null
-        };
-    }
-
-    private static string? ResolveKinship(string lhsRelation, string? photoGender)
-    {
-        var lower = (lhsRelation ?? "").Trim().ToLowerInvariant();
-        var isPhotoChildOfSpeaker = lower is "father" or "mother";
-        var isPhotoParentOfSpeaker = lower is "son" or "daughter";
-        if (!isPhotoChildOfSpeaker && !isPhotoParentOfSpeaker)
-            return null;
-
-        if (isPhotoChildOfSpeaker)
-        {
-            return photoGender switch
-            {
-                "male" => "son",
-                "female" => "daughter",
-                _ => "child"
-            };
-        }
-
-        return photoGender switch
-        {
-            "male" => "father",
-            "female" => "mother",
-            _ => "parent"
-        };
-    }
-
-    private static bool TryResolveAmbiguousReferentQuestion(
-        string userMessage,
-        out GuardrailsPipelineResult result)
-    {
-        result = null!;
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var normalized = CollapseWhitespace(userMessage);
-        var lower = normalized.ToLowerInvariant();
-        var becauseIndex = lower.IndexOf(" because ", StringComparison.Ordinal);
-        if (becauseIndex <= 0 || !lower.Contains(" who ", StringComparison.Ordinal))
-            return false;
-
-        var preBecause = normalized[..becauseIndex];
-        var names = ExtractProperNames(preBecause);
-        if (names.Count < 2)
-            return false;
-
-        var candidateA = names[0];
-        var candidateB = names[1];
-        var afterBecause = normalized[(becauseIndex + " because ".Length)..];
-        var becauseClause = ExtractClauseUntilSentenceBreak(afterBecause);
-        var lowerClause = becauseClause.ToLowerInvariant();
-        var lowerA = candidateA.ToLowerInvariant();
-        var lowerB = candidateB.ToLowerInvariant();
-
-        if (StartsWithWord(lowerClause, lowerA) || StartsWithWord(lowerClause, lowerB))
-        {
-            var resolved = StartsWithWord(lowerClause, lowerA) ? candidateA : candidateB;
-            var alternate = string.Equals(resolved, candidateA, StringComparison.OrdinalIgnoreCase)
-                ? candidateB
-                : candidateA;
-
-            result = new GuardrailsPipelineResult
-            {
-                AnswerText = $"{resolved}.",
-                RationaleLines =
-                [
-                    "Goal: Resolve who the referent points to in the sentence.",
-                    $"Constraint: The causal clause explicitly repeats '{resolved}', so the referent is disambiguated.",
-                    $"Decision: {resolved}. (alternative considered: {alternate}; rejected because it is not the explicit referent)"
-                ],
-                TriggerRisk = "medium",
-                TriggerWhy = "Detected explicit name-based referent disambiguation.",
-                TriggerSource = "referent_explicit_name",
-                LlmRoundTrips = 0
-            };
-            return true;
-        }
-
-        var startsWithAmbiguousPronoun =
-            StartsWithWord(lowerClause, "he") ||
-            StartsWithWord(lowerClause, "she") ||
-            StartsWithWord(lowerClause, "they");
-
-        if (!startsWithAmbiguousPronoun)
-            return false;
-
-        result = new GuardrailsPipelineResult
-        {
-            AnswerText =
-                $"It cannot be determined from the sentence alone; the pronoun could refer to {candidateA} or {candidateB}. " +
-                $"Who did you mean: {candidateA} or {candidateB}?",
-            RationaleLines =
-            [
-                "Goal: Resolve an underspecified pronoun referent.",
-                $"Constraint: Two candidate names are present ({candidateA}, {candidateB}) and the pronoun does not uniquely identify one.",
-                $"Decision: Mark as ambiguous and request clarification ({candidateA} or {candidateB})."
-            ],
-            TriggerRisk = "medium",
-            TriggerWhy = "Detected ambiguous pronoun with multiple valid named referents.",
-            TriggerSource = "referent_ambiguity",
-            LlmRoundTrips = 0
-        };
-        return true;
-    }
-
-    private static bool TryParseMassMeasurement(string text, out (double Grams, string Unit, double Quantity) measurement)
-    {
-        measurement = default;
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        var match = MassQuantityRegex.Match(text);
-        if (!match.Success)
-            return false;
-
-        var numberText = match.Groups["num"].Value.Trim();
-        var unitText = match.Groups["unit"].Value.Trim().ToLowerInvariant();
-        if (!TryParseFlexibleNumber(numberText, out var quantity))
-            return false;
-        if (quantity < 0)
-            return false;
-
-        double grams;
-        string canonicalUnit;
-        switch (unitText)
-        {
-            case "pound":
-            case "pounds":
-            case "lb":
-            case "lbs":
-                grams = quantity * 453.59237;
-                canonicalUnit = "pounds";
-                break;
-            case "ounce":
-            case "ounces":
-            case "oz":
-                grams = quantity * 28.349523125;
-                canonicalUnit = "ounces";
-                break;
-            case "kilogram":
-            case "kilograms":
-            case "kg":
-            case "kgs":
-                grams = quantity * 1000.0;
-                canonicalUnit = "kilograms";
-                break;
-            case "gram":
-            case "grams":
-            case "g":
-                grams = quantity;
-                canonicalUnit = "grams";
-                break;
-            default:
-                return false;
-        }
-
-        measurement = (grams, canonicalUnit, quantity);
-        return true;
-    }
-
-    private static bool TryParseFlexibleNumber(string raw, out double value)
-    {
-        value = 0;
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-
-        var cleaned = raw.Trim().ToLowerInvariant().Replace(",", "", StringComparison.Ordinal);
-        if (double.TryParse(cleaned, NumberStyles.Float, CultureInfo.InvariantCulture, out var numeric))
-        {
-            value = numeric;
-            return true;
-        }
-
-        var tokens = cleaned
-            .Replace('-', ' ')
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length == 0)
-            return false;
-
-        var total = 0;
-        var current = 0;
-        var sawNumberToken = false;
-        foreach (var token in tokens)
-        {
-            if (string.Equals(token, "and", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (NumberWords.TryGetValue(token, out var numberWord))
-            {
-                current += numberWord;
-                sawNumberToken = true;
-                continue;
-            }
-
-            if (string.Equals(token, "hundred", StringComparison.OrdinalIgnoreCase))
-            {
-                current = current == 0 ? 100 : current * 100;
-                sawNumberToken = true;
-                continue;
-            }
-
-            if (string.Equals(token, "thousand", StringComparison.OrdinalIgnoreCase))
-            {
-                current = current == 0 ? 1 : current;
-                total += current * 1000;
-                current = 0;
-                sawNumberToken = true;
-                continue;
-            }
-
-            return false;
-        }
-
-        if (!sawNumberToken)
-            return false;
-
-        value = total + current;
-        return true;
-    }
-
-    private void WriteSpecialCaseAudit(GuardrailsPipelineResult specialCase)
-    {
-        _audit.Append(new AuditEvent
-        {
-            Actor = "agent",
-            Action = "GUARDRAILS_TRIGGERED",
-            Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["risk"] = string.IsNullOrWhiteSpace(specialCase.TriggerRisk) ? "medium" : specialCase.TriggerRisk,
-                ["source"] = specialCase.TriggerSource,
-                ["why"] = specialCase.TriggerWhy
-            }
-        });
-
-        _audit.Append(new AuditEvent
-        {
-            Actor = "agent",
-            Action = "GUARDRAILS_DECISION",
-            Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["goal"] = specialCase.RationaleLines.FirstOrDefault() ?? "",
-                ["selectedAction"] = specialCase.AnswerText,
-                ["constraint"] = specialCase.RationaleLines.Skip(1).FirstOrDefault() ?? "",
-                ["triggerRisk"] = string.IsNullOrWhiteSpace(specialCase.TriggerRisk) ? "medium" : specialCase.TriggerRisk
-            }
-        });
-    }
-
-    private static string CollapseWhitespace(string raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return "";
-
-        var chunks = raw
-            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        return string.Join(' ', chunks).Trim();
-    }
-
-    private static string TrimTrailingPunctuation(string raw)
-        => (raw ?? "").Trim().TrimEnd('.', '?', '!', ';', ':', ',');
-
-    private static string FormatGrams(double grams)
-        => $"{grams:0.###} g";
-
-    private static List<string> ExtractProperNames(string text)
-    {
-        var names = new List<string>();
-        foreach (Match match in ProperNameRegex.Matches(text ?? ""))
-        {
-            var candidate = match.Value.Trim();
-            if (candidate.Length == 0 || NonNameTokens.Contains(candidate))
-                continue;
-
-            candidate = NormalizeName(candidate);
-            if (!names.Contains(candidate, StringComparer.OrdinalIgnoreCase))
-                names.Add(candidate);
-
-            if (names.Count >= 2)
-                break;
-        }
-
-        return names;
-    }
-
-    private static string ExtractClauseUntilSentenceBreak(string text)
-    {
-        var candidate = (text ?? "").Trim();
-        if (candidate.Length == 0)
-            return candidate;
-
-        var breakIndex = candidate.IndexOfAny(['.', '?', '!']);
-        if (breakIndex >= 0)
-            candidate = candidate[..breakIndex];
-        return candidate.Trim();
-    }
-
-    private static bool TryParseClockTime(string raw, out int minutes)
-    {
-        minutes = 0;
-        var text = (raw ?? "").Trim().ToLowerInvariant();
-        if (text.Length == 0)
-            return false;
-
-        var isAm = false;
-        var isPm = false;
-        if (text.EndsWith("am", StringComparison.Ordinal))
-        {
-            isAm = true;
-            text = text[..^2].Trim();
-        }
-        else if (text.EndsWith("pm", StringComparison.Ordinal))
-        {
-            isPm = true;
-            text = text[..^2].Trim();
-        }
-
-        if (text.Length == 0)
-            return false;
-
-        var parts = text.Split(':', StringSplitOptions.TrimEntries);
-        if (!int.TryParse(parts[0], out var hour))
-            return false;
-
-        var minute = 0;
-        if (parts.Length > 1 && !int.TryParse(parts[1], out minute))
-            return false;
-        if (minute < 0 || minute > 59)
-            return false;
-
-        if (isAm || isPm)
-        {
-            if (hour < 1 || hour > 12)
-                return false;
-
-            hour %= 12;
-            if (isPm)
-                hour += 12;
-        }
-        else if (hour < 0 || hour > 23)
-        {
-            return false;
-        }
-
-        minutes = (hour * 60) + minute;
-        return true;
-    }
-
-    private static string FormatClockMinutes(int minutes)
-    {
-        var bounded = ((minutes % 1440) + 1440) % 1440;
-        var hour24 = bounded / 60;
-        var minute = bounded % 60;
-        var hour12 = hour24 % 12;
-        if (hour12 == 0)
-            hour12 = 12;
-        return $"{hour12}:{minute:00}";
-    }
-
-    private static bool StartsWithWord(string textLower, string prefixLower)
-    {
-        if (!textLower.StartsWith(prefixLower, StringComparison.Ordinal))
-            return false;
-
-        if (textLower.Length == prefixLower.Length)
-            return true;
-
-        var next = textLower[prefixLower.Length];
-        return !char.IsLetterOrDigit(next) && next != '\'';
-    }
-
-    private static string NormalizeName(string raw)
-    {
-        var trimmed = (raw ?? "").Trim().Trim('.', ',', '!', '?', '"', '\'');
-        if (trimmed.Length == 0)
-            return trimmed;
-
-        if (trimmed.Length == 1)
-            return trimmed.ToUpperInvariant();
-
-        return char.ToUpperInvariant(trimmed[0]) + trimmed[1..].ToLowerInvariant();
-    }
+        => null;
 
     private void WriteFallback(string reason)
     {
@@ -1024,7 +244,6 @@ internal sealed record GuardrailsTriggerDecision(
     string Why,
     string Source,
     int LlmRoundTrips);
-
 internal sealed class GuardrailsDetector
 {
     private readonly ILlmClient _llm;
@@ -2417,3 +1636,4 @@ internal static class AnswerComposer
         return trimmed;
     }
 }
+

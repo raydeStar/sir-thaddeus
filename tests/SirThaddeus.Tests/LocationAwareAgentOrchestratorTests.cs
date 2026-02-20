@@ -126,7 +126,7 @@ public sealed class LocationAwareAgentOrchestratorTests
     }
 
     [Fact]
-    public async Task FirstTurnWithoutLocation_QueuesPopup_AndAsksVettingQuestion()
+    public async Task FirstNearMeWithoutLocation_QueuesPopup_AndAsksLocationQuestion()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 2, 16, 12, 0, 0, TimeSpan.Zero));
         var inner = new FakeAgentOrchestrator();
@@ -142,7 +142,7 @@ public sealed class LocationAwareAgentOrchestratorTests
             saved => settings = saved,
             onPromptQueued: () => promptCalls++);
 
-        var response = await orchestrator.ProcessAsync("hello there");
+        var response = await orchestrator.ProcessAsync("hello there, any good restaurants near me?");
 
         Assert.Contains("Where are you located?", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, promptCalls);
@@ -175,13 +175,17 @@ public sealed class LocationAwareAgentOrchestratorTests
         var skip = await orchestrator.ProcessAsync("skip");
 
         Assert.Equal(0, saveCalls);
-        Assert.Contains("Where are you located?", skip.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("No problem. I can still help.", skip.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(inner.ProcessedMessages);
         Assert.Null(settings.GetEffectiveUserLocation(activeProfileId).GetResolvedLabel());
+
+        var retry = await orchestrator.ProcessAsync("can you find a restaurant near me?");
+        Assert.Contains("Where are you located?", retry.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(inner.ProcessedMessages);
     }
 
     [Fact]
-    public async Task SwitchingProfiles_AsksVettingAgainForEachProfile()
+    public async Task SwitchingProfiles_AsksNearMePromptForEachProfile()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 2, 16, 12, 0, 0, TimeSpan.Zero));
         var inner = new FakeAgentOrchestrator();
@@ -197,11 +201,11 @@ public sealed class LocationAwareAgentOrchestratorTests
             saved => settings = saved,
             onPromptQueued: () => promptCalls++);
 
-        var first = await orchestrator.ProcessAsync("hello");
+        var first = await orchestrator.ProcessAsync("hello, find coffee near me");
         Assert.Contains("Where are you located?", first.Text, StringComparison.OrdinalIgnoreCase);
 
         activeProfileId = "user-b";
-        var second = await orchestrator.ProcessAsync("hello again");
+        var second = await orchestrator.ProcessAsync("hello again, find lunch near me");
         Assert.Contains("Where are you located?", second.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(2, promptCalls);
     }

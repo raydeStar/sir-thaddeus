@@ -106,7 +106,8 @@ public sealed class ChatMessageViewModel : ViewModelBase
 
     public DateTime Timestamp { get; init; } = DateTime.Now;
 
-    public string TimeDisplay => Timestamp.ToString("HH:mm");
+    public bool Use24HourTime { get; set; }
+    public string TimeDisplay => Use24HourTime ? Timestamp.ToString("HH:mm") : Timestamp.ToString("h:mm tt");
 
     // ── Source Cards (populated for web search results) ───────────────
 
