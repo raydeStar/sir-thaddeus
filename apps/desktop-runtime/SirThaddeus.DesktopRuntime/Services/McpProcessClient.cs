@@ -20,7 +20,7 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
 {
     private readonly string _serverPath;
     private readonly IAuditLogger _audit;
-    private readonly IReadOnlyDictionary<string, string>? _envVars;
+    private readonly Dictionary<string, string> _envVars;
     private readonly McpHandshakeOptions _handshakeOptions;
 
     private Process? _serverProcess;
@@ -51,7 +51,9 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
     {
         _serverPath = serverPath ?? throw new ArgumentNullException(nameof(serverPath));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
-        _envVars = environmentVariables;
+        _envVars = environmentVariables is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(environmentVariables, StringComparer.OrdinalIgnoreCase);
         _handshakeOptions = handshakeOptions ?? new McpHandshakeOptions();
     }
 
@@ -74,7 +76,7 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
         };
 
         // Inject environment variables (memory DB path, LLM base URL, etc.)
-        if (_envVars is not null)
+        if (_envVars.Count > 0)
         {
             foreach (var (key, value) in _envVars)
                 startInfo.Environment[key] = value;
@@ -131,6 +133,44 @@ public sealed class McpProcessClient : IMcpToolClient, IDisposable
             TerminateServerProcess();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Replaces the environment variable snapshot used on the next MCP
+    /// process start/restart.
+    /// </summary>
+    public void UpdateEnvironmentVariables(IReadOnlyDictionary<string, string>? environmentVariables)
+    {
+        _envVars.Clear();
+        if (environmentVariables is null)
+            return;
+
+        foreach (var (key, value) in environmentVariables)
+            _envVars[key] = value;
+    }
+
+    /// <summary>
+    /// Restarts the MCP child process and re-runs handshake/initialization.
+    /// </summary>
+    public async Task RestartAsync(CancellationToken ct = default)
+    {
+        await _rpcLock.WaitAsync(ct);
+        try
+        {
+            TerminateServerProcess();
+            _stdin?.Dispose();
+            _stdout?.Dispose();
+            _serverProcess?.Dispose();
+            _stdin = null;
+            _stdout = null;
+            _serverProcess = null;
+        }
+        finally
+        {
+            _rpcLock.Release();
+        }
+
+        await StartAsync(ct);
     }
 
     /// <inheritdoc />

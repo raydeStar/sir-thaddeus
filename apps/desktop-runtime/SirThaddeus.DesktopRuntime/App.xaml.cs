@@ -85,6 +85,7 @@ public partial class App : System.Windows.Application
     private bool _isHeadless;
     private readonly object _liveAsrPreviewGate = new();
     private readonly SemaphoreSlim _voiceMicUpGate = new(1, 1);
+    private readonly SemaphoreSlim _mcpRefreshGate = new(1, 1);
     private CancellationTokenSource? _liveAsrPreviewCts;
     private Task? _liveAsrPreviewTask;
     private readonly object _liveAsrTranscriptGate = new();
@@ -158,15 +159,51 @@ public partial class App : System.Windows.Application
         LogStartup();
         InitializeLocationServices();
 
-        // ── 3. Create LLM client (Layer 3) ──────────────────────────
-        var llmOptions = new LlmClientOptions
+        // Ensure first-run profile context is available before the first
+        // memory retrieval call (chat can start before Settings is opened).
+        if (_settings.Memory.Enabled)
         {
-            BaseUrl = _settings.Llm.BaseUrl,
-            Model = _settings.Llm.Model,
-            MaxTokens = _settings.Llm.MaxTokens,
-            ContextWindowTokens = _settings.Llm.ContextWindowTokens,
-            Temperature = _settings.Llm.Temperature
-        };
+            try
+            {
+                var bootstrap = await ActiveProfileBootstrapper.EnsureInitializedAsync(
+                    _settings,
+                    ResolveMemoryDbPath(_settings));
+                _settings = bootstrap.Settings;
+
+                if (bootstrap.CreatedDefaults || bootstrap.AssignedActiveProfile)
+                {
+                    SettingsManager.Save(_settings);
+                    _auditLogger.Append(new AuditEvent
+                    {
+                        Actor = "runtime",
+                        Action = "ACTIVE_PROFILE_BOOTSTRAP",
+                        Result = "ok",
+                        Details = new Dictionary<string, object>
+                        {
+                            ["createdDefaults"] = bootstrap.CreatedDefaults,
+                            ["assignedActiveProfile"] = bootstrap.AssignedActiveProfile,
+                            ["activeProfileId"] = _settings.ActiveProfileId ?? ""
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "ACTIVE_PROFILE_BOOTSTRAP_FAILED",
+                    Result = "error",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["error"] = ex.Message
+                    }
+                });
+            }
+        }
+
+        // ── 3. Create LLM client (Layer 3) ──────────────────────────
+        var llmOptions = BuildLlmClientOptions(_settings);
         _llmClient = new LmStudioClient(llmOptions);
 
         _auditLogger.Append(new AuditEvent
@@ -1912,10 +1949,14 @@ public partial class App : System.Windows.Application
 
         settingsVm.SettingsChanged += updated =>
         {
+            var previous = _settings;
             _settings = updated;
             _runtimeControls = RuntimeControlState.FromSettings(updated);
             _runtimeSafeModeReason = updated.RuntimeSafety.SafeModeReason;
             _permissionGate?.UpdateSettings(updated);
+
+            // Reconfigure LLM transport/model live so save applies immediately.
+            _llmClient?.UpdateOptions(BuildLlmClientOptions(updated));
 
             if (_orchestrator is not null)
             {
@@ -1952,8 +1993,18 @@ public partial class App : System.Windows.Application
             if (_audioPlaybackService is not null)
                 _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
 
+            _voiceOrchestrator?.UpdateTimeouts(
+                TimeSpan.FromMilliseconds(Math.Max(5_000, updated.Voice.AsrTimeoutMs)),
+                TimeSpan.FromMilliseconds(Math.Max(10_000, updated.Voice.AgentTimeoutMs)),
+                TimeSpan.FromMilliseconds(Math.Max(10_000, updated.Voice.SpeakingTimeoutMs)));
+
+            Environment.SetEnvironmentVariable("ST_ACTIVE_PROFILE_ID", updated.ActiveProfileId ?? "");
+            Environment.SetEnvironmentVariable("ST_ACTIVE_PERSONALITY_ID", updated.ActivePersonalityId ?? "");
+
             RebindPushToTalkInput(updated.Audio);
             _overlayViewModel?.RefreshPersonality();
+
+            _ = RefreshMcpRuntimeFromSettingsAsync(previous, updated);
         };
 
         window.SetSettingsViewModel(settingsVm);
@@ -2098,6 +2149,18 @@ public partial class App : System.Windows.Application
         return Path.GetFullPath(Path.Combine(mcpBinDebug, "net8.0-windows10.0.19041.0", exeName));
     }
 
+    private static LlmClientOptions BuildLlmClientOptions(AppSettings settings)
+    {
+        return new LlmClientOptions
+        {
+            BaseUrl = settings.Llm.BaseUrl,
+            Model = settings.Llm.Model,
+            MaxTokens = settings.Llm.MaxTokens,
+            ContextWindowTokens = settings.Llm.ContextWindowTokens,
+            Temperature = settings.Llm.Temperature
+        };
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Memory / MCP Environment Variables
     // ─────────────────────────────────────────────────────────────────────
@@ -2178,6 +2241,73 @@ public partial class App : System.Windows.Application
             : settings.DeepDive.DefaultLocale.Trim();
 
         return env;
+    }
+
+    private async Task RefreshMcpRuntimeFromSettingsAsync(AppSettings? previous, AppSettings current)
+    {
+        if (_mcpClient is null)
+            return;
+
+        if (!McpEnvironmentChanged(previous, current))
+            return;
+
+        await _mcpRefreshGate.WaitAsync();
+        try
+        {
+            _mcpClient.UpdateEnvironmentVariables(BuildMcpEnvironmentVariables(current));
+            await _mcpClient.RestartAsync();
+
+            _auditLogger?.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "MCP_RUNTIME_REFRESHED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["reason"] = "settings_saved"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _auditLogger?.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "MCP_RUNTIME_REFRESH_FAILED",
+                Result = "error",
+                Details = new Dictionary<string, object>
+                {
+                    ["reason"] = "settings_saved",
+                    ["error"] = ex.Message
+                }
+            });
+        }
+        finally
+        {
+            _mcpRefreshGate.Release();
+        }
+    }
+
+    private static bool McpEnvironmentChanged(AppSettings? previous, AppSettings current)
+    {
+        if (previous is null)
+            return true;
+
+        var before = BuildMcpEnvironmentVariables(previous);
+        var after = BuildMcpEnvironmentVariables(current);
+
+        if (before.Count != after.Count)
+            return true;
+
+        foreach (var (key, value) in before)
+        {
+            if (!after.TryGetValue(key, out var nextValue))
+                return true;
+            if (!string.Equals(value, nextValue, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────────

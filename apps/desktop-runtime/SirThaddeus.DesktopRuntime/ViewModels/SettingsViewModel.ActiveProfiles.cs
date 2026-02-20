@@ -2,14 +2,15 @@ using System.Text.Json;
 using System.Windows.Input;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
+using SirThaddeus.DesktopRuntime.Services;
 using SirThaddeus.Memory;
 
 namespace SirThaddeus.DesktopRuntime.ViewModels;
 
 public sealed partial class SettingsViewModel
 {
-    private const string DefaultJohnProfileId = "user-john-doe";
-    private const string DefaultJaneProfileId = "user-jane-doe";
+    private const string DefaultJohnProfileId = ActiveProfileBootstrapper.DefaultJohnProfileId;
+    private const string DefaultJaneProfileId = ActiveProfileBootstrapper.DefaultJaneProfileId;
 
     private static readonly JsonSerializerOptions ProfileJsonOptions = new()
     {
