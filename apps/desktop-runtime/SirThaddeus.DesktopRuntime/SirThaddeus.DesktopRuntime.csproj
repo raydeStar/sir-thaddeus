@@ -48,10 +48,12 @@
     <Content Include="..\..\..\assets\icons\sir-thaddeus.ico">
       <Link>assets\icons\sir-thaddeus.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\..\assets\icons\sir-thaddeus-tray.ico">
       <Link>assets\icons\sir-thaddeus-tray.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
 
