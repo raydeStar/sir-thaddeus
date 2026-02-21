@@ -43,17 +43,22 @@ if ($DebugMode) {
     
     # Launch Python Backend
     $BackendScript = Join-Path $RepoRoot "dev/start-voice-backend.ps1"
-    Start-Process powershell -ArgumentList "-NoExit", "-File", "`"$BackendScript`"" -WindowStyle Normal
+    $backendProcess = Start-Process powershell -ArgumentList "-NoExit", "-File", "`"$BackendScript`"" -WindowStyle Normal -PassThru
 
     # Launch VoiceHost
     $VoiceHostCsproj = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "dotnet run --project `"$VoiceHostCsproj`"" -WindowStyle Normal
+    $voiceHostProcess = Start-Process powershell -ArgumentList "-NoExit", "-Command", "dotnet run --project `"$VoiceHostCsproj`"" -WindowStyle Normal -PassThru
 
     Write-Host "      Waiting for VoiceHost to initialize..." -ForegroundColor DarkGray
     $maxWait = 45
     while ($maxWait -gt 0) {
-        $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction SilentlyContinue
-        if ($null -ne $health -and $health.status -eq 'ok') { break }
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction Stop
+            if ($null -ne $health -and $health.status -eq 'ok') { break }
+        }
+        catch {
+            # Ignore connection refused or timeout errors while waiting for the service to bind
+        }
         Start-Sleep -Seconds 1
         $maxWait--
     }
@@ -70,6 +75,16 @@ else {
 $ProjectPath = Join-Path $RepoRoot "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
 # Remove --debug from args before passing to dotnet run if needed, 
 # though DesktopRuntime usually ignores unknown args.
-& dotnet run --project $ProjectPath -- $args
+try {
+    & dotnet run --project $ProjectPath -- $args
+}
+finally {
+    if ($DebugMode) {
+        Write-Host "`n[DEBUG] Cleaning up background service windows..." -ForegroundColor DarkGray
+        if ($null -ne $voiceHostProcess) { Stop-Process -Id $voiceHostProcess.Id -Force -ErrorAction SilentlyContinue }
+        if ($null -ne $backendProcess) { Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue }
+    }
+}
 
 exit $LASTEXITCODE
+
