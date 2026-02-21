@@ -134,7 +134,7 @@ public partial class MainWindow : Window
     private void LogsTab_Click(object sender, RoutedEventArgs e)     => ActivateTab("Logs");
     private void SettingsTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Settings");
 
-    private void ActivateTab(string tab)
+    public void ActivateTab(string tab)
     {
         ChatTabButton.IsChecked     = tab == "Chat";
         BriefingTabButton.IsChecked = tab == "Briefing";

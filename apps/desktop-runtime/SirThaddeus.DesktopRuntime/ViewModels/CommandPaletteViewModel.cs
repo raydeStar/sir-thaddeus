@@ -683,7 +683,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _processingCts?.Cancel();
     }
 
-    private void ClearConversation()
+    public void ClearConversation()
     {
         // Save current session to history if it has substantive content.
         SnapshotCurrentSession();
