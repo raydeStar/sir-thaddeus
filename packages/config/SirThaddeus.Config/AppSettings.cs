@@ -67,6 +67,13 @@ public sealed partial record AppSettings
     [JsonPropertyName("personalityProfilesDir")]
     public string PersonalityProfilesDir { get; init; } = "";
 
+    /// <summary>
+    /// Set to true after the user completes the first-run onboarding wizard.
+    /// When false, the wizard is shown before the main app loads.
+    /// </summary>
+    [JsonPropertyName("onboardingComplete")]
+    public bool OnboardingComplete { get; init; }
+
     public const string DefaultLocationProfileKey = "__default__";
 
     /// <summary>
@@ -106,6 +113,12 @@ public sealed partial record AppSettings
 /// </summary>
 public sealed record UserProfileSettings
 {
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; init; } = "";
+
+    [JsonPropertyName("aboutMe")]
+    public string AboutMe { get; init; } = "";
+
     [JsonPropertyName("location")]
     public LocationSettings Location { get; init; } = new();
 
@@ -277,7 +290,7 @@ public sealed record VoiceSettings
     public string VoiceHostBaseUrl { get; init; } = "http://127.0.0.1:17845";
 
     [JsonPropertyName("voiceHostStartupTimeoutMs")]
-    public int VoiceHostStartupTimeoutMs { get; init; } = 60_000;
+    public int VoiceHostStartupTimeoutMs { get; init; } = 120_000;
 
     [JsonPropertyName("voiceHostHealthPath")]
     public string VoiceHostHealthPath { get; init; } = "/health";
@@ -355,6 +368,8 @@ public sealed record VoiceSettings
 
     public string GetNormalizedTtsEngine()
     {
+        if (PreferLocalTts) return "kokoro";
+
         var engine = (TtsEngine ?? "").Trim().ToLowerInvariant();
         return engine switch
         {

@@ -34,9 +34,7 @@ public static class BrandIcon
             var icoPath = ResolveOutputPath("sir-thaddeus-tray.ico");
             if (File.Exists(icoPath))
             {
-                // Clone through stream to avoid long-lived file locks.
-                using var fs = File.OpenRead(icoPath);
-                return new Icon(fs, 16, 16);
+                return new Icon(icoPath, 16, 16);
             }
         }
         catch
@@ -83,7 +81,17 @@ public static class BrandIcon
 
     private static string ResolveOutputPath(string fileName)
     {
-        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "";
-        return Path.Combine(asmDir, "assets", "icons", fileName);
+        // AppContext.BaseDirectory works correctly in single-file publish
+        // (Assembly.Location returns empty string in that scenario).
+        var baseDir = AppContext.BaseDirectory;
+        
+        // Try assets/icons/ first (standard layout), then bin/assets/icons/ (ZIP layout)
+        var standard = Path.Combine(baseDir, "assets", "icons", fileName);
+        if (File.Exists(standard)) return standard;
+        
+        var binPath = Path.Combine(baseDir, "bin", "assets", "icons", fileName);
+        if (File.Exists(binPath)) return binPath;
+        
+        return standard; // Return standard path even if missing (callers handle null)
     }
 }

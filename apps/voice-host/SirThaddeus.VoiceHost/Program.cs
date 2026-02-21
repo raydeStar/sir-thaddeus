@@ -276,16 +276,7 @@ app.MapPost("/tts", async (
         SampleRate = payload.SampleRate <= 0 ? 24_000 : payload.SampleRate
     };
 
-    if (string.Equals(normalizedPayload.Engine, "kokoro", StringComparison.OrdinalIgnoreCase) &&
-        string.IsNullOrWhiteSpace(normalizedPayload.VoiceId))
-    {
-        return Results.Json(new
-        {
-            error = "Kokoro requires a non-empty voiceId.",
-            errorCode = "tts_voice_missing",
-            requestId
-        }, statusCode: StatusCodes.Status400BadRequest);
-    }
+    // Removed the VoiceId check for Kokoro to allow default fallback handled in server.py
 
     await ttsBackend.StreamSynthesisAsync(normalizedPayload, httpContext.Response, cancellationToken);
     return Results.Empty;

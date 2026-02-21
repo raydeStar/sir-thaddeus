@@ -275,12 +275,47 @@
                     Panel.ZIndex="10" />
 
             <!-- ── Left: Chat Messages ─────────────────────────────── -->
-            <ScrollViewer Grid.Column="1"
-                          x:Name="ChatScroller"
-                          Background="{StaticResource BaseBrush}"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <Grid>
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- ── Voice Warmup Banner ── -->
+                <Border Grid.Row="0"
+                        Margin="10,10,10,0"
+                        Padding="12,8"
+                        CornerRadius="6"
+                        Background="#2D89DCEB"
+                        BorderBrush="{StaticResource BlueBrush}"
+                        BorderThickness="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <!-- Default to Visible (showing while warming up) -->
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <!-- Hide once ready -->
+                                <DataTrigger Binding="{Binding IsVoiceReady}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#x23F3;" FontSize="16" Foreground="{StaticResource BlueBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding VoiceWarmupStatus}" 
+                                   Foreground="{StaticResource TextBrush}" 
+                                   FontSize="13" 
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+
+                <ScrollViewer Grid.Row="1"
+                              x:Name="ChatScroller"
+                              Background="{StaticResource BaseBrush}"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <Grid>
                     <!-- Empty State -->
                     <StackPanel HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
@@ -832,6 +867,7 @@
                 </ItemsControl>
                 </Grid>
             </ScrollViewer>
+            </Grid>
 
         </Grid>
 
@@ -1917,8 +1953,8 @@
                                         <ComboBox Grid.Column="1"
                                                   ItemsSource="{Binding AvailableKokoroVoices}"
                                                   SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Text="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   IsEditable="True"
-                                                  Text="{Binding VoiceTtsVoiceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   IsTextSearchEnabled="True"
                                                   Style="{StaticResource DarkComboBoxStyle}"
                                                   ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
@@ -2461,6 +2497,7 @@
                                     BorderBrush="{StaticResource BlueBrush}"
                                     BorderThickness="1"
                                     Cursor="Hand"
+                                    IsEnabled="{Binding IsVoiceReady}"
                                     PreviewMouseLeftButtonDown="PttButton_MouseDown"
                                     PreviewMouseLeftButtonUp="PttButton_MouseUp"
                                     MouseLeave="PttButton_MouseLeave"/>

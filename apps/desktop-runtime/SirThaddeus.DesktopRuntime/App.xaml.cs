@@ -83,6 +83,7 @@ public partial class App : System.Windows.Application
     private int _stopAllHotkeyId = -1;
     private bool _isShuttingDown;
     private bool _isHeadless;
+    private SplashWindow? _splash;
     private readonly object _liveAsrPreviewGate = new();
     private readonly SemaphoreSlim _voiceMicUpGate = new(1, 1);
     private readonly SemaphoreSlim _mcpRefreshGate = new(1, 1);
@@ -125,17 +126,93 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // ── Global crash safety net ──────────────────────────────────
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+
         // ── Parse CLI args ───────────────────────────────────────────
         _isHeadless = e.Args.Any(a =>
             a.Equals("--headless", StringComparison.OrdinalIgnoreCase));
 
+        // ── Show splash immediately ──────────────────────────────────
+        if (!_isHeadless)
+        {
+            _splash = new SplashWindow();
+            _splash.Show();
+            _splash.SetStatus("Loading configuration…");
+        }
+
+        try
+        {
+            await RunStartupAsync(e);
+        }
+        catch (Exception ex)
+        {
+            _splash?.Close();
+            ShowFatalError("Startup failed", ex.Message);
+            Shutdown(1);
+        }
+    }
+
+    private async Task RunStartupAsync(StartupEventArgs e)
+    {
         // ── 1. Load config ───────────────────────────────────────────
         var settingsLoad = SettingsManager.LoadWithDiagnostics();
         _settings = settingsLoad.Settings;
         _runtimeControls = RuntimeControlState.FromSettings(_settings);
         _runtimeSafeModeReason = settingsLoad.SafeModeReason ?? _settings.RuntimeSafety.SafeModeReason;
 
+        // ── Onboarding gate (first run only) ────────────────────────
+        if (!_isHeadless && !_settings.OnboardingComplete)
+        {
+            _splash?.Close();
+            _splash = null;
+
+            var wizard = new OnboardingWindow();
+            var completed = wizard.ShowDialog() == true;
+
+            if (!completed)
+            {
+                Shutdown(0);
+                return;
+            }
+
+            // Apply wizard results to settings
+            _settings = _settings with
+            {
+                OnboardingComplete = true,
+                ActivePersonalityId = wizard.SelectedPersonalityId,
+                Llm = _settings.Llm with
+                {
+                    BaseUrl = wizard.SelectedBaseUrl,
+                    Model = wizard.SelectedModel
+                },
+                UserProfile = _settings.UserProfile with
+                {
+                    DisplayName = wizard.UserDisplayName,
+                    AboutMe = wizard.UserAboutMe
+                },
+                Voice = _settings.Voice with
+                {
+                    // Ensure ttsVoiceId is never empty. SettingsViewModel might 
+                    // clear it if it doesn't match the catalog, so we force 
+                    // a known-good default here.
+                    TtsVoiceId = string.IsNullOrWhiteSpace(_settings.Voice.TtsVoiceId) 
+                        ? "bm_lewis" 
+                        : _settings.Voice.TtsVoiceId
+                }
+            };
+
+            SettingsManager.Save(_settings);
+            _runtimeControls = RuntimeControlState.FromSettings(_settings);
+
+            // Reopen splash for the heavy init phase
+            _splash = new SplashWindow();
+            _splash.Show();
+        }
+
         // ── 2. Core infrastructure ───────────────────────────────────
+        _splash?.SetStatus("Initializing core services…");
         _auditLogger = JsonLineAuditLogger.CreateDefault();
         _runtimeController = new RuntimeController(_auditLogger, AssistantState.Idle);
         _permissionBroker = new InMemoryPermissionBroker(_auditLogger);
@@ -203,6 +280,7 @@ public partial class App : System.Windows.Application
         }
 
         // ── 3. Create LLM client (Layer 3) ──────────────────────────
+        _splash?.SetStatus("Connecting to LLM…");
         var llmOptions = BuildLlmClientOptions(_settings);
         _llmClient = new LmStudioClient(llmOptions);
 
@@ -219,6 +297,7 @@ public partial class App : System.Windows.Application
         });
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
+        _splash?.SetStatus("Starting MCP server…");
         var mcpServerPath = ResolveMcpServerPath(_settings.Mcp.ServerPath);
         var mcpEnvVars = BuildMcpEnvironmentVariables(_settings);
         var handshakeOptions = new McpHandshakeOptions
@@ -288,6 +367,7 @@ public partial class App : System.Windows.Application
         }
 
         // ── 5. Wrap MCP client with audit + permission gate ──────────
+        _splash?.SetStatus("Setting up agent…");
         var sessionId = Guid.NewGuid().ToString("N")[..12];
         var wpfPrompter = new WpfPermissionPrompter(this);
         _permissionGate = new WpfPermissionGate(
@@ -388,6 +468,7 @@ public partial class App : System.Windows.Application
             queueManualLocationPrompt: QueueManualLocationPromptFromConversation);
 
         // ── 7. Voice pipeline (PTT -> Transcribe -> Thinking -> Speak) ──
+        _splash?.SetStatus("Preparing voice pipeline…");
         _voiceHostProcessManager = new VoiceHostProcessManager(_auditLogger, _settings.Voice);
         _ttsService = new TextToSpeechService(_auditLogger, _settings.Audio.TtsEnabled);
         _audioCaptureService = new AudioCaptureService(_auditLogger)
@@ -401,7 +482,8 @@ public partial class App : System.Windows.Application
         _audioPlaybackService = new AudioPlaybackService(
             _auditLogger,
             () => _settings.Voice,
-            _localTtsClient)
+            _localTtsClient,
+            _ttsService)
         {
             OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(_settings.Audio.OutputDeviceName)
         };
@@ -420,7 +502,12 @@ public partial class App : System.Windows.Application
             {
                 AsrTimeout = TimeSpan.FromMilliseconds(Math.Max(5_000, _settings.Voice.AsrTimeoutMs)),
                 AgentTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.AgentTimeoutMs)),
-                SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs))
+                SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs)),
+                // Preview transcript can shave final ASR latency when the operator releases PTT.
+                // A slightly more permissive freshness/length gate avoids unnecessary fallback ASR calls
+                // without bypassing ASR entirely.
+                RealtimeHintMaxAge = TimeSpan.FromSeconds(3),
+                RealtimeHintMinChars = 6
             });
         _voiceOrchestrator.StateChanged += OnVoiceStateChanged;
         _voiceOrchestrator.ProgressUpdated += OnVoiceProgressUpdated;
@@ -432,6 +519,7 @@ public partial class App : System.Windows.Application
         _stateStore = new RuntimeStateStore(_runtimeController!, _voiceOrchestrator);
 
         // ── 8. UI surface (Layer 1) ──────────────────────────────────
+        _splash?.SetStatus("Ready.");
         if (!_isHeadless && _settings.Ui.ShowOverlay)
         {
             InitializeMainWindow(showImmediately: !_settings.Ui.StartMinimized);
@@ -452,7 +540,61 @@ public partial class App : System.Windows.Application
         InitializeHotkeys(_hotkeyOwnerWindow);
 
         // Start VoiceHost early so first-turn ASR avoids cold-start latency.
-        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
+        // The models will download in the background on the first run.
+        if (_settings.Voice.VoiceHostEnabled)
+            _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
+
+        // ── Close splash ─────────────────────────────────────────────
+        if (_splash is not null)
+        {
+            await Task.Delay(400); // Brief pause so "Ready." is visible
+            _splash.FadeOutAndClose();
+            _splash = null;
+        }
+    }
+
+    private void OnDispatcherUnhandledException(
+        object sender,
+        System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        _auditLogger?.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "UNHANDLED_EXCEPTION",
+            Result = "error",
+            Details = new Dictionary<string, object>
+            {
+                ["message"] = e.Exception.Message,
+                ["type"] = e.Exception.GetType().FullName ?? "unknown",
+                ["stackTrace"] = e.Exception.StackTrace ?? ""
+            }
+        });
+        ShowFatalError("Unexpected error", e.Exception.Message);
+    }
+
+    private static void OnDomainUnhandledException(
+        object sender,
+        UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception ex)
+            ShowFatalError("Fatal error", ex.Message);
+    }
+
+    private static void ShowFatalError(string title, string message)
+    {
+        try
+        {
+            System.Windows.MessageBox.Show(
+                $"{message}\n\nPlease check that LM Studio is running and your settings are configured.",
+                $"Sir Thaddeus — {title}",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch
+        {
+            // Best effort — if even MessageBox fails, we're truly out of options
+        }
     }
 
     private void OnPttMicDown()
@@ -502,7 +644,6 @@ public partial class App : System.Windows.Application
     private async Task TryHandleMicUpAsync()
     {
         // Never gate mic release on readiness checks: stop capture first.
-        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
         _voiceOrchestrator?.EnqueueMicUp();
         PublishVoiceStatus("Transcribing...");
         await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
@@ -868,7 +1009,7 @@ public partial class App : System.Windows.Application
                             continue;
                         }
 
-                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_500);
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_000);
                         if (clip is null || clip.AudioBytes.Length < 2_400)
                         {
                             await Task.Delay(120, token);
@@ -889,7 +1030,7 @@ public partial class App : System.Windows.Application
                         // Preview is diagnostics-only and must not interrupt voice orchestration.
                     }
 
-                    await Task.Delay(350, token);
+                    await Task.Delay(300, token);
                 }
             }
             catch (OperationCanceledException)
@@ -1854,7 +1995,8 @@ public partial class App : System.Windows.Application
             _auditLogger!,
             closeWindow: () => window.Hide(),
             dialogueStatePersistence: _dialogueStatePersistence,
-            chatHistoryPersistence: _chatHistoryPersistence);
+            chatHistoryPersistence: _chatHistoryPersistence,
+            voiceManager: _voiceHostProcessManager);
 
         var overlayVm = new OverlayViewModel(
             _runtimeController!,
@@ -1973,9 +2115,13 @@ public partial class App : System.Windows.Application
                 _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 _commandPaletteViewModel.Use24HourTime = updated.Ui.Use24HourTime;
                 _commandPaletteViewModel.UpdateRuntimeSafety(
-                    _runtimeControls.PanicModeEnabled,
-                    _runtimeControls.SafeModeEnabled,
-                    _runtimeSafeModeReason);
+                    updated.RuntimeSafety.PanicMode,
+                    updated.RuntimeSafety.SafeMode,
+                    updated.RuntimeSafety.SafeModeReason);
+
+                // UX: Start new chat with new settings loaded, per user request.
+                _commandPaletteViewModel.ClearConversation();
+                _mainWindow?.ActivateTab("Chat");
             }
 
             ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);
