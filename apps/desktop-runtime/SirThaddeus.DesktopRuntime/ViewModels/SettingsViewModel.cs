@@ -24,6 +24,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 /// </summary>
 public sealed partial class SettingsViewModel : ViewModelBase
 {
+    private const string DefaultKokoroVoiceId = "bm_lewis";
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
     private readonly YouTubeJobsHttpClient _youtubeJobsClient;
@@ -161,7 +162,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
-    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) MarkDirty(); } }
+    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
     public string VoiceTtsVoiceId 
     { 
@@ -293,7 +294,24 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// </summary>
     public string? SelectedKokoroVoice
     {
-        get => string.IsNullOrWhiteSpace(_voiceTtsVoiceId) ? "" : _voiceTtsVoiceId;
+        get
+        {
+            var configured = (_voiceTtsVoiceId ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
+                return configured;
+
+            if (!string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase))
+                return "";
+
+            var preferredVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
+                _personalityStore,
+                _personalityProfilesDirectory,
+                _settings.ActivePersonalityId);
+            if (!string.IsNullOrWhiteSpace(preferredVoiceId))
+                return preferredVoiceId;
+
+            return DefaultKokoroVoiceId;
+        }
         set
         {
             var normalized = (value ?? "").Trim();
@@ -502,15 +520,10 @@ public sealed partial class SettingsViewModel : ViewModelBase
             : s.Voice.VoiceHostHealthPath.Trim();
         _voiceTtsEngine = s.Voice.GetNormalizedTtsEngine();
         _voiceTtsModelId = s.Voice.GetResolvedTtsModelId();
-        _voiceTtsVoiceId = s.Voice.GetResolvedTtsVoiceId();
+        _voiceTtsVoiceId = string.IsNullOrWhiteSpace(s.Voice.TtsVoiceId)
+            ? ""
+            : s.Voice.TtsVoiceId.Trim();
         _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
-        if (string.IsNullOrWhiteSpace(_voiceTtsVoiceId))
-        {
-            _voiceTtsVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
-                _personalityStore,
-                _personalityProfilesDirectory,
-                s.ActivePersonalityId);
-        }
         // Front-end ASR stays pinned to faster-whisper.
         _voiceSttEngine = "faster-whisper";
         _voiceSttModelId = ResolveFrontendSttModelIdForUi(s.Voice);
@@ -570,6 +583,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceTtsEngine));
         OnPropertyChanged(nameof(VoiceTtsModelId));
         OnPropertyChanged(nameof(VoiceTtsVoiceId));
+        OnPropertyChanged(nameof(SelectedKokoroVoice));
         OnPropertyChanged(nameof(VoiceSttEngine));
         OnPropertyChanged(nameof(VoiceSttModelId));
         OnPropertyChanged(nameof(VoicePreferLocalTts));
@@ -1671,6 +1685,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         }
         else
         {
+            OnPropertyChanged(nameof(SelectedKokoroVoice));
             StatusText = "Personality selected.";
         }
 
@@ -1707,13 +1722,20 @@ public sealed partial class SettingsViewModel : ViewModelBase
         foreach (var voiceId in discovered)
             AvailableKokoroVoices.Add(voiceId);
 
-        // Ensure the current setting is always present in the list
-        // even if the pack folder was removed since the last save.
-        var current = (_voiceTtsVoiceId ?? "").Trim();
-        if (!string.IsNullOrWhiteSpace(current) &&
-            !AvailableKokoroVoices.Contains(current))
+        // Ensure both configured and effective voices are present in the list,
+        // even if packs were removed or the effective voice comes from personality.
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(configured) &&
+            !AvailableKokoroVoices.Contains(configured))
         {
-            AvailableKokoroVoices.Add(current);
+            AvailableKokoroVoices.Add(configured);
+        }
+
+        var effective = (SelectedKokoroVoice ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(effective) &&
+            !AvailableKokoroVoices.Contains(effective))
+        {
+            AvailableKokoroVoices.Add(effective);
         }
 
         OnPropertyChanged(nameof(SelectedKokoroVoice));

@@ -482,7 +482,8 @@ public partial class App : System.Windows.Application
         _audioPlaybackService = new AudioPlaybackService(
             _auditLogger,
             () => _settings.Voice,
-            _localTtsClient)
+            _localTtsClient,
+            _ttsService)
         {
             OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(_settings.Audio.OutputDeviceName)
         };
@@ -501,7 +502,12 @@ public partial class App : System.Windows.Application
             {
                 AsrTimeout = TimeSpan.FromMilliseconds(Math.Max(5_000, _settings.Voice.AsrTimeoutMs)),
                 AgentTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.AgentTimeoutMs)),
-                SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs))
+                SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs)),
+                // Preview transcript can shave final ASR latency when the operator releases PTT.
+                // A slightly more permissive freshness/length gate avoids unnecessary fallback ASR calls
+                // without bypassing ASR entirely.
+                RealtimeHintMaxAge = TimeSpan.FromSeconds(3),
+                RealtimeHintMinChars = 6
             });
         _voiceOrchestrator.StateChanged += OnVoiceStateChanged;
         _voiceOrchestrator.ProgressUpdated += OnVoiceProgressUpdated;
@@ -534,7 +540,9 @@ public partial class App : System.Windows.Application
         InitializeHotkeys(_hotkeyOwnerWindow);
 
         // Start VoiceHost early so first-turn ASR avoids cold-start latency.
-        _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
+        // The models will download in the background on the first run.
+        if (_settings.Voice.VoiceHostEnabled)
+            _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
 
         // ── Close splash ─────────────────────────────────────────────
         if (_splash is not null)
@@ -636,7 +644,6 @@ public partial class App : System.Windows.Application
     private async Task TryHandleMicUpAsync()
     {
         // Never gate mic release on readiness checks: stop capture first.
-        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
         _voiceOrchestrator?.EnqueueMicUp();
         PublishVoiceStatus("Transcribing...");
         await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
@@ -1002,7 +1009,7 @@ public partial class App : System.Windows.Application
                             continue;
                         }
 
-                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_500);
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_000);
                         if (clip is null || clip.AudioBytes.Length < 2_400)
                         {
                             await Task.Delay(120, token);
@@ -1023,7 +1030,7 @@ public partial class App : System.Windows.Application
                         // Preview is diagnostics-only and must not interrupt voice orchestration.
                     }
 
-                    await Task.Delay(350, token);
+                    await Task.Delay(300, token);
                 }
             }
             catch (OperationCanceledException)
@@ -1988,7 +1995,8 @@ public partial class App : System.Windows.Application
             _auditLogger!,
             closeWindow: () => window.Hide(),
             dialogueStatePersistence: _dialogueStatePersistence,
-            chatHistoryPersistence: _chatHistoryPersistence);
+            chatHistoryPersistence: _chatHistoryPersistence,
+            voiceManager: _voiceHostProcessManager);
 
         var overlayVm = new OverlayViewModel(
             _runtimeController!,
