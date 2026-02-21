@@ -57,8 +57,7 @@ jobs:
     name: Package Build Artifact
     needs: test
     if: >
-      always() &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event_name == 'push' &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: windows-latest
     timeout-minutes: 60
@@ -96,3 +95,59 @@ jobs:
             artifacts/release/*.zip
             artifacts/release/*.zip.sha256.txt
           if-no-files-found: error
+
+  publish:
+    name: Publish Rolling Release
+    needs: package
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-package-assets-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Set rolling release tag name
+        id: tag
+        run: |
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "title=Latest Build (master)" >> $GITHUB_OUTPUT
+            echo "body=Rolling release from master branch. Commit: ${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest-dev" >> $GITHUB_OUTPUT
+            echo "title=Latest Dev Build" >> $GITHUB_OUTPUT
+            echo "body=Rolling release from dev branch. Commit: ${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete existing rolling release (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --yes 2>/dev/null || true
+          git -c http.extraHeader="Authorization: bearer $GH_TOKEN" \
+            ls-remote --tags origin "${{ steps.tag.outputs.tag }}" \
+            | grep -q . && \
+            git push --delete \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+              "refs/tags/${{ steps.tag.outputs.tag }}" 2>/dev/null || true
+
+      - name: Create rolling GitHub release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.title }}
+          body: ${{ steps.tag.outputs.body }}
+          prerelease: true
+          make_latest: false
+          files: |
+            release-assets/*.zip
+            release-assets/*.zip.sha256.txt
