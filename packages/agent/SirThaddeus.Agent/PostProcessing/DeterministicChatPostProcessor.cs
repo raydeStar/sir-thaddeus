@@ -139,9 +139,10 @@ public sealed class DeterministicChatPostProcessor
         if (activeProfile is null)
             return sanitized;
 
+        var hasNonMemoryToolEvidence = toolCallsMade.Any(t => !t.ToolName.Equals("MemoryRetrieve", StringComparison.OrdinalIgnoreCase));
         var responseKind = _responseKindClassifier.Classify(
             sanitized,
-            hasToolEvidence: toolCallsMade.Count > 0);
+            hasToolEvidence: hasNonMemoryToolEvidence);
 
         // Safety refusals are semantically sensitive.
         // Only allow deterministic cleanup; no signature, no reduction.

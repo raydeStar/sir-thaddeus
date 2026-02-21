@@ -123,6 +123,18 @@ public sealed record PersonalityInstructions
 
     [JsonPropertyName("style_rules")]
     public IReadOnlyList<string> StyleRules { get; init; } = [];
+
+    [JsonPropertyName("few_shot_examples")]
+    public IReadOnlyList<PersonalityFewShotExample> FewShotExamples { get; init; } = [];
+}
+
+public sealed record PersonalityFewShotExample
+{
+    [JsonPropertyName("user")]
+    public string User { get; init; } = "";
+
+    [JsonPropertyName("assistant")]
+    public string Assistant { get; init; } = "";
 }
 
 public sealed record PersonalityContextModifiers

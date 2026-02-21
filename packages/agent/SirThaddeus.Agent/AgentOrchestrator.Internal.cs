@@ -291,7 +291,8 @@ public sealed partial class AgentOrchestrator
                     output = TrimDanglingIncompleteEnding(output);
                     return output;
                 },
-                LogEvent = LogEvent
+                LogEvent = LogEvent,
+                FewShotExamples = _personalityRuntime.Snapshot.Profile.Instructions.FewShotExamples
             },
             cancellationToken);
     }
@@ -3259,6 +3260,32 @@ public sealed partial class AgentOrchestrator
         }
 
         history.Insert(0, ChatMessage.System(anchorText.Trim()));
+    }
+
+    internal static void InjectFewShotExamplesInPlace(
+        List<ChatMessage> history,
+        IReadOnlyList<PersonalityEngine.Profiles.PersonalityFewShotExample>? examples)
+    {
+        if (examples is null || examples.Count == 0)
+            return;
+
+        // Find where the system prompt ends. It's usually history[0].
+        var insertionIndex = 0;
+        while (insertionIndex < history.Count && history[insertionIndex].Role == "system")
+        {
+            insertionIndex++;
+        }
+
+        foreach (var example in examples)
+        {
+            if (string.IsNullOrWhiteSpace(example.User) || string.IsNullOrWhiteSpace(example.Assistant))
+                continue;
+
+            history.Insert(insertionIndex, ChatMessage.User(example.User.Trim()));
+            insertionIndex++;
+            history.Insert(insertionIndex, ChatMessage.Assistant(example.Assistant.Trim()));
+            insertionIndex++;
+        }
     }
 
     private static string StripPersonalityAnchors(string content)

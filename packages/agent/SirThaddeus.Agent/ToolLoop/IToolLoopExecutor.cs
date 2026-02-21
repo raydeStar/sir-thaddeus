@@ -14,6 +14,7 @@ public sealed record ToolLoopExecutionRequest
     public int MaxRoundTrips { get; init; } = 10;
     public required Func<string, string> SanitizeAssistantText { get; init; }
     public Action<string, string>? LogEvent { get; init; }
+    public IReadOnlyList<PersonalityEngine.Profiles.PersonalityFewShotExample>? FewShotExamples { get; init; }
 }
 
 /// <summary>
