@@ -150,7 +150,7 @@ public sealed class ReasoningGuardrailsPipeline
         };
 
         var finalLlm = await RunBoundedAsync(
-            ct => _llm.ChatAsync(finalMessages, tools: null, maxTokensOverride: 400, ct),
+            async ct => (LlmResponse?) await _llm.ChatAsync(finalMessages, tools: null, maxTokensOverride: 400, ct),
             SynthesisStepTimeout,
             cancellationToken);
 

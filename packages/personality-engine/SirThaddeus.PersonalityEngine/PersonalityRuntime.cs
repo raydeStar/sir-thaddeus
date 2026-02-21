@@ -190,6 +190,21 @@ public sealed class PersonalityRuntime : IPersonalityRuntime
         AppendBulletList(sb, "Failure behavior", profile.Instructions.FailureBehavior, maxItems: 2);
         AppendBulletList(sb, "Style rules", profile.Instructions.StyleRules, maxItems: 3);
 
+        if (profile.Instructions.FewShotExamples is not null && profile.Instructions.FewShotExamples.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Example conversation demonstrating your tone:");
+            foreach (var example in profile.Instructions.FewShotExamples)
+            {
+                if (string.IsNullOrWhiteSpace(example.User) || string.IsNullOrWhiteSpace(example.Assistant))
+                    continue;
+
+                sb.AppendLine($"User: {example.User.Trim()}");
+                sb.AppendLine($"Assistant: {example.Assistant.Trim()}");
+                sb.AppendLine();
+            }
+        }
+
         return sb.ToString();
     }
 

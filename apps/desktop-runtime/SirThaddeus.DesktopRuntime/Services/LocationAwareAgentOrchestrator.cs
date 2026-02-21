@@ -74,6 +74,18 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
             pending = PendingLocationState.None;
         }
 
+        // If location was configured via Settings while a prompt was pending,
+        // clear the pending gate and resume naturally from chat input.
+        if (pending.Mode == PendingLocationMode.AwaitingManualLocation &&
+            !string.IsNullOrWhiteSpace(manualLocation))
+        {
+            WritePendingState(PendingLocationState.None);
+            if (LooksLikeProceedSignal(lower))
+                return await ContinuePendingQueryThroughWrapperAsync(pending.OriginalQuery, cancellationToken);
+
+            return await ContinuePendingQueryThroughWrapperAsync(trimmed, cancellationToken);
+        }
+
         if (pending.Mode != PendingLocationMode.None)
             return await HandlePendingStateAsync(trimmed, lower, pending, cancellationToken);
 
@@ -232,6 +244,21 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                normalized == "still here" ||
                normalized == "i am" ||
                normalized == "im";
+    }
+
+    private static bool LooksLikeProceedSignal(string lower)
+    {
+        var normalized = NormalizeLooseText(lower);
+        return normalized == "ok" ||
+               normalized == "okay" ||
+               normalized == "try now" ||
+               normalized == "ok try now" ||
+               normalized == "go" ||
+               normalized == "go ahead" ||
+               normalized == "continue" ||
+               normalized == "done" ||
+               normalized == "saved" ||
+               normalized == "it is set";
     }
 
     private static bool IsNegative(string lower)

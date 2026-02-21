@@ -842,7 +842,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LogEvent("LOGIC_PUZZLE_SCAFFOLD",
                         "Injected first-principles decomposition scaffold for chat-only solve.");
                 }
+                
                 InjectPersonalityAnchorIntoHistoryInPlace(messages, personalityAnchor, personalityTurnTag);
+                InjectFewShotExamplesInPlace(messages, _personalityRuntime.Snapshot.Profile.Instructions.FewShotExamples);
+
                 var response = await CallLlmWithRetrySafe(
                     messages, roundTrips, MaxTokensCasual, cancellationToken);
 
@@ -936,7 +939,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     Text = text,
                     Success = true,
                     ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = roundTrips
+                    LlmRoundTrips = roundTrips,
+                    AllowToolResultPersonalityPresentation = true
                 }, usageBaseline);
             }
 
