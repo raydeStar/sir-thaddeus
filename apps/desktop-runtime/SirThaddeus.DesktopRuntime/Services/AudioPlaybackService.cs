@@ -49,6 +49,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     private readonly IAuditLogger _auditLogger;
     private readonly LocalTtsHttpClient? _localTtsClient;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
+    private readonly TextToSpeechService? _fallbackTtsService;
     private readonly object _gate = new();
 
     private WaveOutEvent? _activeOutput;
@@ -66,11 +67,13 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     public AudioPlaybackService(
         IAuditLogger auditLogger,
         Func<VoiceSettings> voiceSettingsProvider,
-        LocalTtsHttpClient? localTtsClient = null)
+        LocalTtsHttpClient? localTtsClient = null,
+        TextToSpeechService? fallbackTtsService = null)
     {
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
         _voiceSettingsProvider = voiceSettingsProvider ?? throw new ArgumentNullException(nameof(voiceSettingsProvider));
         _localTtsClient = localTtsClient;
+        _fallbackTtsService = fallbackTtsService;
     }
 
     public bool IsPlaying
@@ -114,6 +117,33 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         {
             var voiceSettings = GetVoiceSettingsSnapshot();
             var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();
+
+            if (selectedTtsEngine == "windows")
+            {
+                if (_fallbackTtsService is not null)
+                {
+                    foreach (var chunkText in textChunks)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await _fallbackTtsService.SpeakAsync(chunkText, cancellationToken);
+                    }
+                }
+                else
+                {
+                    _auditLogger.Append(new AuditEvent
+                    {
+                        Actor = "voice",
+                        Action = "VOICE_TTS_SKIPPED",
+                        Result = "warn",
+                        Details = new Dictionary<string, object>
+                        {
+                            ["sessionId"] = sessionId,
+                            ["reason"] = "no_fallback_tts_service_for_windows"
+                        }
+                    });
+                }
+                return;
+            }
 
             if (_localTtsClient is null)
             {
@@ -219,8 +249,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
     private async Task PlayWaveBytesAsync(byte[] bytes, string sessionId, CancellationToken cancellationToken)
     {
-        using var stream = new MemoryStream(bytes, writable: false);
-        using var reader = new WaveFileReader(stream);
+        using var playbackSource = CreatePlaybackSource(bytes);
         using var output = new WaveOutEvent { DeviceNumber = OutputDeviceNumber };
 
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -243,7 +272,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             try { output.Stop(); } catch { }
         });
 
-        output.Init(reader);
+        output.Init(playbackSource.Provider);
         output.Play();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -255,7 +284,9 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             Details = new Dictionary<string, object>
             {
                 ["sessionId"] = sessionId,
-                ["bytes"] = bytes.Length
+                ["bytes"] = bytes.Length,
+                ["format"] = playbackSource.Format,
+                ["expectedDurationMs"] = (long)Math.Round(playbackSource.ExpectedDuration.TotalMilliseconds)
             }
         });
 
@@ -268,15 +299,101 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             // Playback timing notifications are best-effort.
         }
 
-        await completion.Task.WaitAsync(cancellationToken);
+        var playbackTimeout = GetPlaybackTimeout(playbackSource.ExpectedDuration);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(playbackTimeout);
 
-        lock (_gate)
+        try
         {
-            if (ReferenceEquals(_activeOutput, output))
+            await completion.Task.WaitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            try { output.Stop(); } catch { }
+
+            _auditLogger.Append(new AuditEvent
             {
-                _activeOutput = null;
-                _playbackCompletion = null;
+                Actor = "voice",
+                Action = "VOICE_PLAYBACK_TIMEOUT",
+                Result = "warn",
+                Details = new Dictionary<string, object>
+                {
+                    ["sessionId"] = sessionId,
+                    ["bytes"] = bytes.Length,
+                    ["timeoutMs"] = (long)Math.Round(playbackTimeout.TotalMilliseconds),
+                    ["expectedDurationMs"] = (long)Math.Round(playbackSource.ExpectedDuration.TotalMilliseconds)
+                }
+            });
+
+            completion.TrySetResult(true);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_activeOutput, output))
+                {
+                    _activeOutput = null;
+                    _playbackCompletion = null;
+                }
             }
+        }
+    }
+
+    private static PlaybackSource CreatePlaybackSource(byte[] bytes)
+    {
+        if (LooksLikeWave(bytes))
+        {
+            var stream = new MemoryStream(bytes, writable: false);
+            var reader = new WaveFileReader(stream);
+            return new PlaybackSource(reader, reader.TotalTime, "wav", stream);
+        }
+
+        var rawStream = new MemoryStream(bytes, writable: false);
+        var format = new WaveFormat(24000, 16, 1);
+        var provider = new RawSourceWaveStream(rawStream, format);
+        var expectedDuration = TimeSpan.FromSeconds(bytes.Length / (double)format.AverageBytesPerSecond);
+        return new PlaybackSource(provider, expectedDuration, "pcm_s16le_24000_mono", rawStream);
+    }
+
+    private static bool LooksLikeWave(byte[] bytes)
+        => bytes.Length >= 12 &&
+           bytes[0] == (byte)'R' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F' && bytes[3] == (byte)'F' &&
+           bytes[8] == (byte)'W' && bytes[9] == (byte)'A' && bytes[10] == (byte)'V' && bytes[11] == (byte)'E';
+
+    private static TimeSpan GetPlaybackTimeout(TimeSpan expectedDuration)
+    {
+        var min = TimeSpan.FromSeconds(6);
+        var max = TimeSpan.FromSeconds(45);
+        var computed = expectedDuration + TimeSpan.FromSeconds(5);
+        if (computed < min)
+            return min;
+        if (computed > max)
+            return max;
+        return computed;
+    }
+
+    private sealed class PlaybackSource : IDisposable
+    {
+        private readonly IDisposable? _stream;
+
+        public PlaybackSource(IWaveProvider provider, TimeSpan expectedDuration, string format, IDisposable? stream)
+        {
+            Provider = provider;
+            ExpectedDuration = expectedDuration;
+            Format = format;
+            _stream = stream;
+        }
+
+        public IWaveProvider Provider { get; }
+        public TimeSpan ExpectedDuration { get; }
+        public string Format { get; }
+
+        public void Dispose()
+        {
+            if (Provider is IDisposable disposableProvider)
+                disposableProvider.Dispose();
+            _stream?.Dispose();
         }
     }
 
