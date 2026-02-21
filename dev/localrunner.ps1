@@ -42,7 +42,7 @@ if ($DebugMode) {
     Write-Host "      Launching backend services in separate windows..." -ForegroundColor Cyan
     
     # Launch Python Backend
-    $BackendScript = Join-Path $RepoRoot "dev/start-voice-backend.ps1"
+    $BackendScript = Join-Path $RepoRoot "apps/voice-backend/start-voice-backend.ps1"
     $backendProcess = Start-Process powershell -ArgumentList "-NoExit", "-File", "`"$BackendScript`"" -WindowStyle Normal -PassThru
 
     # Launch VoiceHost

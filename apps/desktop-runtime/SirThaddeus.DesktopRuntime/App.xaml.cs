@@ -539,34 +539,10 @@ public partial class App : System.Windows.Application
         _hotkeyOwnerWindow = _mainWindow ?? CreateHiddenHotkeyWindow();
         InitializeHotkeys(_hotkeyOwnerWindow);
 
-        // ── Block splash screen until VoiceHost is ready so users see download progress ──
-        if (_settings.Voice.VoiceHostEnabled && _splash is not null)
-        {
-            _splash.SetStatus("Starting voice backend (models may download on first run)…");
-            using var warmupCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(_settings.Voice.VoiceHostStartupTimeoutMs + 5000));
-            var warmupTask = _voiceHostProcessManager.EnsureRunningAsync(warmupCts.Token);
-            
-            while (!warmupTask.IsCompleted && !warmupCts.IsCancellationRequested)
-            {
-                var healthTask = _voiceHostProcessManager.CheckHealthAsync(warmupCts.Token);
-                await Task.WhenAny(warmupTask, Task.Delay(500));
-                
-                if (healthTask.IsCompletedSuccessfully)
-                {
-                    var health = healthTask.Result;
-                    if (!health.Ready && health.Reachable)
-                    {
-                        var msg = string.IsNullOrWhiteSpace(health.Message) ? "Starting voice backend…" : health.Message;
-                        if (msg.Length > 85) msg = msg.Substring(0, 82) + "...";
-                        _splash.SetStatus($"Voice: {msg}");
-                    }
-                }
-            }
-        }
-        else
-        {
+        // Start VoiceHost early so first-turn ASR avoids cold-start latency.
+        // The models will download in the background on the first run.
+        if (_settings.Voice.VoiceHostEnabled)
             _voiceHostProcessManager.ScheduleWarmup(TimeSpan.FromSeconds(1), startIfMissing: true);
-        }
 
         // ── Close splash ─────────────────────────────────────────────
         if (_splash is not null)
@@ -2019,7 +1995,8 @@ public partial class App : System.Windows.Application
             _auditLogger!,
             closeWindow: () => window.Hide(),
             dialogueStatePersistence: _dialogueStatePersistence,
-            chatHistoryPersistence: _chatHistoryPersistence);
+            chatHistoryPersistence: _chatHistoryPersistence,
+            voiceManager: _voiceHostProcessManager);
 
         var overlayVm = new OverlayViewModel(
             _runtimeController!,
