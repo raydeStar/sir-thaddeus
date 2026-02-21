@@ -368,6 +368,8 @@ public sealed record VoiceSettings
 
     public string GetNormalizedTtsEngine()
     {
+        if (PreferLocalTts) return "kokoro";
+
         var engine = (TtsEngine ?? "").Trim().ToLowerInvariant();
         return engine switch
         {

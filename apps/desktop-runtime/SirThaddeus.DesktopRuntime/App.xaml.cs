@@ -482,7 +482,8 @@ public partial class App : System.Windows.Application
         _audioPlaybackService = new AudioPlaybackService(
             _auditLogger,
             () => _settings.Voice,
-            _localTtsClient)
+            _localTtsClient,
+            _ttsService)
         {
             OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(_settings.Audio.OutputDeviceName)
         };

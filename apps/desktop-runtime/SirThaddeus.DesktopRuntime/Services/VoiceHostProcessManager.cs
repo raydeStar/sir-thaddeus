@@ -839,10 +839,22 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         if (File.Exists(adjacent))
             return adjacent;
 
-        var voiceHostBinDebug = Path.GetFullPath(Path.Combine(
-            baseDir, "..", "..", "..", "..", "..",
+        var dir = new DirectoryInfo(baseDir);
+        while (dir is null == false && dir.Name != "apps")
+        {
+            dir = dir.Parent;
+        }
+
+        if (dir is null)
+        {
+            // Give up if we can't find 'apps'
+            return Path.Combine(baseDir, exeName);
+        }
+
+        var voiceHostBinDebug = Path.Combine(
+            dir.FullName,
             "voice-host", "SirThaddeus.VoiceHost",
-            "bin", "Debug"));
+            "bin", "Debug");
 
         if (Directory.Exists(voiceHostBinDebug))
         {

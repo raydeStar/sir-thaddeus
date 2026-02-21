@@ -53,7 +53,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VoiceBackendDir = Join-Path $PSScriptRoot ".." "apps" "voice-backend"
+$VoiceBackendDir = Resolve-Path "$PSScriptRoot\..\apps\voice-backend"
 $VenvDir = Join-Path $VoiceBackendDir ".venv"
 
 # ── Check Python ─────────────────────────────────────────────────
@@ -69,7 +69,7 @@ Write-Host "Using $pyVersion" -ForegroundColor Cyan
 
 # ── Create venv if missing ───────────────────────────────────────
 
-if (-not (Test-Path (Join-Path $VenvDir "Scripts" "activate.ps1"))) {
+if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
     & python -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) {
@@ -80,7 +80,7 @@ if (-not (Test-Path (Join-Path $VenvDir "Scripts" "activate.ps1"))) {
 
 # ── Activate venv ────────────────────────────────────────────────
 
-$activateScript = Join-Path $VenvDir "Scripts" "Activate.ps1"
+$activateScript = "$VenvDir\Scripts\Activate.ps1"
 . $activateScript
 
 # ── Install / update dependencies ────────────────────────────────
