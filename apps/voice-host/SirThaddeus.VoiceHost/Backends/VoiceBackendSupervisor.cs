@@ -547,6 +547,36 @@ public sealed class VoiceBackendSupervisor : IDisposable
                     SafePid(process),
                     SafeExitCode(process));
             };
+
+            var logPath = Path.Combine(AppContext.BaseDirectory, "voice-backend-debug.log");
+            var logLock = new object();
+            
+            void WriteLog(string level, string? data)
+            {
+                if (string.IsNullOrWhiteSpace(data)) return;
+                try
+                {
+                    lock (logLock)
+                    {
+                        File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {data}{Environment.NewLine}");
+                    }
+                }
+                catch { }
+            }
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    _logger.LogInformation("[VoiceBackend] {Data}", e.Data);
+                WriteLog("OUT", e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    _logger.LogWarning("[VoiceBackend] {Data}", e.Data);
+                WriteLog("ERR", e.Data);
+            };
+
             try
             {
                 process.BeginOutputReadLine();
