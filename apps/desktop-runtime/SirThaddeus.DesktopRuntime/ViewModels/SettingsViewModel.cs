@@ -1722,13 +1722,20 @@ public sealed partial class SettingsViewModel : ViewModelBase
         foreach (var voiceId in discovered)
             AvailableKokoroVoices.Add(voiceId);
 
-        // Ensure the current setting is always present in the list
-        // even if the pack folder was removed since the last save.
-        var current = (_voiceTtsVoiceId ?? "").Trim();
-        if (!string.IsNullOrWhiteSpace(current) &&
-            !AvailableKokoroVoices.Contains(current))
+        // Ensure both configured and effective voices are present in the list,
+        // even if packs were removed or the effective voice comes from personality.
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(configured) &&
+            !AvailableKokoroVoices.Contains(configured))
         {
-            AvailableKokoroVoices.Add(current);
+            AvailableKokoroVoices.Add(configured);
+        }
+
+        var effective = (SelectedKokoroVoice ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(effective) &&
+            !AvailableKokoroVoices.Contains(effective))
+        {
+            AvailableKokoroVoices.Add(effective);
         }
 
         OnPropertyChanged(nameof(SelectedKokoroVoice));
