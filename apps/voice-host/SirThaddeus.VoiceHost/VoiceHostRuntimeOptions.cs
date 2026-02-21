@@ -75,7 +75,8 @@ public sealed record VoiceHostRuntimeOptions(
         var backendStartupTimeoutRaw = GetOrDefault(
             values,
             "backend-startup-timeout-ms",
-            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "15000");
+            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "120000");
+
         var backendShutdownGraceRaw = GetOrDefault(
             values,
             "backend-shutdown-grace-ms",
@@ -91,10 +92,11 @@ public sealed record VoiceHostRuntimeOptions(
         var autoStartBackends = ParseBool(autoStartRaw, fallback: true);
         var backendStartupTimeoutMs = ParseInt(
             backendStartupTimeoutRaw,
-            fallback: 15_000,
+            fallback: 120_000,
             min: 1_000,
-            max: 120_000,
+            max: 300_000,
             argName: "--backend-startup-timeout-ms");
+
         var backendShutdownGraceMs = ParseInt(
             backendShutdownGraceRaw,
             fallback: 2_500,

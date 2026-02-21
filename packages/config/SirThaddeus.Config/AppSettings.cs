@@ -290,7 +290,7 @@ public sealed record VoiceSettings
     public string VoiceHostBaseUrl { get; init; } = "http://127.0.0.1:17845";
 
     [JsonPropertyName("voiceHostStartupTimeoutMs")]
-    public int VoiceHostStartupTimeoutMs { get; init; } = 60_000;
+    public int VoiceHostStartupTimeoutMs { get; init; } = 120_000;
 
     [JsonPropertyName("voiceHostHealthPath")]
     public string VoiceHostHealthPath { get; init; } = "/health";

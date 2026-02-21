@@ -62,6 +62,14 @@ internal static class BackendHealthProbe
 
             return BackendReadiness.NotReady("health_missing_readiness_fields");
         }
+        catch (TaskCanceledException)
+        {
+            return BackendReadiness.NotReady("starting up (may be downloading models)");
+        }
+        catch (HttpRequestException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
+        {
+            return BackendReadiness.NotReady("waiting for service to bind");
+        }
         catch (Exception ex)
         {
             return BackendReadiness.NotReady(ex.Message);
