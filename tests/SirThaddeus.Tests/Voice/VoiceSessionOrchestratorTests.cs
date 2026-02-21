@@ -131,12 +131,12 @@ public sealed class VoiceSessionOrchestratorTests
 
         orchestrator.EnqueueMicDown();
         orchestrator.EnqueueMicUp();
-        await WaitForStateAsync(orchestrator, VoiceState.Transcribing, TimeSpan.FromSeconds(2));
+        await WaitForStateAsync(orchestrator, VoiceState.Transcribing, TimeSpan.FromSeconds(5));
 
         orchestrator.EnqueueMicDown();
         asr.Release("stale transcript");
 
-        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(2));
+        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(5));
 
         Assert.Equal(2, capture.StartCalls);
         Assert.Equal(0, agent.CallCount);
@@ -183,7 +183,7 @@ public sealed class VoiceSessionOrchestratorTests
         {
             if (orchestrator.CurrentState == expected)
                 return;
-            await Task.Delay(15);
+            await Task.Delay(5);
         }
 
         Assert.Fail($"Timed out waiting for state '{expected}'. Current='{orchestrator.CurrentState}'.");

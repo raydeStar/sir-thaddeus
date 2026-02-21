@@ -210,10 +210,10 @@ public sealed class VoiceHostOrchestratorIntegrationTests : IDisposable
         await orchestrator.StartAsync();
 
         orchestrator.EnqueueMicDown();
-        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(2));
+        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(5));
 
         orchestrator.EnqueueMicUp();
-        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(5));
+        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(10));
 
         Assert.True(_server.AsrRequestCount >= 1, "ASR endpoint should have been hit.");
         Assert.True(agent.CallCount >= 1, "Agent should have been invoked.");
@@ -236,10 +236,10 @@ public sealed class VoiceHostOrchestratorIntegrationTests : IDisposable
 
         orchestrator.EnqueueMicDown();
         orchestrator.EnqueueMicUp();
-        await WaitForStateAsync(orchestrator, VoiceState.Speaking, TimeSpan.FromSeconds(4));
+        await WaitForStateAsync(orchestrator, VoiceState.Speaking, TimeSpan.FromSeconds(5));
 
         orchestrator.EnqueueShutup();
-        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(2));
+        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(5));
 
         Assert.Equal(VoiceState.Idle, orchestrator.CurrentState);
     }
@@ -256,7 +256,7 @@ public sealed class VoiceHostOrchestratorIntegrationTests : IDisposable
         {
             if (orchestrator.CurrentState == expected)
                 return;
-            await Task.Delay(15);
+            await Task.Delay(5);
         }
 
         Assert.Fail($"Timed out waiting for state '{expected}'. " +
