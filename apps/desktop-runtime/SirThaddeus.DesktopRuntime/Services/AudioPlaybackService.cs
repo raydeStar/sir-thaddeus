@@ -461,9 +461,9 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             if (line.Length == 0)
                 continue;
 
-            // Split line into sentences for finer chunking
-            // Match punctuation followed by space and uppercase letter/number, or end of line.
-            var sentenceMatches = Regex.Matches(line, @"(.+?(?:[\.\!\?]+(?=\s+[A-Z0-9])|$)|\n)");
+            // Split line into phrases for finer chunking.
+            // Match major punctuation (., !, ?) or minor pauses (, ; : - —) followed by space, or end of line.
+            var sentenceMatches = Regex.Matches(line, @"(.+?(?:[\.\!\?\,\;\:\—]+(?=\s+)|$)|\n)");
             
             foreach (Match match in sentenceMatches)
             {
@@ -474,8 +474,13 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
                         currentChunk.Append(' ');
                     currentChunk.Append(sentence);
 
-                    // Flush if chunk gets reasonably large
-                    if (currentChunk.Length > 80)
+                    // Flush aggressively for the very first chunk to drop time-to-first-audio,
+                    // or if the chunk has reached a reasonable phrase length (40 chars)
+                    if (chunks.Count == 0 && currentChunk.Length > 20)
+                    {
+                        FlushChunk(force: true);
+                    }
+                    else if (currentChunk.Length > 40)
                     {
                         FlushChunk();
                     }

@@ -1,13 +1,20 @@
 # Voice Engine Setup and Verification
 
-## Engine Selection Precedence
-
 - If `voice.ttsEngine` is unset, runtime defaults to `windows`.
 - If `voice.sttEngine` is unset, runtime defaults to `faster-whisper`.
 - `faster-whisper` defaults `sttModelId` to `base` when omitted.
 - `voice.sttLanguage` defaults to `en` (use `"auto"` to disable pinning).
 - `kokoro` requires `ttsVoiceId`.
 - `qwen3asr` requires explicit `sttModelId`.
+
+## Low-Latency Streaming Strategy
+
+Sir Thaddeus uses an aggressive chunking and pre-fetch strategy to minimize Time-To-First-Audio (TTFA):
+
+1. **Phrase-Level Chunking**: The desktop runtime (`AudioPlaybackService`) splits LLM output into small phrases using major punctuation (`.`, `!`, `?`) and minor pauses (`,`, `;`, `:`, `-`, `—`).
+2. **Aggressive First-Flush**: The very first chunk of a response is flushed to the TTS engine as soon as it reaches **20 characters**, ensuring audio starts playing almost instantly.
+3. **Overlapped Synthesis**: Subsequent chunks (40+ chars) are pre-fetched while the first chunk is playing.
+4. **Python Concatenation**: The `server.py` backend safely concatenates yielded buffers from the `kokoro` engine to ensure seamless audio flow.
 
 ## Voice Turn Timing Contract
 
@@ -94,6 +101,20 @@ If you prefer to supply your own model files:
 3. Configure settings:
    - `voice.ttsEngine = "kokoro"`
    - `voice.ttsVoiceId = "af_sky"`
+
+## Development Setup
+
+To start the voice backend manually for testing:
+
+```powershell
+./dev/start-voice-backend.ps1 -TtsEngine kokoro -TtsVoiceId af_sky
+```
+
+This script will:
+1. Create a Python virtual environment (`.venv`) if missing.
+2. Install all required dependencies from `requirements.txt`.
+3. Auto-download models if missing.
+4. Launch the FastAPI server.
 
 ## Smoke Commands
 
