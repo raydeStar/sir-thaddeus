@@ -409,7 +409,14 @@ public sealed record VoiceSettings
     }
 
     public string GetResolvedTtsVoiceId()
-        => string.IsNullOrWhiteSpace(TtsVoiceId) ? "" : TtsVoiceId.Trim();
+    {
+        var voiceId = string.IsNullOrWhiteSpace(TtsVoiceId) ? "" : TtsVoiceId.Trim();
+        if (string.IsNullOrEmpty(voiceId) && GetNormalizedTtsEngine() == "kokoro")
+        {
+            return "bm_lewis";
+        }
+        return voiceId;
+    }
 
     public string GetResolvedTtsModelId()
         => string.IsNullOrWhiteSpace(TtsModelId) ? "" : TtsModelId.Trim();
