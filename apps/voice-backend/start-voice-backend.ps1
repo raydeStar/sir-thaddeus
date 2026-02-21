@@ -56,22 +56,30 @@ $ErrorActionPreference = "Stop"
 $VoiceBackendDir = $PSScriptRoot
 $VenvDir = Join-Path $VoiceBackendDir ".venv"
 
-# ── Check Python ─────────────────────────────────────────────────
+$BinDir = Join-Path $VoiceBackendDir "bin"
+$UvExe = Join-Path $BinDir "uv.exe"
 
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    Write-Host "ERROR: Python not found. Install Python 3.10+ and try again." -ForegroundColor Red
-    exit 1
+# ── Bootstrap UV ─────────────────────────────────────────────────
+
+if (-not (Test-Path $UvExe)) {
+    Write-Host "Downloading 'uv' (fast Python manager)..." -ForegroundColor Yellow
+    if (-not (Test-Path $BinDir)) {
+        New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    }
+    
+    $uvZipUrl = "https://github.com/astral-sh/uv/releases/download/0.5.21/uv-x86_64-pc-windows-msvc.zip"
+    $uvZipPath = Join-Path $BinDir "uv.zip"
+    
+    Invoke-WebRequest -Uri $uvZipUrl -OutFile $uvZipPath
+    Expand-Archive -Path $uvZipPath -DestinationPath $BinDir -Force
+    Remove-Item -Path $uvZipPath -Force
 }
 
-$pyVersion = & python --version 2>&1
-Write-Host "Using $pyVersion" -ForegroundColor Cyan
-
-# ── Create venv if missing ───────────────────────────────────────
+# ── Create venv via UV ───────────────────────────────────────────
 
 if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
-    Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-    & python -m venv $VenvDir
+    Write-Host "Creating virtual environment (downloading Python 3.11 if needed)..." -ForegroundColor Yellow
+    & $UvExe venv $VenvDir --python 3.11
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Failed to create venv." -ForegroundColor Red
         exit 1
@@ -86,10 +94,10 @@ $activateScript = "$VenvDir\Scripts\Activate.ps1"
 # ── Install / update dependencies ────────────────────────────────
 
 $requirementsFile = Join-Path $VoiceBackendDir "requirements.txt"
-Write-Host "Installing dependencies..." -ForegroundColor Yellow
-& pip install -q -r $requirementsFile
+Write-Host "Installing dependencies using uv..." -ForegroundColor Yellow
+& $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q -r $requirementsFile
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: pip install failed." -ForegroundColor Red
+    Write-Host "ERROR: uv pip install failed." -ForegroundColor Red
     exit 1
 }
 
@@ -130,4 +138,4 @@ if (-not [string]::IsNullOrWhiteSpace($TtsVoiceId)) {
     $pythonArgs += @("--tts-voice-id", $TtsVoiceId.Trim())
 }
 
-& python @pythonArgs
+& "$VenvDir\Scripts\python.exe" @pythonArgs
