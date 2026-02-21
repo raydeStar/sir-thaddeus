@@ -24,7 +24,11 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
-        _http.Timeout = TimeSpan.FromSeconds(120);
+        
+        // ── Sir Thaddeus notes: A butler must exhibit patience! ───
+        // Local GPUs require time to sweep their VRAM floors. 
+        // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
+        _http.Timeout = TimeSpan.FromSeconds(300);
 
         _json = new JsonSerializerOptions
         {
@@ -99,10 +103,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
         // ── Self-healing: regex failure → retry without extras ────────
-        // Some models / model backends choke on non-standard params
-        // (repetition_penalty) or certain stop sequences. If we detect
-        // the characteristic "Failed to process regex" 400, retry once
-        // with a bare request. This keeps the client model-agnostic.
+        // Sir Thaddeus notes: When the magic fizzles, try a simpler spell.
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
@@ -115,6 +116,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 return await ParseResponse(response, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            
+            // If the bare request still fails, it is highly likely the local model 
+            // is not properly instructed for tool schemas. We must inform the user elegantly.
+            throw new HttpRequestException(
+                $"Enterprise Alert: The local model failed to parse the tool schema. " +
+                $"Please ensure you are using an 'Instruct' or tool-calling capable model in LM Studio. " +
+                $"Original LLM error: {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
         }
 
         throw new HttpRequestException(

@@ -25,6 +25,11 @@ namespace SirThaddeus.Agent;
 //   I3 — No side effects without explicit permission
 //   I4 — Audit is always on; every tool call is logged
 //   D2 — Redaction by default (OCR text, file content, etc.)
+//
+// TODO: ROADMAP MARKER - Full MCP Protocol Support
+// This architecture must eventually support the `Resources` and `Prompts`
+// endpoints of the Model Context Protocol (MCP) to be truly enterprise-grade.
+// Currently, only the `Tools` facet is orchestrated and audited here.
 // ─────────────────────────────────────────────────────────────────────────
 
 /// <summary>
