@@ -102,15 +102,18 @@ public sealed record VoiceHostRuntimeOptions(
             max: 30_000,
             argName: "--backend-shutdown-grace-ms");
 
+        var normalizedTtsEngine = NormalizeTtsEngine(ttsEngineRaw);
+        var normalizedTtsVoiceId = NormalizeTtsVoiceId(normalizedTtsEngine, ttsVoiceIdRaw);
+
         return new VoiceHostRuntimeOptions(
             bindIp,
             port,
             backendMode,
             asrUri,
             ttsUri,
-            NormalizeTtsEngine(ttsEngineRaw),
+            normalizedTtsEngine,
             ttsModelIdRaw,
-            ttsVoiceIdRaw,
+            normalizedTtsVoiceId,
             NormalizeSttEngine(sttEngineRaw),
             NormalizeSttModelId(sttEngineRaw, sttModelIdRaw),
             NormalizeSttLanguage(sttLanguageRaw),
@@ -202,6 +205,18 @@ public sealed record VoiceHostRuntimeOptions(
             "kokoro" => "kokoro",
             _ => value
         };
+    }
+
+    private static string NormalizeTtsVoiceId(string normalizedTtsEngine, string raw)
+    {
+        var voiceId = string.IsNullOrWhiteSpace(raw) ? "" : raw.Trim();
+        if (string.IsNullOrWhiteSpace(voiceId) &&
+            string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+        {
+            return "bm_lewis";
+        }
+
+        return voiceId;
     }
 
     private static string NormalizeSttEngine(string raw)
