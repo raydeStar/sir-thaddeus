@@ -300,9 +300,17 @@ public sealed partial class SettingsViewModel : ViewModelBase
             if (!string.IsNullOrWhiteSpace(configured))
                 return configured;
 
-            return string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase)
-                ? DefaultKokoroVoiceId
-                : "";
+            if (!string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase))
+                return "";
+
+            var preferredVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
+                _personalityStore,
+                _personalityProfilesDirectory,
+                _settings.ActivePersonalityId);
+            if (!string.IsNullOrWhiteSpace(preferredVoiceId))
+                return preferredVoiceId;
+
+            return DefaultKokoroVoiceId;
         }
         set
         {
@@ -512,15 +520,10 @@ public sealed partial class SettingsViewModel : ViewModelBase
             : s.Voice.VoiceHostHealthPath.Trim();
         _voiceTtsEngine = s.Voice.GetNormalizedTtsEngine();
         _voiceTtsModelId = s.Voice.GetResolvedTtsModelId();
-        _voiceTtsVoiceId = s.Voice.GetResolvedTtsVoiceId();
+        _voiceTtsVoiceId = string.IsNullOrWhiteSpace(s.Voice.TtsVoiceId)
+            ? ""
+            : s.Voice.TtsVoiceId.Trim();
         _personalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(s);
-        if (string.IsNullOrWhiteSpace(_voiceTtsVoiceId))
-        {
-            _voiceTtsVoiceId = PersonalityVoicePreferenceResolver.ResolvePreferredTtsVoiceId(
-                _personalityStore,
-                _personalityProfilesDirectory,
-                s.ActivePersonalityId);
-        }
         // Front-end ASR stays pinned to faster-whisper.
         _voiceSttEngine = "faster-whisper";
         _voiceSttModelId = ResolveFrontendSttModelIdForUi(s.Voice);
@@ -1682,6 +1685,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         }
         else
         {
+            OnPropertyChanged(nameof(SelectedKokoroVoice));
             StatusText = "Personality selected.";
         }
 
