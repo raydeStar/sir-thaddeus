@@ -1104,8 +1104,11 @@ class ProviderRegistry:
         resolved_engine = normalize_tts_engine(engine or self.runtime_config.tts_engine)
         resolved_model = (model_id or self.runtime_config.tts_model_id or "").strip()
         resolved_voice = (voice_id or self.runtime_config.tts_voice_id or "").strip()
+
+        # Enforce the system default voice constraint if kokoro is used without a voice
         if resolved_engine == "kokoro" and not resolved_voice:
             resolved_voice = "bm_lewis"
+
         key = (resolved_engine, resolved_model, resolved_voice)
         with self._lock:
             provider = self._tts_cache.get(key)

@@ -49,6 +49,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     private readonly IAuditLogger _auditLogger;
     private readonly LocalTtsHttpClient? _localTtsClient;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
+    private readonly TextToSpeechService? _fallbackTtsService;
     private readonly object _gate = new();
 
     private WaveOutEvent? _activeOutput;
@@ -66,11 +67,13 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
     public AudioPlaybackService(
         IAuditLogger auditLogger,
         Func<VoiceSettings> voiceSettingsProvider,
-        LocalTtsHttpClient? localTtsClient = null)
+        LocalTtsHttpClient? localTtsClient = null,
+        TextToSpeechService? fallbackTtsService = null)
     {
         _auditLogger = auditLogger ?? throw new ArgumentNullException(nameof(auditLogger));
         _voiceSettingsProvider = voiceSettingsProvider ?? throw new ArgumentNullException(nameof(voiceSettingsProvider));
         _localTtsClient = localTtsClient;
+        _fallbackTtsService = fallbackTtsService;
     }
 
     public bool IsPlaying
@@ -114,6 +117,33 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         {
             var voiceSettings = GetVoiceSettingsSnapshot();
             var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();
+
+            if (selectedTtsEngine == "windows")
+            {
+                if (_fallbackTtsService is not null)
+                {
+                    foreach (var chunkText in textChunks)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await _fallbackTtsService.SpeakAsync(chunkText, cancellationToken);
+                    }
+                }
+                else
+                {
+                    _auditLogger.Append(new AuditEvent
+                    {
+                        Actor = "voice",
+                        Action = "VOICE_TTS_SKIPPED",
+                        Result = "warn",
+                        Details = new Dictionary<string, object>
+                        {
+                            ["sessionId"] = sessionId,
+                            ["reason"] = "no_fallback_tts_service_for_windows"
+                        }
+                    });
+                }
+                return;
+            }
 
             if (_localTtsClient is null)
             {

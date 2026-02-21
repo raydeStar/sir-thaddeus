@@ -34,9 +34,7 @@ public static class BrandIcon
             var icoPath = ResolveOutputPath("sir-thaddeus-tray.ico");
             if (File.Exists(icoPath))
             {
-                // Clone through stream to avoid long-lived file locks.
-                using var fs = File.OpenRead(icoPath);
-                return new Icon(fs, 16, 16);
+                return new Icon(icoPath, 16, 16);
             }
         }
         catch
