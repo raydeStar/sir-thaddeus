@@ -76,7 +76,8 @@ public sealed partial class PersonalityProfileValidator
         "response_priority_order",
         "conflict_resolution",
         "failure_behavior",
-        "style_rules"
+        "style_rules",
+        "few_shot_examples"
     ];
 
     private static readonly HashSet<string> InstructionArrayProperties =
@@ -84,7 +85,8 @@ public sealed partial class PersonalityProfileValidator
         "response_priority_order",
         "conflict_resolution",
         "failure_behavior",
-        "style_rules"
+        "style_rules",
+        "few_shot_examples"
     ];
 
     private static readonly HashSet<string> ContextModifiersProperties =
@@ -379,6 +381,10 @@ public sealed partial class PersonalityProfileValidator
             result = ValidateStringArrayField(instructions, "style_rules", "instructions");
             if (!result.IsValid)
                 return result;
+
+            result = ValidateFewShotExamplesField(instructions);
+            if (!result.IsValid)
+                return result;
         }
 
         if (root.TryGetProperty("context_modifiers", out var contextModifiers))
@@ -503,6 +509,52 @@ public sealed partial class PersonalityProfileValidator
                     PersonalityValidationReasonCode.InvalidSchema,
                     $"{scope}.{propertyName} entries must be strings.");
             }
+        }
+
+        return PersonalityValidationResult.Ok();
+    }
+
+    private static readonly HashSet<string> FewShotExampleProperties =
+    [
+        "user",
+        "assistant"
+    ];
+
+    private static PersonalityValidationResult ValidateFewShotExamplesField(JsonElement instructions)
+    {
+        if (!instructions.TryGetProperty("few_shot_examples", out var examples))
+            return PersonalityValidationResult.Ok();
+
+        if (examples.ValueKind != JsonValueKind.Array)
+        {
+            return PersonalityValidationResult.Fail(
+                PersonalityValidationReasonCode.InvalidSchema,
+                "instructions.few_shot_examples must be an array.");
+        }
+
+        var index = 0;
+        foreach (var item in examples.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                return PersonalityValidationResult.Fail(
+                    PersonalityValidationReasonCode.InvalidSchema,
+                    $"instructions.few_shot_examples[{index}] must be an object with 'user' and 'assistant' string fields.");
+            }
+
+            var fieldCheck = ValidateObjectFields(item, FewShotExampleProperties, $"instructions.few_shot_examples[{index}]");
+            if (!fieldCheck.IsValid)
+                return fieldCheck;
+
+            if (!item.TryGetProperty("user", out var user) || user.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("assistant", out var assistant) || assistant.ValueKind != JsonValueKind.String)
+            {
+                return PersonalityValidationResult.Fail(
+                    PersonalityValidationReasonCode.InvalidSchema,
+                    $"instructions.few_shot_examples[{index}] must have 'user' and 'assistant' string fields.");
+            }
+
+            index++;
         }
 
         return PersonalityValidationResult.Ok();
