@@ -30,6 +30,10 @@ public sealed class VoiceSessionOrchestrator :
     private readonly IVoiceAgentService _agent;
     private readonly IAuditLogger _audit;
     private readonly VoiceSessionOrchestratorOptions _options;
+    private readonly object _timeoutsGate = new();
+    private TimeSpan _asrTimeout;
+    private TimeSpan _agentTimeout;
+    private TimeSpan _speakingTimeout;
     private readonly TimeProvider _timeProvider;
 
     private readonly Channel<VoiceEvent> _events =
@@ -67,6 +71,9 @@ public sealed class VoiceSessionOrchestrator :
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options ?? new VoiceSessionOrchestratorOptions();
+        _asrTimeout = _options.AsrTimeout;
+        _agentTimeout = _options.AgentTimeout;
+        _speakingTimeout = _options.SpeakingTimeout;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -93,6 +100,19 @@ public sealed class VoiceSessionOrchestrator :
         {
             lock (_sessionGate)
                 return _currentSessionId;
+        }
+    }
+
+    /// <summary>
+    /// Applies runtime timeout updates without recreating the voice pipeline.
+    /// </summary>
+    public void UpdateTimeouts(TimeSpan asrTimeout, TimeSpan agentTimeout, TimeSpan speakingTimeout)
+    {
+        lock (_timeoutsGate)
+        {
+            _asrTimeout = asrTimeout <= TimeSpan.Zero ? TimeSpan.FromSeconds(45) : asrTimeout;
+            _agentTimeout = agentTimeout <= TimeSpan.Zero ? TimeSpan.FromSeconds(90) : agentTimeout;
+            _speakingTimeout = speakingTimeout <= TimeSpan.Zero ? TimeSpan.FromSeconds(90) : speakingTimeout;
         }
     }
 
@@ -360,9 +380,10 @@ public sealed class VoiceSessionOrchestrator :
 
             try
             {
+                var asrTimeout = GetAsrTimeout();
                 transcript = await ExecuteWithTimeoutAsync(
                     ct => _asr.TranscribeAsync(clip, sessionId, ct),
-                    _options.AsrTimeout,
+                    asrTimeout,
                     SessionToken(sessionId));
             }
             catch (OperationCanceledException)
@@ -416,9 +437,10 @@ public sealed class VoiceSessionOrchestrator :
         VoiceAgentResponse response;
         try
         {
+            var agentTimeout = GetAgentTimeout();
             response = await ExecuteWithTimeoutAsync(
                 ct => _agent.ProcessAsync(transcript, sessionId, ct),
-                _options.AgentTimeout,
+                agentTimeout,
                 SessionToken(sessionId));
         }
         catch (OperationCanceledException)
@@ -499,9 +521,10 @@ public sealed class VoiceSessionOrchestrator :
         SetState(VoiceState.Speaking, "Playback");
         try
         {
+            var speakingTimeout = GetSpeakingTimeout();
             await ExecuteWithTimeoutAsync(
                 ct => _playback.PlayTextAsync(responseForVoiceUiAndSpeech, sessionId, ct),
-                _options.SpeakingTimeout,
+                speakingTimeout,
                 SessionToken(sessionId));
         }
         catch (OperationCanceledException)
@@ -841,6 +864,24 @@ public sealed class VoiceSessionOrchestrator :
         {
             throw new TimeoutException("Voice stage timed out.");
         }
+    }
+
+    private TimeSpan GetAsrTimeout()
+    {
+        lock (_timeoutsGate)
+            return _asrTimeout;
+    }
+
+    private TimeSpan GetAgentTimeout()
+    {
+        lock (_timeoutsGate)
+            return _agentTimeout;
+    }
+
+    private TimeSpan GetSpeakingTimeout()
+    {
+        lock (_timeoutsGate)
+            return _speakingTimeout;
     }
 
     private void FireProgress(

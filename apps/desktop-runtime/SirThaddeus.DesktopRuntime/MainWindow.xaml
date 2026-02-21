@@ -1287,7 +1287,7 @@
                                FontSize="11" FontWeight="Bold"
                                Foreground="{StaticResource MauveBrush}"
                                Margin="0,0,0,8"/>
-                    <TextBlock Text="Who is using the assistant right now? The selected profile is automatically injected so the assistant knows your name, preferences, and context."
+                    <TextBlock Text="Who is using the assistant right now? The selected profile is injected automatically. You can also set a profile-specific Near Me location here."
                                FontSize="11.5"
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
@@ -1298,7 +1298,45 @@
                               DisplayMemberPath="DisplayLabel"
                               Style="{StaticResource DarkComboBoxStyle}"
                               ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
-                              Margin="0,0,0,20"/>
+                              Margin="0,0,0,8"/>
+
+                    <WrapPanel Margin="0,0,0,12">
+                        <Button Content="+ Add Profile"
+                                Command="{Binding AddActiveProfileCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,8"/>
+                        <Button Content="Edit JSON"
+                                Command="{Binding EditActiveProfileJsonCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,8"/>
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshActiveProfilesCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,0,8"/>
+                    </WrapPanel>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Near Me location"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LocationLabel, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"
+                                 Margin="8,0,8,0"
+                                 ToolTip="City, State or ZIP for this profile"/>
+                        <Button Grid.Column="2"
+                                Content="Clear"
+                                Click="ClearManualLocation_Click"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </Grid>
 
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"
@@ -1609,8 +1647,8 @@
                                 </StackPanel>
                             </Expander>
 
-                            <!-- ── Privacy & Location ────────────────── -->
-                            <Expander Header="Privacy &amp; Location" Foreground="{StaticResource BlueBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
+                            <!-- ── Privacy ───────────────────────────── -->
+                            <Expander Header="Privacy" Foreground="{StaticResource BlueBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
                                 <StackPanel Margin="0,12,0,0">
                                     <TextBlock Text="Device location: OFF (not used)"
                                                FontSize="12"
@@ -1622,34 +1660,11 @@
                                                Foreground="{StaticResource Overlay0Brush}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,2"/>
-                                    <TextBlock Text="Location (optional): Manual city/ZIP stored locally."
+                                    <TextBlock Text="Near Me location is profile-scoped and can be edited in the Active Profile section above."
                                                FontSize="10.5"
                                                Foreground="{StaticResource Overlay0Brush}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,10"/>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Manual location"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <TextBox Grid.Column="1"
-                                                 Text="{Binding LocationLabel, UpdateSourceTrigger=LostFocus}"
-                                                 Style="{StaticResource ChatInputStyle}"
-                                                 FontSize="12"
-                                                 Padding="8,6"
-                                                 ToolTip="City, State or ZIP"/>
-                                    </Grid>
-                                    <StackPanel Orientation="Horizontal"
-                                                HorizontalAlignment="Right"
-                                                Margin="0,0,0,8">
-                                        <Button Content="Clear location"
-                                                Click="ClearManualLocation_Click"
-                                                Style="{StaticResource MemoryActionButtonStyle}"/>
-                                    </StackPanel>
                                 </StackPanel>
                             </Expander>
 

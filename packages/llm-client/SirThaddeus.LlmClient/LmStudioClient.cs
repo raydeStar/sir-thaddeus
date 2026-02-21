@@ -12,7 +12,8 @@ namespace SirThaddeus.LlmClient;
 public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
     private readonly HttpClient _http;
-    private readonly LlmClientOptions _options;
+    private readonly object _optionsGate = new();
+    private LlmClientOptions _options;
     private readonly JsonSerializerOptions _json;
     private long _promptTokensTotal;
     private long _completionTokensTotal;
@@ -23,7 +24,11 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
-        _http.Timeout = TimeSpan.FromSeconds(120);
+        
+        // ── Sir Thaddeus notes: A butler must exhibit patience! ───
+        // Local GPUs require time to sweep their VRAM floors. 
+        // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
+        _http.Timeout = TimeSpan.FromSeconds(300);
 
         _json = new JsonSerializerOptions
         {
@@ -31,6 +36,24 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             PropertyNameCaseInsensitive = true
         };
+    }
+
+    /// <summary>
+    /// Applies updated transport/model settings at runtime.
+    /// This avoids requiring a full app restart after saving Settings.
+    /// </summary>
+    public void UpdateOptions(LlmClientOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        lock (_optionsGate)
+        {
+            _options = options;
+
+            var targetBase = options.BaseUrl.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(targetBase))
+                _http.BaseAddress = new Uri(targetBase);
+        }
     }
 
     /// <inheritdoc />
@@ -80,10 +103,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
         // ── Self-healing: regex failure → retry without extras ────────
-        // Some models / model backends choke on non-standard params
-        // (repetition_penalty) or certain stop sequences. If we detect
-        // the characteristic "Failed to process regex" 400, retry once
-        // with a bare request. This keeps the client model-agnostic.
+        // Sir Thaddeus notes: When the magic fizzles, try a simpler spell.
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
@@ -96,6 +116,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 return await ParseResponse(response, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            
+            // If the bare request still fails, it is highly likely the local model 
+            // is not properly instructed for tool schemas. We must inform the user elegantly.
+            throw new HttpRequestException(
+                $"Enterprise Alert: The local model failed to parse the tool schema. " +
+                $"Please ensure you are using an 'Instruct' or tool-calling capable model in LM Studio. " +
+                $"Original LLM error: {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
         }
 
         throw new HttpRequestException(
@@ -208,12 +235,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         int? maxTokensOverride,
         bool includeExtras)
     {
+        var options = GetOptionsSnapshot();
         var body = new Dictionary<string, object>
         {
-            ["model"]       = _options.Model,
+            ["model"]       = options.Model,
             ["messages"]    = messages,
-            ["max_tokens"]  = maxTokensOverride ?? _options.MaxTokens,
-            ["temperature"] = _options.Temperature,
+            ["max_tokens"]  = maxTokensOverride ?? options.MaxTokens,
+            ["temperature"] = options.Temperature,
             ["stream"]      = false
         };
 
@@ -221,12 +249,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         {
             // Repetition penalty — not part of the OpenAI spec, but
             // supported by llama.cpp / LM Studio for most models.
-            if (_options.RepetitionPenalty is > 0 and not 1.0)
-                body["repetition_penalty"] = _options.RepetitionPenalty;
+            if (options.RepetitionPenalty is > 0 and not 1.0)
+                body["repetition_penalty"] = options.RepetitionPenalty;
 
             // Stop sequences — plain-text only (no template tokens).
-            if (_options.StopSequences is { Length: > 0 })
-                body["stop"] = _options.StopSequences;
+            if (options.StopSequences is { Length: > 0 })
+                body["stop"] = options.StopSequences;
         }
 
         if (tools is { Count: > 0 })
@@ -280,8 +308,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
     public LlmUsageSnapshot GetUsageSnapshot()
     {
-        var contextWindow = _options.ContextWindowTokens > 0
-            ? _options.ContextWindowTokens
+        var options = GetOptionsSnapshot();
+        var contextWindow = options.ContextWindowTokens > 0
+            ? options.ContextWindowTokens
             : 8192;
 
         return new LlmUsageSnapshot
@@ -327,6 +356,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+    }
+
+    private LlmClientOptions GetOptionsSnapshot()
+    {
+        lock (_optionsGate)
+            return _options;
     }
 
     private void TrackUsage(TokenUsage? usage)
