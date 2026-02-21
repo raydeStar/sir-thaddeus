@@ -83,7 +83,17 @@ public static class BrandIcon
 
     private static string ResolveOutputPath(string fileName)
     {
-        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "";
-        return Path.Combine(asmDir, "assets", "icons", fileName);
+        // AppContext.BaseDirectory works correctly in single-file publish
+        // (Assembly.Location returns empty string in that scenario).
+        var baseDir = AppContext.BaseDirectory;
+        
+        // Try assets/icons/ first (standard layout), then bin/assets/icons/ (ZIP layout)
+        var standard = Path.Combine(baseDir, "assets", "icons", fileName);
+        if (File.Exists(standard)) return standard;
+        
+        var binPath = Path.Combine(baseDir, "bin", "assets", "icons", fileName);
+        if (File.Exists(binPath)) return binPath;
+        
+        return standard; // Return standard path even if missing (callers handle null)
     }
 }

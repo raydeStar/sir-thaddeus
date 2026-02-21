@@ -135,8 +135,10 @@ public static class KokoroVoiceCatalog
 
         var baseDir = AppContext.BaseDirectory;
 
-        // Published layout: voices/ folder adjacent to the executable.
+        // Published layout: voices/ folder adjacent to the executable,
+        // or inside the bin/ support subfolder for cleanest layout.
         yield return Path.Combine(baseDir, "voices");
+        yield return Path.Combine(baseDir, "bin", "voices");
 
         // Dev build layout:
         //   AppContext.BaseDirectory = apps/desktop-runtime/.../bin/Debug/net8.0-windows/

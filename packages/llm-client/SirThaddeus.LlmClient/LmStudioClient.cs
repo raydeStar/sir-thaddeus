@@ -11,7 +11,7 @@ namespace SirThaddeus.LlmClient;
 /// </summary>
 public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
-    private readonly HttpClient _http;
+    private HttpClient _http;
     private readonly object _optionsGate = new();
     private LlmClientOptions _options;
     private readonly JsonSerializerOptions _json;
@@ -40,7 +40,8 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
     /// <summary>
     /// Applies updated transport/model settings at runtime.
-    /// This avoids requiring a full app restart after saving Settings.
+    /// Creates a fresh HttpClient because .NET forbids changing
+    /// BaseAddress after the first request has been sent.
     /// </summary>
     public void UpdateOptions(LlmClientOptions options)
     {
@@ -52,7 +53,24 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
             var targetBase = options.BaseUrl.TrimEnd('/');
             if (!string.IsNullOrWhiteSpace(targetBase))
-                _http.BaseAddress = new Uri(targetBase);
+            {
+                // HttpClient.BaseAddress is immutable after first use.
+                // Replace the entire client to avoid InvalidOperationException.
+                var oldClient = _http;
+                _http = new HttpClient
+                {
+                    BaseAddress = new Uri(targetBase),
+                    Timeout = TimeSpan.FromSeconds(300)
+                };
+
+                // Dispose the old client on a background thread to avoid
+                // blocking if a request is in flight.
+                Task.Run(() =>
+                {
+                    try { oldClient.Dispose(); }
+                    catch { /* best effort */ }
+                });
+            }
         }
     }
 
