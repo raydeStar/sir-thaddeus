@@ -45,14 +45,18 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 
             log("AGENT_LLM_CALL", $"Round trip #{roundTrips}");
             LlmResponse response;
+            
+            var messagesToSend = request.History.ToList();
+            AgentOrchestrator.InjectFewShotExamplesInPlace(messagesToSend, request.FewShotExamples);
+
             try
             {
-                response = await _llm.ChatAsync(request.History, tools, cancellationToken);
+                response = await _llm.ChatAsync(messagesToSend, tools, cancellationToken);
             }
             catch (HttpRequestException ex) when (IsLmStudioRegexFailure(ex) && tools is { Count: > 0 })
             {
                 log("AGENT_LLM_REGEX_RETRY", "LM Studio regex failure - retrying without tools");
-                response = await _llm.ChatAsync(request.History, tools: null, cancellationToken);
+                response = await _llm.ChatAsync(messagesToSend, tools: null, cancellationToken);
             }
 
             if (response.IsComplete || response.ToolCalls is not { Count: > 0 })
