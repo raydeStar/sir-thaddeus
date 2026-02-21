@@ -53,7 +53,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VoiceBackendDir = Resolve-Path "$PSScriptRoot\..\apps\voice-backend"
+$VoiceBackendDir = $PSScriptRoot
 $VenvDir = Join-Path $VoiceBackendDir ".venv"
 
 # ── Check Python ─────────────────────────────────────────────────

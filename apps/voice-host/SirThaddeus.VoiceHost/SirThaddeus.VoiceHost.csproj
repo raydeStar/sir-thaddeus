@@ -28,6 +28,13 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('..\..\voice-backend\start-voice-backend.ps1')">
+    <None Include="..\..\voice-backend\start-voice-backend.ps1"
+          Link="voice\start-voice-backend.ps1"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup Condition="Exists('..\..\voice-backend\model_downloader.py')">
     <None Include="..\..\voice-backend\model_downloader.py"
           Link="voice\model_downloader.py"
