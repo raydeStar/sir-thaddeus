@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 import wave
+import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -735,10 +736,22 @@ class KokoroProvider(BaseProvider):
             return wav_bytes, sample_rate
 
         generator = self._runtime(text, voice=self.voice_id)
-        chunk = next(iter(generator))
-        audio_data = chunk[-1] if isinstance(chunk, (tuple, list)) else chunk
+        
+        all_audio = []
         sample_rate = int(getattr(self._runtime, "sample_rate", 24000))
-        wav_bytes = convert_audio_to_wav_bytes(audio_data, sample_rate)
+
+        for chunk in generator:
+            if chunk is None:
+                continue
+            audio_data = chunk[-1] if isinstance(chunk, (tuple, list)) else chunk
+            all_audio.append(audio_data)
+
+        if not all_audio:
+            # Fallback for empty synthesis
+            return convert_audio_to_wav_bytes(np.zeros(0), sample_rate), sample_rate
+
+        final_audio = np.concatenate(all_audio) if len(all_audio) > 1 else all_audio[0]
+        wav_bytes = convert_audio_to_wav_bytes(final_audio, sample_rate)
         return wav_bytes, sample_rate
 
     def _run_init_probe(self) -> InitProbeResult:
