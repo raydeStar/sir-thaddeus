@@ -1917,6 +1917,7 @@
                                         <ComboBox Grid.Column="1"
                                                   ItemsSource="{Binding AvailableKokoroVoices}"
                                                   SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Text="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   IsEditable="True"
                                                   IsTextSearchEnabled="True"
                                                   Style="{StaticResource DarkComboBoxStyle}"

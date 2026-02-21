@@ -466,6 +466,28 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             }
 
             process.EnableRaisingEvents = true;
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
+                    {
+                        ["pid"] = process.Id,
+                        ["line"] = e.Data.Trim()
+                    });
+                }
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
+                    {
+                        ["pid"] = process.Id,
+                        ["line"] = e.Data.Trim()
+                    });
+                }
+            };
             process.Exited += (_, _) =>
             {
                 WriteAudit("VOICEHOST_PROCESS_EXITED", "ok", new Dictionary<string, object>
