@@ -24,6 +24,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 /// </summary>
 public sealed partial class SettingsViewModel : ViewModelBase
 {
+    private const string DefaultKokoroVoiceId = "bm_lewis";
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
     private readonly YouTubeJobsHttpClient _youtubeJobsClient;
@@ -161,7 +162,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
-    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) MarkDirty(); } }
+    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
     public string VoiceTtsVoiceId 
     { 
@@ -293,7 +294,16 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// </summary>
     public string? SelectedKokoroVoice
     {
-        get => string.IsNullOrWhiteSpace(_voiceTtsVoiceId) ? "" : _voiceTtsVoiceId;
+        get
+        {
+            var configured = (_voiceTtsVoiceId ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
+                return configured;
+
+            return string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase)
+                ? DefaultKokoroVoiceId
+                : "";
+        }
         set
         {
             var normalized = (value ?? "").Trim();
@@ -570,6 +580,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceTtsEngine));
         OnPropertyChanged(nameof(VoiceTtsModelId));
         OnPropertyChanged(nameof(VoiceTtsVoiceId));
+        OnPropertyChanged(nameof(SelectedKokoroVoice));
         OnPropertyChanged(nameof(VoiceSttEngine));
         OnPropertyChanged(nameof(VoiceSttModelId));
         OnPropertyChanged(nameof(VoicePreferLocalTts));

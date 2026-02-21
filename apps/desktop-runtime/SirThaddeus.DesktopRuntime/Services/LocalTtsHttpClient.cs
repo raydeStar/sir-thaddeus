@@ -13,6 +13,7 @@ namespace SirThaddeus.DesktopRuntime.Services;
 /// </summary>
 public sealed class LocalTtsHttpClient : IDisposable
 {
+    private const string DefaultKokoroVoiceId = "bm_lewis";
     private readonly HttpClient _httpClient;
     private readonly Func<string> _baseUrlProvider;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
@@ -62,7 +63,7 @@ public sealed class LocalTtsHttpClient : IDisposable
         var requestId = BuildRequestId(sessionId);
         var engine = voiceSettings.GetNormalizedTtsEngine();
         var modelId = voiceSettings.GetResolvedTtsModelId();
-        var voiceId = voiceSettings.GetResolvedTtsVoiceId();
+        var voiceId = ResolveEffectiveVoiceId(voiceSettings);
         var payloadJson = JsonSerializer.Serialize(new
         {
             text,
@@ -70,7 +71,7 @@ public sealed class LocalTtsHttpClient : IDisposable
             engine,
             modelId,
             voiceId,
-            voice = string.IsNullOrWhiteSpace(voiceId) ? "default" : voiceId,
+            voice = voiceId,
             format = "pcm_s16le",
             sampleRate = 24000,
             sessionId
@@ -107,6 +108,24 @@ public sealed class LocalTtsHttpClient : IDisposable
                 Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
             };
             retryRequest.Headers.TryAddWithoutValidation("X-Request-Id", requestId);
+
+            _auditLogger.Append(new AuditEvent
+            {
+                Actor = "voice",
+                Action = "VOICE_TTS_REQUEST",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["sessionId"] = sessionId,
+                    ["requestId"] = requestId,
+                    ["attempt"] = attempt,
+                    ["engine"] = engine,
+                    ["modelId"] = modelId,
+                    ["voiceId"] = voiceId,
+                    ["endpoint"] = endpoint,
+                    ["textLength"] = text.Length
+                }
+            });
 
             try
             {
@@ -199,6 +218,17 @@ public sealed class LocalTtsHttpClient : IDisposable
         });
 
         return audioBytes;
+    }
+
+    private static string ResolveEffectiveVoiceId(VoiceSettings voiceSettings)
+    {
+        var resolved = voiceSettings.GetResolvedTtsVoiceId();
+        if (!string.IsNullOrWhiteSpace(resolved))
+            return resolved;
+
+        return string.Equals(voiceSettings.GetNormalizedTtsEngine(), "kokoro", StringComparison.OrdinalIgnoreCase)
+            ? DefaultKokoroVoiceId
+            : "";
     }
 
     private static bool IsRetryableStartupStatusCode(HttpStatusCode statusCode)
