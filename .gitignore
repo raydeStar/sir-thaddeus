@@ -89,3 +89,4 @@ packages/requested-files.zip
 # Generated YouTube transcript jobs (runtime output)
 data/youtube/
 apps/voice-backend/data/youtube/
+.cursor/rules/oss-comments.mdc
