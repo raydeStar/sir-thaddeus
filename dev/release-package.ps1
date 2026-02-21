@@ -114,29 +114,78 @@ $projects = @(
 )
 
 foreach ($project in $projects) {
-    Write-Host "  Publishing $project"
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
+    $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
+    
+    if (Test-Path $projectPublishDir) {
+        Remove-Item -Path $projectPublishDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $projectPublishDir | Out-Null
+
+    Write-Host "  Publishing $project to $projectPublishDir"
     dotnet publish $project `
         -c $Configuration `
         -r $Runtime `
         --self-contained $selfContainedValue `
-        -o $publishDir
+        -o $projectPublishDir
     if ($LASTEXITCODE -ne 0) {
         Fail "dotnet publish failed for $project (exit code $LASTEXITCODE)." $LASTEXITCODE
     }
 }
 
-Write-Section "Stage Package Contents"
+# ── Structured staging ───────────────────────────────────────────────
+#
+#  ZIP root/
+#   ├── SirThaddeus.DesktopRuntime.exe   ← user double-clicks this
+#   ├── SirThaddeus.McpServer.exe
+#   ├── SirThaddeus.VoiceHost.exe
+#   ├── README_FIRST_RUN.md
+#   └── bin/                             ← support files (DLLs, assets, voice/)
+#
+
+Write-Section "Stage Artifacts"
+
 if (Test-Path $stageDir) {
     Remove-Item -Path $stageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+$binDir = Join-Path $stageDir "bin"
+New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
-Copy-Item -Path (Join-Path $publishDir "*") -Destination $stageDir -Recurse -Force
+foreach ($project in $projects) {
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
+    $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
+
+    Write-Host "  Staging $projectName files..."
+    Get-ChildItem -Path $projectPublishDir -Recurse | ForEach-Object {
+        $relativePath = $_.FullName.Substring($projectPublishDir.Length).TrimStart('\')
+        $isExe = ($_.Extension -eq ".exe" -and $relativePath -notmatch '\\')
+
+        if ($isExe) {
+            # Top-level EXEs land at the ZIP root
+            $dest = Join-Path $stageDir $_.Name
+        }
+        elseif ($_.PSIsContainer) {
+            # Recreate subdirectories under bin/
+            $dest = Join-Path $binDir $relativePath
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            return
+        }
+        else {
+            # Everything else (DLLs, assets, voice/) goes into bin/
+            $dest = Join-Path $binDir $relativePath
+            $destParent = Split-Path $dest -Parent
+            if (-not (Test-Path $destParent)) {
+                New-Item -ItemType Directory -Path $destParent -Force | Out-Null
+            }
+        }
+        Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
+    }
+}
 
 if (-not (Test-Path $firstRunReadmeSource)) {
     Fail "required file is missing: $firstRunReadmeSource"
 }
-
 Copy-Item -Path $firstRunReadmeSource -Destination (Join-Path $stageDir "README_FIRST_RUN.md") -Force
 
 if (Test-Path $settingsTemplateSource) {
@@ -167,7 +216,10 @@ if (Test-Path $binaryChecksumsPath) {
     Remove-Item $binaryChecksumsPath -Force
 }
 
-Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+# Using a more robust zip method for PS 5.1
+$sourcePath = $stageDir
+if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
+Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
 
 $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 "$($zipHash.Hash) *$archiveName" | Out-File -FilePath $checksumPath -Encoding ASCII -Force

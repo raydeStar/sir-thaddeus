@@ -25,6 +25,12 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>..\..\..\assets\icons\sir-thaddeus.ico</ApplicationIcon>
+    
+    <!-- Single File / Self Contained Optimizations -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -42,10 +48,12 @@
     <Content Include="..\..\..\assets\icons\sir-thaddeus.ico">
       <Link>assets\icons\sir-thaddeus.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\..\assets\icons\sir-thaddeus-tray.ico">
       <Link>assets\icons\sir-thaddeus-tray.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
 

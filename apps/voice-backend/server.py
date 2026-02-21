@@ -1071,6 +1071,8 @@ def build_runtime_config(
     resolved_tts_engine = normalize_tts_engine(tts_engine or os.environ.get("ST_VOICE_TTS_ENGINE"))
     resolved_tts_model = (tts_model_id or os.environ.get("ST_VOICE_TTS_MODEL_ID") or "").strip()
     resolved_tts_voice = (tts_voice_id or os.environ.get("ST_VOICE_TTS_VOICE_ID") or "").strip()
+    if resolved_tts_engine == "kokoro" and not resolved_tts_voice:
+        resolved_tts_voice = "bm_lewis"
     resolved_device = (stt_device or os.environ.get("WHISPER_DEVICE") or "cpu").strip().lower() or "cpu"
     resolved_port = port or int(os.environ.get("PORT", "8001"))
 
@@ -1102,6 +1104,11 @@ class ProviderRegistry:
         resolved_engine = normalize_tts_engine(engine or self.runtime_config.tts_engine)
         resolved_model = (model_id or self.runtime_config.tts_model_id or "").strip()
         resolved_voice = (voice_id or self.runtime_config.tts_voice_id or "").strip()
+
+        # Enforce the system default voice constraint if kokoro is used without a voice
+        if resolved_engine == "kokoro" and not resolved_voice:
+            resolved_voice = "bm_lewis"
+
         key = (resolved_engine, resolved_model, resolved_voice)
         with self._lock:
             provider = self._tts_cache.get(key)

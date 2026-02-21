@@ -75,7 +75,8 @@ public sealed record VoiceHostRuntimeOptions(
         var backendStartupTimeoutRaw = GetOrDefault(
             values,
             "backend-startup-timeout-ms",
-            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "15000");
+            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "120000");
+
         var backendShutdownGraceRaw = GetOrDefault(
             values,
             "backend-shutdown-grace-ms",
@@ -91,10 +92,11 @@ public sealed record VoiceHostRuntimeOptions(
         var autoStartBackends = ParseBool(autoStartRaw, fallback: true);
         var backendStartupTimeoutMs = ParseInt(
             backendStartupTimeoutRaw,
-            fallback: 15_000,
+            fallback: 120_000,
             min: 1_000,
-            max: 120_000,
+            max: 300_000,
             argName: "--backend-startup-timeout-ms");
+
         var backendShutdownGraceMs = ParseInt(
             backendShutdownGraceRaw,
             fallback: 2_500,
@@ -102,15 +104,18 @@ public sealed record VoiceHostRuntimeOptions(
             max: 30_000,
             argName: "--backend-shutdown-grace-ms");
 
+        var normalizedTtsEngine = NormalizeTtsEngine(ttsEngineRaw);
+        var normalizedTtsVoiceId = NormalizeTtsVoiceId(normalizedTtsEngine, ttsVoiceIdRaw);
+
         return new VoiceHostRuntimeOptions(
             bindIp,
             port,
             backendMode,
             asrUri,
             ttsUri,
-            NormalizeTtsEngine(ttsEngineRaw),
+            normalizedTtsEngine,
             ttsModelIdRaw,
-            ttsVoiceIdRaw,
+            normalizedTtsVoiceId,
             NormalizeSttEngine(sttEngineRaw),
             NormalizeSttModelId(sttEngineRaw, sttModelIdRaw),
             NormalizeSttLanguage(sttLanguageRaw),
@@ -202,6 +207,18 @@ public sealed record VoiceHostRuntimeOptions(
             "kokoro" => "kokoro",
             _ => value
         };
+    }
+
+    private static string NormalizeTtsVoiceId(string normalizedTtsEngine, string raw)
+    {
+        var voiceId = string.IsNullOrWhiteSpace(raw) ? "" : raw.Trim();
+        if (string.IsNullOrWhiteSpace(voiceId) &&
+            string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+        {
+            return "bm_lewis";
+        }
+
+        return voiceId;
     }
 
     private static string NormalizeSttEngine(string raw)

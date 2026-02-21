@@ -42,6 +42,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private readonly Action _closeWindow;
     private readonly IDialogueStatePersistence? _dialogueStatePersistence;
     private readonly Services.ChatHistoryPersistence? _chatHistoryPersistence;
+    private readonly SirThaddeus.DesktopRuntime.Services.VoiceHostProcessManager? _voiceManager;
     // Voice PTT delegates are now set as public properties (VoiceMicDown, VoiceMicUp, VoiceShutup)
     // after construction — the ViewModel doesn't own the orchestrator.
 
@@ -63,7 +64,9 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private CancellationTokenSource? _processingCts;
     private Guid? _currentSessionId;
 
-    // ── Voice debug state ────────────────────────────────────────────
+    // ── Voice debug & readiness state ─────────────────────────────────────────
+    private bool _isVoiceReady = true;
+    private string _voiceWarmupStatus = "";
     private string _voiceStatusText = "";
     private string _voiceTranscriptText = "";
     private bool _isVoiceActive;
@@ -99,7 +102,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         IAuditLogger audit,
         Action closeWindow,
         IDialogueStatePersistence? dialogueStatePersistence = null,
-        Services.ChatHistoryPersistence? chatHistoryPersistence = null)
+        Services.ChatHistoryPersistence? chatHistoryPersistence = null,
+        SirThaddeus.DesktopRuntime.Services.VoiceHostProcessManager? voiceManager = null)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _llmClient    = llmClient    ?? throw new ArgumentNullException(nameof(llmClient));
@@ -108,6 +112,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _closeWindow  = closeWindow  ?? throw new ArgumentNullException(nameof(closeWindow));
         _dialogueStatePersistence = dialogueStatePersistence;
         _chatHistoryPersistence = chatHistoryPersistence;
+        _voiceManager = voiceManager;
 
         SendCommand   = new AsyncRelayCommand(SendAsync, CanSend);
         ClearCommand  = new RelayCommand(ClearConversation);
@@ -132,7 +137,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Interval = TimeSpan.FromSeconds(2)
         };
-        _auditTimer.Tick += (s, e) => SyncAuditLogs();
+        _auditTimer.Tick += (s, e) => 
+        {
+            SyncAuditLogs();
+            _ = CheckVoiceHealthAsync();
+        };
         _auditTimer.Start();
     }
 
@@ -284,8 +293,27 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // Voice Debug Properties (push-button ASR test panel)
+    // Voice Debug & Readiness Properties
     // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True if the VoiceHost is ready for connections (or if voice is disabled).
+    /// Used to show a banner while downloading initial model packages.
+    /// </summary>
+    public bool IsVoiceReady
+    {
+        get => _isVoiceReady;
+        private set => SetProperty(ref _isVoiceReady, value);
+    }
+
+    /// <summary>
+    /// Status description of the VoiceHost warmup progress.
+    /// </summary>
+    public string VoiceWarmupStatus
+    {
+        get => _voiceWarmupStatus;
+        private set => SetProperty(ref _voiceWarmupStatus, value);
+    }
 
     /// <summary>
     /// Current voice pipeline phase label (e.g. "Listening...", "Transcribing...").
@@ -482,6 +510,37 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             IsLlmConnected = false;
             ConnectionStatus = "Error";
             AddStatus("Failed to check LLM connection.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Voice Readiness Check
+    // ─────────────────────────────────────────────────────────────────
+
+    private async Task CheckVoiceHealthAsync()
+    {
+        if (_voiceManager == null) return;
+        
+        try
+        {
+            var health = await _voiceManager.CheckHealthAsync(default);
+            var wasReady = IsVoiceReady;
+            IsVoiceReady = health.Ready;
+            
+            if (!IsVoiceReady && health.Reachable)
+            {
+                var msg = string.IsNullOrWhiteSpace(health.Message) ? "Starting voice backend..." : health.Message;
+                if (msg.Length > 85) msg = msg.Substring(0, 82) + "...";
+                VoiceWarmupStatus = msg;
+            }
+            else
+            {
+                VoiceWarmupStatus = "";
+            }
+        }
+        catch
+        {
+            // Transient error while probing, leave properties alone until next tick
         }
     }
 
@@ -683,7 +742,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _processingCts?.Cancel();
     }
 
-    private void ClearConversation()
+    public void ClearConversation()
     {
         // Save current session to history if it has substantive content.
         SnapshotCurrentSession();

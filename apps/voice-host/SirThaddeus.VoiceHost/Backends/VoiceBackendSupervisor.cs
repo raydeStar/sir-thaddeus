@@ -274,15 +274,24 @@ public sealed class VoiceBackendSupervisor : IDisposable
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
-            // Preferred publish layout
+            // Packaged release layout
+            Path.Combine(baseDir, "bin", "voice", "voice-backend.exe"),
+            Path.Combine(baseDir, "bin", "voice", "start-voice-backend.ps1"),
+            Path.Combine(baseDir, "bin", "voice", "server.py"),
+            // Fallback layout (compiled sidecar)
             Path.Combine(baseDir, "voice", "voice-backend.exe"),
-            // Portable fallback
             Path.Combine(baseDir, "voice-backend.exe"),
-            // Dev fallback (PyInstaller dist under source tree)
+            // Fallback layout (powershell bootstrapper)
+            Path.Combine(baseDir, "voice", "start-voice-backend.ps1"),
+            Path.Combine(baseDir, "start-voice-backend.ps1"),
+            // Legacy / dev fallbacks
+            Path.Combine(baseDir, "voice", "server.py"),
+            Path.GetFullPath(Path.Combine(
+                baseDir, "..", "..", "..", "..", "..",
+                "voice-backend", "start-voice-backend.ps1")),
             Path.GetFullPath(Path.Combine(
                 baseDir, "..", "..", "..", "..", "..",
                 "voice-backend", "dist", "voice-backend.exe")),
-            // Dev fallback (raw Python script)
             Path.GetFullPath(Path.Combine(
                 baseDir, "..", "..", "..", "..", "..",
                 "voice-backend", "server.py"))
@@ -295,7 +304,7 @@ public sealed class VoiceBackendSupervisor : IDisposable
         }
 
         // Return preferred path so diagnostics are deterministic/actionable.
-        return candidates[0];
+        return candidates[1];
     }
 
     private bool TryBuildStartInfo(
@@ -316,6 +325,30 @@ public sealed class VoiceBackendSupervisor : IDisposable
         var ext = Path.GetExtension(backendPath);
         var workingDir = Path.GetDirectoryName(backendPath) ?? AppContext.BaseDirectory;
         var engineArgs = BuildEngineArgs();
+
+        if (ext.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            var psArgs = $"-NoProfile -ExecutionPolicy Bypass -File {QuoteArg(backendPath)} -Port {port}";
+            if (!string.IsNullOrWhiteSpace(_options.SttEngine)) psArgs += $" -SttEngine {QuoteArg(_options.SttEngine)}";
+            if (!string.IsNullOrWhiteSpace(_options.SttModelId)) psArgs += $" -SttModelId {QuoteArg(_options.SttModelId)}";
+            if (!string.IsNullOrWhiteSpace(_options.SttLanguage)) psArgs += $" -SttLanguage {QuoteArg(_options.SttLanguage)}";
+            if (!string.IsNullOrWhiteSpace(_options.TtsEngine)) psArgs += $" -TtsEngine {QuoteArg(_options.TtsEngine)}";
+            if (!string.IsNullOrWhiteSpace(_options.TtsModelId)) psArgs += $" -TtsModelId {QuoteArg(_options.TtsModelId)}";
+            if (!string.IsNullOrWhiteSpace(_options.TtsVoiceId)) psArgs += $" -TtsVoiceId {QuoteArg(_options.TtsVoiceId)}";
+
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                Arguments = psArgs,
+                WorkingDirectory = workingDir,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            ApplyEngineEnvironment(startInfo);
+            return true;
+        }
 
         if (ext.Equals(".py", StringComparison.OrdinalIgnoreCase))
         {
