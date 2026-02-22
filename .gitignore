@@ -91,3 +91,5 @@ packages/requested-files.zip
 data/youtube/
 apps/voice-backend/data/youtube/
 .cursor/rules/oss-comments.mdc
+apps/voice-backend/output.log
+apps/voice-backend/output_utf8.log

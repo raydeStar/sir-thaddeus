@@ -96,7 +96,7 @@ public sealed class LocalTtsHttpClient : IDisposable
 
         var allowStartupRetries = voiceSettings.VoiceHostEnabled;
         var retryDeadlineUtc = startedAt + TimeSpan.FromMilliseconds(
-            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 120_000));
+            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 1_800_000));
         var attempt = 0;
         byte[]? audioBytes = null;
 
