@@ -274,7 +274,7 @@ public static class SettingsManager
                 VoiceHostStartupTimeoutMs = IntOrFallback(
                     voice.VoiceHostStartupTimeoutMs,
                     defaults.Voice.VoiceHostStartupTimeoutMs,
-                    min: 5_000,
+                    min: 30_000,
                     max: 300_000),
                 TtsEngine = NormalizeTtsEngine(voice.TtsEngine, defaults.Voice.TtsEngine),
                 TtsModelId = OptionalString(voice.TtsModelId),
