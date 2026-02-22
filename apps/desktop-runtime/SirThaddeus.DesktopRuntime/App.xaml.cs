@@ -2259,15 +2259,19 @@ public partial class App : System.Windows.Application
         if (File.Exists(adjacent))
             return adjacent;
 
-        // 2. Scan the MCP server's build output — works regardless of TFM folder name.
-        //    5 parent jumps from bin/Debug/net8.0-windows lands at apps/,
-        //    so we navigate directly to the sibling mcp-server project.
-        //    Multiple TFM directories may exist (e.g. stale net8.0 + current
-        //    net8.0-windows10.0.19041.0), so pick the most recently built binary.
-        var mcpBinDebug = Path.GetFullPath(Path.Combine(
-            baseDir, "..", "..", "..", "..", "..",
-            "mcp-server", "SirThaddeus.McpServer",
-            "bin", "Debug"));
+        // 2. Scan the MCP server's build output.
+        //    Walk up the tree until we find the "apps" directory, dodging TFM/RID variations.
+        var dir = baseDir;
+        var dirName = Path.GetFileName(dir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        while (dir != null && !string.Equals(dirName, "apps", StringComparison.OrdinalIgnoreCase))
+        {
+            dir = Path.GetDirectoryName(dir);
+            dirName = Path.GetFileName(dir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+
+        var mcpBinDebug = dir != null 
+            ? Path.GetFullPath(Path.Combine(dir, "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"))
+            : Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"));
 
         if (Directory.Exists(mcpBinDebug))
         {
@@ -2292,7 +2296,7 @@ public partial class App : System.Windows.Application
         }
 
         // 3. Fallback: return the expected path so the error message is actionable
-        return Path.GetFullPath(Path.Combine(mcpBinDebug, "net8.0-windows10.0.19041.0", exeName));
+        return Path.GetFullPath(Path.Combine(mcpBinDebug, "net8.0", exeName));
     }
 
     private static LlmClientOptions BuildLlmClientOptions(AppSettings settings)

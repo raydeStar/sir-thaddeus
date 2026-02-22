@@ -1692,15 +1692,24 @@ public sealed partial class SettingsViewModel : ViewModelBase
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);
 
+        var details = new Dictionary<string, object>
+        {
+            ["profileId"] = selectedId
+        };
+        if (voicePreferenceResult.Applied)
+        {
+            details["appliedVoiceId"] = voicePreferenceResult.AppliedVoiceId;
+            details["appliedVoiceSource"] = string.IsNullOrWhiteSpace(voicePreferenceResult.AppliedSource)
+                ? "unknown"
+                : voicePreferenceResult.AppliedSource;
+        }
+
         _audit.Append(new AuditEvent
         {
             Actor = "user",
             Action = "PERSONALITY_SELECTED",
             Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["profileId"] = selectedId
-            }
+            Details = details
         });
     }
 
