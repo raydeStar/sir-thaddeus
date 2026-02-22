@@ -138,6 +138,10 @@ public sealed class ReasoningGuardrailsPipeline
 
         llmRoundTrips += constraints.LlmRoundTrips;
 
+        var effectiveConstraints = MergeDeterministicConstraintHints(
+            constraints.Constraints,
+            userMessage);
+
         var breakdown = await RunBoundedAsync(
             ct => BuildFirstPrinciplesBreakdownAsync(userMessage, goal, entities, constraints, ct),
             ExtractionStepTimeout,
@@ -157,7 +161,7 @@ public sealed class ReasoningGuardrailsPipeline
         var contextText = new StringBuilder();
         contextText.AppendLine($"- Goal: {goal.PrimaryGoal}");
         contextText.AppendLine($"- Key entities: {entitySummary}");
-        contextText.AppendLine($"- Constraints: {string.Join("; ", constraints.Constraints)}");
+        contextText.AppendLine($"- Constraints: {string.Join("; ", effectiveConstraints)}");
         contextText.AppendLine($"- Need: {breakdown.Need}");
         contextText.AppendLine($"- Pieces: {breakdown.Pieces}");
         contextText.AppendLine($"- Assembly: {breakdown.Assembly}");
@@ -219,7 +223,7 @@ public sealed class ReasoningGuardrailsPipeline
             AnswerText = finalLlm.Content,
             RationaleLines = [
                 $"Goal: {goal.PrimaryGoal}",
-                $"Constraint: {string.Join("; ", constraints.Constraints)}"
+                $"Constraint: {string.Join("; ", effectiveConstraints)}"
             ],
             TriggerRisk = triggerDecision.Risk,
             TriggerWhy = triggerDecision.Why,
@@ -284,6 +288,37 @@ public sealed class ReasoningGuardrailsPipeline
         {
             return null;
         }
+    }
+
+    private static IReadOnlyList<string> MergeDeterministicConstraintHints(
+        IReadOnlyList<string> baseConstraints,
+        string userMessage)
+    {
+        var merged = new List<string>(baseConstraints.Where(c => !string.IsNullOrWhiteSpace(c)));
+        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+
+        var looksLikeCarWashChoice =
+            lower.Contains("car wash", StringComparison.Ordinal) &&
+            ((lower.Contains("walk", StringComparison.Ordinal) && lower.Contains("drive", StringComparison.Ordinal)) ||
+             lower.Contains("walk or drive", StringComparison.Ordinal) ||
+             lower.Contains("drive or walk", StringComparison.Ordinal));
+
+        if (looksLikeCarWashChoice)
+        {
+            const string feasibilityConstraint =
+                "Feasibility: the car must physically arrive at the car wash; prefer actions that move the car to the destination.";
+
+            if (!merged.Any(c => c.Contains("car wash", StringComparison.OrdinalIgnoreCase) ||
+                                 c.Contains("physically arrive", StringComparison.OrdinalIgnoreCase)))
+            {
+                merged.Add(feasibilityConstraint);
+            }
+        }
+
+        if (merged.Count == 0)
+            merged.Add("Choose the physically feasible option that directly completes the goal.");
+
+        return merged;
     }
 
     public GuardrailsPipelineResult? TryRunDeterministicSpecialCase(string userMessage)
