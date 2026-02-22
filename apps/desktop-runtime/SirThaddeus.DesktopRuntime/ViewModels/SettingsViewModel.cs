@@ -1490,7 +1490,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 VoiceHostBaseUrl = string.IsNullOrWhiteSpace(_voiceHostBaseUrl)
                     ? "http://127.0.0.1:17845"
                     : _voiceHostBaseUrl.Trim(),
-                VoiceHostStartupTimeoutMs = Math.Max(5_000, _voiceHostStartupTimeoutMs),
+                VoiceHostStartupTimeoutMs = Math.Max(30_000, _voiceHostStartupTimeoutMs),
                 VoiceHostHealthPath = string.IsNullOrWhiteSpace(_voiceHostHealthPath)
                     ? "/health"
                     : _voiceHostHealthPath.Trim(),
