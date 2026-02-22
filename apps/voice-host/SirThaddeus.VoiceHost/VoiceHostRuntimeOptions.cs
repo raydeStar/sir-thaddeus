@@ -92,9 +92,9 @@ public sealed record VoiceHostRuntimeOptions(
         var autoStartBackends = ParseBool(autoStartRaw, fallback: true);
         var backendStartupTimeoutMs = ParseInt(
             backendStartupTimeoutRaw,
-            fallback: 120_000,
+            fallback: 1_200_000,
             min: 1_000,
-            max: 300_000,
+            max: 1_800_000,
             argName: "--backend-startup-timeout-ms");
 
         var backendShutdownGraceMs = ParseInt(
