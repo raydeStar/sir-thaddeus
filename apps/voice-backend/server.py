@@ -29,6 +29,38 @@ from pydantic import BaseModel
 from youtube_pipeline import PipelineError, YouTubeJobManager, YouTubeSummaryConfig
 
 
+_global_model_progress: str = ""
+
+
+def _patch_tqdm() -> None:
+    try:
+        import tqdm
+
+        original_init = tqdm.tqdm.__init__
+        original_update = tqdm.tqdm.update
+
+        def custom_init(self, *args, **kwargs):
+            kwargs["file"] = open(os.devnull, "w")
+            original_init(self, *args, **kwargs)
+
+        def custom_update(self, n=1):
+            original_update(self, n)
+            try:
+                msg = self.format_meter(self.n, self.total, self.start_t)
+                global _global_model_progress
+                _global_model_progress = f"Downloading models: {msg}"
+            except Exception:
+                pass
+
+        tqdm.tqdm.__init__ = custom_init
+        tqdm.tqdm.update = custom_update
+    except ImportError:
+        pass
+
+
+_patch_tqdm()
+
+
 def _safe_int_env(name: str, default: int, min_value: int, max_value: int) -> int:
     raw = (os.environ.get(name) or "").strip()
     if not raw:
@@ -1336,6 +1368,9 @@ def build_health_payload(
         else:
             error_code = "tts_not_ready"
             message = f"TTS not ready: {tts_error or 'unknown'}"
+
+        if _global_model_progress:
+            message = _global_model_progress
 
     return {
         "schemaVersion": SCHEMA_VERSION,
