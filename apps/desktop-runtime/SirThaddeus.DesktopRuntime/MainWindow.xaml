@@ -48,48 +48,95 @@
                     <ColumnDefinition Width="Auto"/> <!-- STOP ALL -->
                 </Grid.ColumnDefinitions>
 
-                <!-- ── 1. Status Indicator (Left) ── -->
-                <Border x:Name="HeaderArea" Grid.Column="0" 
-                        Background="Transparent"
-                        Padding="4,2"
-                        Cursor="Hand"
-                        ToolTip="Click to view Activity Drawer">
-                    <Border.InputBindings>
-                        <MouseBinding Gesture="LeftClick" Command="{Binding ToggleDrawerCommand}" />
-                    </Border.InputBindings>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <!-- We can use a basic pulse animation or just a color change via Triggers -->
-                        <Ellipse Width="10" Height="10" Margin="0,0,8,0" VerticalAlignment="Center">
-                            <Ellipse.Style>
-                                <Style TargetType="Ellipse">
-                                    <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding StateLabel}" Value="Stopped">
-                                            <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding StateLabel}" Value="Listening">
-                                            <Setter Property="Fill" Value="{StaticResource BlueBrush}"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding StateLabel}" Value="Thinking">
-                                            <Setter Property="Fill" Value="{StaticResource MauveBrush}"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding StateLabel}" Value="Working in background">
-                                            <Setter Property="Fill" Value="{StaticResource YellowBrush}"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding StateLabel}" Value="Error">
-                                            <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Ellipse.Style>
-                        </Ellipse>
+                <!-- ── 1. Session Selector + Status (Left) ── -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+
+                    <!-- Chat Session Dropdown (text-first, no emoji) -->
+                    <Button x:Name="ChatHistoryToggle"
+                            Click="ChatHistoryToggle_Click"
+                            VerticalAlignment="Center"
+                            Cursor="Hand"
+                            Margin="0,0,14,0"
+                            ToolTip="Toggle chat history">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="DropdownBg"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Padding="14,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Conversation"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Text="  ▾"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource Subtext1Brush}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="5,1,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="DropdownBg" Property="Background" Value="{StaticResource Surface0Brush}"/>
+                                        <Setter TargetName="DropdownBg" Property="BorderBrush" Value="{StaticResource Surface1Brush}"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter TargetName="DropdownBg" Property="Background" Value="{StaticResource Surface1Brush}"/>
+                                        <Setter TargetName="DropdownBg" Property="BorderBrush" Value="{StaticResource Surface2Brush}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- Status Indicator — text-only, semantic color by state -->
+                    <Border x:Name="HeaderArea"
+                            Background="Transparent"
+                            Padding="4,2"
+                            Cursor="Hand"
+                            ToolTip="Click to view Activity Drawer">
+                        <Border.InputBindings>
+                            <MouseBinding Gesture="LeftClick" Command="{Binding ToggleDrawerCommand}" />
+                        </Border.InputBindings>
                         <TextBlock Text="{Binding StateLabel}"
                                    FontSize="13"
                                    FontWeight="Medium"
-                                   Foreground="{StaticResource TextBrush}"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Border>
+                                   VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <!-- Default: normal muted text (Connected / idle) -->
+                                    <Setter Property="Foreground" Value="{StaticResource Subtext0Brush}"/>
+                                    <Style.Triggers>
+                                        <!-- Listening → muted blue -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Listening">
+                                            <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
+                                        </DataTrigger>
+                                        <!-- Thinking → muted blue -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Thinking">
+                                            <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
+                                        </DataTrigger>
+                                        <!-- Working in background → amber -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Working in background">
+                                            <Setter Property="Foreground" Value="{StaticResource YellowBrush}"/>
+                                        </DataTrigger>
+                                        <!-- Stopped → red -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Stopped">
+                                            <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                        </DataTrigger>
+                                        <!-- Error → red -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Error">
+                                            <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
 
                 <!-- ── 2. View Toggle Tabs (Center) ── -->
                 <StackPanel Grid.Column="1"
@@ -235,23 +282,8 @@
                 </DockPanel>
             </Border>
 
-            <!-- History toggle button -->
-            <Button Grid.Column="1"
-                    x:Name="ChatHistoryToggle"
-                    Content="&#x1F4AC;"
-                    ToolTip="Toggle chat history"
-                    Click="ChatHistoryToggle_Click"
-                    VerticalAlignment="Top"
-                    HorizontalAlignment="Left"
-                    Margin="6,6,0,0"
-                    Padding="6,4"
-                    FontSize="14"
-                    Background="{StaticResource Surface0Brush}"
-                    Foreground="{StaticResource TextBrush}"
-                    BorderBrush="{StaticResource Surface1Brush}"
-                    BorderThickness="1"
-                    Cursor="Hand"
-                    Panel.ZIndex="10" />
+            <!-- (ChatHistoryToggle moved to header bar) -->
+
 
             <!-- ── Left: Chat Messages ─────────────────────────────── -->
             <Grid Grid.Column="1">
@@ -339,512 +371,485 @@
                                   Padding="16,12">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Grid Margin="0,3">
-                                <Border x:Name="Bubble"
-                                        CornerRadius="12"
-                                        Padding="14,10"
-                                        MaxWidth="480"
-                                        HorizontalAlignment="Left"
-                                        Background="{StaticResource Surface0Brush}">
-                                    <StackPanel>
+                            <!-- ═══════════════════════════════════
+                                 LEDGER ENTRY
+                                 3-column grid: Spine | Spacer | Content
+                                 IsMouseOver on the outer Grid drives
+                                 timestamp + overflow reveal.
+                                 ═══════════════════════════════ -->
+                            <Grid x:Name="LedgerEntry" Margin="0,0,0,16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- ── Left Spine ────────────────── -->
+                                <Border x:Name="Spine"
+                                        Grid.Column="0"
+                                        Background="{StaticResource SpineResultBrush}"
+                                        CornerRadius="0"
+                                        VerticalAlignment="Stretch"/>
+
+                                <!-- ── Content Column ────────────── -->
+                                <StackPanel Grid.Column="2">
+
+                                    <!-- ── Header row (author + role + timestamp + overflow) ── -->
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Author + Role label -->
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                            <TextBlock Text="{Binding AuthorLabel}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource Subtext1Brush}"/>
+                                            <TextBlock Text=" — "
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource Overlay0Brush}"/>
+                                            <TextBlock x:Name="RoleTag"
+                                                       Text="{Binding RoleLabel}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource Overlay0Brush}"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+
+                                        <!-- Timestamp (reveal on hover) -->
                                         <TextBlock x:Name="TimeLabel"
+                                                   Grid.Column="1"
                                                    Text="{Binding TimeDisplay}"
                                                    FontSize="10"
                                                    Foreground="{StaticResource Overlay0Brush}"
-                                                   Margin="0,0,0,3"/>
-                                        <Border x:Name="ThinkingPanel"
-                                                Visibility="Collapsed"
-                                                Margin="0,0,0,8"
-                                                Background="#3322283A"
-                                                BorderBrush="{StaticResource Surface1Brush}"
-                                                BorderThickness="1"
-                                                CornerRadius="8"
-                                                Padding="8,6">
-                                            <Expander IsExpanded="{Binding IsThoughtExpanded, Mode=TwoWay}"
-                                                      Background="Transparent"
-                                                      BorderThickness="0"
-                                                      Foreground="{StaticResource Subtext0Brush}">
-                                                <Expander.Header>
-                                                    <TextBlock Text="Model thinking"
-                                                               FontSize="11"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="{StaticResource Subtext0Brush}"/>
-                                                </Expander.Header>
-                                                <TextBox Text="{Binding ThoughtContent, Mode=OneWay}"
-                                                         Margin="0,6,0,0"
-                                                         TextWrapping="Wrap"
-                                                         FontSize="12"
-                                                         FontFamily="Consolas, Cascadia Mono, monospace"
-                                                         Foreground="{StaticResource Overlay0Brush}"
-                                                         Background="Transparent"
-                                                         BorderThickness="0"
-                                                         Padding="0"
-                                                         IsReadOnly="True"
-                                                         IsReadOnlyCaretVisible="False"
-                                                         IsTabStop="False"
-                                                         FocusVisualStyle="{x:Null}"
-                                                         Cursor="IBeam"
-                                                         SelectionBrush="{StaticResource BlueBrush}"
-                                                         SelectionOpacity="0.35"
-                                                         CaretBrush="{StaticResource TextBrush}"/>
-                                            </Expander>
-                                        </Border>
-                                        <!--
-                                            Message body
-                                            - Default: lightweight Markdown-ish rendering (bold + bullets) via FlowDocument.
-                                            - Tool/status messages: fall back to plain TextBox for tight control over styling.
-                                        -->
-                                        <FlowDocumentScrollViewer x:Name="ContentMarkdown"
-                                                                 Document="{Binding Content, Converter={StaticResource MarkdownToFlowDocument}}"
-                                                                 FontSize="13"
-                                                                 FontFamily="Segoe UI"
-                                                                 Foreground="{StaticResource TextBrush}"
-                                                                 Background="Transparent"
-                                                                 FocusVisualStyle="{x:Null}"
-                                                                 IsTabStop="False"
-                                                                 IsSelectionEnabled="True"
-                                                                 VerticalScrollBarVisibility="Hidden"
-                                                                 HorizontalScrollBarVisibility="Hidden"/>
+                                                   VerticalAlignment="Center"
+                                                   Margin="8,0,0,0"
+                                                   Opacity="0"
+                                                   IsHitTestVisible="False"/>
 
-                                        <TextBox x:Name="ContentPlain"
-                                                 Text="{Binding Content, Mode=OneWay}"
-                                                 Visibility="Collapsed"
-                                                 TextWrapping="Wrap"
-                                                 FontSize="13"
-                                                 FontFamily="Segoe UI"
-                                                 Foreground="{StaticResource TextBrush}"
-                                                 Background="Transparent"
-                                                 BorderThickness="0"
-                                                 Padding="0"
-                                                 IsReadOnly="True"
-                                                 IsReadOnlyCaretVisible="False"
-                                                 IsTabStop="False"
-                                                 FocusVisualStyle="{x:Null}"
-                                                 Cursor="IBeam"
-                                                 SelectionBrush="{StaticResource BlueBrush}"
-                                                 SelectionOpacity="0.35"
-                                                 CaretBrush="{StaticResource TextBrush}"/>
+                                        <!-- Overflow menu button (reveal on hover) -->
+                                        <Button x:Name="OverflowBtn"
+                                                Grid.Column="2"
+                                                Content="⋮"
+                                                FontSize="14"
+                                                Foreground="{StaticResource Overlay0Brush}"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Cursor="Hand"
+                                                Padding="6,0"
+                                                Margin="4,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Opacity="0"
+                                                IsHitTestVisible="False"
+                                                Click="OverflowBtn_Click"
+                                                Visibility="Collapsed">
+                                            <Button.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Copy" Click="CopyMessage_Click"/>
+                                                    <MenuItem Header="Retry" Click="RetryMessage_Click"/>
+                                                    <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click"/>
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                    </Grid>
 
-                                        <!-- Assistant chat actions -->
-                                        <StackPanel x:Name="MessageActionsPanel"
-                                                    Orientation="Horizontal"
-                                                    Visibility="Collapsed"
-                                                    Margin="0,8,0,2">
-                                            <Button Content="Copy"
-                                                    Click="CopyMessage_Click"
-                                                    Background="Transparent"
-                                                    BorderThickness="0"
-                                                    Padding="0"
-                                                    Cursor="Hand"
-                                                    FontSize="11"
-                                                    Foreground="{StaticResource Subtext0Brush}"/>
-                                            <TextBlock Text=" | "
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource Overlay0Brush}"
-                                                       VerticalAlignment="Center"/>
-                                            <Button Content="Retry"
-                                                    Click="RetryMessage_Click"
-                                                    Background="Transparent"
-                                                    BorderThickness="0"
-                                                    Padding="0"
-                                                    Cursor="Hand"
-                                                    FontSize="11"
-                                                    Foreground="{StaticResource Subtext0Brush}"/>
-                                            <TextBlock Text=" | "
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource Overlay0Brush}"
-                                                       VerticalAlignment="Center"/>
-                                            <Button Content="Read aloud"
-                                                    Click="ReadAloudMessage_Click"
-                                                    Background="Transparent"
-                                                    BorderThickness="0"
-                                                    Padding="0"
-                                                    Cursor="Hand"
-                                                    FontSize="11"
-                                                    Foreground="{StaticResource Subtext0Brush}"/>
-                                        </StackPanel>
+                                    <!-- ── Thinking expander ── -->
+                                    <Border x:Name="ThinkingPanel"
+                                            Visibility="Collapsed"
+                                            Margin="0,0,0,8"
+                                            Background="{StaticResource ToolActivityBgBrush}"
+                                            BorderBrush="{StaticResource Surface1Brush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="8,6">
+                                        <Expander IsExpanded="{Binding IsThoughtExpanded, Mode=TwoWay}"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"
+                                                  Foreground="{StaticResource Subtext0Brush}">
+                                            <Expander.Header>
+                                                <TextBlock Text="Model reasoning trace"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource Subtext0Brush}"/>
+                                            </Expander.Header>
+                                            <TextBox Text="{Binding ThoughtContent, Mode=OneWay}"
+                                                     Margin="0,6,0,0"
+                                                     TextWrapping="Wrap"
+                                                     FontSize="12"
+                                                     FontFamily="Consolas, Cascadia Mono, monospace"
+                                                     Foreground="{StaticResource Overlay0Brush}"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     Padding="0"
+                                                     IsReadOnly="True"
+                                                     IsReadOnlyCaretVisible="False"
+                                                     IsTabStop="False"
+                                                     FocusVisualStyle="{x:Null}"
+                                                     Cursor="IBeam"
+                                                     SelectionBrush="{StaticResource BlueBrush}"
+                                                     SelectionOpacity="0.35"
+                                                     CaretBrush="{StaticResource TextBrush}"
+                                                     PreviewMouseWheel="BubbleMouseWheel"/>
+                                        </Expander>
+                                    </Border>
 
-                                        <!-- ══════════════════════════════════════
-                                             SOURCE CARDS CAROUSEL
-                                             ViewModel-driven paging — shows 2
-                                             cards at a time, arrows swap pages.
-                                             No ScrollViewer, no jank.
-                                             ══════════════════════════════════ -->
-                                        <Grid x:Name="SourceCardsPanel"
-                                              Visibility="Collapsed"
-                                              Margin="0,12,0,4">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
+                                    <!-- ── Message body (Markdown) ── -->
+                                    <FlowDocumentScrollViewer x:Name="ContentMarkdown"
+                                                             Document="{Binding Content, Converter={StaticResource MarkdownToFlowDocument}}"
+                                                             FontSize="13"
+                                                             FontFamily="Segoe UI"
+                                                             Foreground="{StaticResource TextBrush}"
+                                                             Background="Transparent"
+                                                             FocusVisualStyle="{x:Null}"
+                                                             IsTabStop="False"
+                                                             IsSelectionEnabled="True"
+                                                             VerticalScrollBarVisibility="Hidden"
+                                                             HorizontalScrollBarVisibility="Hidden"
+                                                             PreviewMouseWheel="BubbleMouseWheel"/>
 
-                                            <!-- ── Left arrow (overlaid) ──────── -->
-                                            <Button Grid.Row="0"
-                                                    Command="{Binding PrevPageCommand}"
-                                                    VerticalAlignment="Center"
-                                                    HorizontalAlignment="Left"
-                                                    Panel.ZIndex="10"
-                                                    Cursor="Hand"
-                                                    Width="30" Height="30"
-                                                    Margin="-4,0,0,0">
-                                                <Button.Style>
-                                                    <Style TargetType="Button">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding CanGoLeft}" Value="False">
-                                                                <Setter Property="Visibility" Value="Hidden"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border x:Name="ArrowBg"
-                                                                Background="#DD1E1E2E"
-                                                                CornerRadius="15"
-                                                                Width="30" Height="30">
-                                                            <TextBlock Text="&#x276E;"
-                                                                       FontSize="14"
-                                                                       Foreground="{StaticResource TextBrush}"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"/>
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="ArrowBg"
-                                                                        Property="Background" Value="#EE45475A"/>
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Button.Template>
-                                            </Button>
+                                    <!-- ── Message body (Plain text, tool/status) ── -->
+                                    <TextBox x:Name="ContentPlain"
+                                             Text="{Binding Content, Mode=OneWay}"
+                                             Visibility="Collapsed"
+                                             TextWrapping="Wrap"
+                                             FontSize="13"
+                                             FontFamily="Segoe UI"
+                                             Foreground="{StaticResource TextBrush}"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Padding="0"
+                                             IsReadOnly="True"
+                                             IsReadOnlyCaretVisible="False"
+                                             IsTabStop="False"
+                                             FocusVisualStyle="{x:Null}"
+                                             Cursor="IBeam"
+                                             SelectionBrush="{StaticResource BlueBrush}"
+                                             SelectionOpacity="0.35"
+                                             CaretBrush="{StaticResource TextBrush}"
+                                             PreviewMouseWheel="BubbleMouseWheel"/>
 
-                                            <!-- ── Right arrow (overlaid) ─────── -->
-                                            <Button Grid.Row="0"
-                                                    Command="{Binding NextPageCommand}"
-                                                    VerticalAlignment="Center"
-                                                    HorizontalAlignment="Right"
-                                                    Panel.ZIndex="10"
-                                                    Cursor="Hand"
-                                                    Width="30" Height="30"
-                                                    Margin="0,0,-4,0">
-                                                <Button.Style>
-                                                    <Style TargetType="Button">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding CanGoRight}" Value="False">
-                                                                <Setter Property="Visibility" Value="Hidden"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border x:Name="ArrowBg"
-                                                                Background="#DD1E1E2E"
-                                                                CornerRadius="15"
-                                                                Width="30" Height="30">
-                                                            <TextBlock Text="&#x276F;"
-                                                                       FontSize="14"
-                                                                       Foreground="{StaticResource TextBrush}"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"/>
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="ArrowBg"
-                                                                        Property="Background" Value="#EE45475A"/>
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Button.Template>
-                                            </Button>
+                                    <!-- (Legacy actions removed, now in ContextMenu) -->
 
-                                            <!-- ── Card row (2 per page, ViewModel-driven) ── -->
-                                            <ItemsControl Grid.Row="0"
-                                                          ItemsSource="{Binding VisibleCards}"
-                                                          Margin="10,0,10,0">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal"/>
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <!-- ── Clickable Source Card ────── -->
-                                                        <Button Click="SourceCard_Click"
-                                                                Cursor="Hand"
-                                                                Margin="0,0,10,0"
-                                                                VerticalAlignment="Top"
-                                                                Opacity="0"
-                                                                RenderTransformOrigin="0,0.5">
-                                                            <!-- Slide+fade entrance on page swap -->
-                                                            <Button.RenderTransform>
-                                                                <TranslateTransform/>
-                                                            </Button.RenderTransform>
-                                                            <Button.Triggers>
-                                                                <EventTrigger RoutedEvent="FrameworkElement.Loaded">
-                                                                    <BeginStoryboard>
-                                                                        <Storyboard>
-                                                                            <DoubleAnimation
-                                                                                Storyboard.TargetProperty="Opacity"
-                                                                                From="0" To="1"
-                                                                                Duration="0:0:0.28"/>
-                                                                            <DoubleAnimation
-                                                                                Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
-                                                                                From="40" To="0"
-                                                                                Duration="0:0:0.3">
-                                                                                <DoubleAnimation.EasingFunction>
-                                                                                    <CubicEase EasingMode="EaseOut"/>
-                                                                                </DoubleAnimation.EasingFunction>
-                                                                            </DoubleAnimation>
-                                                                        </Storyboard>
-                                                                    </BeginStoryboard>
-                                                                </EventTrigger>
-                                                            </Button.Triggers>
-                                                            <Button.Template>
-                                                                <ControlTemplate TargetType="Button">
-                                                                    <Border x:Name="CardBorder"
-                                                                            Background="{StaticResource Surface1Brush}"
-                                                                            CornerRadius="10"
-                                                                            Width="198"
-                                                                            ClipToBounds="True"
-                                                                            SnapsToDevicePixels="True">
-                                                                        <StackPanel>
-                                                                            <!-- ── Thumbnail image area ──── -->
-                                                                            <Grid Height="110"
-                                                                                  Background="{StaticResource Surface0Brush}">
-                                                                                <Image x:Name="ThumbnailImg"
-                                                                                       Source="{Binding ThumbnailUrl,
-                                                                                                Converter={StaticResource UrlToImage}}"
-                                                                                       Stretch="UniformToFill"
+                                    <!-- ══════════════════════════════════════
+                                         SOURCE CARDS CAROUSEL
+                                         ══════════════════════════════════ -->
+                                    <Grid x:Name="SourceCardsPanel"
+                                          Visibility="Collapsed"
+                                          Margin="0,12,0,4">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Left arrow -->
+                                        <Button Grid.Row="0"
+                                                Command="{Binding PrevPageCommand}"
+                                                VerticalAlignment="Center"
+                                                HorizontalAlignment="Left"
+                                                Panel.ZIndex="10"
+                                                Cursor="Hand"
+                                                Width="30" Height="30"
+                                                Margin="-4,0,0,0">
+                                            <Button.Style>
+                                                <Style TargetType="Button">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CanGoLeft}" Value="False">
+                                                            <Setter Property="Visibility" Value="Hidden"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="ArrowBg"
+                                                            Background="#DD1E1E2E"
+                                                            CornerRadius="15"
+                                                            Width="30" Height="30">
+                                                        <TextBlock Text="&#x276E;"
+                                                                   FontSize="14"
+                                                                   Foreground="{StaticResource TextBrush}"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ArrowBg"
+                                                                    Property="Background" Value="#EE45475A"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+
+                                        <!-- Right arrow -->
+                                        <Button Grid.Row="0"
+                                                Command="{Binding NextPageCommand}"
+                                                VerticalAlignment="Center"
+                                                HorizontalAlignment="Right"
+                                                Panel.ZIndex="10"
+                                                Cursor="Hand"
+                                                Width="30" Height="30"
+                                                Margin="0,0,-4,0">
+                                            <Button.Style>
+                                                <Style TargetType="Button">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CanGoRight}" Value="False">
+                                                            <Setter Property="Visibility" Value="Hidden"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="ArrowBg"
+                                                            Background="#DD1E1E2E"
+                                                            CornerRadius="15"
+                                                            Width="30" Height="30">
+                                                        <TextBlock Text="&#x276F;"
+                                                                   FontSize="14"
+                                                                   Foreground="{StaticResource TextBrush}"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ArrowBg"
+                                                                    Property="Background" Value="#EE45475A"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+
+                                        <!-- Card row -->
+                                        <ItemsControl Grid.Row="0"
+                                                      ItemsSource="{Binding VisibleCards}"
+                                                      Margin="10,0,10,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Click="SourceCard_Click"
+                                                            Cursor="Hand"
+                                                            Margin="0,0,10,0"
+                                                            VerticalAlignment="Top"
+                                                            Opacity="0"
+                                                            RenderTransformOrigin="0,0.5">
+                                                        <Button.RenderTransform>
+                                                            <TranslateTransform/>
+                                                        </Button.RenderTransform>
+                                                        <Button.Triggers>
+                                                            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation
+                                                                            Storyboard.TargetProperty="Opacity"
+                                                                            From="0" To="1"
+                                                                            Duration="0:0:0.15"/>
+                                                                        <DoubleAnimation
+                                                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                                            From="30" To="0"
+                                                                            Duration="0:0:0.15">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut"/>
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </EventTrigger>
+                                                        </Button.Triggers>
+                                                        <Button.Template>
+                                                            <ControlTemplate TargetType="Button">
+                                                                <Border x:Name="CardBorder"
+                                                                        Background="{StaticResource Surface1Brush}"
+                                                                        CornerRadius="4"
+                                                                        Width="198"
+                                                                        ClipToBounds="True"
+                                                                        SnapsToDevicePixels="True">
+                                                                    <StackPanel>
+                                                                        <Grid Height="110"
+                                                                              Background="{StaticResource Surface0Brush}">
+                                                                            <Image x:Name="ThumbnailImg"
+                                                                                   Source="{Binding ThumbnailUrl,
+                                                                                            Converter={StaticResource UrlToImage}}"
+                                                                                   Stretch="UniformToFill"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Visibility="Collapsed"/>
+                                                                            <Border x:Name="ThumbPlaceholder"
+                                                                                    Background="{Binding AvatarColor,
+                                                                                                 Converter={StaticResource StringToBrush}}">
+                                                                                <TextBlock Text="{Binding AvatarLetter}"
+                                                                                           FontSize="32"
+                                                                                           FontWeight="Bold"
+                                                                                           Foreground="{DynamicResource CrustBrush}"
+                                                                                           Opacity="0.35"
+                                                                                           HorizontalAlignment="Center"
+                                                                                           VerticalAlignment="Center"/>
+                                                                            </Border>
+                                                                        </Grid>
+                                                                        <StackPanel Margin="12,8,12,10">
+                                                                            <Grid Height="18" Margin="0,0,0,5">
+                                                                                <Grid.ColumnDefinitions>
+                                                                                    <ColumnDefinition Width="18"/>
+                                                                                    <ColumnDefinition Width="*"/>
+                                                                                </Grid.ColumnDefinitions>
+                                                                                <Image x:Name="FaviconImg"
+                                                                                       Grid.Column="0"
+                                                                                       Source="{Binding FaviconBase64,
+                                                                                                Converter={StaticResource Base64ToImage}}"
+                                                                                       Width="14" Height="14"
                                                                                        HorizontalAlignment="Center"
                                                                                        VerticalAlignment="Center"
                                                                                        Visibility="Collapsed"/>
-
-                                                                                <Border x:Name="ThumbPlaceholder"
+                                                                                <Border x:Name="AvatarCircle"
+                                                                                        Grid.Column="0"
+                                                                                        Width="16" Height="16"
+                                                                                        CornerRadius="8"
+                                                                                        HorizontalAlignment="Center"
+                                                                                        VerticalAlignment="Center"
                                                                                         Background="{Binding AvatarColor,
                                                                                                      Converter={StaticResource StringToBrush}}">
                                                                                     <TextBlock Text="{Binding AvatarLetter}"
-                                                                                               FontSize="32"
+                                                                                               FontSize="8"
                                                                                                FontWeight="Bold"
                                                                                                Foreground="{DynamicResource CrustBrush}"
-                                                                                               Opacity="0.35"
                                                                                                HorizontalAlignment="Center"
                                                                                                VerticalAlignment="Center"/>
                                                                                 </Border>
-                                                                            </Grid>
-
-                                                                            <!-- ── Card body ──────────────── -->
-                                                                            <StackPanel Margin="12,8,12,10">
-                                                                                <!-- Domain + favicon row -->
-                                                                                <Grid Height="18" Margin="0,0,0,5">
-                                                                                    <Grid.ColumnDefinitions>
-                                                                                        <ColumnDefinition Width="18"/>
-                                                                                        <ColumnDefinition Width="*"/>
-                                                                                    </Grid.ColumnDefinitions>
-
-                                                                                    <Image x:Name="FaviconImg"
-                                                                                           Grid.Column="0"
-                                                                                           Source="{Binding FaviconBase64,
-                                                                                                    Converter={StaticResource Base64ToImage}}"
-                                                                                           Width="14" Height="14"
-                                                                                           HorizontalAlignment="Center"
+                                                                                <TextBlock Grid.Column="1"
+                                                                                           Text="{Binding Domain}"
+                                                                                           FontSize="10.5"
+                                                                                           Foreground="{StaticResource Overlay0Brush}"
                                                                                            VerticalAlignment="Center"
-                                                                                           Visibility="Collapsed"/>
-
-                                                                                    <Border x:Name="AvatarCircle"
-                                                                                            Grid.Column="0"
-                                                                                            Width="16" Height="16"
-                                                                                            CornerRadius="8"
-                                                                                            HorizontalAlignment="Center"
-                                                                                            VerticalAlignment="Center"
-                                                                                            Background="{Binding AvatarColor,
-                                                                                                         Converter={StaticResource StringToBrush}}">
-                                                                                        <TextBlock Text="{Binding AvatarLetter}"
-                                                                                                   FontSize="8"
-                                                                                                   FontWeight="Bold"
-                                                                                                   Foreground="{DynamicResource CrustBrush}"
-                                                                                                   HorizontalAlignment="Center"
-                                                                                                   VerticalAlignment="Center"/>
-                                                                                    </Border>
-
-                                                                                    <TextBlock Grid.Column="1"
-                                                                                               Text="{Binding Domain}"
-                                                                                               FontSize="10.5"
-                                                                                               Foreground="{StaticResource Overlay0Brush}"
-                                                                                               VerticalAlignment="Center"
-                                                                                               Margin="5,0,0,0"
-                                                                                               TextTrimming="CharacterEllipsis"/>
-                                                                                </Grid>
-
-                                                                                <!-- Title -->
-                                                                                <TextBlock Text="{Binding Title}"
-                                                                                           FontSize="12.5"
-                                                                                           FontWeight="SemiBold"
-                                                                                           Foreground="{StaticResource TextBrush}"
-                                                                                           TextWrapping="Wrap"
-                                                                                           MaxHeight="36"
-                                                                                           TextTrimming="CharacterEllipsis"
-                                                                                           Margin="0,0,0,4"/>
-
-                                                                                <!-- Excerpt / summary -->
-                                                                                <TextBlock Text="{Binding Excerpt}"
-                                                                                           FontSize="11"
-                                                                                           Foreground="{StaticResource Subtext0Brush}"
-                                                                                           TextWrapping="Wrap"
-                                                                                           MaxHeight="64"
-                                                                                           TextTrimming="CharacterEllipsis"
-                                                                                           LineHeight="15"/>
-                                                                            </StackPanel>
+                                                                                           Margin="5,0,0,0"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                            </Grid>
+                                                                            <TextBlock Text="{Binding Title}"
+                                                                                       FontSize="12.5"
+                                                                                       FontWeight="SemiBold"
+                                                                                       Foreground="{StaticResource TextBrush}"
+                                                                                       TextWrapping="Wrap"
+                                                                                       MaxHeight="36"
+                                                                                       TextTrimming="CharacterEllipsis"
+                                                                                       Margin="0,0,0,4"/>
+                                                                            <TextBlock Text="{Binding Excerpt}"
+                                                                                       FontSize="11"
+                                                                                       Foreground="{StaticResource Subtext0Brush}"
+                                                                                       TextWrapping="Wrap"
+                                                                                       MaxHeight="64"
+                                                                                       TextTrimming="CharacterEllipsis"
+                                                                                       LineHeight="15"/>
                                                                         </StackPanel>
-                                                                    </Border>
+                                                                    </StackPanel>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="CardBorder"
+                                                                                Property="Background"
+                                                                                Value="{StaticResource Surface2Brush}"/>
+                                                                    </Trigger>
+                                                                    <DataTrigger Binding="{Binding HasThumbnail}" Value="True">
+                                                                        <Setter TargetName="ThumbnailImg"
+                                                                                Property="Visibility" Value="Visible"/>
+                                                                        <Setter TargetName="ThumbPlaceholder"
+                                                                                Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding HasFavicon}" Value="True">
+                                                                        <Setter TargetName="FaviconImg"
+                                                                                Property="Visibility" Value="Visible"/>
+                                                                        <Setter TargetName="AvatarCircle"
+                                                                                Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Button.Template>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
 
-                                                                    <ControlTemplate.Triggers>
-                                                                        <Trigger Property="IsMouseOver" Value="True">
-                                                                            <Setter TargetName="CardBorder"
-                                                                                    Property="Background"
-                                                                                    Value="{StaticResource Surface2Brush}"/>
-                                                                        </Trigger>
-                                                                        <DataTrigger Binding="{Binding HasThumbnail}" Value="True">
-                                                                            <Setter TargetName="ThumbnailImg"
-                                                                                    Property="Visibility" Value="Visible"/>
-                                                                            <Setter TargetName="ThumbPlaceholder"
-                                                                                    Property="Visibility" Value="Collapsed"/>
-                                                                        </DataTrigger>
-                                                                        <DataTrigger Binding="{Binding HasFavicon}" Value="True">
-                                                                            <Setter TargetName="FaviconImg"
-                                                                                    Property="Visibility" Value="Visible"/>
-                                                                            <Setter TargetName="AvatarCircle"
-                                                                                    Property="Visibility" Value="Collapsed"/>
-                                                                        </DataTrigger>
-                                                                    </ControlTemplate.Triggers>
-                                                                </ControlTemplate>
-                                                            </Button.Template>
-                                                        </Button>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                        <!-- Page indicator -->
+                                        <TextBlock Grid.Row="1"
+                                                   Text="{Binding CarouselPageLabel}"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource Overlay0Brush}"
+                                                   HorizontalAlignment="Center"
+                                                   Margin="0,6,0,0"/>
+                                    </Grid>
 
-                                            <!-- ── Page indicator (e.g. "1 / 3") ── -->
-                                            <TextBlock Grid.Row="1"
-                                                       Text="{Binding CarouselPageLabel}"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource Overlay0Brush}"
-                                                       HorizontalAlignment="Center"
-                                                       Margin="0,6,0,0"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
+                                </StackPanel>
                             </Grid>
 
                             <DataTemplate.Triggers>
-                                <!-- ── Show source cards when present ──────── -->
+                                <!-- ── Hover: reveal timestamp + overflow ── -->
+                                <Trigger SourceName="LedgerEntry" Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="TimeLabel" Property="Opacity" Value="1"/>
+                                    <Setter TargetName="TimeLabel" Property="IsHitTestVisible" Value="True"/>
+                                    <Setter TargetName="OverflowBtn" Property="Opacity" Value="1"/>
+                                    <Setter TargetName="OverflowBtn" Property="IsHitTestVisible" Value="True"/>
+                                </Trigger>
+
+                                <!-- ── Source cards when present ── -->
                                 <DataTrigger Binding="{Binding HasSourceCards}" Value="True">
                                     <Setter TargetName="SourceCardsPanel"
                                             Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
 
-                                <!-- ── Assistant thought traces (collapsed expander) ── -->
+                                <!-- ── Thought traces ── -->
                                 <DataTrigger Binding="{Binding HasThoughtContent}" Value="True">
                                     <Setter TargetName="ThinkingPanel"
                                             Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
 
+                                <!-- ── Assistant: result spine + overflow visible ── -->
                                 <DataTrigger Binding="{Binding IsAssistant}" Value="True">
-                                    <Setter TargetName="MessageActionsPanel"
-                                            Property="Visibility" Value="Visible"/>
+                                    <Setter TargetName="Spine" Property="Background" Value="{StaticResource SpineResultBrush}"/>
+                                    <Setter TargetName="OverflowBtn" Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
 
-                                <!-- ── User: right-aligned accent bubble ──── -->
+                                <!-- ── User: command spine ── -->
                                 <DataTrigger Binding="{Binding IsUser}" Value="True">
-                                    <Setter TargetName="Bubble"
-                                            Property="HorizontalAlignment" Value="Right"/>
-                                    <Setter TargetName="Bubble"
-                                            Property="Background"
-                                            Value="{StaticResource BlueBrush}"/>
-                                    <Setter TargetName="ContentMarkdown"
-                                            Property="Foreground"
-                                            Value="{StaticResource CrustBrush}"/>
-                                    <Setter TargetName="ContentMarkdown"
-                                            Property="FontWeight" Value="Medium"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="Foreground"
-                                            Value="{StaticResource CrustBrush}"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="FontWeight" Value="Medium"/>
-                                    <Setter TargetName="TimeLabel"
-                                            Property="Foreground" Value="{StaticResource Surface1Brush}"/>
-                                    <Setter TargetName="TimeLabel"
-                                            Property="HorizontalAlignment" Value="Right"/>
-                                    <Setter TargetName="SourceCardsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="ThinkingPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="MessageActionsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="Spine" Property="Background" Value="{StaticResource SpineCommandBrush}"/>
+                                    <Setter TargetName="OverflowBtn" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="SourceCardsPanel" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel" Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
 
-                                <!-- ── Tool activity: subtle bordered ─────── -->
+                                <!-- ── Tool activity: indented, pill bg ── -->
                                 <DataTrigger Binding="{Binding IsToolActivity}" Value="True">
-                                    <Setter TargetName="Bubble"
-                                            Property="Background"
-                                            Value="{StaticResource MantleBrush}"/>
-                                    <Setter TargetName="Bubble"
-                                            Property="BorderBrush"
-                                            Value="{StaticResource Surface1Brush}"/>
-                                    <Setter TargetName="Bubble"
-                                            Property="BorderThickness" Value="1"/>
-                                    <Setter TargetName="ContentMarkdown"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="Visibility" Value="Visible"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="FontSize" Value="11"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="Foreground"
-                                            Value="{StaticResource Subtext0Brush}"/>
-                                    <Setter TargetName="TimeLabel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="SourceCardsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="ThinkingPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="MessageActionsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="Spine" Property="Background" Value="{StaticResource SpineToolBrush}"/>
+                                    <Setter TargetName="LedgerEntry" Property="Margin" Value="16,0,0,12"/>
+                                    <Setter TargetName="ContentMarkdown" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ContentPlain" Property="Visibility" Value="Visible"/>
+                                    <Setter TargetName="ContentPlain" Property="FontSize" Value="12"/>
+                                    <Setter TargetName="ContentPlain" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="ContentPlain" Property="Background" Value="{StaticResource ToolActivityBgBrush}"/>
+                                    <Setter TargetName="ContentPlain" Property="Padding" Value="8,6"/>
+                                    <Setter TargetName="OverflowBtn" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="SourceCardsPanel" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel" Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
 
-                                <!-- ── Status: centered, no bubble ────────── -->
+                                <!-- ── Status: minimal ── -->
                                 <DataTrigger Binding="{Binding IsStatus}" Value="True">
-                                    <Setter TargetName="Bubble"
-                                            Property="HorizontalAlignment" Value="Stretch"/>
-                                    <Setter TargetName="Bubble"
-                                            Property="Background" Value="Transparent"/>
-                                    <Setter TargetName="Bubble"
-                                            Property="MaxWidth" Value="9999"/>
-                                    <Setter TargetName="ContentMarkdown"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="Visibility" Value="Visible"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="HorizontalAlignment" Value="Center"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="TextAlignment" Value="Center"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="FontStyle" Value="Italic"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="FontSize" Value="12"/>
-                                    <Setter TargetName="ContentPlain"
-                                            Property="Foreground"
-                                            Value="{StaticResource Overlay0Brush}"/>
-                                    <Setter TargetName="TimeLabel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="SourceCardsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="ThinkingPanel"
-                                            Property="Visibility" Value="Collapsed"/>
-                                    <Setter TargetName="MessageActionsPanel"
-                                            Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="Spine" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ContentMarkdown" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ContentPlain" Property="Visibility" Value="Visible"/>
+                                    <Setter TargetName="ContentPlain" Property="FontStyle" Value="Italic"/>
+                                    <Setter TargetName="ContentPlain" Property="FontSize" Value="12"/>
+                                    <Setter TargetName="ContentPlain" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="OverflowBtn" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="SourceCardsPanel" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ThinkingPanel" Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>

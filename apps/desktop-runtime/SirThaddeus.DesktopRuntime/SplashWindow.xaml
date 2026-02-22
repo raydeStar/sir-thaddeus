@@ -13,12 +13,6 @@
 
     <!-- ── Resources MUST come before content ─────────────────── -->
     <Window.Resources>
-        <DropShadowEffect x:Key="SplashDropShadow"
-                          Color="#000000"
-                          BlurRadius="32"
-                          ShadowDepth="0"
-                          Opacity="0.6"
-                          Direction="0"/>
     </Window.Resources>
 
     <Window.Triggers>
@@ -28,11 +22,11 @@
                     <DoubleAnimation Storyboard.TargetName="SpinnerRotation"
                                      Storyboard.TargetProperty="Angle"
                                      From="0" To="360"
-                                     Duration="0:0:0.9"
+                                     Duration="0:0:0.15"
                                      RepeatBehavior="Forever"/>
                     <DoubleAnimation Storyboard.TargetProperty="Opacity"
                                      From="0" To="1"
-                                     Duration="0:0:0.3"/>
+                                     Duration="0:0:0.15"/>
                 </Storyboard>
             </BeginStoryboard>
         </EventTrigger>
@@ -42,8 +36,7 @@
             CornerRadius="16"
             BorderBrush="#1E232E"
             BorderThickness="1"
-            Padding="0"
-            Effect="{StaticResource SplashDropShadow}">
+            Padding="0">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>

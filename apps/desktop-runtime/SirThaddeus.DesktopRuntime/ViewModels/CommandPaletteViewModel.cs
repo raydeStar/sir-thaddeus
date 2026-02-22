@@ -58,6 +58,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _safeModeEnabled;
     private string _runtimeSafetyText = "";
     private bool _contextLocked;
+    private string _userDisplayName = "User";
     private int _tokensIn;
     private int _tokensOut;
     private int _contextFillPercent;
@@ -247,6 +248,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _runtimeSafetyText;
         private set => SetProperty(ref _runtimeSafetyText, value);
+    }
+
+    public string UserDisplayName
+    {
+        get => _userDisplayName;
+        set => SetProperty(ref _userDisplayName, value);
     }
 
     /// <summary>
@@ -585,7 +592,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Use24HourTime = Use24HourTime,
             Role    = ChatMessageRole.Status,
-            Content = "Thinking\u2026"
+            Content = "Thinking\u2026",
+            AuthorLabel = "System"
         };
         Messages.Add(thinkingMsg);
         MessageAdded?.Invoke();
@@ -609,7 +617,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     Role    = ChatMessageRole.Assistant,
                     Content = displayParts.DisplayText,
                     ThoughtContent = displayParts.ThinkingText,
-                    RetryPrompt = userText
+                    RetryPrompt = userText,
+                    AuthorLabel = "Sir Thaddeus"
                 };
 
                 // ── Parse source cards from web search results ───
@@ -894,7 +903,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 {
                     Use24HourTime = Use24HourTime,
                     Role    = role,
-                    Content = msg.Content
+                    Content = msg.Content,
+                    AuthorLabel = role == ChatMessageRole.User ? UserDisplayName : role == ChatMessageRole.Assistant ? "Sir Thaddeus" : "System"
                 });
             }
         }
@@ -991,7 +1001,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         Messages.Add(new ChatMessageViewModel
         {
             Role    = role,
-            Content = content
+            Content = content,
+            AuthorLabel = role switch
+            {
+                ChatMessageRole.User         => UserDisplayName,
+                ChatMessageRole.Assistant    => "Sir Thaddeus",
+                _                            => "System"
+            }
         });
         OnPropertyChanged(nameof(HasActiveSession));
         MessageAdded?.Invoke();
@@ -1023,7 +1039,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Role = ChatMessageRole.Assistant,
             Content = displayParts.DisplayText,
             ThoughtContent = displayParts.ThinkingText,
-            RetryPrompt = ResolveMostRecentUserPrompt()
+            RetryPrompt = ResolveMostRecentUserPrompt(),
+            AuthorLabel = "Sir Thaddeus"
         });
         
         SnapshotCurrentSession();
