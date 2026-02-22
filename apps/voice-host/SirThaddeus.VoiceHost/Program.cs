@@ -45,9 +45,10 @@ Task<BackendSupervisorResult> QueueBackendEnsure()
             {
                 try
                 {
-                    using var ensureCts = CancellationTokenSource.CreateLinkedTokenSource(app.Lifetime.ApplicationStopping);
-                    ensureCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(5_000, options.BackendStartupTimeoutMs)));
-                    return await backendSupervisor.EnsureRunningAsync(ensureCts.Token);
+                    // Keep one long-lived ensure task alive instead of repeatedly
+                    // canceling startup attempts during heavy first-run model downloads.
+                    // /health stays responsive because this runs in the background.
+                    return await backendSupervisor.EnsureRunningAsync(app.Lifetime.ApplicationStopping);
                 }
                 catch (OperationCanceledException)
                 {
