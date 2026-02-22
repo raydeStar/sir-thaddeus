@@ -404,6 +404,7 @@ public sealed class VoiceBackendSupervisor : IDisposable
         startInfo.Environment["ST_VOICE_STT_ENGINE"] = _options.SttEngine;
         startInfo.Environment["ST_VOICE_STT_MODEL_ID"] = _options.SttModelId;
         startInfo.Environment["ST_VOICE_STT_LANGUAGE"] = _options.SttLanguage;
+        startInfo.Environment["HF_HUB_DISABLE_PROGRESS_BAR"] = "0";
 
         // Compose an effective PATH from process + user + machine values so
         // child processes see recently installed tools without requiring logoff.
