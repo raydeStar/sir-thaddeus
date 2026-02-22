@@ -15,6 +15,7 @@ using SirThaddeus.Agent.Tools;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
+using SirThaddeus.PersonalityEngine.Formatting;
 using SirThaddeus.PersonalityEngine.Profiles;
 
 namespace SirThaddeus.Agent;
@@ -61,6 +62,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly MiniActionableExtractor _miniActionableExtractor;
     private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
     private readonly UnifiedResponseComposer _unifiedResponseComposer;
+    private readonly ResponseKindClassifier _responseKindClassifier = new();
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -72,7 +74,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private DateTimeOffset _lastPlaceContextAt;
     private string? _lastUtilityContextKey;
     private DateTimeOffset _lastUtilityContextAt;
-    private string _reasoningGuardrailsMode = "off";
+    private string _reasoningGuardrailsMode = "auto";
     private string? _userLocationHint;
     private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
@@ -152,17 +154,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     // For small models, force a minimal first-principles structure so
     // reasoning prompts stay grounded and reproducible.
     private const string LogicPuzzleDecompositionModeSuffix =
-        "\n\n[LOGIC PUZZLE MODE]\n" +
-        "Break the problem into smallest parts before answering.\n" +
-        "Use this compact structure:\n" +
-        "Facts:\n" +
-        "- List the explicit givens from the prompt.\n" +
-        "Goal:\n" +
-        "- State exactly what must be determined.\n" +
-        "Basic checks:\n" +
-        "- Ask and answer 2-4 tiny checks (yes/no, arithmetic, or constraint checks).\n" +
-        "Answer:\n" +
-        "- Give the final answer in one clear sentence.\n" +
+        "\n[LOGIC PUZZLE MODE]\n" +
+        "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
+        "When solving logic puzzles, riddles, or trick questions:\n\n" +
+        "MANDATORY FORMAT:\n" +
+        "<think>\n" +
+        "Facts: [bullet points]\n" +
+        "Goal: [target objective]\n" +
+        "Basic checks: [bullet points]\n" +
+        "</think>\n\n" +
+        "Final answer: [your direct answer]\n\n" +
+        "CRITICAL: Start your response with <think>. Do not include any text before the opening <think> tag.\n" +
         "Do not call tools. Do not invent missing facts.\n" +
         "[/LOGIC PUZZLE MODE]\n";
 
@@ -756,13 +758,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 route,
                 contextualUserMessage,
                 ReasoningGuardrailsMode,
+                memoryPackText,
                 cancellationToken);
 
             if (guardrailsResult is not null)
             {
                 roundTrips += guardrailsResult.LlmRoundTrips;
 
-                var guardedText = guardrailsResult.AnswerText;
+                var guardedText = _postProcessor.SanitizeFinalResponse(
+                    guardrailsResult.AnswerText,
+                    toolCallsMade,
+                    contextualUserMessage);
                 _lastFirstPrinciplesRationale = guardrailsResult.RationaleLines.Take(3).ToArray();
                 _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
                 _history.Add(ChatMessage.Assistant(guardedText));

@@ -1197,6 +1197,7 @@ public static class ClassicReasoningEngine
         string answer)
     {
         var lines = new List<string>();
+        lines.Add("<think>");
         lines.Add("Facts:");
         foreach (var fact in facts)
         {
@@ -1217,6 +1218,7 @@ public static class ClassicReasoningEngine
                 continue;
             lines.Add($"- {check.Trim()}");
         }
+        lines.Add("</think>");
 
         lines.Add("");
         lines.Add("Answer:");
