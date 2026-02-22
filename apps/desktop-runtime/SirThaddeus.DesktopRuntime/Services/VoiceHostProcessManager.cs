@@ -246,8 +246,11 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
                     "VoiceHost component missing. Reinstall to restore voice.");
             }
 
+            // First-run voice setup can require large artifact downloads
+            // (e.g., Kokoro + faster-whisper), so keep a generous minimum
+            // startup window to avoid process restart thrash on fresh machines.
             var startupTimeout = TimeSpan.FromMilliseconds(
-                Math.Max(5_000, settings.VoiceHostStartupTimeoutMs));
+                Math.Max(30_000, settings.VoiceHostStartupTimeoutMs));
             var deadline = _timeProvider.GetUtcNow() + startupTimeout;
             var lastHealth = preferredHealth;
             var lastStartError = "";
