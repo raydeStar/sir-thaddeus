@@ -168,6 +168,36 @@ public class GuardrailsCoordinatorTests
         Assert.Contains("Feasibility: the car must physically arrive at the car wash", finalUserPrompt, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TryRunAsync_CarWashChoice_CorrectsToDeterministicDriveAnswer()
+    {
+        var callCount = 0;
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            callCount++;
+            var content = callCount switch
+            {
+                1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
+                2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
+                3 => """{"constraints":["Pick the easiest option"]}""",
+                4 => """{"need":"wash the car","pieces":"car, wash location, actions","assembly":"choose feasible action"}""",
+                _ => "Walk."
+            };
+
+            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+        });
+
+        var coordinator = new GuardrailsCoordinator(new ReasoningGuardrailsPipeline(llm, new TestAuditLogger()));
+        var result = await coordinator.TryRunAsync(
+            new RouterOutput { Intent = Intents.ChatOnly, Confidence = 0.9 },
+            "The car wash is 50m from my house. Do I walk or drive?",
+            mode: "always");
+
+        Assert.NotNull(result);
+        Assert.Equal("Drive.", result!.AnswerText);
+        Assert.Contains("Decision:", result.RationaleLines.Last(), StringComparison.Ordinal);
+    }
+
     private static GuardrailsCoordinator BuildCoordinator(bool returnStructuredJson = false)
     {
         Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> handler;
