@@ -330,13 +330,19 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <TextBlock Text="How can I help?"
-                                   FontSize="20"
+                        <TextBlock Text="Your AI. Your Rules."
+                                   FontSize="28"
                                    FontFamily="{StaticResource PrimaryFont}"
-                                   FontWeight="SemiBold"
+                                   FontWeight="Bold"
                                    Foreground="{StaticResource TextBrush}"
                                    HorizontalAlignment="Center"
-                                   Margin="0,0,0,12"/>
+                                   Margin="0,0,0,8"/>
+                        <TextBlock Text="A local-first copilot that only acts with explicit permission."
+                                   FontSize="14"
+                                   FontFamily="{StaticResource PrimaryFont}"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,24"/>
                         <TextBlock Text="Hold to talk (Ctrl+Alt+M)"
                                    FontSize="13"
                                    FontFamily="{StaticResource PrimaryFont}"
