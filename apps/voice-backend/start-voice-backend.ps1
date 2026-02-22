@@ -122,23 +122,44 @@ else {
 
 # ── Start server ─────────────────────────────────────────────────
 
+$resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } else { $SttModelId.Trim() }
+$resolvedTtsEngine = if ([string]::IsNullOrWhiteSpace($TtsEngine)) { "windows" } else { $TtsEngine.Trim().ToLowerInvariant() }
+$resolvedTtsModelId = if ([string]::IsNullOrWhiteSpace($TtsModelId)) { "" } else { $TtsModelId.Trim() }
+$resolvedTtsVoiceId = if ([string]::IsNullOrWhiteSpace($TtsVoiceId)) { "" } else { $TtsVoiceId.Trim() }
+
+# Fresh machines can have Kokoro selected in settings but no local voice bundle yet.
+# If assets for the requested Kokoro voice are missing, degrade to Windows TTS so
+# the app still becomes ready instead of remaining stuck in perpetual warmup.
+if ($resolvedTtsEngine -eq "kokoro") {
+    if ([string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
+        $resolvedTtsVoiceId = "bm_lewis"
+        Write-Host "[VOICE_TTS_DEFAULT_APPLIED] No Kokoro voice specified; defaulting to '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+    }
+
+    $voiceManifest = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\manifest.json")
+    if (-not (Test-Path $voiceManifest)) {
+        Write-Host "[VOICE_TTS_FALLBACK_APPLIED] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; falling back to Windows TTS for readiness." -ForegroundColor Yellow
+        $resolvedTtsEngine = "windows"
+        $resolvedTtsVoiceId = ""
+        $resolvedTtsModelId = ""
+    }
+}
+
 Write-Host ""
 Write-Host "  Voice Backend starting on http://127.0.0.1:$Port" -ForegroundColor Green
-Write-Host "  STT: $SttEngine  model: $(if ($SttModelId) { $SttModelId } else { $Model })  lang: $SttLanguage  device: $Device" -ForegroundColor Green
-Write-Host "  TTS: $TtsEngine  model: $(if ($TtsModelId) { $TtsModelId } else { '<none>' })  voice: $(if ($TtsVoiceId) { $TtsVoiceId } else { '<none>' })" -ForegroundColor Green
+Write-Host "  STT: $SttEngine  model: $resolvedSttModel  lang: $SttLanguage  device: $Device" -ForegroundColor Green
+Write-Host "  TTS: $resolvedTtsEngine  model: $(if ($resolvedTtsModelId) { $resolvedTtsModelId } else { '<none>' })  voice: $(if ($resolvedTtsVoiceId) { $resolvedTtsVoiceId } else { '<none>' })" -ForegroundColor Green
 Write-Host "  Press Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
-
-$resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } else { $SttModelId.Trim() }
 
 $env:WHISPER_MODEL = $resolvedSttModel
 $env:WHISPER_DEVICE = $Device
 $env:ST_VOICE_STT_ENGINE = $SttEngine
 $env:ST_VOICE_STT_MODEL_ID = $resolvedSttModel
 $env:ST_VOICE_STT_LANGUAGE = $SttLanguage
-$env:ST_VOICE_TTS_ENGINE = $TtsEngine
-$env:ST_VOICE_TTS_MODEL_ID = $TtsModelId
-$env:ST_VOICE_TTS_VOICE_ID = $TtsVoiceId
+$env:ST_VOICE_TTS_ENGINE = $resolvedTtsEngine
+$env:ST_VOICE_TTS_MODEL_ID = $resolvedTtsModelId
+$env:ST_VOICE_TTS_VOICE_ID = $resolvedTtsVoiceId
 
 $serverScript = Join-Path $VoiceBackendDir "server.py"
 $pythonArgs = @(
@@ -148,13 +169,13 @@ $pythonArgs = @(
     "--stt-model-id", "$resolvedSttModel",
     "--stt-language", "$SttLanguage",
     "--device", "$Device",
-    "--tts-engine", "$TtsEngine"
+    "--tts-engine", "$resolvedTtsEngine"
 )
-if (-not [string]::IsNullOrWhiteSpace($TtsModelId)) {
-    $pythonArgs += @("--tts-model-id", $TtsModelId.Trim())
+if (-not [string]::IsNullOrWhiteSpace($resolvedTtsModelId)) {
+    $pythonArgs += @("--tts-model-id", $resolvedTtsModelId)
 }
-if (-not [string]::IsNullOrWhiteSpace($TtsVoiceId)) {
-    $pythonArgs += @("--tts-voice-id", $TtsVoiceId.Trim())
+if (-not [string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
+    $pythonArgs += @("--tts-voice-id", $resolvedTtsVoiceId)
 }
 
 & "$VenvDir\Scripts\python.exe" @pythonArgs
