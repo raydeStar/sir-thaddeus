@@ -94,11 +94,30 @@ $activateScript = "$VenvDir\Scripts\Activate.ps1"
 # ── Install / update dependencies ────────────────────────────────
 
 $requirementsFile = Join-Path $VoiceBackendDir "requirements.txt"
-Write-Host "Installing dependencies using uv..." -ForegroundColor Yellow
-& $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q -r $requirementsFile
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: uv pip install failed." -ForegroundColor Red
-    exit 1
+$requirementsHashFile = Join-Path $VenvDir ".requirements.sha256"
+$currentRequirementsHash = (Get-FileHash -Algorithm SHA256 $requirementsFile).Hash
+$storedRequirementsHash = ""
+if (Test-Path $requirementsHashFile) {
+    try {
+        $storedRequirementsHash = (Get-Content -Path $requirementsHashFile -Raw).Trim()
+    }
+    catch {
+        $storedRequirementsHash = ""
+    }
+}
+
+if ($storedRequirementsHash -ne $currentRequirementsHash) {
+    Write-Host "Installing dependencies using uv..." -ForegroundColor Yellow
+    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q -r $requirementsFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: uv pip install failed." -ForegroundColor Red
+        exit 1
+    }
+
+    Set-Content -Path $requirementsHashFile -Value $currentRequirementsHash -NoNewline
+}
+else {
+    Write-Host "Dependencies already installed (requirements unchanged)." -ForegroundColor DarkGray
 }
 
 # ── Start server ─────────────────────────────────────────────────
