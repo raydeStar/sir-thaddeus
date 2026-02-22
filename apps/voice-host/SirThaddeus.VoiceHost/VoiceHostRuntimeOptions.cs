@@ -90,10 +90,12 @@ public sealed record VoiceHostRuntimeOptions(
         var asrUri = ParseAbsoluteUri(asrRaw, "--asr-upstream", requireLoopback: true);
         var ttsUri = ParseAbsoluteUri(ttsRaw, "--tts-upstream", requireLoopback: true);
         var autoStartBackends = ParseBool(autoStartRaw, fallback: true);
+        // Cold-start model downloads can be large on fresh machines; keep
+        // startup timeout floor aligned with DesktopRuntime to avoid churn.
         var backendStartupTimeoutMs = ParseInt(
             backendStartupTimeoutRaw,
-            fallback: 1_200_000,
-            min: 1_000,
+            fallback: 120_000,
+            min: 30_000,
             max: 1_800_000,
             argName: "--backend-startup-timeout-ms");
 
