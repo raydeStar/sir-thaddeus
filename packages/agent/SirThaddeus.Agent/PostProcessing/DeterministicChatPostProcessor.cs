@@ -26,7 +26,12 @@ public sealed class DeterministicChatPostProcessor
         IReadOnlyList<ToolCallRecord> toolCallsMade,
         Action<string, string>? logEvent = null)
     {
-        var text = SanitizeCommon(draftText);
+        var responseKind = _responseKindClassifier.Classify(
+            draftText,
+            hasToolEvidence: false);
+        var preserveRationale = responseKind is ResponseKind.Reasoning;
+
+        var text = SanitizeCommon(draftText, preserveRationale);
 
         if (LooksLikeThinkingLeak(text))
         {
@@ -34,14 +39,14 @@ public sealed class DeterministicChatPostProcessor
             return "I got ahead of myself. Ask that again and I will answer directly.";
         }
 
-        if (LooksLikeUnsolicitedCalculation(userMessage, text))
+        if (responseKind is not ResponseKind.Reasoning && LooksLikeUnsolicitedCalculation(userMessage, text))
         {
             // Keep legacy audit action for compatibility with existing tests/dashboards.
             logEvent?.Invoke("AGENT_OFFTOPIC_CALC_REWRITE", "Detected off-topic calculation style response.");
             return "Let's keep it respectful. I'm here to help with a real question when you're ready.";
         }
 
-        if (LooksLikeRoleConfusedMathAsk(userMessage, text))
+        if (responseKind is not ResponseKind.Reasoning && LooksLikeRoleConfusedMathAsk(userMessage, text))
         {
             // Keep legacy audit action for compatibility with existing tests/dashboards.
             logEvent?.Invoke("AGENT_ROLE_CONFUSION_REWRITE", "Detected assistant role confusion on non-math turn.");
@@ -105,25 +110,19 @@ public sealed class DeterministicChatPostProcessor
             filtered.Add(line);
         }
 
-        if (filtered.Count == 0)
-            return (text ?? "").Trim();
+        var expanded = string.Join('\n', filtered).Trim();
+        expanded = EnsureReasoningIsTagged(expanded);
 
-        var compact = new List<string>(filtered.Count);
-        var previousBlank = false;
-        foreach (var line in filtered)
-        {
-            var isBlank = string.IsNullOrWhiteSpace(line);
-            if (isBlank && previousBlank)
-                continue;
+        var hasNonMemoryToolEvidence = toolCallsMade.Any(t => !t.ToolName.Equals("MemoryRetrieve", StringComparison.OrdinalIgnoreCase));
+        var responseKind = _responseKindClassifier.Classify(
+            expanded,
+            hasToolEvidence: hasNonMemoryToolEvidence);
+        var preserveRationale = responseKind is ResponseKind.Reasoning;
 
-            compact.Add(line);
-            previousBlank = isBlank;
-        }
-
-        var sanitized = string.Join('\n', compact).Trim();
+        var sanitized = expanded;
         sanitized = TruncateSelfDialogue(sanitized);
         sanitized = TrimHallucinatedConversationTail(sanitized, latestUserMessage);
-        sanitized = SanitizeCommon(sanitized);
+        sanitized = SanitizeCommon(sanitized, preserveRationale);
         sanitized = SourceCitationFormatter.Apply(sanitized, toolCallsMade);
 
         if (LooksLikeUnsafeMirroringResponse(userMessage: null, assistantText: sanitized))
@@ -138,11 +137,6 @@ public sealed class DeterministicChatPostProcessor
         var activeProfile = _resolveActiveProfile();
         if (activeProfile is null)
             return sanitized;
-
-        var hasNonMemoryToolEvidence = toolCallsMade.Any(t => !t.ToolName.Equals("MemoryRetrieve", StringComparison.OrdinalIgnoreCase));
-        var responseKind = _responseKindClassifier.Classify(
-            sanitized,
-            hasToolEvidence: hasNonMemoryToolEvidence);
 
         // Safety refusals are semantically sensitive.
         // Only allow deterministic cleanup; no signature, no reduction.
@@ -192,6 +186,9 @@ public sealed class DeterministicChatPostProcessor
 
         sanitized = PresentationFormatter.Apply(sanitized, presentationOptions);
 
+        if (responseKind is ResponseKind.Reasoning)
+            return sanitized;
+
         sanitized = ReductionFormatter.Apply(
             sanitized,
             PersonalityFormattingPolicy.BuildReductionOptions(activeProfile, latestUserMessage));
@@ -199,9 +196,9 @@ public sealed class DeterministicChatPostProcessor
         return sanitized;
     }
 
-    private static string SanitizeCommon(string text)
+    private static string SanitizeCommon(string text, bool preserveRationale = false)
     {
-        var output = StripThinkingScaffold(text ?? "[No response]");
+        var output = StripThinkingScaffold(text ?? "[No response]", preserveRationale);
         output = TruncateSelfDialogue(output);
         output = StripRawTemplateTokens(output);
         output = TrimDanglingIncompleteEnding(output);
@@ -338,6 +335,51 @@ public sealed class DeterministicChatPostProcessor
     }
 
     // ── Bare response detection ────────────────────────────────────
+    private static string EnsureReasoningIsTagged(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        if (text.Contains("<think>", StringComparison.OrdinalIgnoreCase))
+            return text;
+
+        // Pattern: Starts with reasoning cues and ends with a "Final answer:" or similar trigger.
+        var lower = text.ToLowerInvariant();
+        
+        // Cues that this response contains a logic puzzle breakdown
+        var hasReasoningCues = 
+            lower.Contains("facts:") || 
+            lower.Contains("goal:") || 
+            lower.Contains("basic checks:") || 
+            lower.Contains("let's analyze") || 
+            lower.Contains("dissect this") ||
+            lower.Contains("break it down");
+
+        if (!hasReasoningCues)
+            return text;
+
+        // Keywords that mark the start of the final direct answer
+        var splitKeywords = new[] { "final answer:", "answer:", "final decision:", "in short:" };
+        int splitIdx = -1;
+        foreach (var kw in splitKeywords)
+        {
+            splitIdx = lower.LastIndexOf(kw, StringComparison.Ordinal);
+            if (splitIdx >= 0)
+                break;
+        }
+
+        // If we found a clear answer boundary, wrap the preceding text in <think> tags.
+        if (splitIdx > 20) // Require some substance in the reasoning
+        {
+            var reasoning = text[..splitIdx].Trim();
+            var remaining = text[splitIdx..].Trim();
+            
+            return $"<think>\n{reasoning}\n</think>\n\n{remaining}";
+        }
+
+        return text;
+    }
+
     // Small models sometimes return "Yes", "No", or a single bare
     // sentence. This is a poor experience — enrich them with a nudge.
 

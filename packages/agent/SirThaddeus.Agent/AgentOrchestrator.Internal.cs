@@ -13,6 +13,7 @@ using SirThaddeus.Agent.ToolLoop;
 using SirThaddeus.Agent.Tools;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine.Formatting;
 
 namespace SirThaddeus.Agent;
 
@@ -283,9 +284,12 @@ public sealed partial class AgentOrchestrator
                 ToolCallsMade = toolCallsMade,
                 InitialRoundTrips = roundTrips,
                 MaxRoundTrips = MaxToolRoundTrips,
-                SanitizeAssistantText = static text =>
+                SanitizeAssistantText = text =>
                 {
-                    var output = StripThinkingScaffold(text ?? "[No response]");
+                    var responseKind = _responseKindClassifier.Classify(text, hasToolEvidence: true);
+                    var preserveRationale = responseKind is ResponseKind.Reasoning;
+
+                    var output = StripThinkingScaffold(text ?? "[No response]", preserveRationale);
                     output = TruncateSelfDialogue(output);
                     output = StripRawTemplateTokens(output);
                     output = TrimDanglingIncompleteEnding(output);

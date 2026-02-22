@@ -1,0 +1,24 @@
+id: reasoning_car_wash_memory
+name: Reasoning - Implied goal trap (car wash walk vs drive) with Memory
+user_message: "The car wash is 50m away from my house. Do I walk, or drive?"
+allowed_tools:
+  - memory_retrieve
+mode: live
+assertions:
+  required_tools:
+    - memory_retrieve
+  forbidden_tools:
+    - web_search
+    - weather_geocode
+    - weather_forecast
+  allowed_tools_only: true
+  require_structured_errors: true
+expectations:
+  required_keywords:
+    - "drive"
+    - "car"
+  forbidden_keywords:
+    - "walk is"
+    - "you should walk"
+  max_response_chars: 2400
+min_score: 8.0

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -42,6 +43,7 @@ public sealed class ReasoningGuardrailsPipeline
     public async Task<GuardrailsPipelineResult?> TryRunAsync(
         string userMessage,
         string mode,
+        string? extraContext,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
@@ -133,20 +135,38 @@ public sealed class ReasoningGuardrailsPipeline
             ? string.Join(", ", entities.Entities.Select(e => e.Name))
             : "none extracted";
 
+        var contextText = new StringBuilder();
+        contextText.AppendLine($"- Goal: {goal.PrimaryGoal}");
+        contextText.AppendLine($"- Key entities: {entitySummary}");
+        contextText.AppendLine($"- Constraints: {string.Join("; ", constraints.Constraints)}");
+
+        if (!string.IsNullOrWhiteSpace(extraContext))
+        {
+            contextText.AppendLine();
+            contextText.AppendLine("[SUPPLEMENTAL CONTEXT]");
+            contextText.AppendLine(extraContext);
+            contextText.AppendLine("[/SUPPLEMENTAL CONTEXT]");
+        }
+
         var finalMessages = new List<ChatMessage>
         {
             ChatMessage.System(
-                "You are a precise reasoning engine. Answer the question using ONLY the decomposed " +
-                "first-principles context below. Walk through the logic step by step, then state " +
-                "your final answer clearly. Do NOT use any tools or external lookups. " +
-                "Do NOT hedge or say you cannot answer. Be concise but complete."),
+                "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
+                "You have solved a logic puzzle. Present your reasoning and final answer.\n\n" +
+                "MANDATORY FORMAT:\n" +
+                "<think>\n" +
+                "Facts: [bullet points]\n" +
+                "Goal: [target objective]\n" +
+                "Basic checks: [bullet points]\n" +
+                "</think>\n\n" +
+                "Final answer: [your direct answer]\n\n" +
+                "CRITICAL: Start your response with <think>. Do not include any text before the opening <think> tag."),
             ChatMessage.User(
                 $"Question:\n{userMessage}\n\n" +
                 $"Decomposed Context:\n" +
-                $"- Goal: {goal.PrimaryGoal}\n" +
-                $"- Key entities: {entitySummary}\n" +
-                $"- Constraints: {string.Join("; ", constraints.Constraints)}\n\n" +
-                "Reason step by step, then give your answer.")
+                contextText + "\n" +
+                "Use the <think> structure for your internal logic. Then state your 'Final answer:'.\n" +
+                "MANDATORY: You MUST start your response with <think>.")
         };
 
         var finalLlm = await RunBoundedAsync(
@@ -428,7 +448,8 @@ internal sealed class GoalInferencer
         var messages = new List<ChatMessage>
         {
             ChatMessage.System(
-                "Infer the practical real-world goal behind the user's question. " +
+                "Infer the practical real-world goal. \n" +
+                "IMPORTANT: Look for destination-based requirements. If the destination is a 'car wash', the goal is to WASH THE CAR. YOU MUST BRING THE CAR TO THE CAR WASH. Walking is NOT an option for washing a car.\n" +
                 "Return STRICT JSON only: " +
                 "{\"primary_goal\":\"...\",\"alternative_goals\":[\"...\"],\"confidence\":0.0}"),
             ChatMessage.User(userMessage)
@@ -756,7 +777,7 @@ internal sealed class EntityExtractor
         var messages = new List<ChatMessage>
         {
             ChatMessage.System(
-                "Extract entities and action options from the user question. " +
+                "Extract entities and action options. Look for implied objects (e.g. 'car' for 'car wash', 'license' for 'drive'). " +
                 "Return STRICT JSON only with schema: " +
                 "{\"entities\":[{\"name\":\"...\",\"kind\":\"required_object|destination|other\",\"required\":true}]," +
                 "\"options\":[{\"label\":\"...\",\"preconditions\":[\"...\"],\"effects\":[\"...\"]}]}"),

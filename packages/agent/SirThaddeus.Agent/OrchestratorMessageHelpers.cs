@@ -48,9 +48,12 @@ internal static partial class OrchestratorMessageHelpers
         return false;
     }
 
-    internal static string StripThinkingScaffold(string text)
+    internal static string StripThinkingScaffold(string text, bool preserveRationale = false)
     {
         if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        if (preserveRationale)
             return text;
 
         var cleaned = text.Trim();

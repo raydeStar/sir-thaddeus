@@ -24,6 +24,7 @@ public interface IGuardrailsCoordinator
         RouterOutput route,
         string message,
         string mode,
+        string? extraContext = null,
         CancellationToken cancellationToken = default);
 }
 

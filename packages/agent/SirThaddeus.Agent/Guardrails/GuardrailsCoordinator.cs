@@ -26,12 +26,13 @@ public sealed class GuardrailsCoordinator : IGuardrailsCoordinator
         RouterOutput route,
         string message,
         string mode,
+        string? extraContext = null,
         CancellationToken cancellationToken = default)
     {
         if (!ShouldAttemptReasoningGuardrails(route, message))
             return null;
 
-        var result = await _pipeline.TryRunAsync(message, mode, cancellationToken);
+        var result = await _pipeline.TryRunAsync(message, mode, extraContext, cancellationToken);
         return result is null ? null : Map(result);
     }
 
@@ -54,14 +55,12 @@ public sealed class GuardrailsCoordinator : IGuardrailsCoordinator
         if (route.NeedsScreenRead ||
             route.NeedsFileAccess ||
             route.NeedsSystemExecute ||
-            route.NeedsBrowserAutomation ||
-            route.NeedsMemoryRead ||
-            route.NeedsMemoryWrite)
+            route.NeedsBrowserAutomation)
         {
             return false;
         }
 
-        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.LookupFact or Intents.LookupNews or Intents.LookupDeepDive or Intents.GeneralTool;
+        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.LookupFact or Intents.LookupNews or Intents.LookupDeepDive or Intents.GeneralTool or Intents.MemoryRead or Intents.MemoryWrite;
     }
 }
 
