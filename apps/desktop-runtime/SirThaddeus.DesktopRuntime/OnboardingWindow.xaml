@@ -200,22 +200,22 @@
             <!-- ── Step 2: Who Are You? ──────────────────────────── -->
             <Grid x:Name="Step2Panel" Grid.Row="1" Margin="32,16,32,0" Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="Who are you?"
+                    <TextBlock Text="User Context"
                                FontSize="16" FontWeight="SemiBold" Foreground="#DFE5F2"
                                Margin="0,0,0,4"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
-                    <TextBlock Text="So I know who I'm working with."
+                    <TextBlock Text="Define local operating parameters."
                                FontSize="13" Foreground="#9AA8C2" Margin="0,0,0,20"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
 
-                    <TextBlock Text="What should I call you?"
+                    <TextBlock Text="Operator Alias"
                                FontSize="13" Foreground="#B8C5DE" Margin="0,0,0,6"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
                     <TextBox x:Name="DisplayNameInput"
                              Style="{StaticResource WizardInputStyle}"
                              MaxLength="60" Margin="0,0,0,20"/>
 
-                    <TextBlock Text="Tell me a bit about yourself (optional)"
+                    <TextBlock Text="Initial System Context (Optional)"
                                FontSize="13" Foreground="#B8C5DE" Margin="0,0,0,6"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
                     <TextBox x:Name="AboutMeInput"
@@ -229,11 +229,11 @@
             <!-- ── Step 3: Pick a Personality ─────────────────────── -->
             <Grid x:Name="Step3Panel" Grid.Row="1" Margin="32,16,32,0" Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="Pick a personality"
+                    <TextBlock Text="System Profile"
                                FontSize="16" FontWeight="SemiBold" Foreground="#DFE5F2"
                                Margin="0,0,0,4"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
-                    <TextBlock Text="Choose how your assistant communicates."
+                    <TextBlock Text="Select operational behavior."
                                FontSize="13" Foreground="#9AA8C2" Margin="0,0,0,16"
                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
 
@@ -252,7 +252,7 @@
                                                FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="Witty, pragmatic, calm guide that stays grounded and trustworthy."
+                            <TextBlock Text="Neutral, pragmatic, operator-grade responses."
                                        FontSize="12" Foreground="#9AA8C2" Margin="0,4,0,0"
                                        TextWrapping="Wrap"
                                        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
@@ -277,10 +277,10 @@
                                  Style="{StaticResource ProviderRadioStyle}"
                                  GroupName="Personality">
                         <StackPanel>
-                            <TextBlock Text="Helpful Default" FontWeight="SemiBold"
+                            <TextBlock Text="Raw Output" FontWeight="SemiBold"
                                        Foreground="#DFE5F2" FontSize="14"
                                        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
-                            <TextBlock Text="Clean, minimal, no personality flavor — just the facts."
+                            <TextBlock Text="Direct telemetry, no behavioral framing."
                                        FontSize="12" Foreground="#9AA8C2" Margin="0,4,0,0"
                                        TextWrapping="Wrap"
                                        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>

@@ -110,6 +110,27 @@
                                   ToolTip="Deep-Dive Briefings (Ctrl+2)"
                                   AutomationProperties.Name="Briefing tab"
                                   Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="MemoryTabButton"
+                                  Content="Memory"
+                                  IsChecked="False"
+                                  Click="MemoryTab_Click"
+                                  ToolTip="Memory (Ctrl+3)"
+                                  AutomationProperties.Name="Memory tab"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="ProfileTabButton"
+                                  Content="Profile"
+                                  IsChecked="False"
+                                  Click="ProfileTab_Click"
+                                  ToolTip="Profile (Ctrl+4)"
+                                  AutomationProperties.Name="Profile tab"
+                                  Style="{StaticResource ViewTabStyle}"/>
+                    <ToggleButton x:Name="LogsTabButton"
+                                  Content="Logs"
+                                  IsChecked="False"
+                                  Click="LogsTab_Click"
+                                  ToolTip="Logs (Ctrl+5)"
+                                  AutomationProperties.Name="Logs tab"
+                                  Style="{StaticResource ViewTabStyle}"/>
                     <ToggleButton x:Name="SettingsTabButton"
                                   Content="Settings"
                                   IsChecked="False"
@@ -316,23 +337,12 @@
                                    Foreground="{StaticResource TextBrush}"
                                    HorizontalAlignment="Center"
                                    Margin="0,0,0,8"/>
-                        <TextBlock Text="A local-first copilot that only acts with explicit permission."
+                        <TextBlock Text="Local-first. Permission-bound. Always visible."
                                    FontSize="14"
                                    FontFamily="{StaticResource PrimaryFont}"
                                    Foreground="{StaticResource Subtext0Brush}"
                                    HorizontalAlignment="Center"
                                    Margin="0,0,0,24"/>
-                        <TextBlock Text="Hold to talk (Ctrl+Alt+M)"
-                                   FontSize="13"
-                                   FontFamily="{StaticResource PrimaryFont}"
-                                   Foreground="{StaticResource Overlay0Brush}"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,0,0,4"/>
-                        <TextBlock Text="Command Palette (Ctrl+Space)"
-                                   FontSize="13"
-                                   FontFamily="{StaticResource PrimaryFont}"
-                                   Foreground="{StaticResource Overlay0Brush}"
-                                   HorizontalAlignment="Center"/>
                     </StackPanel>
 
                     <ItemsControl ItemsSource="{Binding Messages}"
@@ -341,7 +351,7 @@
                         <DataTemplate>
                             <Grid Margin="0,3">
                                 <Border x:Name="Bubble"
-                                        CornerRadius="12"
+                                        CornerRadius="4"
                                         Padding="14,10"
                                         MaxWidth="480"
                                         HorizontalAlignment="Left"
@@ -1285,31 +1295,7 @@
              Common configuration surfaced in-app. Changes are
              persisted to settings.json on save.
              ═══════════════════════════════════════════════════════ -->
-        <!-- Settings Wrapper with Sub-tabs -->
         <Grid Grid.Row="1" x:Name="SettingsView" Visibility="Collapsed">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-
-            <Border Grid.Row="0"
-                    Background="{StaticResource MantleBrush}"
-                    Padding="12,8"
-                    BorderBrush="{StaticResource Surface0Brush}"
-                    BorderThickness="0,0,0,1">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <RadioButton x:Name="SettingsSubGeneral" Content="General" IsChecked="True" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="General" Style="{StaticResource MemorySubTabStyle}"/>
-                    <RadioButton x:Name="SettingsSubMemory" Content="Memory" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Memory" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
-                    <RadioButton x:Name="SettingsSubProfile" Content="Profile" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Profile" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
-                    <RadioButton x:Name="SettingsSubLogs" Content="Logs" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Logs" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
-                </StackPanel>
-            </Border>
-
-            <Grid Grid.Row="1" x:Name="SettingsContentArea"/>
-        </Grid>
-
-        <!-- Original Settings Content (now internal) -->
-        <Grid Grid.Row="1" x:Name="SettingsGeneralView" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
@@ -2446,12 +2432,29 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBox Grid.Row="1"
-                         Grid.Column="0"
-                         x:Name="ChatInput"
-                         Style="{StaticResource ChatInputStyle}"
-                         Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
-                         Margin="0,0,8,0"/>
+                <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+                    <TextBox x:Name="ChatInput"
+                             Style="{StaticResource ChatInputStyle}"
+                             Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Text="Issue a command…"
+                               IsHitTestVisible="False"
+                               Margin="16,0,0,0"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               FontSize="15"
+                               FontFamily="{StaticResource PrimaryFont}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text.Length, ElementName=ChatInput}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
 
                 <!-- Send / Cancel button swap -->
                 <Grid Grid.Row="1" Grid.Column="1">

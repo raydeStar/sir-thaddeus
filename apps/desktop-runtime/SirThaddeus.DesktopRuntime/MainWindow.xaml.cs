@@ -138,16 +138,10 @@ public partial class MainWindow : Window
     {
         ChatTabButton.IsChecked     = tab == "Chat";
         BriefingTabButton.IsChecked = tab == "Briefing";
-        MemoryTabButton.IsChecked   = tab == "Memory";
-        ProfileTabButton.IsChecked  = tab == "Profile";
-        LogsTabButton.IsChecked     = tab == "Logs";
         SettingsTabButton.IsChecked = tab == "Settings";
 
         ChatView.Visibility     = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
         BriefingView.Visibility = tab == "Briefing" ? Visibility.Visible : Visibility.Collapsed;
-        MemoryView.Visibility   = tab == "Memory"   ? Visibility.Visible : Visibility.Collapsed;
-        ProfileView.Visibility  = tab == "Profile"  ? Visibility.Visible : Visibility.Collapsed;
-        LogsView.Visibility     = tab == "Logs"     ? Visibility.Visible : Visibility.Collapsed;
         SettingsView.Visibility = tab == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         InputArea.Visibility    = tab == "Chat" ? Visibility.Visible : Visibility.Collapsed;
         NewChatButton.Visibility = tab == "Chat"    ? Visibility.Visible : Visibility.Collapsed;
@@ -163,18 +157,42 @@ public partial class MainWindow : Window
                 ChatInput?.Focus();
                 break;
 
-            case "Memory":
-                LazyLoadMemory();
-                MemorySearchBox?.Focus();
-                break;
-
-            case "Profile":
-                LazyLoadProfile();
-                break;
-
             case "Settings":
                 LazyLoadSettings();
                 break;
+        }
+    }
+
+    private void SettingsSubTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string subtab)
+        {
+            ActivateSettingsSubtab(subtab);
+        }
+    }
+
+    private void ActivateSettingsSubtab(string subtab)
+    {
+        ActivateTab("Settings");
+
+        SettingsSubGeneral.IsChecked = subtab == "General";
+        SettingsSubMemory.IsChecked = subtab == "Memory";
+        SettingsSubProfile.IsChecked = subtab == "Profile";
+        SettingsSubLogs.IsChecked = subtab == "Logs";
+
+        SettingsGeneralView.Visibility = subtab == "General" ? Visibility.Visible : Visibility.Collapsed;
+        MemoryView.Visibility = subtab == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        ProfileView.Visibility = subtab == "Profile" ? Visibility.Visible : Visibility.Collapsed;
+        LogsView.Visibility = subtab == "Logs" ? Visibility.Visible : Visibility.Collapsed;
+
+        if (subtab == "Memory")
+        {
+            LazyLoadMemory();
+            MemorySearchBox?.Focus();
+        }
+        else if (subtab == "Profile")
+        {
+            LazyLoadProfile();
         }
     }
 
@@ -312,6 +330,33 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         ChatInput.Focus();
+        ReparentSettingsViews();
+    }
+
+    private void ReparentSettingsViews()
+    {
+        var parentGrid = MemoryView.Parent as Grid;
+        if (parentGrid == null) return;
+
+        parentGrid.Children.Remove(MemoryView);
+        parentGrid.Children.Remove(ProfileView);
+        parentGrid.Children.Remove(LogsView);
+        parentGrid.Children.Remove(SettingsGeneralView);
+
+        SettingsContentArea.Children.Add(SettingsGeneralView);
+        SettingsContentArea.Children.Add(MemoryView);
+        SettingsContentArea.Children.Add(ProfileView);
+        SettingsContentArea.Children.Add(LogsView);
+
+        Grid.SetRow(MemoryView, 0);
+        Grid.SetRow(ProfileView, 0);
+        Grid.SetRow(LogsView, 0);
+        Grid.SetRow(SettingsGeneralView, 0);
+
+        // Optional: Ensure all subviews hide initially
+        MemoryView.Visibility = Visibility.Collapsed;
+        ProfileView.Visibility = Visibility.Collapsed;
+        LogsView.Visibility = Visibility.Collapsed;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -369,10 +414,10 @@ public partial class MainWindow : Window
         {
             case Key.D1: ActivateTab("Chat");     e.Handled = true; return;
             case Key.D2: ActivateTab("Briefing"); e.Handled = true; return;
-            case Key.D3: ActivateTab("Memory");   e.Handled = true; return;
-            case Key.D4: ActivateTab("Profile");  e.Handled = true; return;
-            case Key.D5: ActivateTab("Logs");     e.Handled = true; return;
-            case Key.D6: ActivateTab("Settings"); e.Handled = true; return;
+            case Key.D3: ActivateSettingsSubtab("Memory");   e.Handled = true; return;
+            case Key.D4: ActivateSettingsSubtab("Profile");  e.Handled = true; return;
+            case Key.D5: ActivateSettingsSubtab("Logs");     e.Handled = true; return;
+            case Key.D6: ActivateSettingsSubtab("General"); e.Handled = true; return;
         }
         }
 
