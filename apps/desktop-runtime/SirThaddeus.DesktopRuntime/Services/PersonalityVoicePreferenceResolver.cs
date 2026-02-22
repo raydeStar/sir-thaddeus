@@ -7,20 +7,15 @@ public sealed record PersonalityVoicePreferenceResult
 {
     public required AppSettings Settings { get; init; }
     public string AppliedVoiceId { get; init; } = "";
+    public string AppliedSource { get; init; } = "";
     public bool Applied => !string.IsNullOrWhiteSpace(AppliedVoiceId);
 }
 
 public static class PersonalityVoicePreferenceResolver
 {
-    private static readonly IReadOnlyDictionary<string, string> BuiltInVoiceDefaults =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [BuiltInProfileCatalog.HelpfulDefaultId] = "af_sarah",
-            [BuiltInProfileCatalog.ProfessionalId] = "bm_george",
-            [BuiltInProfileCatalog.SirThaddeusId] = "am_adam"
-        };
+    private const string DefaultVoiceId = "bm_lewis";
 
-    public static string ResolvePreferredTtsVoiceId(
+    private static (string VoiceId, string Source) ResolvePreferredTtsVoice(
         PersonalityProfileStore store,
         string profilesDirectory,
         string? activePersonalityId)
@@ -30,7 +25,7 @@ public static class PersonalityVoicePreferenceResolver
         if (string.IsNullOrWhiteSpace(profilesDirectory) ||
             string.IsNullOrWhiteSpace(activePersonalityId))
         {
-            return "";
+            return ("", "");
         }
 
         try
@@ -41,21 +36,27 @@ public static class PersonalityVoicePreferenceResolver
             // Only auto-apply from the actually selected profile. If it fell
             // back to default due validation/missing file, do not surprise users.
             if (!string.Equals(loaded.Profile.Id, requestedId, StringComparison.OrdinalIgnoreCase))
-                return "";
+                return ("", "");
 
             var preferred = loaded.Profile.VoicePreferences.GetResolvedPreferredTtsVoiceId();
             if (!string.IsNullOrWhiteSpace(preferred))
-                return preferred;
+                return (preferred, "profile_preference");
 
-            return BuiltInVoiceDefaults.TryGetValue(requestedId, out var fallbackVoiceId)
-                ? fallbackVoiceId
-                : "";
+            // Use a stable global fallback voice so personality switches do not
+            // unexpectedly flip TTS voice ids when users leave voice blank.
+            return (DefaultVoiceId, "global_default");
         }
         catch
         {
-            return "";
+            return ("", "");
         }
     }
+
+    public static string ResolvePreferredTtsVoiceId(
+        PersonalityProfileStore store,
+        string profilesDirectory,
+        string? activePersonalityId)
+        => ResolvePreferredTtsVoice(store, profilesDirectory, activePersonalityId).VoiceId;
 
     public static PersonalityVoicePreferenceResult ApplyPreferredTtsVoiceIfMissing(
         AppSettings settings,
@@ -74,12 +75,12 @@ public static class PersonalityVoicePreferenceResolver
             };
         }
 
-        var preferredVoiceId = ResolvePreferredTtsVoiceId(
+        var preferredVoice = ResolvePreferredTtsVoice(
             store,
             profilesDirectory,
             activePersonalityId);
 
-        if (string.IsNullOrWhiteSpace(preferredVoiceId))
+        if (string.IsNullOrWhiteSpace(preferredVoice.VoiceId))
         {
             return new PersonalityVoicePreferenceResult
             {
@@ -93,10 +94,11 @@ public static class PersonalityVoicePreferenceResolver
             {
                 Voice = settings.Voice with
                 {
-                    TtsVoiceId = preferredVoiceId
+                    TtsVoiceId = preferredVoice.VoiceId
                 }
             },
-            AppliedVoiceId = preferredVoiceId
+            AppliedVoiceId = preferredVoice.VoiceId,
+            AppliedSource = preferredVoice.Source
         };
     }
 }

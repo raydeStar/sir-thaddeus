@@ -1490,7 +1490,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 VoiceHostBaseUrl = string.IsNullOrWhiteSpace(_voiceHostBaseUrl)
                     ? "http://127.0.0.1:17845"
                     : _voiceHostBaseUrl.Trim(),
-                VoiceHostStartupTimeoutMs = Math.Max(5_000, _voiceHostStartupTimeoutMs),
+                VoiceHostStartupTimeoutMs = Math.Max(30_000, _voiceHostStartupTimeoutMs),
                 VoiceHostHealthPath = string.IsNullOrWhiteSpace(_voiceHostHealthPath)
                     ? "/health"
                     : _voiceHostHealthPath.Trim(),
@@ -1692,15 +1692,24 @@ public sealed partial class SettingsViewModel : ViewModelBase
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);
 
+        var details = new Dictionary<string, object>
+        {
+            ["profileId"] = selectedId
+        };
+        if (voicePreferenceResult.Applied)
+        {
+            details["appliedVoiceId"] = voicePreferenceResult.AppliedVoiceId;
+            details["appliedVoiceSource"] = string.IsNullOrWhiteSpace(voicePreferenceResult.AppliedSource)
+                ? "unknown"
+                : voicePreferenceResult.AppliedSource;
+        }
+
         _audit.Append(new AuditEvent
         {
             Actor = "user",
             Action = "PERSONALITY_SELECTED",
             Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["profileId"] = selectedId
-            }
+            Details = details
         });
     }
 
