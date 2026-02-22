@@ -375,6 +375,15 @@ public partial class MainWindow : Window
     {
         if (_viewModel is null) return;
 
+        // Interrupt mode: if AI is processing, button is unclickable (IsHitTestVisible=False)
+        // If AI is speaking, tap = interrupt, hold = interrupt + start recording
+        var isSpeaking = _overlayViewModel?.StateLabel == "Speaking";
+        if (isSpeaking)
+        {
+            _viewModel.VoiceShutup?.Invoke();
+            // Fall through to start recording — hold = interrupt + record
+        }
+
         if (sender is System.Windows.Controls.Button btn)
             btn.CaptureMouse();
 
@@ -590,5 +599,14 @@ public partial class MainWindow : Window
             Source = sender
         };
         ChatScroller.RaiseEvent(args);
+    }
+
+    /// <summary>
+    /// Closes the Activity Drawer when clicking the transparent overlay behind it.
+    /// </summary>
+    private void DrawerDismiss_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_overlayViewModel != null)
+            _overlayViewModel.IsDrawerOpen = false;
     }
 }

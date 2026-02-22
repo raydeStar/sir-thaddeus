@@ -72,11 +72,11 @@
                                                    FontWeight="SemiBold"
                                                    Foreground="{StaticResource TextBrush}"
                                                    VerticalAlignment="Center"/>
-                                        <TextBlock Text="  ▾"
-                                                   FontSize="11"
+                                        <TextBlock Text="▾"
+                                                   FontSize="13"
                                                    Foreground="{StaticResource Subtext1Brush}"
                                                    VerticalAlignment="Center"
-                                                   Margin="5,1,0,0"/>
+                                                   Margin="6,0,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <ControlTemplate.Triggers>
@@ -92,6 +92,7 @@
                             </ControlTemplate>
                         </Button.Template>
                     </Button>
+
 
                     <!-- Status Indicator — text-only, semantic color by state -->
                     <Border x:Name="HeaderArea"
@@ -118,6 +119,10 @@
                                         <!-- Thinking → muted blue -->
                                         <DataTrigger Binding="{Binding StateLabel}" Value="Thinking">
                                             <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
+                                        </DataTrigger>
+                                        <!-- Speaking → mauve -->
+                                        <DataTrigger Binding="{Binding StateLabel}" Value="Speaking">
+                                            <Setter Property="Foreground" Value="{StaticResource MauveBrush}"/>
                                         </DataTrigger>
                                         <!-- Working in background → amber -->
                                         <DataTrigger Binding="{Binding StateLabel}" Value="Working in background">
@@ -2408,16 +2413,16 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Context chips -->
                 <ItemsControl Grid.Row="0"
-                              Grid.ColumnSpan="2"
+                              Grid.ColumnSpan="3"
                               ItemsSource="{Binding ContextChips}"
                               Margin="0,0,0,8">
                     <ItemsControl.ItemsPanel>
@@ -2451,6 +2456,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Text input -->
                 <TextBox Grid.Row="1"
                          Grid.Column="0"
                          x:Name="ChatInput"
@@ -2458,8 +2464,86 @@
                          Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,8,0"/>
 
+                <!-- Voice button: Hold-to-Talk (normal) / Interrupt (when AI is processing) -->
+                <Button x:Name="PttButton"
+                        Grid.Row="1" Grid.Column="1"
+                        IsEnabled="{Binding IsVoiceReady}"
+                        PreviewMouseLeftButtonDown="PttButton_MouseDown"
+                        PreviewMouseLeftButtonUp="PttButton_MouseUp"
+                        MouseLeave="PttButton_MouseLeave"
+                        ToolTip="Hold to record. Release to send."
+                        Cursor="Hand"
+                        Margin="0,0,8,0">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="HoldBg"
+                                    Background="{StaticResource Surface1Brush}"
+                                    BorderBrush="{StaticResource Surface2Brush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="12,6">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="MicIcon" Text="&#xE720;"
+                                               FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                               Foreground="{StaticResource Subtext1Brush}"
+                                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBlock x:Name="HoldLabel" Text="Hold" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <!-- Hover (normal) -->
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource Surface2Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource Overlay0Brush}"/>
+                                </Trigger>
+                                <!-- Pressed (recording) -->
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                </Trigger>
+                                <!-- Disabled -->
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="HoldBg" Property="Opacity" Value="0.4"/>
+                                </Trigger>
+                                <!-- Processing state: AI is thinking (unclickable) -->
+                                <DataTrigger Binding="{Binding IsProcessing}" Value="True">
+                                    <Setter TargetName="MicIcon" Property="Text" Value="&#xE946;"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Text" Value="Processing…"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource Surface1Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource Surface0Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="IsHitTestVisible" Value="False"/>
+                                </DataTrigger>
+                                <!-- Processing state: voice input path (Thinking state) -->
+                                <DataTrigger Binding="{Binding DataContext.StateLabel, ElementName=HeaderArea}" Value="Thinking">
+                                    <Setter TargetName="MicIcon" Property="Text" Value="&#xE946;"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Text" Value="Processing…"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource Surface1Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource Surface0Brush}"/>
+                                    <Setter TargetName="HoldBg" Property="IsHitTestVisible" Value="False"/>
+                                </DataTrigger>
+                                <!-- Interrupt mode: AI is speaking (TTS playback) -->
+                                <DataTrigger Binding="{Binding DataContext.StateLabel, ElementName=HeaderArea}" Value="Speaking">
+                                    <Setter TargetName="MicIcon" Property="Text" Value="&#xE71A;"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Text" Value="Interrupt"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource RedBrush}"/>
+                                    <Setter TargetName="HoldBg" Property="Background" Value="Transparent"/>
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
                 <!-- Send / Cancel button swap -->
-                <Grid Grid.Row="1" Grid.Column="1">
+                <Grid Grid.Row="1" Grid.Column="2">
                     <!-- Send (visible when NOT processing) -->
                     <Button Content="Send ↵"
                             Command="{Binding SendCommand}">
@@ -2484,79 +2568,20 @@
                                          Converter={StaticResource BoolToVis}}"
                             Style="{StaticResource CancelButtonStyle}"/>
                 </Grid>
-
-                <!-- Voice debug panel (manual hold-to-talk + live transcript) -->
-                <Border Grid.Row="2"
-                        Grid.ColumnSpan="2"
-                        Margin="0,8,0,0"
-                        Padding="8,6"
-                        Background="{StaticResource Surface0Brush}"
-                        BorderBrush="{StaticResource Surface1Brush}"
-                        BorderThickness="1"
-                        CornerRadius="6">
-                    <StackPanel>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-
-                            <Button x:Name="PttButton"
-                                    Content="Hold to Talk"
-                                    Padding="12,5"
-                                    FontSize="11"
-                                    Foreground="{StaticResource TextBrush}"
-                                    Background="{StaticResource Surface1Brush}"
-                                    BorderBrush="{StaticResource BlueBrush}"
-                                    BorderThickness="1"
-                                    Cursor="Hand"
-                                    IsEnabled="{Binding IsVoiceReady}"
-                                    PreviewMouseLeftButtonDown="PttButton_MouseDown"
-                                    PreviewMouseLeftButtonUp="PttButton_MouseUp"
-                                    MouseLeave="PttButton_MouseLeave"/>
-
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding VoiceStatusText}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource Subtext0Brush}"
-                                       VerticalAlignment="Center"
-                                       Margin="10,0,0,0"/>
-
-                            <Button Grid.Column="2"
-                                    Content="Stop"
-                                    Padding="10,4"
-                                    FontSize="10"
-                                    Click="VoiceStopButton_Click"
-                                    Visibility="{Binding IsVoiceActive,
-                                                 Converter={StaticResource BoolToVis}}"
-                                    Style="{StaticResource CancelButtonStyle}"/>
-                        </Grid>
-
-                        <TextBox Text="{Binding VoiceTranscriptText, Mode=OneWay}"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 AcceptsReturn="True"
-                                 MaxHeight="100"
-                                 FontSize="11"
-                                 FontFamily="Consolas"
-                                 Foreground="{StaticResource TextBrush}"
-                                 Background="{StaticResource MantleBrush}"
-                                 BorderBrush="{StaticResource Surface1Brush}"
-                                 BorderThickness="1"
-                                 Padding="6,4"
-                                 Margin="0,6,0,0"
-                                 VerticalScrollBarVisibility="Auto"
-                                 Visibility="{Binding IsVoiceActive,
-                                              Converter={StaticResource BoolToVis}}"/>
-                    </StackPanel>
-                </Border>
             </Grid>
         </Border>
 
         <!-- ═══════════════════════════════════════════════════════════
              ACTIVITY DRAWER (Overlay)
              ═══════════════════════════════════════════════════════ -->
+        <!-- Light-dismiss overlay (click outside to close drawer) -->
+        <Border Grid.Row="1" Grid.RowSpan="2"
+                Background="Transparent"
+                DataContext="{Binding ElementName=HeaderArea, Path=DataContext}"
+                Visibility="{Binding IsDrawerOpen, Converter={StaticResource BoolToVis}}"
+                Panel.ZIndex="99"
+                MouseLeftButtonDown="DrawerDismiss_Click"/>
+
         <Border Grid.Row="1" Grid.RowSpan="2"
                 HorizontalAlignment="Right"
                 Width="320"
@@ -2590,7 +2615,7 @@
                           x:Name="LogScroller"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding ActivityLog}" Padding="12,8">
+                            <ItemsControl ItemsSource="{Binding DataContext.DrawerLog, RelativeSource={RelativeSource AncestorType=Window}}" Padding="12,8">
                     <ItemsControl.ItemTemplate>
                             <DataTemplate>
                             <Grid Margin="0,4">
@@ -2631,7 +2656,7 @@
                         <Style TargetType="TextBlock">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding AuditFeed.Count}" Value="0">
+                                <DataTrigger Binding="{Binding DataContext.DrawerLog.Count, RelativeSource={RelativeSource AncestorType=Window}}" Value="0">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>

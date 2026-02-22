@@ -161,6 +161,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public ObservableCollection<LogEntry> ActivityLog { get; } = [];
 
     /// <summary>
+    /// Filtered log for the Activity Drawer — MCP hooks, tool calls, state changes, and errors only.
+    /// Excludes verbose voice diagnostics and connection checks.
+    /// </summary>
+    public ObservableCollection<LogEntry> DrawerLog { get; } = [];
+
+    /// <summary>
     /// Compact continuity chips rendered above chat input.
     /// </summary>
     public ObservableCollection<ContextChipViewModel> ContextChips { get; } = [];
@@ -1148,6 +1154,22 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) kind = LogEntryKind.ToolOutput;
 
                     ActivityLog.Insert(0, new LogEntry { Kind = kind, Text = txt, Timestamp = ev.Timestamp.DateTime });
+
+                    // Only show MCP/tool calls and state changes in the drawer — no errors, no JSON
+                    if (ev.Action.StartsWith("MCP_") || ev.Action.StartsWith("TOOL_"))
+                    {
+                        var label = ev.Action.Replace("MCP_", "").Replace("TOOL_", "").Replace("_", " ");
+                        var drawerText = $"{label} — {ev.Result}";
+                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.ToolOutput, Text = drawerText, Timestamp = ev.Timestamp.DateTime });
+                        while (DrawerLog.Count > 30)
+                            DrawerLog.RemoveAt(DrawerLog.Count - 1);
+                    }
+                    else if (ev.Action.StartsWith("STATE_"))
+                    {
+                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.Info, Text = $"State → {ev.Result}", Timestamp = ev.Timestamp.DateTime });
+                        while (DrawerLog.Count > 30)
+                            DrawerLog.RemoveAt(DrawerLog.Count - 1);
+                    }
                 }
                 
                 while (ActivityLog.Count > 100)
