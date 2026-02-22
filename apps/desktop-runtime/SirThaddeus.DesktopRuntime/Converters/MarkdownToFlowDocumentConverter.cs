@@ -58,9 +58,16 @@ public sealed class MarkdownToFlowDocumentConverter : IValueConverter
         {
             var doc = new FlowDocument
             {
-                PagePadding = new Thickness(0),
-                // Font/Foreground are inherited from the viewer control.
+                PagePadding = new Thickness(0)
             };
+            if (System.Windows.Application.Current?.TryFindResource("PrimaryFont") is System.Windows.Media.FontFamily pf)
+            {
+                doc.FontFamily = pf;
+            }
+            else
+            {
+                doc.FontFamily = new System.Windows.Media.FontFamily("Segoe UI");
+            }
 
             var text = NormalizeNewlines(raw);
             if (string.IsNullOrWhiteSpace(text))
