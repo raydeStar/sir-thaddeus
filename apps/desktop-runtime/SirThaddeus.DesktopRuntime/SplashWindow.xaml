@@ -121,7 +121,7 @@
 
             <!-- Footer -->
             <TextBlock Grid.Row="1"
-                       Text="Local-first AI assistant"
+                       Text="No silent background agents. No hidden telemetry. Just tools you control."
                        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"
                        FontSize="11"
                        Foreground="#4A556B"
