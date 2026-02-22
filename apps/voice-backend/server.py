@@ -471,8 +471,7 @@ class BaseProvider:
         return ""
 
     def get_cached_init_probe(self) -> Optional[InitProbeResult]:
-        with self._init_lock:
-            return self._init_cache
+        return self._init_cache
 
     def init_probe(self, force: bool = False) -> InitProbeResult:
         with self._init_lock:
