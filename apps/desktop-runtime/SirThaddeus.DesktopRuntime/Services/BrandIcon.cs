@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Microsoft.Win32;
 
 namespace SirThaddeus.DesktopRuntime.Services;
 
@@ -31,7 +32,19 @@ public static class BrandIcon
     {
         try
         {
-            var icoPath = ResolveOutputPath("sir-thaddeus-tray.ico");
+            var isLightMode = false;
+            if (OperatingSystem.IsWindows())
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                if (key?.GetValue("SystemUsesLightTheme") is int lightMode)
+                {
+                    isLightMode = lightMode == 1;
+                }
+            }
+
+            var iconName = isLightMode ? "sir-thaddeus-tray-dark.ico" : "sir-thaddeus-tray.ico";
+            var icoPath = ResolveOutputPath(iconName);
+            
             if (File.Exists(icoPath))
             {
                 return new Icon(icoPath, 16, 16);

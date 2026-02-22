@@ -21,21 +21,21 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName WindowsBase
 
-$repoRoot  = Split-Path -Parent $PSScriptRoot
-$svgPath   = Join-Path $repoRoot "assets\svg\sir-thaddeus.svg"
-$outDir    = Join-Path $repoRoot "assets\icons"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$svgPath = Join-Path $repoRoot "assets\svg\sir-thaddeus.svg"
+$outDir = Join-Path $repoRoot "assets\icons"
 
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 }
 
 # ── Standard ICO sizes ────────────────────────────────────────────────
-$appSizes  = @(16, 24, 32, 48, 64, 128, 256)
+$appSizes = @(16, 24, 32, 48, 64, 128, 256)
 $traySizes = @(16, 24, 32, 48)
 
 # ── Brand colors ──────────────────────────────────────────────────────
 $navyBlue = [System.Windows.Media.Color]::FromRgb(0x1B, 0x3F, 0x6E)
-$white    = [System.Windows.Media.Color]::FromRgb(0xFF, 0xFF, 0xFF)
+$white = [System.Windows.Media.Color]::FromRgb(0xFF, 0xFF, 0xFF)
 
 # ── Extract path data from SVG ────────────────────────────────────────
 function Extract-SvgPathData {
@@ -52,10 +52,10 @@ function Extract-SvgPathData {
 Write-Host "Parsing SVG path from: $svgPath"
 $pathData = Extract-SvgPathData -SvgFilePath $svgPath
 $geometry = [System.Windows.Media.Geometry]::Parse($pathData)
-$bounds   = $geometry.Bounds
+$bounds = $geometry.Bounds
 
 Write-Host ("  Geometry bounds: X={0:F1} Y={1:F1} W={2:F1} H={3:F1}" -f `
-    $bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
+        $bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
 
 # ── Render a single frame ────────────────────────────────────────────
 function Render-IconPng {
@@ -66,24 +66,24 @@ function Render-IconPng {
     )
 
     $visual = New-Object System.Windows.Media.DrawingVisual
-    $dc     = $visual.RenderOpen()
+    $dc = $visual.RenderOpen()
 
     # Scale geometry to fit with padding
     $available = $Size * (1.0 - 2.0 * $PaddingFraction)
-    $scaleX    = $available / $bounds.Width
-    $scaleY    = $available / $bounds.Height
-    $scale     = [Math]::Min($scaleX, $scaleY)
+    $scaleX = $available / $bounds.Width
+    $scaleY = $available / $bounds.Height
+    $scale = [Math]::Min($scaleX, $scaleY)
 
-    $scaledW = $bounds.Width  * $scale
+    $scaledW = $bounds.Width * $scale
     $scaledH = $bounds.Height * $scale
 
     # Transform: origin-shift → scale → center
     $group = New-Object System.Windows.Media.TransformGroup
     $group.Children.Add((New-Object System.Windows.Media.TranslateTransform(
-        (-$bounds.X), (-$bounds.Y))))
+                (-$bounds.X), (-$bounds.Y))))
     $group.Children.Add((New-Object System.Windows.Media.ScaleTransform($scale, $scale)))
     $group.Children.Add((New-Object System.Windows.Media.TranslateTransform(
-        (($Size - $scaledW) / 2.0), (($Size - $scaledH) / 2.0))))
+                (($Size - $scaledW) / 2.0), (($Size - $scaledH) / 2.0))))
 
     $dc.PushTransform($group)
 
@@ -112,7 +112,7 @@ function Write-IcoFile {
         [int[]]$Sizes
     )
 
-    $count      = $PngDataArray.Count
+    $count = $PngDataArray.Count
     $headerSize = 6 + ($count * 16)
 
     $fs = [System.IO.File]::Create($OutputPath)
@@ -153,7 +153,7 @@ Write-Host "Generating app icon (navy blue raven)..."
 $appFrames = @()
 foreach ($sz in $appSizes) {
     Write-Host "  ${sz}x${sz}"
-    $appFrames += ,(Render-IconPng -Size $sz -FillColor $navyBlue)
+    $appFrames += , (Render-IconPng -Size $sz -FillColor $navyBlue)
 }
 $appIcoPath = Join-Path $outDir "sir-thaddeus.ico"
 Write-IcoFile -OutputPath $appIcoPath -PngDataArray $appFrames -Sizes $appSizes
@@ -165,13 +165,26 @@ Write-Host "Generating tray icon (white raven for tray contrast)..."
 $trayFrames = @()
 foreach ($sz in $traySizes) {
     Write-Host "  ${sz}x${sz}"
-    $trayFrames += ,(Render-IconPng -Size $sz -FillColor $white)
+    $trayFrames += , (Render-IconPng -Size $sz -FillColor $white)
 }
 $trayIcoPath = Join-Path $outDir "sir-thaddeus-tray.ico"
 Write-IcoFile -OutputPath $trayIcoPath -PngDataArray $trayFrames -Sizes $traySizes
 Write-Host "  -> $trayIcoPath"
 
+# ── Generate tray icon (dark for light mode system tray) ─────────────
+Write-Host ""
+Write-Host "Generating tray icon (navy blue raven for light mode tray contrast)..."
+$trayDarkFrames = @()
+foreach ($sz in $traySizes) {
+    Write-Host "  ${sz}x${sz}"
+    $trayDarkFrames += , (Render-IconPng -Size $sz -FillColor $navyBlue)
+}
+$trayDarkIcoPath = Join-Path $outDir "sir-thaddeus-tray-dark.ico"
+Write-IcoFile -OutputPath $trayDarkIcoPath -PngDataArray $trayDarkFrames -Sizes $traySizes
+Write-Host "  -> $trayDarkIcoPath"
+
 Write-Host ""
 Write-Host "Done."
 Write-Host "  App icon:  $appIcoPath"
 Write-Host "  Tray icon: $trayIcoPath"
+Write-Host "  Tray dark: $trayDarkIcoPath"
