@@ -288,9 +288,9 @@ public sealed class ReasoningGuardrailsPipeline
 
     private async Task<FirstPrinciplesBreakdownResult?> BuildFirstPrinciplesBreakdownAsync(
         string userMessage,
-        GoalInferenceResult goal,
-        EntityExtractionResult entities,
-        ConstraintBuildResult constraints,
+        GoalInference goal,
+        EntityExtraction entities,
+        ConstraintSet constraints,
         CancellationToken cancellationToken)
     {
         var entitySummary = entities.Entities.Count > 0
