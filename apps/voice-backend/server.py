@@ -90,6 +90,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("voice-backend")
 
+class ModelDownloaderProgressCapture(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "model-downloader" and "Progress:" in record.getMessage():
+            global _global_model_progress
+            _global_model_progress = f"Downloading models:{record.getMessage().split('Progress:', 1)[1]}"
+        return True
+
+logging.getLogger("model-downloader").addFilter(ModelDownloaderProgressCapture())
+
 app = FastAPI(title="Voice Backend", version="0.2.0")
 
 SCHEMA_VERSION = 1
