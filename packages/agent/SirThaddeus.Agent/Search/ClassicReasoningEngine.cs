@@ -113,17 +113,6 @@ public static class ClassicReasoningEngine
             ?? TrySolveRoosterEggRiddle(message);
     }
 
-    /// <summary>
-    /// Used in chat post-processing only (kept out of deterministic utility
-    /// pre-routing so reasoning-guardrails benchmarks in always mode still
-    /// exercise the guardrails pipeline path).
-    /// </summary>
-    public static bool TryBuildCarWashReasoning(string message, out string answer)
-    {
-        answer = "";
-        return false;
-    }
-
     private static DeterministicUtilityResult? TrySolveWaterJugPuzzle(string message)
     {
         if (!TryParseWaterJugPrompt(message, out var jugA, out var jugB, out var target))
