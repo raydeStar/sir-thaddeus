@@ -96,7 +96,7 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
             voiceSettings.VoiceHostEnabled &&
             !IsPreviewSessionId(sessionId);
         var retryDeadlineUtc = startedAt + TimeSpan.FromMilliseconds(
-            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 120_000));
+            Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 1_800_000));
         var attempt = 0;
         string transcript;
 
