@@ -768,6 +768,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 _history.Add(ChatMessage.Assistant(guardedText));
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={guardrailsResult.TriggerRisk}, source={guardrailsResult.TriggerSource}, why={guardrailsResult.TriggerWhy}");
+                LogEvent(
+                    "FIRST_PRINCIPLES_TRACE",
+                    string.Join(" || ", guardrailsResult.RationaleLines));
                 LogEvent("AGENT_RESPONSE", guardedText);
 
                 return AttachContextSnapshot(new AgentResponse
