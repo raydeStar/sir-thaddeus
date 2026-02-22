@@ -232,3 +232,21 @@ public class BareResponseEnrichmentTests
         Assert.Equal(answer, result);
     }
 }
+
+
+public class ChatPostProcessorReasoningBehaviorTests
+{
+    [Fact]
+    public void ProcessChatOnlyDraft_DoesNotApplyCarWashHardcodedOverride()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "Walk.",
+            userMessage: "The car wash is 50m away. Should I walk, or drive?",
+            toolCallsMade: []);
+
+        Assert.Equal("Walk.", output);
+        Assert.DoesNotContain("<think>", output, StringComparison.OrdinalIgnoreCase);
+    }
+}

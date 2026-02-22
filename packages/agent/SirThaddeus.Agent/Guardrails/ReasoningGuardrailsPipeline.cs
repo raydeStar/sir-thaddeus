@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Guardrails;
@@ -29,6 +30,12 @@ public sealed class ReasoningGuardrailsPipeline
     private static readonly TimeSpan DetectorStepTimeout = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ExtractionStepTimeout = TimeSpan.FromMilliseconds(850);
     private static readonly TimeSpan SynthesisStepTimeout = TimeSpan.FromMilliseconds(3000);
+
+    private sealed record FirstPrinciplesBreakdownResult(
+        string Need,
+        string Pieces,
+        string Assembly,
+        int LlmRoundTrips);
 
     public ReasoningGuardrailsPipeline(ILlmClient llm, IAuditLogger audit)
     {
@@ -131,6 +138,18 @@ public sealed class ReasoningGuardrailsPipeline
 
         llmRoundTrips += constraints.LlmRoundTrips;
 
+        var breakdown = await RunBoundedAsync(
+            ct => BuildFirstPrinciplesBreakdownAsync(userMessage, goal, entities, constraints, ct),
+            ExtractionStepTimeout,
+            cancellationToken);
+        if (breakdown is null)
+        {
+            WriteFallback("first_principles_breakdown_failed");
+            return null;
+        }
+
+        llmRoundTrips += breakdown.LlmRoundTrips;
+
         var entitySummary = entities.Entities.Count > 0
             ? string.Join(", ", entities.Entities.Select(e => e.Name))
             : "none extracted";
@@ -139,6 +158,9 @@ public sealed class ReasoningGuardrailsPipeline
         contextText.AppendLine($"- Goal: {goal.PrimaryGoal}");
         contextText.AppendLine($"- Key entities: {entitySummary}");
         contextText.AppendLine($"- Constraints: {string.Join("; ", constraints.Constraints)}");
+        contextText.AppendLine($"- Need: {breakdown.Need}");
+        contextText.AppendLine($"- Pieces: {breakdown.Pieces}");
+        contextText.AppendLine($"- Assembly: {breakdown.Assembly}");
 
         if (!string.IsNullOrWhiteSpace(extraContext))
         {
@@ -148,25 +170,23 @@ public sealed class ReasoningGuardrailsPipeline
             contextText.AppendLine("[/SUPPLEMENTAL CONTEXT]");
         }
 
+        var userAsksForReasoning = IntentFeatureExtractor.LooksLikeReasoningFollowUp(
+            (userMessage ?? string.Empty).Trim().ToLowerInvariant());
+
         var finalMessages = new List<ChatMessage>
         {
             ChatMessage.System(
                 "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
-                "You have solved a logic puzzle. Present your reasoning and final answer.\n\n" +
-                "MANDATORY FORMAT:\n" +
-                "<think>\n" +
-                "Facts: [bullet points]\n" +
-                "Goal: [target objective]\n" +
-                "Basic checks: [bullet points]\n" +
-                "</think>\n\n" +
-                "Final answer: [your direct answer]\n\n" +
-                "CRITICAL: Start your response with <think>. Do not include any text before the opening <think> tag."),
+                "Use first-principles logic internally, but keep private reasoning hidden.\n" +
+                "Return a direct answer.\n" +
+                "Only include a brief explanation when the user explicitly asks for it."),
             ChatMessage.User(
                 $"Question:\n{userMessage}\n\n" +
                 $"Decomposed Context:\n" +
                 contextText + "\n" +
-                "Use the <think> structure for your internal logic. Then state your 'Final answer:'.\n" +
-                "MANDATORY: You MUST start your response with <think>.")
+                (userAsksForReasoning
+                    ? "The user explicitly asked for reasoning. Give the direct answer first, then add a short 'Why:' section using Need/Pieces/Assembly in 2-4 bullets."
+                    : "The user did not ask for reasoning. Give only the direct answer in one concise paragraph."))
         };
 
         var finalLlm = await RunBoundedAsync(
@@ -206,6 +226,64 @@ public sealed class ReasoningGuardrailsPipeline
             TriggerSource = triggerDecision.Source,
             LlmRoundTrips = llmRoundTrips
         };
+    }
+
+    private async Task<FirstPrinciplesBreakdownResult?> BuildFirstPrinciplesBreakdownAsync(
+        string userMessage,
+        GoalInferenceResult goal,
+        EntityExtractionResult entities,
+        ConstraintBuildResult constraints,
+        CancellationToken cancellationToken)
+    {
+        var entitySummary = entities.Entities.Count > 0
+            ? string.Join(", ", entities.Entities.Select(e => e.Name))
+            : "none";
+        var optionSummary = entities.Options.Count > 0
+            ? string.Join(", ", entities.Options.Select(o => o.Label))
+            : "none";
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "Break this into first principles. Return strict JSON only with keys: need, pieces, assembly."),
+            ChatMessage.User(
+                "Question:\n" + userMessage + "\n\n" +
+                "Answer these internal questions:\n" +
+                "1) What do we need to make this work?\n" +
+                "2) What are the pieces involved?\n" +
+                "3) How do the pieces combine to decide between options?\n\n" +
+                $"Goal: {goal.PrimaryGoal}\n" +
+                $"Entities: {entitySummary}\n" +
+                $"Options: {optionSummary}\n" +
+                $"Constraints: {string.Join("; ", constraints.Constraints)}")
+        };
+
+        var response = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 220, cancellationToken);
+        if (string.IsNullOrWhiteSpace(response.Content))
+            return null;
+
+        var cleaned = response.Content.Trim();
+        try
+        {
+            using var doc = JsonDocument.Parse(cleaned);
+            var root = doc.RootElement;
+            var need = root.TryGetProperty("need", out var needEl) ? needEl.GetString() : null;
+            var pieces = root.TryGetProperty("pieces", out var piecesEl) ? piecesEl.GetString() : null;
+            var assembly = root.TryGetProperty("assembly", out var assemblyEl) ? assemblyEl.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(need) ||
+                string.IsNullOrWhiteSpace(pieces) ||
+                string.IsNullOrWhiteSpace(assembly))
+            {
+                return null;
+            }
+
+            return new FirstPrinciplesBreakdownResult(need.Trim(), pieces.Trim(), assembly.Trim(), 1);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public GuardrailsPipelineResult? TryRunDeterministicSpecialCase(string userMessage)
@@ -1657,4 +1735,3 @@ internal static class AnswerComposer
         return trimmed;
     }
 }
-
