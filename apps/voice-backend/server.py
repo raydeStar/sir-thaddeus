@@ -1421,9 +1421,15 @@ async def on_startup() -> None:
     # the event loop and starve health-check responses during cold start.
     try:
         stt_provider = PROVIDERS.get_stt()
-        await asyncio.to_thread(stt_provider.init_probe, False)
+        async def warm_stt_async() -> None:
+            try:
+                await asyncio.to_thread(stt_provider.init_probe, False)
+            except Exception as inner_exc:
+                logger.error("STT init probe failed on startup: %s", inner_exc)
+                
+        asyncio.create_task(warm_stt_async())
     except Exception as exc:
-        logger.error("STT init probe failed on startup: %s", exc)
+        logger.error("STT init probe scheduling failed on startup: %s", exc)
 
     try:
         tts_provider = PROVIDERS.get_tts()
@@ -1432,6 +1438,18 @@ async def on_startup() -> None:
             # as fast as possible for PTT latency.
             async def warm_tts_async() -> None:
                 try:
+                    if tts_provider.engine == "kokoro" and getattr(tts_provider, "voice_id", None):
+                        from model_downloader import ensure_kokoro_models
+                        registry_path = ROOT_DIR / "model_registry.json"
+                        variant = os.environ.get("KOKORO_MODEL_VARIANT") or None
+                        await asyncio.to_thread(
+                            ensure_kokoro_models,
+                            VOICES_ROOT,
+                            tts_provider.voice_id,
+                            registry_path,
+                            variant=variant,
+                        )
+
                     await asyncio.to_thread(tts_provider.init_probe, False)
                 except Exception as inner_exc:
                     logger.error("TTS init probe failed on startup: %s", inner_exc)
@@ -1860,24 +1878,8 @@ if __name__ == "__main__":
         tts_voice_id=cli.tts_voice_id,
     )
 
-    # ── Auto-download missing model files before providers initialize ──
-    if RUNTIME_CONFIG.tts_engine == "kokoro" and RUNTIME_CONFIG.tts_voice_id:
-        try:
-            from model_downloader import ensure_kokoro_models
-
-            registry_path = ROOT_DIR / "model_registry.json"
-            variant = cli.kokoro_variant or os.environ.get("KOKORO_MODEL_VARIANT") or None
-            ensure_kokoro_models(
-                voices_root=VOICES_ROOT,
-                voice_id=RUNTIME_CONFIG.tts_voice_id,
-                registry_path=registry_path,
-                variant=variant,
-            )
-        except Exception as exc:
-            # Non-fatal: log the failure but let the server attempt startup.
-            # If the files truly don't exist, the provider will fail later
-            # with a clear error about the missing model.
-            logger.warning("Model auto-download failed (non-fatal): %s", exc)
+    if cli.kokoro_variant:
+        os.environ["KOKORO_MODEL_VARIANT"] = cli.kokoro_variant
 
     PROVIDERS = ProviderRegistry(RUNTIME_CONFIG)
 
