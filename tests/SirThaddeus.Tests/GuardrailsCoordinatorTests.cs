@@ -106,6 +106,34 @@ public class GuardrailsCoordinatorTests
         Assert.Contains("Pieces:", finalUserPrompt, StringComparison.Ordinal);
         Assert.Contains("Assembly:", finalUserPrompt, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task TryRunAsync_LookupRoute_WithLowConfidenceGuardrailsAnswer_ReturnsNullForWebFallback()
+    {
+        var callCount = 0;
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            callCount++;
+            var content = callCount switch
+            {
+                1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
+                2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
+                3 => """{"constraints":["The car must physically reach the car wash"]}""",
+                4 => """{"need":"wash the car","pieces":"car, wash location","assembly":"choose option that gets car to wash"}""",
+                _ => "It depends on your preferences and conditions."
+            };
+            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+        });
+
+        var coordinator = new GuardrailsCoordinator(new ReasoningGuardrailsPipeline(llm, new TestAuditLogger()));
+        var result = await coordinator.TryRunAsync(
+            new RouterOutput { Intent = Intents.LookupFact, Confidence = 0.9, NeedsWeb = true, NeedsSearch = true },
+            "The car wash is 50m away. Should I walk or drive?",
+            mode: "always");
+
+        Assert.Null(result);
+    }
+
     private static GuardrailsCoordinator BuildCoordinator(bool returnStructuredJson = false)
     {
         Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> handler;
