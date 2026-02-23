@@ -1,5 +1,4 @@
 using static SirThaddeus.Agent.OrchestratorMessageHelpers;
-using SirThaddeus.Agent.Search;
 using SirThaddeus.PersonalityEngine.Formatting;
 using SirThaddeus.PersonalityEngine.Profiles;
 using System.Text.RegularExpressions;
@@ -65,12 +64,6 @@ public sealed class DeterministicChatPostProcessor
             return BuildRespectfulResetReply();
         }
 
-        if (TryResolveClassicReasoningOverride(userMessage, out var deterministicOverride))
-        {
-            logEvent?.Invoke("AGENT_CLASSIC_REASONING_OVERRIDE", "Applied deterministic override for classic reasoning prompt.");
-            return deterministicOverride;
-        }
-
         return text;
     }
 
@@ -111,7 +104,6 @@ public sealed class DeterministicChatPostProcessor
         }
 
         var expanded = string.Join('\n', filtered).Trim();
-        expanded = EnsureReasoningIsTagged(expanded);
 
         var hasNonMemoryToolEvidence = toolCallsMade.Any(t => !t.ToolName.Equals("MemoryRetrieve", StringComparison.OrdinalIgnoreCase));
         var responseKind = _responseKindClassifier.Classify(
@@ -334,52 +326,6 @@ public sealed class DeterministicChatPostProcessor
                  lower.Contains("to you", StringComparison.Ordinal)));
     }
 
-    // ── Bare response detection ────────────────────────────────────
-    private static string EnsureReasoningIsTagged(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return text;
-
-        if (text.Contains("<think>", StringComparison.OrdinalIgnoreCase))
-            return text;
-
-        // Pattern: Starts with reasoning cues and ends with a "Final answer:" or similar trigger.
-        var lower = text.ToLowerInvariant();
-        
-        // Cues that this response contains a logic puzzle breakdown
-        var hasReasoningCues = 
-            lower.Contains("facts:") || 
-            lower.Contains("goal:") || 
-            lower.Contains("basic checks:") || 
-            lower.Contains("let's analyze") || 
-            lower.Contains("dissect this") ||
-            lower.Contains("break it down");
-
-        if (!hasReasoningCues)
-            return text;
-
-        // Keywords that mark the start of the final direct answer
-        var splitKeywords = new[] { "final answer:", "answer:", "final decision:", "in short:" };
-        int splitIdx = -1;
-        foreach (var kw in splitKeywords)
-        {
-            splitIdx = lower.LastIndexOf(kw, StringComparison.Ordinal);
-            if (splitIdx >= 0)
-                break;
-        }
-
-        // If we found a clear answer boundary, wrap the preceding text in <think> tags.
-        if (splitIdx > 20) // Require some substance in the reasoning
-        {
-            var reasoning = text[..splitIdx].Trim();
-            var remaining = text[splitIdx..].Trim();
-            
-            return $"<think>\n{reasoning}\n</think>\n\n{remaining}";
-        }
-
-        return text;
-    }
-
     // Small models sometimes return "Yes", "No", or a single bare
     // sentence. This is a poor experience — enrich them with a nudge.
 
@@ -461,8 +407,4 @@ public sealed class DeterministicChatPostProcessor
                lower.Contains("smtp", StringComparison.Ordinal);
     }
 
-    private static bool TryResolveClassicReasoningOverride(string userMessage, out string answer)
-    {
-        return ClassicReasoningEngine.TryBuildCarWashReasoning(userMessage, out answer);
-    }
 }

@@ -4473,7 +4473,13 @@ public sealed partial class AgentOrchestrator
             "i couldn't find",
             "i could not find",
             "i wasn't able to",
-            "i was not able to"
+            "i was not able to",
+            "depends",
+            "it depends",
+            "might",
+            "could",
+            "possibly",
+            "perhaps"
         ];
 
         foreach (var marker in markers)

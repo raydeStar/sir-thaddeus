@@ -58,10 +58,6 @@ public static class ClassicReasoningEngine
         "[\"'`“”](?<word>[A-Za-z]{2,})[\"'`“”]",
         RegexOptions.Compiled);
 
-    private static readonly Regex CarWashDistanceRegex = new(
-        @"\b\d+(?:\.\d+)?\s*(?:m|meter|meters|km|kilometer|kilometers|ft|feet|yard|yards|block|blocks)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     private static readonly Dictionary<string, int> NumberWords = new(StringComparer.OrdinalIgnoreCase)
     {
         ["zero"] = 0,
@@ -115,78 +111,6 @@ public static class ClassicReasoningEngine
             ?? TrySolveMonths28Riddle(message)
             ?? TrySolveAnagramRiddle(message)
             ?? TrySolveRoosterEggRiddle(message);
-    }
-
-    /// <summary>
-    /// Used in chat post-processing only (kept out of deterministic utility
-    /// pre-routing so reasoning-guardrails benchmarks in always mode still
-    /// exercise the guardrails pipeline path).
-    /// </summary>
-    public static bool TryBuildCarWashReasoning(string message, out string answer)
-    {
-        answer = "";
-        var lower = (message ?? "").Trim().ToLowerInvariant();
-        if (lower.Length == 0 ||
-            !lower.Contains("car wash", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var hasWalkDriveChoice =
-            lower.Contains("walk or drive", StringComparison.Ordinal) ||
-            lower.Contains("drive or walk", StringComparison.Ordinal);
-        if (!hasWalkDriveChoice)
-            return false;
-
-        var hasQuestionCue =
-            lower.Contains("should i", StringComparison.Ordinal) ||
-            lower.Contains("should you", StringComparison.Ordinal) ||
-            lower.Contains("should we", StringComparison.Ordinal) ||
-            lower.Contains("?", StringComparison.Ordinal);
-        if (!hasQuestionCue)
-            return false;
-
-        var hasDistanceCue = CarWashDistanceRegex.IsMatch(lower);
-        var hasVehicleCue =
-            lower.Contains("vehicle", StringComparison.Ordinal) ||
-            lower.Contains("car", StringComparison.Ordinal);
-        if (!hasDistanceCue && !hasVehicleCue)
-            return false;
-
-        var optionA = lower.Contains("walk or drive", StringComparison.Ordinal) ? "walk" : "drive";
-        var optionB = lower.Contains("walk or drive", StringComparison.Ordinal) ? "drive" : "walk";
-
-        var destinationRequiresCar = lower.Contains("car wash", StringComparison.Ordinal);
-        var optionAMovesCar = OptionMovesCar(optionA);
-        var optionBMovesCar = OptionMovesCar(optionB);
-
-        var scoreA = (destinationRequiresCar && optionAMovesCar ? 2 : 0) + (optionAMovesCar ? 1 : 0);
-        var scoreB = (destinationRequiresCar && optionBMovesCar ? 2 : 0) + (optionBMovesCar ? 1 : 0);
-        var selectedAction = scoreA >= scoreB ? optionA : optionB;
-        var selectedText = $"{char.ToUpperInvariant(selectedAction[0])}{selectedAction[1..]}.";
-
-        answer = BuildLogicBreakdown(
-            facts:
-            [
-                "The destination is a car wash.",
-                $"The choice is between {optionA} and {optionB}.",
-                "The practical goal is to get the car to the wash."
-            ],
-            goal: "Choose the option that actually completes the goal.",
-            checks:
-            [
-                $"If you {optionA}, does the car reach the wash? {(optionAMovesCar ? "Yes" : "No")}.",
-                $"If you {optionB}, does the car reach the wash? {(optionBMovesCar ? "Yes" : "No")}.",
-                $"{optionA} score = {scoreA}, {optionB} score = {scoreB}."
-            ],
-            answer: selectedText);
-        return true;
-
-        static bool OptionMovesCar(string option)
-            => option.Contains("drive", StringComparison.Ordinal) ||
-               option.Contains("take the car", StringComparison.Ordinal) ||
-               option.Contains("take my car", StringComparison.Ordinal) ||
-               option.Contains("use the car", StringComparison.Ordinal);
     }
 
     private static DeterministicUtilityResult? TrySolveWaterJugPuzzle(string message)
@@ -1196,34 +1120,13 @@ public static class ClassicReasoningEngine
         IReadOnlyList<string> checks,
         string answer)
     {
-        var lines = new List<string>();
-        lines.Add("<think>");
-        lines.Add("Facts:");
-        foreach (var fact in facts)
-        {
-            if (string.IsNullOrWhiteSpace(fact))
-                continue;
-            lines.Add($"- {fact.Trim()}");
-        }
+        _ = facts;
+        _ = goal;
+        _ = checks;
 
-        lines.Add("");
-        lines.Add("Goal:");
-        lines.Add($"- {goal.Trim()}");
-
-        lines.Add("");
-        lines.Add("Basic checks:");
-        foreach (var check in checks)
-        {
-            if (string.IsNullOrWhiteSpace(check))
-                continue;
-            lines.Add($"- {check.Trim()}");
-        }
-        lines.Add("</think>");
-
-        lines.Add("");
-        lines.Add("Answer:");
-        lines.Add($"- {answer.Trim()}");
-        return string.Join('\n', lines);
+        return string.IsNullOrWhiteSpace(answer)
+            ? "I can't determine a reliable answer from the given details."
+            : answer.Trim();
     }
 
     private readonly record struct JugState(int A, int B);

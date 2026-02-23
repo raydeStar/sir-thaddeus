@@ -2256,8 +2256,11 @@ public class PolicyFilteringTests
             if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { IsComplete = true, Content = """{"entities":[],"options":[{"label":"drive out now","preconditions":[],"effects":[]},{"label":"pay at the kiosk first","preconditions":[],"effects":[]}]}""", FinishReason = "stop" };
 
-            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { IsComplete = true, Content = """{"constraints":["Respect explicit prerequisites before choosing an action."]}""", FinishReason = "stop" };
+
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"need":"Prerequisite","pieces":"Door and key","assembly":"Use key on door."}""", FinishReason = "stop" };
 
             return new LlmResponse { IsComplete = true, Content = "Complete the prerequisite before proceeding.", FinishReason = "stop" };
         });
