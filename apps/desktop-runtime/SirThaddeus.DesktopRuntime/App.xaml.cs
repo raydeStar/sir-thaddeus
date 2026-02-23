@@ -369,7 +369,7 @@ public partial class App : System.Windows.Application
         // ── 5. Wrap MCP client with audit + permission gate ──────────
         _splash?.SetStatus("Setting up agent…");
         var sessionId = Guid.NewGuid().ToString("N")[..12];
-        var wpfPrompter = new WpfPermissionPrompter(this);
+        var wpfPrompter = new WpfPermissionPrompter(this, _isHeadless);
         _permissionGate = new WpfPermissionGate(
             _permissionBroker!, wpfPrompter, _auditLogger, _settings, sessionId);
         _auditedMcpClient = new AuditedMcpToolClient(
