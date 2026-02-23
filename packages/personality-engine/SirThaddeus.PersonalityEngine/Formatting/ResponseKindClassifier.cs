@@ -12,6 +12,9 @@ public sealed partial class ResponseKindClassifier
         if (hasToolEvidence)
             return ResponseKind.ToolResult;
 
+        if (LooksLikeReasoning(text))
+            return ResponseKind.Reasoning;
+
         if (LooksLikeSafetyRefusal(text))
             return ResponseKind.SafetyRefusal;
 
@@ -22,6 +25,20 @@ public sealed partial class ResponseKindClassifier
             return ResponseKind.NumericHeavy;
 
         return ResponseKind.Normal;
+    }
+
+    private static bool LooksLikeReasoning(string text)
+    {
+        var lower = text.ToLowerInvariant();
+        
+        // New structure with tags
+        if (lower.Contains("<think>", StringComparison.Ordinal))
+            return true;
+
+        // Old legacy structure
+        return lower.Contains("facts:", StringComparison.Ordinal) &&
+               lower.Contains("goal:", StringComparison.Ordinal) &&
+               lower.Contains("basic checks:", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeSafetyRefusal(string text)

@@ -6,5 +6,6 @@ public enum ResponseKind
     SafetyRefusal = 1,
     ToolResult = 2,
     CodeHeavy = 3,
-    NumericHeavy = 4
+    NumericHeavy = 4,
+    Reasoning = 5
 }

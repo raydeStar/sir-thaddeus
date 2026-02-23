@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace SirThaddeus.Agent.Routing;
 
 /// <summary>
@@ -176,8 +178,7 @@ internal static class LogicPuzzleDetector
 
         // Car wash + walk/drive goal inference
         if (lower.Contains("car wash", StringComparison.Ordinal) &&
-            (lower.Contains("walk or drive", StringComparison.Ordinal) ||
-             lower.Contains("drive or walk", StringComparison.Ordinal)))
+            Regex.IsMatch(lower, @"\b(?:walk|drive)\b.*?\bor\b.*?\b(?:walk|drive)\b", RegexOptions.IgnoreCase))
             return true;
 
         return false;
