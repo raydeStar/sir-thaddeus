@@ -123,6 +123,34 @@ if ($storedRequirementsHash -ne $currentRequirementsHash) {
     }
 
     Set-Content -Path $requirementsHashFile -Value $currentRequirementsHash -NoNewline
+
+    # Copy VC++ runtime DLLs from the venv's Scripts directory (where uv
+    # bundles them with the standalone Python) into onnxruntime/capi/ so the
+    # Windows loader finds them co-located with the .pyd on fresh machines
+    # that lack a system-level VC++ redistributable install.
+    try {
+        $ortDir = & "$VenvDir\Scripts\python.exe" -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'))" 2>$null
+        $venvScriptsDir = Join-Path $VenvDir "Scripts"
+        if ($ortDir -and (Test-Path $ortDir) -and (Test-Path $venvScriptsDir)) {
+            $copied = 0
+            foreach ($pattern in @("vcruntime140*.dll", "msvcp140*.dll")) {
+                Get-ChildItem -Path $venvScriptsDir -Filter $pattern -ErrorAction SilentlyContinue |
+                    ForEach-Object {
+                        $dest = Join-Path $ortDir $_.Name
+                        if (-not (Test-Path $dest)) {
+                            Copy-Item -Path $_.FullName -Destination $dest -ErrorAction SilentlyContinue
+                            $copied++
+                        }
+                    }
+            }
+            if ($copied -gt 0) {
+                Write-Host "[VOICE_DLL_BOOTSTRAP] Copied $copied VC++ runtime DLL(s) into onnxruntime directory." -ForegroundColor DarkGray
+            }
+        }
+    }
+    catch {
+        # best effort — probe/repair will catch issues later
+    }
 }
 else {
     Write-Host "Dependencies already installed (requirements unchanged)." -ForegroundColor DarkGray
@@ -222,10 +250,28 @@ function Repair-KokoroRuntimeIfNeeded {
     }
 
     Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Detected runtime issue. Attempting one-time repair..." -ForegroundColor Yellow
-    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --upgrade --force-reinstall "numpy>=1.24,<2" onnxruntime "msvc-runtime; platform_system == 'Windows'"
+    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --upgrade --force-reinstall "numpy>=1.24,<2" "onnxruntime>=1.19.0,<1.21" "msvc-runtime; platform_system == 'Windows'"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[VOICE_TTS_RUNTIME_REPAIR_WARNING] Runtime repair install failed." -ForegroundColor Yellow
         return $false
+    }
+
+    # Copy VC++ runtime DLLs from venv Scripts into onnxruntime/capi/
+    try {
+        $ortDir = & "$VenvDir\Scripts\python.exe" -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'))" 2>$null
+        $venvScriptsDir = Join-Path $VenvDir "Scripts"
+        if ($ortDir -and (Test-Path $ortDir) -and (Test-Path $venvScriptsDir)) {
+            foreach ($pattern in @("vcruntime140*.dll", "msvcp140*.dll")) {
+                Get-ChildItem -Path $venvScriptsDir -Filter $pattern -ErrorAction SilentlyContinue |
+                    ForEach-Object {
+                        Copy-Item -Path $_.FullName -Destination (Join-Path $ortDir $_.Name) -Force -ErrorAction SilentlyContinue
+                    }
+            }
+            Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Copied VC++ DLLs into onnxruntime directory." -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        # best effort
     }
 
     Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Runtime packages refreshed." -ForegroundColor DarkGray
@@ -361,15 +407,36 @@ voice_dir = voice_backend_dir / 'voices' / voice_id
 model_path = voice_dir / 'model.onnx'
 voices_path = voice_dir / 'voices.bin'
 
-# Ensure msvc-runtime DLLs are on the DLL search path for onnxruntime
+# Ensure VC++ runtime DLLs are loadable before importing onnxruntime.
+# On fresh machines they live in the venv Scripts/ dir (bundled by uv) or
+# in onnxruntime/capi/ (if the startup script copied them there).
 if sys.platform == 'win32':
+    import importlib.util as _ilu
+    _vcrt_dirs = [str(Path(sys.executable).parent)]
     try:
-        import importlib.util
-        spec = importlib.util.find_spec('msvc_runtime')
-        if spec and spec.origin:
-            msvc_dir = str(Path(spec.origin).parent)
-            os.add_dll_directory(msvc_dir)
-            os.environ['PATH'] = msvc_dir + os.pathsep + os.environ.get('PATH', '')
+        _ort_spec = _ilu.find_spec('onnxruntime')
+        if _ort_spec and _ort_spec.submodule_search_locations:
+            _ort_capi = str(Path(list(_ort_spec.submodule_search_locations)[0]) / 'capi')
+            if os.path.isdir(_ort_capi):
+                _vcrt_dirs.append(_ort_capi)
+    except Exception:
+        pass
+    for _d in _vcrt_dirs:
+        try:
+            os.add_dll_directory(_d)
+        except OSError:
+            pass
+        for _n in ('vcruntime140.dll', 'vcruntime140_1.dll',
+                    'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+                    'concrt140.dll', 'vcomp140.dll'):
+            _p = os.path.join(_d, _n)
+            if os.path.isfile(_p):
+                try:
+                    ctypes.WinDLL(_p)
+                except OSError:
+                    pass
+    try:
+        import msvc_runtime
     except Exception:
         pass
 
@@ -455,6 +522,24 @@ Write-Host "  STT: $SttEngine  model: $resolvedSttModel  lang: $SttLanguage  dev
 Write-Host "  TTS: $resolvedTtsEngine  model: $(if ($resolvedTtsModelId) { $resolvedTtsModelId } else { '<none>' })  voice: $(if ($resolvedTtsVoiceId) { $resolvedTtsVoiceId } else { '<none>' })" -ForegroundColor Green
 Write-Host "  Press Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
+
+# ── Kill stale processes holding our port ─────────────────────────
+# When the supervisor restarts this script, a previous python process may
+# still be holding the port.  Kill it before we try to bind.
+try {
+    $staleListeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $staleListeners) {
+        $stalePid = $conn.OwningProcess
+        if ($stalePid -and $stalePid -ne $PID -and $stalePid -ne 0) {
+            Write-Host "[PORT_CLEANUP] Killing stale process $stalePid on port $Port" -ForegroundColor Yellow
+            try { Stop-Process -Id $stalePid -Force -ErrorAction SilentlyContinue } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+catch {
+    # Get-NetTCPConnection may not be available on all systems; proceed anyway.
+}
 
 $env:WHISPER_MODEL = $resolvedSttModel
 $env:WHISPER_DEVICE = $Device
