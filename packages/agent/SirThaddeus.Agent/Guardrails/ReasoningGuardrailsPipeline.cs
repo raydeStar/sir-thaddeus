@@ -253,7 +253,7 @@ public sealed class ReasoningGuardrailsPipeline
 
     private static bool TryApplyDeterministicFeasibilityDecision(
         string userMessage,
-        EntityExtractionResult entities,
+        EntityExtraction entities,
         string answerText,
         out string correctedAnswer,
         out string decisionLine)
