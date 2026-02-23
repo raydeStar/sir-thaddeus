@@ -6,3 +6,5 @@ python-multipart>=0.0.6
 faster-whisper>=1.2.0
 kokoro-onnx>=0.3.0
 yt-dlp
+onnxruntime>=1.19.0,<2
+msvc-runtime>=14.42.34433; platform_system == 'Windows'

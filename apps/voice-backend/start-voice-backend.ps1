@@ -128,17 +128,28 @@ else {
 if ($PrefetchVoiceAssets -or $PrefetchAsrAssets) {
     Write-Host "Preparing voice/ASR model assets (first run can take several minutes)..." -ForegroundColor Yellow
 
-    $prefetchCode = @"
+    $env:ST_PREFETCH_BACKEND_DIR = $VoiceBackendDir
+    $env:ST_PREFETCH_VOICE_ID = $TtsVoiceId
+    $env:ST_PREFETCH_STT_MODEL_ID = $SttModelId
+    $env:ST_PREFETCH_STT_MODEL_ALIAS = $Model
+    $env:ST_PREFETCH_DEVICE = $Device
+    $env:ST_PREFETCH_VOICE_ASSETS = [string]$PrefetchVoiceAssets
+    $env:ST_PREFETCH_ASR_ASSETS = [string]$PrefetchAsrAssets
+    $env:ST_PREFETCH_YT_ASR_ASSETS = [string]$PrefetchYouTubeAsrAssets
+
+    $prefetchCode = @'
 from pathlib import Path
 import os
 
-voice_backend_dir = Path(r'$VoiceBackendDir')
+voice_backend_dir = Path(os.environ.get('ST_PREFETCH_BACKEND_DIR') or '')
 voices_root = voice_backend_dir / 'voices'
 registry_path = voice_backend_dir / 'model_registry.json'
-prefetch_voice_assets = '$PrefetchVoiceAssets'.strip().lower() == 'true'
-prefetch_asr_assets = '$PrefetchAsrAssets'.strip().lower() == 'true'
-prefetch_youtube_asr_assets = '$PrefetchYouTubeAsrAssets'.strip().lower() == 'true'
-requested_voice_id = r'$TtsVoiceId'.strip() or 'bm_lewis'
+prefetch_voice_assets = (os.environ.get('ST_PREFETCH_VOICE_ASSETS') or '').strip().lower() == 'true'
+prefetch_asr_assets = (os.environ.get('ST_PREFETCH_ASR_ASSETS') or '').strip().lower() == 'true'
+prefetch_youtube_asr_assets = (os.environ.get('ST_PREFETCH_YT_ASR_ASSETS') or '').strip().lower() == 'true'
+requested_voice_id = (os.environ.get('ST_PREFETCH_VOICE_ID') or '').strip() or 'bm_lewis'
+requested_stt_model = ((os.environ.get('ST_PREFETCH_STT_MODEL_ID') or '').strip() or (os.environ.get('ST_PREFETCH_STT_MODEL_ALIAS') or '').strip() or 'base')
+device = (os.environ.get('ST_PREFETCH_DEVICE') or 'cpu').strip().lower() or 'cpu'
 variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
 
 if prefetch_voice_assets:
@@ -150,9 +161,6 @@ if prefetch_voice_assets:
         print(f"[VOICE_PREFETCH_WARNING] Failed for '{requested_voice_id}': {exc}")
 
 if prefetch_asr_assets:
-    requested_stt_model = (r'$SttModelId'.strip() or r'$Model'.strip() or 'base')
-    device = (r'$Device'.strip() or 'cpu').lower()
-
     try:
         from faster_whisper import WhisperModel
         print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device}...")
@@ -166,9 +174,49 @@ if prefetch_asr_assets:
 
     if prefetch_youtube_asr_assets:
         print("[ASR_PREFETCH_INFO] whisper-only mode enabled; skipping optional YouTube qwen-asr prefetch.")
-"@
+'@
 
-    & "$VenvDir\Scripts\python.exe" -c $prefetchCode
+    $prefetchFile = Join-Path $env:TEMP ("st-prefetch-" + [guid]::NewGuid().ToString("N") + ".py")
+    Set-Content -Path $prefetchFile -Value $prefetchCode -Encoding UTF8
+    try {
+        & "$VenvDir\Scripts\python.exe" $prefetchFile
+    }
+    finally {
+        Remove-Item -Path $prefetchFile -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_BACKEND_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_VOICE_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_STT_MODEL_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_STT_MODEL_ALIAS -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_DEVICE -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_VOICE_ASSETS -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_ASR_ASSETS -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_YT_ASR_ASSETS -ErrorAction SilentlyContinue
+    }
+}
+
+function Repair-KokoroRuntimeIfNeeded {
+    param(
+        [string]$ProbeFailureOutput
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ProbeFailureOutput)) {
+        return $false
+    }
+
+    $needsRepair = $ProbeFailureOutput -match 'onnxruntime_pybind11_state' -or $ProbeFailureOutput -match 'DLL load failed'
+    if (-not $needsRepair) {
+        return $false
+    }
+
+    Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Detected onnxruntime/DLL import issue. Attempting one-time runtime repair..." -ForegroundColor Yellow
+    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --upgrade --force-reinstall onnxruntime "msvc-runtime; platform_system == 'Windows'"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[VOICE_TTS_RUNTIME_REPAIR_WARNING] Runtime repair install failed." -ForegroundColor Yellow
+        return $false
+    }
+
+    Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Runtime packages refreshed." -ForegroundColor DarkGray
+    return $true
 }
 
 # ── Start server ─────────────────────────────────────────────────
@@ -282,9 +330,25 @@ except Exception as exc:
     Set-Content -Path $kokoroProbeFile -Value $kokoroProbeCode -Encoding UTF8
 
     $probeExitCode = 0
+    $probeOutput = ''
+    $probeAttemptedRepair = $false
     try {
-        & "$VenvDir\Scripts\python.exe" $kokoroProbeFile
+        $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
+        if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
+            Write-Host $probeOutput.TrimEnd()
+        }
         $probeExitCode = $LASTEXITCODE
+
+        if ($probeExitCode -ne 0) {
+            $probeAttemptedRepair = Repair-KokoroRuntimeIfNeeded -ProbeFailureOutput $probeOutput
+            if ($probeAttemptedRepair) {
+                $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
+                if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
+                    Write-Host $probeOutput.TrimEnd()
+                }
+                $probeExitCode = $LASTEXITCODE
+            }
+        }
     }
     finally {
         Remove-Item -Path $kokoroProbeFile -ErrorAction SilentlyContinue
@@ -293,7 +357,12 @@ except Exception as exc:
     }
 
     if ($probeExitCode -ne 0) {
-        Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe failed. Aborting startup." -ForegroundColor Red
+        if ($probeAttemptedRepair) {
+            Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe still failed after repair attempt. Aborting startup." -ForegroundColor Red
+        }
+        else {
+            Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe failed. Aborting startup." -ForegroundColor Red
+        }
         exit 1
     }
 
