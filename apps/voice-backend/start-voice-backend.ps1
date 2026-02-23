@@ -410,7 +410,39 @@ voice_backend_dir = Path(os.environ.get('ST_KOKORO_PROBE_BACKEND_DIR') or '')
 voice_id = (os.environ.get('ST_KOKORO_PROBE_VOICE_ID') or '').strip() or 'bm_lewis'
 voice_dir = voice_backend_dir / 'voices' / voice_id
 model_path = voice_dir / 'model.onnx'
-voices_path = voice_dir / 'voices.bin'
+
+# kokoro-onnx >=0.3.x expects JSON voices; prefer .json, fall back to .bin/.npz
+# and auto-convert numpy format to JSON if needed.
+import json as _json, numpy as _np
+voices_path = None
+for _ext in ('.json', '.bin', '.npy', '.npz'):
+    for _p in voice_dir.glob('*' + _ext):
+        if _p.name == 'manifest.json':
+            continue
+        voices_path = _p
+        break
+    if voices_path is not None:
+        break
+
+if voices_path is not None and voices_path.suffix.lower() != '.json':
+    _json_path = voices_path.with_suffix('.json')
+    if _json_path.exists():
+        voices_path = _json_path
+    else:
+        try:
+            with open(voices_path, 'rb') as _f:
+                if _f.read(2) == b'PK':
+                    _data = _np.load(str(voices_path))
+                    _jd = {k: _data[k].tolist() for k in _data.files}
+                    with open(_json_path, 'w') as _jf:
+                        _json.dump(_jd, _jf)
+                    print('[VOICE_TTS_PROBE] Converted %d voice(s) from %s -> %s' % (len(_jd), voices_path.name, _json_path.name))
+                    voices_path = _json_path
+        except Exception as _ce:
+            print('[VOICE_TTS_PROBE] Could not convert voices: %s' % _ce)
+
+if voices_path is None:
+    voices_path = voice_dir / 'voices.bin'
 
 # Ensure VC++ runtime DLLs are loadable before importing onnxruntime.
 # On fresh machines they live in the venv Scripts/ dir (bundled by uv) or
