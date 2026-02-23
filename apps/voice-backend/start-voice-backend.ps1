@@ -49,7 +49,9 @@ param(
     [string]$SttLanguage = "en",
     [string]$TtsEngine = "windows",
     [string]$TtsModelId = "",
-    [string]$TtsVoiceId = ""
+    [string]$TtsVoiceId = "",
+    [bool]$PrefetchVoiceAssets = $true,
+    [bool]$PrefetchAsrAssets = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,6 +122,67 @@ else {
     Write-Host "Dependencies already installed (requirements unchanged)." -ForegroundColor DarkGray
 }
 
+# ── Prefetch voice + ASR assets for fresh machines ──────────────────────────
+
+if ($PrefetchVoiceAssets -or $PrefetchAsrAssets) {
+    Write-Host "Preparing voice/ASR model assets (first run can take several minutes)..." -ForegroundColor Yellow
+
+    $prefetchCode = @"
+from pathlib import Path
+import os
+
+voice_backend_dir = Path(r'$VoiceBackendDir')
+voices_root = voice_backend_dir / 'voices'
+registry_path = voice_backend_dir / 'model_registry.json'
+prefetch_voice_assets = '$PrefetchVoiceAssets'.strip().lower() == 'true'
+prefetch_asr_assets = '$PrefetchAsrAssets'.strip().lower() == 'true'
+requested_voice_id = r'$TtsVoiceId'.strip() or 'bm_lewis'
+variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
+
+if prefetch_voice_assets:
+    from model_downloader import ensure_kokoro_models
+
+    voice_ids = []
+    if voices_root.exists():
+        voice_ids = sorted([path.name for path in voices_root.iterdir() if path.is_dir()])
+
+    if requested_voice_id not in voice_ids:
+        voice_ids.append(requested_voice_id)
+
+    for voice_id in voice_ids:
+        try:
+            print(f"[VOICE_PREFETCH] Ensuring Kokoro assets for '{voice_id}'...")
+            ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
+        except Exception as exc:
+            print(f"[VOICE_PREFETCH_WARNING] Failed for '{voice_id}': {exc}")
+
+if prefetch_asr_assets:
+    requested_stt_model = (r'$SttModelId'.strip() or r'$Model'.strip() or 'base')
+    device = (r'$Device'.strip() or 'cpu').lower()
+
+    try:
+        from faster_whisper import WhisperModel
+        print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device}...")
+        whisper = WhisperModel(requested_stt_model, device=device, compute_type='int8')
+        try:
+            _ = whisper.transcribe(b"", language='en')
+        except Exception:
+            pass
+    except Exception as exc:
+        print(f"[ASR_PREFETCH_WARNING] faster-whisper preload failed: {exc}")
+
+    qwen_model_id = (os.environ.get('ST_YOUTUBE_ASR_MODEL_ID') or 'qwen-asr-1.6b').strip() or 'qwen-asr-1.6b'
+    try:
+        from qwen_asr import Qwen3ASRModel
+        print(f"[ASR_PREFETCH] Ensuring qwen-asr model '{qwen_model_id}' on {device}...")
+        _ = Qwen3ASRModel.from_pretrained(qwen_model_id, device=device)
+    except Exception as exc:
+        print(f"[ASR_PREFETCH_WARNING] qwen-asr preload failed: {exc}")
+"@
+
+    & "$VenvDir\Scripts\python.exe" -c $prefetchCode
+}
+
 # ── Start server ─────────────────────────────────────────────────
 
 $resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } else { $SttModelId.Trim() }
@@ -137,7 +200,9 @@ if ($resolvedTtsEngine -eq "kokoro") {
     }
 
     $voiceManifest = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\manifest.json")
-    if (-not (Test-Path $voiceManifest)) {
+    $voiceModel = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\model.onnx")
+    $voiceBundle = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\voices.bin")
+    if ((-not (Test-Path $voiceManifest)) -or (-not (Test-Path $voiceModel)) -or (-not (Test-Path $voiceBundle))) {
         Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_ATTEMPT] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; starting background auto-download." -ForegroundColor Yellow
 
         $pythonCode = @"
