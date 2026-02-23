@@ -64,6 +64,11 @@ $ErrorActionPreference = "Stop"
 $VoiceBackendDir = $PSScriptRoot
 $VenvDir = Join-Path $VoiceBackendDir ".venv"
 
+# Force Python to use UTF-8 for all text I/O.  Without this, Windows uses the
+# system locale encoding (e.g. cp1252) which chokes on non-ASCII bytes inside
+# third-party packages like kokoro_onnx.
+$env:PYTHONUTF8 = "1"
+
 $BinDir = Join-Path $VoiceBackendDir "bin"
 $UvExe = Join-Path $BinDir "uv.exe"
 
