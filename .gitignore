@@ -81,6 +81,8 @@ __pycache__/
 *.safetensors
 apps/voice-backend/voices/*/*.bin
 apps/voice-backend/voices/*/*.npy
+apps/voice-backend/voices/*/*.json
+!apps/voice-backend/voices/*/manifest.json
 apps/voice-backend/stt-models/*/*.bin
 apps/voice-backend/stt-models/*/*.model
 apps/voice-backend/bin/uv*
