@@ -10,6 +10,12 @@ This package is a self-contained Windows build. You do not need to install the .
 2. Open the extracted folder.
 3. Double-click `SirThaddeus.DesktopRuntime.exe`.
 
+### ⚠ Background Initialization (First Run)
+Sir Thaddeus launches **instantly**, but the voice engine (ASR/TTS) initializes in the background. On your first run:
+- **Status Banner**: A banner at the top of the chat window will show "Downloading models..." or "Starting voice backend...".
+- **PTT Disabled**: The "Hold to Talk" button is disabled until this process completes.
+- **Async Startup**: You can type messages and use other features immediately while the voice engine warms up.
+
 If Windows SmartScreen appears, use **More info -> Run anyway** after you verify the source.
 *Note: Unsigned binaries may trigger AV heuristics; verify checksum and source.*
 

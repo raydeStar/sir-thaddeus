@@ -24,6 +24,8 @@
 - **Preview/apply contract**: file and system tools support `_preview` + `_apply` pairs for explicit dry-run style execution.
 - **Headless mode**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
 - **PTT voice pipeline**: push-to-talk capture → local ASR (`faster-whisper`) → agent response → local TTS playback via VoiceHost.
+  - **Cold-start optimization**: Voice engine warms up in the background asynchronously to ensure an instant application splash/launch.
+  - **Streaming latency**: Aggressive phrase-based chunking provides ultra-low Time-To-First-Audio (TTFA).
 - **Audit log is always-on**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
 
 ## Architecture (4 layers)
@@ -212,6 +214,9 @@ Sir Thaddeus is local-first by design.
 
 # Production preflight gate before release/distribution
 .\dev\preflight.ps1
+
+# Start the voice backend manually (for development)
+.\dev\start-voice-backend.ps1 -TtsEngine kokoro -TtsVoiceId af_sky
 ```
 
 Testing details and filters are documented in `README_TESTING.md`.

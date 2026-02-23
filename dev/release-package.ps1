@@ -252,6 +252,11 @@ if (-not (Test-Path $firstRunReadmeSource)) {
 }
 Copy-Item -Path $firstRunReadmeSource -Destination (Join-Path $stageDir "README_FIRST_RUN.md") -Force
 
+$disclaimerSource = Join-Path $RepoRoot "DISCLAIMER.md"
+if (Test-Path $disclaimerSource) {
+    Copy-Item -Path $disclaimerSource -Destination (Join-Path $stageDir "DISCLAIMER.md") -Force
+}
+
 if (Test-Path $settingsTemplateSource) {
     Copy-Item -Path $settingsTemplateSource -Destination (Join-Path $stageDir "SirThaddeus.Settings.template.json") -Force
 }
