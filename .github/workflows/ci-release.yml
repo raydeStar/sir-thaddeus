@@ -97,7 +97,7 @@ jobs:
 
     steps:
       - name: Download release package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-package-assets
           path: release-assets
