@@ -69,27 +69,23 @@ public class GuardrailsCoordinatorTests
     {
         string finalSystemPrompt = string.Empty;
         string finalUserPrompt = string.Empty;
-        var callCount = 0;
 
         var llm = new FakeLlmClient((messages, _) =>
         {
-            callCount++;
-            if (callCount == 5)
-            {
-                finalSystemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
-                finalUserPrompt = messages.FirstOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
-            }
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
 
-            var content = callCount switch
-            {
-                1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
-                2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
-                3 => """{"constraints":["The car must physically reach the car wash"]}""",
-                4 => """{"need":"wash the car","pieces":"car, car wash location, available actions","assembly":"pick the action that gets the car to the wash"}""",
-                _ => "Drive to the car wash."
-            };
+            if (system.Contains("real-world goal", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""");
+            if (system.Contains("Extract entities", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""");
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"constraints":["The car must physically reach the car wash"]}""");
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"need":"wash the car","pieces":"car, car wash location, available actions","assembly":"pick the action that gets the car to the wash"}""");
 
-            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+            finalSystemPrompt = system;
+            finalUserPrompt = messages.FirstOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
+            return Respond("Drive to the car wash.");
         });
 
         var coordinator = new GuardrailsCoordinator(new ReasoningGuardrailsPipeline(llm, new TestAuditLogger()));
@@ -138,24 +134,22 @@ public class GuardrailsCoordinatorTests
     public async Task TryRunAsync_CarWashChoice_IncludesDeterministicFeasibilityConstraintInFinalPrompt()
     {
         string finalUserPrompt = string.Empty;
-        var callCount = 0;
 
         var llm = new FakeLlmClient((messages, _) =>
         {
-            callCount++;
-            if (callCount == 5)
-                finalUserPrompt = messages.FirstOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
 
-            var content = callCount switch
-            {
-                1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
-                2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
-                3 => """{"constraints":["Pick the easiest option"]}""",
-                4 => """{"need":"wash the car","pieces":"car, wash location, actions","assembly":"choose feasible action"}""",
-                _ => "Drive."
-            };
+            if (system.Contains("real-world goal", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""");
+            if (system.Contains("Extract entities", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""");
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"constraints":["Pick the easiest option"]}""");
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"need":"wash the car","pieces":"car, wash location, actions","assembly":"choose feasible action"}""");
 
-            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+            finalUserPrompt = messages.FirstOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
+            return Respond("Drive.");
         });
 
         var coordinator = new GuardrailsCoordinator(new ReasoningGuardrailsPipeline(llm, new TestAuditLogger()));
@@ -171,20 +165,20 @@ public class GuardrailsCoordinatorTests
     [Fact]
     public async Task TryRunAsync_CarWashChoice_CorrectsToDeterministicDriveAnswer()
     {
-        var callCount = 0;
         var llm = new FakeLlmClient((messages, _) =>
         {
-            callCount++;
-            var content = callCount switch
-            {
-                1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
-                2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
-                3 => """{"constraints":["Pick the easiest option"]}""",
-                4 => """{"need":"wash the car","pieces":"car, wash location, actions","assembly":"choose feasible action"}""",
-                _ => "Walk."
-            };
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
 
-            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+            if (system.Contains("real-world goal", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""");
+            if (system.Contains("Extract entities", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""");
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"constraints":["Pick the easiest option"]}""");
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"need":"wash the car","pieces":"car, wash location, actions","assembly":"choose feasible action"}""");
+
+            return Respond("Walk.");
         });
 
         var coordinator = new GuardrailsCoordinator(new ReasoningGuardrailsPipeline(llm, new TestAuditLogger()));
@@ -204,24 +198,25 @@ public class GuardrailsCoordinatorTests
 
         if (returnStructuredJson)
         {
-            var callCount = 0;
             handler = (messages, _) =>
             {
-                callCount++;
-                var content = callCount switch
-                {
-                    1 => """{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""",
-                    2 => """{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""",
-                    3 => """{"constraints":["The car must physically reach the car wash"]}""",
-                    4 => """{"need":"wash the car","pieces":"car, car wash location, available actions","assembly":"pick the action that gets the car to the wash"}""",
-                    _ => "Drive to the car wash since the car needs to be there."
-                };
-                return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
+                var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+
+                if (system.Contains("real-world goal", StringComparison.OrdinalIgnoreCase))
+                    return Respond("""{"primary_goal":"Get the car washed","alternative_goals":[],"confidence":0.9}""");
+                if (system.Contains("Extract entities", StringComparison.OrdinalIgnoreCase))
+                    return Respond("""{"entities":[{"name":"car","kind":"required_object","required":true}],"options":[{"label":"walk","preconditions":[],"effects":[]},{"label":"drive","preconditions":[],"effects":[]}]}""");
+                if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
+                    return Respond("""{"constraints":["The car must physically reach the car wash"]}""");
+                if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                    return Respond("""{"need":"wash the car","pieces":"car, car wash location, available actions","assembly":"pick the action that gets the car to the wash"}""");
+
+                return Respond("Drive to the car wash since the car needs to be there.");
             };
         }
         else
         {
-            handler = (_, _) => new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+            handler = (_, _) => Respond("chat");
         }
 
         var llm = new FakeLlmClient(handler);
@@ -229,4 +224,7 @@ public class GuardrailsCoordinatorTests
         var pipeline = new ReasoningGuardrailsPipeline(llm, audit);
         return new GuardrailsCoordinator(pipeline);
     }
+
+    private static LlmResponse Respond(string content) =>
+        new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
 }
