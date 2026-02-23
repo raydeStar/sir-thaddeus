@@ -138,7 +138,31 @@ if ($resolvedTtsEngine -eq "kokoro") {
 
     $voiceManifest = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\manifest.json")
     if (-not (Test-Path $voiceManifest)) {
-        Write-Host "[VOICE_TTS_FALLBACK_APPLIED] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; falling back to Windows TTS for readiness." -ForegroundColor Yellow
+        Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_ATTEMPT] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; starting background auto-download." -ForegroundColor Yellow
+
+        $pythonCode = @"
+from pathlib import Path
+import os
+from model_downloader import ensure_kokoro_models
+
+voice_backend_dir = Path(r'$VoiceBackendDir')
+voices_root = voice_backend_dir / 'voices'
+registry_path = voice_backend_dir / 'model_registry.json'
+voice_id = r'$resolvedTtsVoiceId'
+variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
+
+ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
+"@
+
+        try {
+            Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList @("-c", $pythonCode) -WorkingDirectory $VoiceBackendDir -WindowStyle Hidden | Out-Null
+            Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_BACKGROUND_STARTED] Kokoro asset download launched for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_FAILED] Failed to launch Kokoro asset download for '$resolvedTtsVoiceId': $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
+        Write-Host "[VOICE_TTS_FALLBACK_APPLIED] Kokoro assets are not installed yet for '$resolvedTtsVoiceId'; falling back to Windows TTS for readiness." -ForegroundColor Yellow
         $resolvedTtsEngine = "windows"
         $resolvedTtsVoiceId = ""
         $resolvedTtsModelId = ""
