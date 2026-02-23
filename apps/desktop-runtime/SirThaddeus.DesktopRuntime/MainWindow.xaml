@@ -1260,7 +1260,7 @@
             <ScrollViewer x:Name="FullLogScroller"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
-                                <ItemsControl ItemsSource="{Binding ActivityLog}" Padding="32,24">
+                                <ItemsControl ItemsSource="{Binding DataContext.ActivityLog, RelativeSource={RelativeSource AncestorType=Window}}" Padding="32,24">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Grid Margin="0,6,0,10">

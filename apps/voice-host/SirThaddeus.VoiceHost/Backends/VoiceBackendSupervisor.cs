@@ -71,9 +71,9 @@ public sealed class VoiceBackendSupervisor : IDisposable
     public Task<BackendSupervisorResult> EnsureRunningAsync(CancellationToken cancellationToken)
         => EnsureReadyAsync(
             requireAsr: true,
-            requireTts: true,
+            requireTts: false,
             successCode: "backends_ready",
-            successMessage: "Backend upstreams are ready.",
+            successMessage: "Backend upstreams are ready (TTS may still be warming up).",
             cancellationToken);
 
     public Task<BackendSupervisorResult> EnsureAsrReadyAsync(CancellationToken cancellationToken)

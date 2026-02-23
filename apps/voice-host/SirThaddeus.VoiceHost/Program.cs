@@ -139,7 +139,10 @@ app.MapGet("/health", async (
     var ttsStatus = EnsureEngineStatus(ttsState, "tts");
     var asrReady = asrStatus.Ready;
     var ttsReady = ttsStatus.Ready;
-    var ready = asrReady && ttsReady;
+    // ASR is the primary capability; TTS (Kokoro) is optional.
+    // Report ready=true when ASR works so the DesktopRuntime doesn't
+    // restart-loop when Kokoro is unavailable on fresh machines.
+    var ready = asrReady;
 
     var errorCode = "";
     var message = "";
