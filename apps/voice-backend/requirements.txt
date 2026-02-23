@@ -4,6 +4,5 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 faster-whisper>=1.2.0
-qwen-asr>=0.0.8
 kokoro-onnx>=0.3.0
 yt-dlp

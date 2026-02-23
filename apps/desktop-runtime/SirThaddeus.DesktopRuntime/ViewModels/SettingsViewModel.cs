@@ -58,8 +58,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private int    _voiceAsrTimeoutMs = 45000;
     private int    _voiceAgentTimeoutMs = 90000;
     private int    _voiceSpeakingTimeoutMs = 90000;
-    private string _youtubeAsrProvider = "qwen3asr";
-    private string _youtubeAsrModelId = "qwen-asr-1.6b";
+    private string _youtubeAsrProvider = "faster-whisper";
+    private string _youtubeAsrModelId = "base";
     private string _youtubeLanguageHint = "en-us";
     private string _youtubeDraftTone = "professional";
     private bool _youtubeKeepAudio;
@@ -1506,10 +1506,10 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 AgentTimeoutMs = Math.Max(10_000, _voiceAgentTimeoutMs),
                 SpeakingTimeoutMs = Math.Max(10_000, _voiceSpeakingTimeoutMs),
                 YouTubeAsrProvider = string.IsNullOrWhiteSpace(_youtubeAsrProvider)
-                    ? "qwen3asr"
+                    ? "faster-whisper"
                     : _youtubeAsrProvider.Trim(),
                 YouTubeAsrModelId = string.IsNullOrWhiteSpace(_youtubeAsrModelId)
-                    ? "qwen-asr-1.6b"
+                    ? "base"
                     : _youtubeAsrModelId.Trim(),
                 YouTubeLanguageHint = string.IsNullOrWhiteSpace(_youtubeLanguageHint)
                     ? ""

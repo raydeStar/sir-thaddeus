@@ -112,11 +112,11 @@ DATA_ROOT = Path(os.environ.get("THADDEUS_DATA_DIR") or str(REPO_ROOT / "data"))
 UNSAFE_ARTIFACTS_ALLOWED = (os.environ.get("ST_VOICE_ALLOW_UNSAFE_ARTIFACTS", "").strip().lower() in {"1", "true", "yes", "on"})
 
 YOUTUBE_DEFAULT_ASR_PROVIDER = (
-    os.environ.get("ST_YOUTUBE_ASR_PROVIDER") or "qwen3asr"
-).strip().lower() or "qwen3asr"
+    os.environ.get("ST_YOUTUBE_ASR_PROVIDER") or "faster-whisper"
+).strip().lower() or "faster-whisper"
 YOUTUBE_DEFAULT_ASR_MODEL_ID = (
-    os.environ.get("ST_YOUTUBE_ASR_MODEL_ID") or "qwen-asr-1.6b"
-).strip() or "qwen-asr-1.6b"
+    os.environ.get("ST_YOUTUBE_ASR_MODEL_ID") or "base"
+).strip() or "base"
 _YOUTUBE_LANGUAGE_HINT_RAW = (os.environ.get("ST_YOUTUBE_LANGUAGE_HINT") or "").strip().lower()
 YOUTUBE_DEFAULT_LANGUAGE_HINT = (
     "" if _YOUTUBE_LANGUAGE_HINT_RAW in {"auto", "detect"} else _YOUTUBE_LANGUAGE_HINT_RAW
@@ -192,28 +192,17 @@ def normalize_tts_engine(value: Optional[str]) -> str:
 
 
 def normalize_stt_engine(value: Optional[str]) -> str:
-    """Resolve an STT engine identifier to a canonical name.
-
-    qwen3asr is valid ONLY for the YouTube transcription pipeline.
-    All other callers (especially the /asr live endpoint) should use
-    normalize_live_stt_engine() which pins to faster-whisper.
-    """
+    """Resolve an STT engine identifier to the whisper-only canonical name."""
     normalized = (value or "").strip().lower()
     if not normalized:
         return "faster-whisper"
-    if normalized == "whisper":
+    if normalized in {"whisper", "faster-whisper", "qwen3asr", "qwen-asr"}:
         return "faster-whisper"
-    if normalized in {"faster-whisper", "qwen3asr"}:
-        return normalized
-    return normalized
+    return "faster-whisper"
 
 
 def normalize_live_stt_engine(value: Optional[str]) -> str:
-    """Pin the live /asr endpoint to faster-whisper unconditionally.
-
-    Qwen3-ASR is reserved for video transcription jobs. Any other engine
-    value for interactive voice-to-text is remapped to faster-whisper.
-    """
+    """Pin live /asr to faster-whisper unconditionally."""
     return "faster-whisper"
 
 
@@ -236,10 +225,14 @@ def normalize_stt_language(value: Optional[str]) -> str:
 
 def resolve_stt_model_id(engine: str, model_id: Optional[str]) -> str:
     candidate = (model_id or "").strip()
+    if engine == "faster-whisper":
+        # Legacy YouTube configs may still carry qwen model ids.
+        # Normalize those back to the whisper baseline model.
+        if not candidate or "qwen" in candidate.lower():
+            return "base"
+        return candidate
     if candidate:
         return candidate
-    if engine == "faster-whisper":
-        return "base"
     return ""
 
 
@@ -1073,8 +1066,6 @@ def create_stt_provider(engine: str, model_id: str, device: str, language: str) 
     normalized = normalize_stt_engine(engine)
     if normalized == "faster-whisper":
         return FasterWhisperProvider(model_id=model_id, device=device, language=language)
-    if normalized == "qwen3asr":
-        return Qwen3AsrProvider(model_id=model_id, device=device, language=language)
     return UnsupportedSttProvider(normalized, model_id)
 
 
@@ -1728,7 +1719,7 @@ async def youtube_transcribe(payload: YouTubeTranscribeRequest, request: Request
         draft_tone = "professional"
     summary_cfg = build_youtube_summary_config()
 
-    if asr_provider not in {"qwen3asr", "faster-whisper"}:
+    if asr_provider not in {"faster-whisper"}:
         return JSONResponse(
             {
                 "requestId": request_id,
@@ -1737,7 +1728,7 @@ async def youtube_transcribe(payload: YouTubeTranscribeRequest, request: Request
                     "message": "Unsupported ASR provider.",
                     "details": {
                         "configuredProvider": asr_provider,
-                        "supportedProviders": ["qwen3asr", "faster-whisper"],
+                        "supportedProviders": ["faster-whisper"],
                     },
                 },
             },
