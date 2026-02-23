@@ -127,6 +127,7 @@ public class OrchestratorDecompositionIntegrationTests
             RouterOutput route,
             string message,
             string mode,
+            string? extraContext = null,
             CancellationToken cancellationToken = default)
         {
             MessagesChecked.Add(message);

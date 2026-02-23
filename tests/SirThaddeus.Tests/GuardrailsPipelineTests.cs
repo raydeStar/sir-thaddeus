@@ -87,8 +87,11 @@ public class ReasoningGuardrailsModeTests
                     """{"entities":[],"options":[{"label":"Preconditions","preconditions":[],"effects":[]},{"label":"Action options","preconditions":[],"effects":[]}]}""");
             }
 
-            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
                 return Respond("""{"constraints":["Choose the physically feasible option that directly completes the goal."]}""");
+
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"need":"General help","pieces":"None","assembly":"Just help."}""");
 
             if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return Respond("chat");
@@ -269,11 +272,18 @@ public class ReasoningGuardrailsModeTests
                     : Respond("""{"entities":[{"name":"id","kind":"required_object","required":true}],"options":[{"label":"wait in the room","preconditions":[],"effects":[]},{"label":"bring ID downstairs","preconditions":[],"effects":[]}]}""");
             }
 
-            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
             {
                 return malformedGuardrailsJson
                     ? Respond("not json")
                     : Respond("""{"constraints":["Respect explicit prerequisites and choose the option that physically completes the task."]}""");
+            }
+
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+            {
+                return malformedGuardrailsJson
+                    ? Respond("not json")
+                    : Respond("""{"need":"Physical access","pieces":"ID card, receptionist","assembly":"Bring ID to the person."}""");
             }
 
             if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
@@ -332,8 +342,11 @@ public class ReasoningGuardrailsBenchTests
             if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
                 return Respond("""{"entities":[],"options":[{"label":"option A","preconditions":[],"effects":[]},{"label":"option B","preconditions":[],"effects":[]}]}""");
 
-            if (system.Contains("Build practical constraints", StringComparison.OrdinalIgnoreCase))
+            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
                 return Respond("""{"constraints":["Pick the option that satisfies required real-world preconditions."]}""");
+
+            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
+                return Respond("""{"need":"Action","pieces":"A and B","assembly":"Do A."}""");
 
             if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return Respond("chat");
