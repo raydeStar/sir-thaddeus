@@ -766,9 +766,13 @@ class KokoroProvider(BaseProvider):
                 model_path = path
                 break
 
-        # kokoro-onnx loads voices via np.load, commonly a .bin/.npy/.npz bundle.
-        for pattern in ("*.bin", "*.npy", "*.npz"):
+        # kokoro-onnx >=0.3.x uses json.load() for voices; look for .json first,
+        # then fall back to legacy numpy formats (.bin/.npy/.npz) which will be
+        # auto-converted to JSON by _ensure_json_voices().
+        for pattern in ("*.json", "*.bin", "*.npy", "*.npz"):
             for path in voice_dir.rglob(pattern):
+                if path.name == "manifest.json":
+                    continue
                 voices_path = path
                 break
             if voices_path is not None:
@@ -776,23 +780,61 @@ class KokoroProvider(BaseProvider):
 
         return model_path, voices_path
 
+    @staticmethod
+    def _ensure_json_voices(voices_path: Path) -> Path:
+        """Convert numpy .npz/.bin voices to JSON if kokoro-onnx >=0.3 expects it."""
+        # Already JSON — nothing to do.
+        if voices_path.suffix.lower() == ".json":
+            return voices_path
+
+        json_path = voices_path.with_suffix(".json")
+        if json_path.exists():
+            logger.info("[Kokoro] Using cached JSON voices: %s", json_path)
+            return json_path
+
+        # Detect numpy NPZ (ZIP) format: magic bytes 'PK'
+        try:
+            with open(voices_path, "rb") as f:
+                magic = f.read(2)
+            if magic == b"PK":
+                logger.info("[Kokoro] Converting numpy voices → JSON (%s)...", voices_path.name)
+                import json as _json
+                data = np.load(str(voices_path))
+                json_data = {key: data[key].tolist() for key in data.files}
+                with open(json_path, "w") as f:
+                    _json.dump(json_data, f)
+                logger.info("[Kokoro] Converted %d voice(s) → %s", len(json_data), json_path.name)
+                return json_path
+        except Exception as exc:
+            logger.warning("[Kokoro] Could not convert voices to JSON: %s", exc)
+
+        return voices_path
+
     def _load_runtime(self) -> None:
         if self._runtime is not None:
             return
 
+        logger.info("[Kokoro] Detecting runtime...")
         runtime_kind, err = self._detect_runtime()
         if not runtime_kind:
+            logger.error("[Kokoro] No runtime found: %s", err or "kokoro_runtime_missing")
             raise RuntimeError(err or "kokoro_runtime_missing")
 
+        logger.info("[Kokoro] Runtime detected: %s", runtime_kind)
         self._runtime_kind = runtime_kind
         if runtime_kind == "kokoro_onnx":
             module = importlib.import_module("kokoro_onnx")
             model_path, voices_path = self._resolve_model_and_voices_paths()
+            logger.info("[Kokoro] model_path=%s  voices_path=%s", model_path, voices_path)
             if model_path is None:
+                logger.error("[Kokoro] ONNX model file not found")
                 raise RuntimeError("kokoro_model_onnx_missing")
             if voices_path is None:
+                logger.error("[Kokoro] Voices bundle file not found")
                 raise RuntimeError("kokoro_voices_bundle_missing")
+            voices_path = self._ensure_json_voices(voices_path)
             kokoro_cls = getattr(module, "Kokoro")
+            logger.info("[Kokoro] Loading ONNX model (this may take a moment)...")
             try:
                 self._runtime = kokoro_cls(str(model_path), str(voices_path))
             except TypeError:
@@ -800,14 +842,17 @@ class KokoroProvider(BaseProvider):
                     model_path=str(model_path),
                     voices_path=str(voices_path),
                 )
+            logger.info("[Kokoro] ONNX model loaded successfully")
         else:
             module = importlib.import_module("kokoro")
             pipeline_cls = getattr(module, "KPipeline")
             lang_code = os.environ.get("KOKORO_LANG", "en-us")
+            logger.info("[Kokoro] Loading KPipeline (lang=%s)...", lang_code)
             try:
                 self._runtime = pipeline_cls(lang_code=lang_code)
             except TypeError:
                 self._runtime = pipeline_cls(lang_code)
+            logger.info("[Kokoro] KPipeline loaded successfully")
 
     def _synthesize_internal(self, text: str) -> Tuple[bytes, int]:
         self._load_runtime()
@@ -842,11 +887,15 @@ class KokoroProvider(BaseProvider):
 
     def _run_init_probe(self) -> InitProbeResult:
         try:
+            logger.info("[Kokoro] Running init probe (synthesizing test phrase)...")
             wav_bytes, _sample_rate = self._synthesize_internal("Voice engine initialization check.")
             if len(wav_bytes) < 44:
+                logger.warning("[Kokoro] Init probe returned empty audio (%d bytes)", len(wav_bytes))
                 return InitProbeResult(ready=False, startup_ms=0, last_error="kokoro_synthesis_empty")
+            logger.info("[Kokoro] Init probe passed (%d bytes, %d Hz)", len(wav_bytes), _sample_rate)
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
+            logger.error("[Kokoro] Init probe FAILED: %s", exc, exc_info=True)
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
 
     def synthesize(self, text: str, request_id: str) -> Tuple[bytes, int]:
@@ -1498,10 +1547,13 @@ async def on_startup() -> None:
             # as fast as possible for PTT latency.
             async def warm_tts_async() -> None:
                 try:
+                    logger.info("[TTS Warmup] Starting TTS warmup (engine=%s, voice=%s)...",
+                                tts_provider.engine, getattr(tts_provider, "voice_id", ""))
                     if tts_provider.engine == "kokoro" and getattr(tts_provider, "voice_id", None):
                         from model_downloader import ensure_kokoro_models
                         registry_path = ROOT_DIR / "model_registry.json"
                         variant = os.environ.get("KOKORO_MODEL_VARIANT") or None
+                        logger.info("[TTS Warmup] Ensuring Kokoro models are downloaded...")
                         await asyncio.to_thread(
                             ensure_kokoro_models,
                             VOICES_ROOT,
@@ -1509,10 +1561,18 @@ async def on_startup() -> None:
                             registry_path,
                             variant=variant,
                         )
+                        logger.info("[TTS Warmup] Kokoro models verified.")
 
+                    logger.info("[TTS Warmup] Running TTS init probe...")
                     await asyncio.to_thread(tts_provider.init_probe, False)
+                    cached = tts_provider.get_cached_init_probe()
+                    if cached and cached.ready:
+                        logger.info("[TTS Warmup] TTS is READY (startup_ms=%d)", cached.startup_ms)
+                    else:
+                        logger.warning("[TTS Warmup] TTS init probe completed but NOT ready: %s",
+                                       cached.last_error if cached else "no result")
                 except Exception as inner_exc:
-                    logger.error("TTS init probe failed on startup: %s", inner_exc)
+                    logger.error("[TTS Warmup] TTS init probe FAILED on startup: %s", inner_exc, exc_info=True)
 
             asyncio.create_task(warm_tts_async())
     except Exception as exc:
