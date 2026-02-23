@@ -39,6 +39,13 @@
     <SolidColorBrush x:Key="BlueBadgeBgBrush"  Color="#0D2E5E"/>
     <SolidColorBrush x:Key="SubtleBadgeBgBrush" Color="#1F1F1F"/>
 
+    <!-- ── Ledger Surfaces ─────────────────────────────────────── -->
+    <SolidColorBrush x:Key="LedgerEntryBgBrush"   Color="#1A1F26"/>
+    <SolidColorBrush x:Key="ToolActivityBgBrush"   Color="#161B22"/>
+    <SolidColorBrush x:Key="SpineCommandBrush"     Color="#409CFF"/>
+    <SolidColorBrush x:Key="SpineResultBrush"      Color="#39414A"/>
+    <SolidColorBrush x:Key="SpineToolBrush"        Color="#30363D"/>
+
     <!-- ── Standard Corner Radii (Sharper, Modern Minimalist) ────── -->
     <CornerRadius x:Key="RadiusSm">4</CornerRadius>
     <CornerRadius x:Key="RadiusMd">4</CornerRadius>
