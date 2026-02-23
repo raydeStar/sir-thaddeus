@@ -63,4 +63,36 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Pre-bundled Kokoro TTS voice assets (default voice: bm_lewis).
+       These are ~337 MB and gitignored, but present after a first local run.
+       Bundling them eliminates the largest cold-start download on fresh machines.
+       Other voices are downloaded on-demand when the user switches. -->
+  <ItemGroup Condition="Exists('..\..\voice-backend\voices\bm_lewis\model.onnx')">
+    <None Include="..\..\voice-backend\voices\bm_lewis\model.onnx"
+          Link="voice\voices\bm_lewis\model.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\voices\bm_lewis\voices.bin')">
+    <None Include="..\..\voice-backend\voices\bm_lewis\voices.bin"
+          Link="voice\voices\bm_lewis\voices.bin"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\voices\bm_lewis\manifest.json')">
+    <None Include="..\..\voice-backend\voices\bm_lewis\manifest.json"
+          Link="voice\voices\bm_lewis\manifest.json"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\voices\README.md')">
+    <None Include="..\..\voice-backend\voices\README.md"
+          Link="voice\voices\README.md"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
