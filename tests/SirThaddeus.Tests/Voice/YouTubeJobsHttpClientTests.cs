@@ -35,8 +35,8 @@ public sealed class YouTubeJobsHttpClientTests
             videoUrl: "https://www.youtube.com/watch?v=abc123",
             languageHint: null,
             keepAudio: false,
-            asrProvider: "qwen3asr",
-            asrModel: "qwen-asr-1.6b",
+            asrProvider: "faster-whisper",
+            asrModel: "base",
             draftTone: "professional",
             cancellationToken: CancellationToken.None);
 
