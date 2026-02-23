@@ -28,21 +28,52 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # ── Windows DLL bootstrap ──────────────────────────────────────────────
-# On fresh machines the VC++ runtime may only exist inside the msvc-runtime
-# pip package.  Register that directory before anything imports onnxruntime.
-# Also suppress the Windows crash-dialog so native DLL failures surface as
-# Python exceptions instead of a blocking pop-up.
+# On fresh machines the VC++ runtime may only exist inside the Python
+# installation that uv bundles (in the venv's Scripts directory) or inside
+# the onnxruntime/capi directory (if the startup script copied them there).
+# Register those directories and force-load the DLLs into the process
+# before anything imports onnxruntime.  Also suppress the Windows crash-
+# dialog so native DLL failures surface as Python exceptions.
 if sys.platform == "win32":
     try:
         ctypes.windll.kernel32.SetErrorMode(0x8003)
     except Exception:
         pass
+    # Collect candidate directories containing VC++ runtime DLLs.
+    _vcrt_dirs: list = []
+    # 1. The directory containing python.exe (venv Scripts/)
+    _vcrt_dirs.append(str(Path(sys.executable).parent))
+    # 2. onnxruntime/capi/ (DLLs may have been copied there by startup script)
     try:
-        _msvc_spec = importlib.util.find_spec("msvc_runtime")
-        if _msvc_spec and _msvc_spec.origin:
-            _msvc_dir = str(Path(_msvc_spec.origin).parent)
-            os.add_dll_directory(_msvc_dir)
-            os.environ["PATH"] = _msvc_dir + os.pathsep + os.environ.get("PATH", "")
+        _ort_spec = importlib.util.find_spec("onnxruntime")
+        if _ort_spec and _ort_spec.submodule_search_locations:
+            _ort_capi = str(Path(list(_ort_spec.submodule_search_locations)[0]) / "capi")
+            if os.path.isdir(_ort_capi):
+                _vcrt_dirs.append(_ort_capi)
+    except Exception:
+        pass
+    for _vcrt_dir in _vcrt_dirs:
+        try:
+            os.add_dll_directory(_vcrt_dir)
+        except OSError:
+            pass
+        # Force-load each VC++ runtime DLL into the process so onnxruntime
+        # finds them already resident when it loads its native extension.
+        for _dll_name in (
+            "vcruntime140.dll", "vcruntime140_1.dll",
+            "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+            "concrt140.dll", "vcomp140.dll",
+        ):
+            _dll_path = os.path.join(_vcrt_dir, _dll_name)
+            if os.path.isfile(_dll_path):
+                try:
+                    ctypes.WinDLL(_dll_path)
+                except OSError:
+                    pass
+    # Also try importing msvc_runtime — it statically bundles the VC++
+    # runtime and makes it available to the process when loaded.
+    try:
+        import msvc_runtime  # noqa: F401
     except Exception:
         pass
 
