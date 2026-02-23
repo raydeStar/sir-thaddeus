@@ -105,6 +105,70 @@ if (-not $SkipPreflight) {
     }
 }
 
+# ── Prefetch default Kokoro TTS voice assets ──────────────────────────
+# These are gitignored (~337 MB) but required in the release package so
+# fresh target machines don't need a large first-run download.
+# URLs are read from model_registry.json to stay in sync.
+
+Write-Section "Prefetch Voice Assets"
+
+$voiceBackendDir = Join-Path $RepoRoot "apps/voice-backend"
+$voicesDir = Join-Path $voiceBackendDir "voices/bm_lewis"
+$registryPath = Join-Path $voiceBackendDir "model_registry.json"
+$modelPath = Join-Path $voicesDir "model.onnx"
+$voicesBinPath = Join-Path $voicesDir "voices.bin"
+$manifestPath = Join-Path $voicesDir "manifest.json"
+
+if ((Test-Path $modelPath) -and (Test-Path $voicesBinPath)) {
+    Write-Host "  Kokoro bm_lewis assets already present — skipping download."
+}
+elseif (-not (Test-Path $registryPath)) {
+    Write-Host "  WARN: model_registry.json not found; skipping voice asset prefetch." -ForegroundColor Yellow
+}
+else {
+    $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
+    $kokoroFiles = $registry.kokoro.'v1.0'.files
+
+    if (-not (Test-Path $voicesDir)) {
+        New-Item -ItemType Directory -Force -Path $voicesDir | Out-Null
+    }
+
+    foreach ($file in $kokoroFiles) {
+        $destPath = Join-Path $voicesDir $file.localName
+        if (Test-Path $destPath) {
+            Write-Host "  Already exists: $($file.localName)"
+            continue
+        }
+
+        Write-Host "  Downloading $($file.localName) ($([math]::Round($file.sizeBytes / 1MB, 1)) MB)..."
+        $tmpPath = "$destPath.tmp"
+        try {
+            Invoke-WebRequest -Uri $file.url -OutFile $tmpPath -UseBasicParsing
+            Move-Item -Path $tmpPath -Destination $destPath -Force
+            Write-Host "  OK: $($file.localName)"
+        }
+        catch {
+            if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue }
+            Write-Host "  WARN: Failed to download $($file.localName): $_" -ForegroundColor Yellow
+        }
+    }
+
+    # Write manifest so the startup script recognizes the bundle as valid.
+    if ((Test-Path $modelPath) -and (Test-Path $voicesBinPath) -and -not (Test-Path $manifestPath)) {
+        $manifest = @{
+            voiceId = "bm_lewis"
+            generatedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            autoDownloaded = $true
+            files = @(
+                @{ path = "model.onnx"; sha256 = (Get-FileHash $modelPath -Algorithm SHA256).Hash.ToLowerInvariant() },
+                @{ path = "voices.bin"; sha256 = (Get-FileHash $voicesBinPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+            )
+        }
+        $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding UTF8
+        Write-Host "  Created manifest.json for bm_lewis"
+    }
+}
+
 Write-Section "Publish Artifacts"
 
 $projects = @(
