@@ -17,7 +17,7 @@
     Compute device: cpu or cuda (default: cpu).
 
 .PARAMETER SttEngine
-    STT engine: faster-whisper (default) or qwen3asr.
+    STT engine: faster-whisper (default).
 
 .PARAMETER SttModelId
     STT model id. If omitted with faster-whisper, defaults to base.
@@ -26,7 +26,7 @@
     STT language pin (default: en). Use "auto" to enable detection.
 
 .PARAMETER TtsEngine
-    TTS engine: windows (default) or kokoro.
+    TTS engine: kokoro (default).
 
 .PARAMETER TtsModelId
     Optional TTS model id.
@@ -47,11 +47,12 @@ param(
     [string]$SttEngine = "faster-whisper",
     [string]$SttModelId = "",
     [string]$SttLanguage = "en",
-    [string]$TtsEngine = "windows",
+    [string]$TtsEngine = "kokoro",
     [string]$TtsModelId = "",
     [string]$TtsVoiceId = "",
     [bool]$PrefetchVoiceAssets = $true,
-    [bool]$PrefetchAsrAssets = $true
+    [bool]$PrefetchAsrAssets = $true,
+    [bool]$PrefetchYouTubeAsrAssets = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -136,25 +137,17 @@ voices_root = voice_backend_dir / 'voices'
 registry_path = voice_backend_dir / 'model_registry.json'
 prefetch_voice_assets = '$PrefetchVoiceAssets'.strip().lower() == 'true'
 prefetch_asr_assets = '$PrefetchAsrAssets'.strip().lower() == 'true'
+prefetch_youtube_asr_assets = '$PrefetchYouTubeAsrAssets'.strip().lower() == 'true'
 requested_voice_id = r'$TtsVoiceId'.strip() or 'bm_lewis'
 variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
 
 if prefetch_voice_assets:
     from model_downloader import ensure_kokoro_models
-
-    voice_ids = []
-    if voices_root.exists():
-        voice_ids = sorted([path.name for path in voices_root.iterdir() if path.is_dir()])
-
-    if requested_voice_id not in voice_ids:
-        voice_ids.append(requested_voice_id)
-
-    for voice_id in voice_ids:
-        try:
-            print(f"[VOICE_PREFETCH] Ensuring Kokoro assets for '{voice_id}'...")
-            ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
-        except Exception as exc:
-            print(f"[VOICE_PREFETCH_WARNING] Failed for '{voice_id}': {exc}")
+    try:
+        print(f"[VOICE_PREFETCH] Ensuring Kokoro assets for '{requested_voice_id}'...")
+        ensure_kokoro_models(voices_root, requested_voice_id, registry_path, variant=variant)
+    except Exception as exc:
+        print(f"[VOICE_PREFETCH_WARNING] Failed for '{requested_voice_id}': {exc}")
 
 if prefetch_asr_assets:
     requested_stt_model = (r'$SttModelId'.strip() or r'$Model'.strip() or 'base')
@@ -171,13 +164,8 @@ if prefetch_asr_assets:
     except Exception as exc:
         print(f"[ASR_PREFETCH_WARNING] faster-whisper preload failed: {exc}")
 
-    qwen_model_id = (os.environ.get('ST_YOUTUBE_ASR_MODEL_ID') or 'qwen-asr-1.6b').strip() or 'qwen-asr-1.6b'
-    try:
-        from qwen_asr import Qwen3ASRModel
-        print(f"[ASR_PREFETCH] Ensuring qwen-asr model '{qwen_model_id}' on {device}...")
-        _ = Qwen3ASRModel.from_pretrained(qwen_model_id, device=device)
-    except Exception as exc:
-        print(f"[ASR_PREFETCH_WARNING] qwen-asr preload failed: {exc}")
+    if prefetch_youtube_asr_assets:
+        print("[ASR_PREFETCH_INFO] whisper-only mode enabled; skipping optional YouTube qwen-asr prefetch.")
 "@
 
     & "$VenvDir\Scripts\python.exe" -c $prefetchCode
@@ -186,26 +174,44 @@ if prefetch_asr_assets:
 # ── Start server ─────────────────────────────────────────────────
 
 $resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } else { $SttModelId.Trim() }
-$resolvedTtsEngine = if ([string]::IsNullOrWhiteSpace($TtsEngine)) { "windows" } else { $TtsEngine.Trim().ToLowerInvariant() }
+$resolvedTtsEngine = if ([string]::IsNullOrWhiteSpace($TtsEngine)) { "kokoro" } else { $TtsEngine.Trim().ToLowerInvariant() }
 $resolvedTtsModelId = if ([string]::IsNullOrWhiteSpace($TtsModelId)) { "" } else { $TtsModelId.Trim() }
 $resolvedTtsVoiceId = if ([string]::IsNullOrWhiteSpace($TtsVoiceId)) { "" } else { $TtsVoiceId.Trim() }
 
+if ($resolvedTtsEngine -ne "kokoro") {
+    Write-Host "[VOICE_TTS_ENGINE_FORCED] Non-kokoro TTS engine '$resolvedTtsEngine' requested; forcing kokoro." -ForegroundColor Yellow
+    $resolvedTtsEngine = "kokoro"
+}
+
 # Fresh machines can have Kokoro selected in settings but no local voice bundle yet.
-# If assets for the requested Kokoro voice are missing, degrade to Windows TTS so
-# the app still becomes ready instead of remaining stuck in perpetual warmup.
+# We require Kokoro for startup readiness and fail fast if no usable Kokoro
+# assets can be resolved.
 if ($resolvedTtsEngine -eq "kokoro") {
     if ([string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
         $resolvedTtsVoiceId = "bm_lewis"
         Write-Host "[VOICE_TTS_DEFAULT_APPLIED] No Kokoro voice specified; defaulting to '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
     }
 
-    $voiceManifest = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\manifest.json")
     $voiceModel = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\model.onnx")
     $voiceBundle = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\voices.bin")
-    if ((-not (Test-Path $voiceManifest)) -or (-not (Test-Path $voiceModel)) -or (-not (Test-Path $voiceBundle))) {
-        Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_ATTEMPT] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; starting background auto-download." -ForegroundColor Yellow
+    $hasRequestedVoiceAssets = (Test-Path $voiceModel) -and (Test-Path $voiceBundle)
+    $fallbackAssetDir = Get-ChildItem -Path (Join-Path $VoiceBackendDir "voices") -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            (Test-Path (Join-Path $_.FullName "model.onnx")) -and
+            (Test-Path (Join-Path $_.FullName "voices.bin"))
+        } |
+        Select-Object -First 1
+    $hasAnyKokoroAssets = $null -ne $fallbackAssetDir
 
-        $pythonCode = @"
+    if (-not $hasRequestedVoiceAssets) {
+        if ($hasAnyKokoroAssets) {
+            Write-Host "[VOICE_TTS_SHARED_ASSETS] No dedicated pack for '$resolvedTtsVoiceId'; using shared Kokoro assets from '$($fallbackAssetDir.Name)'." -ForegroundColor DarkGray
+            $resolvedTtsVoiceId = $fallbackAssetDir.Name
+        }
+        else {
+            Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_ATTEMPT] Kokoro assets are missing for voice '$resolvedTtsVoiceId'; downloading now (startup blocks until complete)." -ForegroundColor Yellow
+
+            $pythonCode = @"
 from pathlib import Path
 import os
 from model_downloader import ensure_kokoro_models
@@ -219,19 +225,79 @@ variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
 ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
 "@
 
-        try {
-            Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList @("-c", $pythonCode) -WorkingDirectory $VoiceBackendDir -WindowStyle Hidden | Out-Null
-            Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_BACKGROUND_STARTED] Kokoro asset download launched for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
-        }
-        catch {
-            Write-Host "[VOICE_TTS_ASSET_DOWNLOAD_FAILED] Failed to launch Kokoro asset download for '$resolvedTtsVoiceId': $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+            & "$VenvDir\Scripts\python.exe" -c $pythonCode
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Failed to download Kokoro assets for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+                exit 1
+            }
 
-        Write-Host "[VOICE_TTS_FALLBACK_APPLIED] Kokoro assets are not installed yet for '$resolvedTtsVoiceId'; falling back to Windows TTS for readiness." -ForegroundColor Yellow
-        $resolvedTtsEngine = "windows"
-        $resolvedTtsVoiceId = ""
-        $resolvedTtsModelId = ""
+            $hasRequestedVoiceAssets = (Test-Path $voiceModel) -and (Test-Path $voiceBundle)
+            if (-not $hasRequestedVoiceAssets) {
+                Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro assets are still missing after download attempt for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+                exit 1
+            }
+
+            Write-Host "[VOICE_TTS_ASSET_READY] Kokoro assets are ready for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+        }
     }
+
+    $resolvedVoiceModel = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\model.onnx")
+    $resolvedVoiceBundle = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\voices.bin")
+    if (-not ((Test-Path $resolvedVoiceModel) -and (Test-Path $resolvedVoiceBundle))) {
+        Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro startup requires usable assets, but none were found for resolved voice '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+        exit 1
+    }
+
+    $env:ST_KOKORO_PROBE_BACKEND_DIR = $VoiceBackendDir
+    $env:ST_KOKORO_PROBE_VOICE_ID = $resolvedTtsVoiceId
+
+    $kokoroProbeCode = @'
+from pathlib import Path
+import os
+import sys
+
+voice_backend_dir = Path(os.environ.get('ST_KOKORO_PROBE_BACKEND_DIR') or '')
+voice_id = (os.environ.get('ST_KOKORO_PROBE_VOICE_ID') or '').strip() or 'bm_lewis'
+voice_dir = voice_backend_dir / 'voices' / voice_id
+model_path = voice_dir / 'model.onnx'
+voices_path = voice_dir / 'voices.bin'
+
+try:
+    from kokoro_onnx import Kokoro
+
+    runtime = Kokoro(str(model_path), str(voices_path))
+    try:
+        result = runtime.create('Voice engine initialization check.', voice=voice_id, speed=1.0, lang='en-us')
+    except TypeError:
+        result = runtime.create('Voice engine initialization check.', voice=voice_id)
+
+    if result is None:
+        raise RuntimeError('kokoro_probe_empty_result')
+except Exception as exc:
+    print('[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro probe failed for %r: %s' % (voice_id, exc))
+    sys.exit(1)
+'@
+
+    $kokoroProbeFile = Join-Path $env:TEMP ("st-kokoro-probe-" + [guid]::NewGuid().ToString("N") + ".py")
+    Set-Content -Path $kokoroProbeFile -Value $kokoroProbeCode -Encoding UTF8
+
+    $probeExitCode = 0
+    try {
+        & "$VenvDir\Scripts\python.exe" $kokoroProbeFile
+        $probeExitCode = $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -Path $kokoroProbeFile -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_KOKORO_PROBE_BACKEND_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_KOKORO_PROBE_VOICE_ID -ErrorAction SilentlyContinue
+    }
+
+    if ($probeExitCode -ne 0) {
+        Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe failed. Aborting startup." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "[VOICE_TTS_PROBE_READY] Kokoro runtime probe passed for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
 }
 
 Write-Host ""

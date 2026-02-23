@@ -338,10 +338,10 @@ public sealed record VoiceSettings
     public int SpeakingTimeoutMs { get; init; } = 30_000;
 
     [JsonPropertyName("youtubeAsrProvider")]
-    public string YouTubeAsrProvider { get; init; } = "qwen3asr";
+    public string YouTubeAsrProvider { get; init; } = "faster-whisper";
 
     [JsonPropertyName("youtubeAsrModelId")]
-    public string YouTubeAsrModelId { get; init; } = "qwen-asr-1.6b";
+    public string YouTubeAsrModelId { get; init; } = "base";
 
     [JsonPropertyName("youtubeLanguageHint")]
     public string YouTubeLanguageHint { get; init; } = "en-us";
@@ -388,8 +388,7 @@ public sealed record VoiceSettings
             "" => "faster-whisper",
             "whisper" => "faster-whisper",
             "faster-whisper" => "faster-whisper",
-            // Interactive voice STT is intentionally pinned to faster-whisper.
-            // Qwen ASR is reserved for YouTube transcription jobs.
+            // Voice + YouTube STT are intentionally pinned to faster-whisper.
             _ => "faster-whisper"
         };
     }
@@ -441,17 +440,25 @@ public sealed record VoiceSettings
         var provider = (YouTubeAsrProvider ?? "").Trim().ToLowerInvariant();
         return provider switch
         {
-            "" => "qwen3asr",
-            "qwen3asr" => "qwen3asr",
-            "qwen-asr" => "qwen3asr",
-            _ => provider
+            "" => "faster-whisper",
+            "whisper" => "faster-whisper",
+            "faster-whisper" => "faster-whisper",
+            "qwen3asr" => "faster-whisper",
+            "qwen-asr" => "faster-whisper",
+            _ => "faster-whisper"
         };
     }
 
     public string GetResolvedYouTubeAsrModelId()
     {
         var model = (YouTubeAsrModelId ?? "").Trim();
-        return string.IsNullOrWhiteSpace(model) ? "qwen-asr-1.6b" : model;
+        if (string.IsNullOrWhiteSpace(model))
+            return "base";
+
+        if (model.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+            return "base";
+
+        return model;
     }
 
     public string GetResolvedYouTubeLanguageHint()
