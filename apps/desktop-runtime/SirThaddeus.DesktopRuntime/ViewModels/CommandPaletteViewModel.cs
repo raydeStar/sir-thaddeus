@@ -58,6 +58,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private bool _safeModeEnabled;
     private string _runtimeSafetyText = "";
     private bool _contextLocked;
+    private string _userDisplayName = "User";
     private int _tokensIn;
     private int _tokensOut;
     private int _contextFillPercent;
@@ -160,6 +161,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public ObservableCollection<LogEntry> ActivityLog { get; } = [];
 
     /// <summary>
+    /// Filtered log for the Activity Drawer — MCP hooks, tool calls, state changes, and errors only.
+    /// Excludes verbose voice diagnostics and connection checks.
+    /// </summary>
+    public ObservableCollection<LogEntry> DrawerLog { get; } = [];
+
+    /// <summary>
     /// Compact continuity chips rendered above chat input.
     /// </summary>
     public ObservableCollection<ContextChipViewModel> ContextChips { get; } = [];
@@ -247,6 +254,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _runtimeSafetyText;
         private set => SetProperty(ref _runtimeSafetyText, value);
+    }
+
+    public string UserDisplayName
+    {
+        get => _userDisplayName;
+        set => SetProperty(ref _userDisplayName, value);
     }
 
     /// <summary>
@@ -585,7 +598,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Use24HourTime = Use24HourTime,
             Role    = ChatMessageRole.Status,
-            Content = "Thinking\u2026"
+            Content = "Thinking\u2026",
+            AuthorLabel = "System"
         };
         Messages.Add(thinkingMsg);
         MessageAdded?.Invoke();
@@ -609,7 +623,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     Role    = ChatMessageRole.Assistant,
                     Content = displayParts.DisplayText,
                     ThoughtContent = displayParts.ThinkingText,
-                    RetryPrompt = userText
+                    RetryPrompt = userText,
+                    AuthorLabel = "Sir Thaddeus"
                 };
 
                 // ── Parse source cards from web search results ───
@@ -894,7 +909,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 {
                     Use24HourTime = Use24HourTime,
                     Role    = role,
-                    Content = msg.Content
+                    Content = msg.Content,
+                    AuthorLabel = role == ChatMessageRole.User ? UserDisplayName : role == ChatMessageRole.Assistant ? "Sir Thaddeus" : "System"
                 });
             }
         }
@@ -991,7 +1007,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         Messages.Add(new ChatMessageViewModel
         {
             Role    = role,
-            Content = content
+            Content = content,
+            AuthorLabel = role switch
+            {
+                ChatMessageRole.User         => UserDisplayName,
+                ChatMessageRole.Assistant    => "Sir Thaddeus",
+                _                            => "System"
+            }
         });
         OnPropertyChanged(nameof(HasActiveSession));
         MessageAdded?.Invoke();
@@ -1023,7 +1045,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             Role = ChatMessageRole.Assistant,
             Content = displayParts.DisplayText,
             ThoughtContent = displayParts.ThinkingText,
-            RetryPrompt = ResolveMostRecentUserPrompt()
+            RetryPrompt = ResolveMostRecentUserPrompt(),
+            AuthorLabel = "Sir Thaddeus"
         });
         
         SnapshotCurrentSession();
@@ -1131,6 +1154,22 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) kind = LogEntryKind.ToolOutput;
 
                     ActivityLog.Insert(0, new LogEntry { Kind = kind, Text = txt, Timestamp = ev.Timestamp.DateTime });
+
+                    // Only show MCP/tool calls and state changes in the drawer — no errors, no JSON
+                    if (ev.Action.StartsWith("MCP_") || ev.Action.StartsWith("TOOL_"))
+                    {
+                        var label = ev.Action.Replace("MCP_", "").Replace("TOOL_", "").Replace("_", " ");
+                        var drawerText = $"{label} — {ev.Result}";
+                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.ToolOutput, Text = drawerText, Timestamp = ev.Timestamp.DateTime });
+                        while (DrawerLog.Count > 30)
+                            DrawerLog.RemoveAt(DrawerLog.Count - 1);
+                    }
+                    else if (ev.Action.StartsWith("STATE_"))
+                    {
+                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.Info, Text = $"State → {ev.Result}", Timestamp = ev.Timestamp.DateTime });
+                        while (DrawerLog.Count > 30)
+                            DrawerLog.RemoveAt(DrawerLog.Count - 1);
+                    }
                 }
                 
                 while (ActivityLog.Count > 100)

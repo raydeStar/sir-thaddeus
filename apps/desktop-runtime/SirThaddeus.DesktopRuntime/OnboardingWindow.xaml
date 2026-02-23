@@ -12,10 +12,6 @@
 
     <!-- ── Resources MUST be declared before content in WPF ─────── -->
     <Window.Resources>
-        <DropShadowEffect x:Key="WizardShadow"
-                          Color="#000000" BlurRadius="32"
-                          ShadowDepth="0" Opacity="0.6" Direction="0"/>
-
         <Style x:Key="StepDotActive" TargetType="Ellipse">
             <Setter Property="Width" Value="10"/>
             <Setter Property="Height" Value="10"/>
@@ -131,7 +127,7 @@
             <BeginStoryboard>
                 <Storyboard>
                     <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                     From="0" To="1" Duration="0:0:0.25"/>
+                                     From="0" To="1" Duration="0:0:0.15"/>
                 </Storyboard>
             </BeginStoryboard>
         </EventTrigger>
@@ -140,8 +136,7 @@
     <Border Background="#0B0D12"
             CornerRadius="16"
             BorderBrush="#1E232E"
-            BorderThickness="1"
-            Effect="{StaticResource WizardShadow}">
+            BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>

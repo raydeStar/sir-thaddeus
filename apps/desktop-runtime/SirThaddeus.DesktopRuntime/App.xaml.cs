@@ -460,6 +460,10 @@ public partial class App : System.Windows.Application
                     _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
                     _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
                 }
+                if (_commandPaletteViewModel is not null)
+                {
+                    _commandPaletteViewModel.UserDisplayName = updated.UserProfile.DisplayName;
+                }
                 Environment.SetEnvironmentVariable(
                     "ST_ACTIVE_PERSONALITY_ID",
                     updated.ActivePersonalityId ?? "");
@@ -1997,6 +2001,8 @@ public partial class App : System.Windows.Application
             dialogueStatePersistence: _dialogueStatePersistence,
             chatHistoryPersistence: _chatHistoryPersistence,
             voiceManager: _voiceHostProcessManager);
+
+        chatVm.UserDisplayName = _settings!.UserProfile.DisplayName;
 
         var overlayVm = new OverlayViewModel(
             _runtimeController!,

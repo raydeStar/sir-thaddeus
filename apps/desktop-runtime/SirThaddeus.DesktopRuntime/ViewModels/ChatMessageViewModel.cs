@@ -39,6 +39,7 @@ public sealed class ChatMessageViewModel : ViewModelBase
     private string _thoughtContent = string.Empty;
     private bool _isThoughtExpanded;
     private int    _carouselPage;
+    private string _authorLabel = "User";
 
     /// <summary>How many source cards are visible per carousel page.</summary>
     private const int CardsPerPage = 2;
@@ -166,6 +167,30 @@ public sealed class ChatMessageViewModel : ViewModelBase
     public bool IsAssistant    => Role == ChatMessageRole.Assistant;
     public bool IsToolActivity => Role == ChatMessageRole.ToolActivity;
     public bool IsStatus       => Role == ChatMessageRole.Status;
+
+    // ── Ledger header labels ─────────────────────────────────────────
+
+    /// <summary>
+    /// Display name of the author for this ledger entry.
+    /// Set externally when creating the message (profile name for User, "Sir Thaddeus" for Assistant).
+    /// </summary>
+    public string AuthorLabel
+    {
+        get => _authorLabel;
+        set => SetProperty(ref _authorLabel, value);
+    }
+
+    /// <summary>
+    /// Uppercase role tag for the ledger header (e.g. COMMAND, RESULT, TOOL ACTIVITY).
+    /// </summary>
+    public string RoleLabel => Role switch
+    {
+        ChatMessageRole.User         => "COMMAND",
+        ChatMessageRole.Assistant    => "RESULT",
+        ChatMessageRole.ToolActivity => "TOOL ACTIVITY",
+        ChatMessageRole.Status       => "STATUS",
+        _                            => ""
+    };
 
     // ── Internals ────────────────────────────────────────────────────
 

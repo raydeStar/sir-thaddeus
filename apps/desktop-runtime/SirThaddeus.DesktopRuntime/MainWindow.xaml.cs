@@ -159,6 +159,14 @@ public partial class MainWindow : Window
 
             case "Settings":
                 LazyLoadSettings();
+                // If no subview is visible, default to General
+                if (SettingsGeneralView.Visibility != Visibility.Visible &&
+                    MemoryView.Visibility != Visibility.Visible &&
+                    ProfileView.Visibility != Visibility.Visible &&
+                    LogsView.Visibility != Visibility.Visible)
+                {
+                    ActivateSettingsSubtab("General", true);
+                }
                 break;
         }
     }
@@ -171,9 +179,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ActivateSettingsSubtab(string subtab)
+    private void ActivateSettingsSubtab(string subtab, bool skipMainTabActivation = false)
     {
-        ActivateTab("Settings");
+        if (!skipMainTabActivation) ActivateTab("Settings");
 
         SettingsSubGeneral.IsChecked = subtab == "General";
         SettingsSubMemory.IsChecked = subtab == "Memory";
@@ -367,6 +375,15 @@ public partial class MainWindow : Window
     {
         if (_viewModel is null) return;
 
+        // Interrupt mode: if AI is processing, button is unclickable (IsHitTestVisible=False)
+        // If AI is speaking, tap = interrupt, hold = interrupt + start recording
+        var isSpeaking = _overlayViewModel?.StateLabel == "Speaking";
+        if (isSpeaking)
+        {
+            _viewModel.VoiceShutup?.Invoke();
+            // Fall through to start recording — hold = interrupt + record
+        }
+
         if (sender is System.Windows.Controls.Button btn)
             btn.CaptureMouse();
 
@@ -557,5 +574,39 @@ public partial class MainWindow : Window
             return;
 
         _viewModel?.LoadChatSessionCommand.Execute(session);
+    }
+
+    private void OverflowBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button btn && btn.ContextMenu != null)
+        {
+            btn.ContextMenu.PlacementTarget = btn;
+            btn.ContextMenu.IsOpen = true;
+        }
+    }
+
+    /// <summary>
+    /// Forwards mouse wheel events from TextBox / FlowDocumentScrollViewer
+    /// to the parent chat ScrollViewer so the chat area stays scrollable
+    /// even when the pointer is over a message body.
+    /// </summary>
+    private void BubbleMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        var args = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = sender
+        };
+        ChatScroller.RaiseEvent(args);
+    }
+
+    /// <summary>
+    /// Closes the Activity Drawer when clicking the transparent overlay behind it.
+    /// </summary>
+    private void DrawerDismiss_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_overlayViewModel != null)
+            _overlayViewModel.IsDrawerOpen = false;
     }
 }
