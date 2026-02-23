@@ -5,15 +5,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import ctypes
 import hashlib
 import inspect
 import importlib
 import importlib.metadata
+import importlib.util
 import io
 import json
 import logging
 import os
 import struct
+import sys
 import tempfile
 import threading
 import time
@@ -22,6 +25,25 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# ── Windows DLL bootstrap ──────────────────────────────────────────────
+# On fresh machines the VC++ runtime may only exist inside the msvc-runtime
+# pip package.  Register that directory before anything imports onnxruntime.
+# Also suppress the Windows crash-dialog so native DLL failures surface as
+# Python exceptions instead of a blocking pop-up.
+if sys.platform == "win32":
+    try:
+        ctypes.windll.kernel32.SetErrorMode(0x8003)
+    except Exception:
+        pass
+    try:
+        _msvc_spec = importlib.util.find_spec("msvc_runtime")
+        if _msvc_spec and _msvc_spec.origin:
+            _msvc_dir = str(Path(_msvc_spec.origin).parent)
+            os.add_dll_directory(_msvc_dir)
+            os.environ["PATH"] = _msvc_dir + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response

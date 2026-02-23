@@ -342,12 +342,33 @@ ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
 from pathlib import Path
 import os
 import sys
+import ctypes
+
+# Suppress Windows crash dialog boxes for DLL failures (access violations etc.)
+# SEM_FAILCRITICALERRORS=1 | SEM_NOGPFAULTERRORBOX=2 | SEM_NOOPENFILEERRORBOX=0x8000
+if sys.platform == 'win32':
+    try:
+        ctypes.windll.kernel32.SetErrorMode(0x8003)
+    except Exception:
+        pass
 
 voice_backend_dir = Path(os.environ.get('ST_KOKORO_PROBE_BACKEND_DIR') or '')
 voice_id = (os.environ.get('ST_KOKORO_PROBE_VOICE_ID') or '').strip() or 'bm_lewis'
 voice_dir = voice_backend_dir / 'voices' / voice_id
 model_path = voice_dir / 'model.onnx'
 voices_path = voice_dir / 'voices.bin'
+
+# Ensure msvc-runtime DLLs are on the DLL search path for onnxruntime
+if sys.platform == 'win32':
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec('msvc_runtime')
+        if spec and spec.origin:
+            msvc_dir = str(Path(spec.origin).parent)
+            os.add_dll_directory(msvc_dir)
+            os.environ['PATH'] = msvc_dir + os.pathsep + os.environ.get('PATH', '')
+    except Exception:
+        pass
 
 try:
     from kokoro_onnx import Kokoro
