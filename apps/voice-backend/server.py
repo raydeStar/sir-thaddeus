@@ -863,6 +863,7 @@ class FasterWhisperProvider(BaseProvider):
 
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
+            logger.error("FasterWhisper init failed: %s", exc, exc_info=True)
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
 
     def transcribe(self, audio_bytes: bytes, request_id: str) -> str:
@@ -889,6 +890,9 @@ class FasterWhisperProvider(BaseProvider):
             elapsed_ms = int((time.perf_counter() - started) * 1000.0)
             logger.info("ASR [%s] faster-whisper bytes=%d elapsed=%dms", request_id, len(audio_bytes), elapsed_ms)
             return text
+        except Exception as exc:
+            logger.error("FasterWhisper transcription error: %s", exc, exc_info=True)
+            raise
         finally:
             try:
                 os.unlink(temp_path)
