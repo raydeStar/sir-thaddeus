@@ -156,15 +156,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string LogicPuzzleDecompositionModeSuffix =
         "\n[LOGIC PUZZLE MODE]\n" +
         "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
-        "When solving logic puzzles, riddles, or trick questions:\n\n" +
-        "MANDATORY FORMAT:\n" +
-        "<think>\n" +
-        "Facts: [bullet points]\n" +
-        "Goal: [target objective]\n" +
-        "Basic checks: [bullet points]\n" +
-        "</think>\n\n" +
-        "Final answer: [your direct answer]\n\n" +
-        "CRITICAL: Start your response with <think>. Do not include any text before the opening <think> tag.\n" +
+        "Use first-principles logic internally, but keep reasoning private unless asked.\n" +
+        "Give a direct answer first.\n" +
+        "If the user explicitly asks why or asks for your logic, include a short 'Why:' section after the answer.\n" +
         "Do not call tools. Do not invent missing facts.\n" +
         "[/LOGIC PUZZLE MODE]\n";
 
@@ -774,6 +768,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 _history.Add(ChatMessage.Assistant(guardedText));
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={guardrailsResult.TriggerRisk}, source={guardrailsResult.TriggerSource}, why={guardrailsResult.TriggerWhy}");
+                LogEvent(
+                    "FIRST_PRINCIPLES_TRACE",
+                    string.Join(" || ", guardrailsResult.RationaleLines));
                 LogEvent("AGENT_RESPONSE", guardedText);
 
                 return AttachContextSnapshot(new AgentResponse
