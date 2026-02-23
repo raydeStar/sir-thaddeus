@@ -213,13 +213,16 @@ function Repair-KokoroRuntimeIfNeeded {
         return $false
     }
 
-    $needsRepair = $ProbeFailureOutput -match 'onnxruntime_pybind11_state' -or $ProbeFailureOutput -match 'DLL load failed'
+    $needsRepair = $ProbeFailureOutput -match 'onnxruntime_pybind11_state' -or
+                   $ProbeFailureOutput -match 'DLL load failed' -or
+                   $ProbeFailureOutput -match 'numpy' -or
+                   $ProbeFailureOutput -match 'No module named'
     if (-not $needsRepair) {
         return $false
     }
 
-    Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Detected onnxruntime/DLL import issue. Attempting one-time runtime repair..." -ForegroundColor Yellow
-    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --upgrade --force-reinstall onnxruntime "msvc-runtime; platform_system == 'Windows'"
+    Write-Host "[VOICE_TTS_RUNTIME_REPAIR] Detected runtime issue. Attempting one-time repair..." -ForegroundColor Yellow
+    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --upgrade --force-reinstall "numpy>=1.24,<2" onnxruntime "msvc-runtime; platform_system == 'Windows'"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[VOICE_TTS_RUNTIME_REPAIR_WARNING] Runtime repair install failed." -ForegroundColor Yellow
         return $false
