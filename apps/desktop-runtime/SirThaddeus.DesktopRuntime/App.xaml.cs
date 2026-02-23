@@ -2804,6 +2804,12 @@ public partial class App : System.Windows.Application
         _pttService?.RequestShutup();
         _voiceOrchestrator?.EnqueueShutup();
         _runtimeController?.StopAll();
+
+        // Kill VoiceHost + its child processes (PowerShell → Python) immediately
+        // so they don't linger as orphans while the dispatcher-queued shutdown runs.
+        _voiceHostProcessManager?.Stop();
+        _mcpClient?.Dispose();
+
         RequestShutdown();
     }
 
