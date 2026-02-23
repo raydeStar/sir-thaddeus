@@ -34,6 +34,10 @@
 .PARAMETER TtsVoiceId
     TTS voice id. Required for kokoro engine.
 
+.PARAMETER RequireTtsReady
+    When true, startup fails if Kokoro cannot be initialized.
+    Default false keeps Whisper ASR available even when Kokoro is unavailable.
+
 # .EXAMPLE
 #     ./dev/start-voice-backend.ps1
 #     ./dev/start-voice-backend.ps1 -SttEngine faster-whisper -SttModelId small -Device cuda
@@ -52,7 +56,8 @@ param(
     [string]$TtsVoiceId = "",
     [bool]$PrefetchVoiceAssets = $true,
     [bool]$PrefetchAsrAssets = $true,
-    [bool]$PrefetchYouTubeAsrAssets = $false
+    [bool]$PrefetchYouTubeAsrAssets = $false,
+    [bool]$RequireTtsReady = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -140,6 +145,7 @@ if ($PrefetchVoiceAssets -or $PrefetchAsrAssets) {
     $prefetchCode = @'
 from pathlib import Path
 import os
+import sys
 
 voice_backend_dir = Path(os.environ.get('ST_PREFETCH_BACKEND_DIR') or '')
 voices_root = voice_backend_dir / 'voices'
@@ -151,6 +157,10 @@ requested_voice_id = (os.environ.get('ST_PREFETCH_VOICE_ID') or '').strip() or '
 requested_stt_model = ((os.environ.get('ST_PREFETCH_STT_MODEL_ID') or '').strip() or (os.environ.get('ST_PREFETCH_STT_MODEL_ALIAS') or '').strip() or 'base')
 device = (os.environ.get('ST_PREFETCH_DEVICE') or 'cpu').strip().lower() or 'cpu'
 variant = (os.environ.get('KOKORO_MODEL_VARIANT') or '').strip() or None
+
+backend_dir_str = str(voice_backend_dir)
+if backend_dir_str:
+    sys.path.insert(0, backend_dir_str)
 
 if prefetch_voice_assets:
     from model_downloader import ensure_kokoro_models
@@ -225,6 +235,7 @@ $resolvedSttModel = if ([string]::IsNullOrWhiteSpace($SttModelId)) { $Model } el
 $resolvedTtsEngine = if ([string]::IsNullOrWhiteSpace($TtsEngine)) { "kokoro" } else { $TtsEngine.Trim().ToLowerInvariant() }
 $resolvedTtsModelId = if ([string]::IsNullOrWhiteSpace($TtsModelId)) { "" } else { $TtsModelId.Trim() }
 $resolvedTtsVoiceId = if ([string]::IsNullOrWhiteSpace($TtsVoiceId)) { "" } else { $TtsVoiceId.Trim() }
+$ttsStartupDegraded = $false
 
 if ($resolvedTtsEngine -ne "kokoro") {
     Write-Host "[VOICE_TTS_ENGINE_FORCED] Non-kokoro TTS engine '$resolvedTtsEngine' requested; forcing kokoro." -ForegroundColor Yellow
@@ -232,8 +243,8 @@ if ($resolvedTtsEngine -ne "kokoro") {
 }
 
 # Fresh machines can have Kokoro selected in settings but no local voice bundle yet.
-# We require Kokoro for startup readiness and fail fast if no usable Kokoro
-# assets can be resolved.
+# Try to make Kokoro ready, but keep ASR startup available unless strict TTS
+# readiness is explicitly required.
 if ($resolvedTtsEngine -eq "kokoro") {
     if ([string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
         $resolvedTtsVoiceId = "bm_lewis"
@@ -262,9 +273,15 @@ if ($resolvedTtsEngine -eq "kokoro") {
             $pythonCode = @"
 from pathlib import Path
 import os
-from model_downloader import ensure_kokoro_models
+import sys
 
 voice_backend_dir = Path(r'$VoiceBackendDir')
+backend_dir_str = str(voice_backend_dir)
+if backend_dir_str:
+    sys.path.insert(0, backend_dir_str)
+
+from model_downloader import ensure_kokoro_models
+
 voices_root = voice_backend_dir / 'voices'
 registry_path = voice_backend_dir / 'model_registry.json'
 voice_id = r'$resolvedTtsVoiceId'
@@ -275,31 +292,53 @@ ensure_kokoro_models(voices_root, voice_id, registry_path, variant=variant)
 
             & "$VenvDir\Scripts\python.exe" -c $pythonCode
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Failed to download Kokoro assets for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
-                exit 1
+                if ($RequireTtsReady) {
+                    Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Failed to download Kokoro assets for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+                    exit 1
+                }
+
+                Write-Host "[VOICE_TTS_OPTIONAL_UNAVAILABLE] Failed to download Kokoro assets for '$resolvedTtsVoiceId'. Continuing with Whisper ASR-only availability." -ForegroundColor Yellow
+                $ttsStartupDegraded = $true
             }
 
-            $hasRequestedVoiceAssets = (Test-Path $voiceModel) -and (Test-Path $voiceBundle)
-            if (-not $hasRequestedVoiceAssets) {
-                Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro assets are still missing after download attempt for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
-                exit 1
-            }
+            if (-not $ttsStartupDegraded) {
+                $hasRequestedVoiceAssets = (Test-Path $voiceModel) -and (Test-Path $voiceBundle)
+                if (-not $hasRequestedVoiceAssets) {
+                    if ($RequireTtsReady) {
+                        Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro assets are still missing after download attempt for '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+                        exit 1
+                    }
 
-            Write-Host "[VOICE_TTS_ASSET_READY] Kokoro assets are ready for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+                    Write-Host "[VOICE_TTS_OPTIONAL_UNAVAILABLE] Kokoro assets are still missing after download attempt for '$resolvedTtsVoiceId'. Continuing with Whisper ASR-only availability." -ForegroundColor Yellow
+                    $ttsStartupDegraded = $true
+                }
+
+                if (-not $ttsStartupDegraded) {
+                    Write-Host "[VOICE_TTS_ASSET_READY] Kokoro assets are ready for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+                }
+            }
         }
     }
 
-    $resolvedVoiceModel = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\model.onnx")
-    $resolvedVoiceBundle = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\voices.bin")
-    if (-not ((Test-Path $resolvedVoiceModel) -and (Test-Path $resolvedVoiceBundle))) {
-        Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro startup requires usable assets, but none were found for resolved voice '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
-        exit 1
+    if (-not $ttsStartupDegraded) {
+        $resolvedVoiceModel = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\model.onnx")
+        $resolvedVoiceBundle = Join-Path $VoiceBackendDir ("voices\\" + $resolvedTtsVoiceId + "\\voices.bin")
+        if (-not ((Test-Path $resolvedVoiceModel) -and (Test-Path $resolvedVoiceBundle))) {
+            if ($RequireTtsReady) {
+                Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro startup requires usable assets, but none were found for resolved voice '$resolvedTtsVoiceId'. Aborting startup." -ForegroundColor Red
+                exit 1
+            }
+
+            Write-Host "[VOICE_TTS_OPTIONAL_UNAVAILABLE] Kokoro startup assets are unavailable for resolved voice '$resolvedTtsVoiceId'. Continuing with Whisper ASR-only availability." -ForegroundColor Yellow
+            $ttsStartupDegraded = $true
+        }
     }
 
-    $env:ST_KOKORO_PROBE_BACKEND_DIR = $VoiceBackendDir
-    $env:ST_KOKORO_PROBE_VOICE_ID = $resolvedTtsVoiceId
+    if (-not $ttsStartupDegraded) {
+        $env:ST_KOKORO_PROBE_BACKEND_DIR = $VoiceBackendDir
+        $env:ST_KOKORO_PROBE_VOICE_ID = $resolvedTtsVoiceId
 
-    $kokoroProbeCode = @'
+        $kokoroProbeCode = @'
 from pathlib import Path
 import os
 import sys
@@ -326,47 +365,64 @@ except Exception as exc:
     sys.exit(1)
 '@
 
-    $kokoroProbeFile = Join-Path $env:TEMP ("st-kokoro-probe-" + [guid]::NewGuid().ToString("N") + ".py")
-    Set-Content -Path $kokoroProbeFile -Value $kokoroProbeCode -Encoding UTF8
+        $kokoroProbeFile = Join-Path $env:TEMP ("st-kokoro-probe-" + [guid]::NewGuid().ToString("N") + ".py")
+        Set-Content -Path $kokoroProbeFile -Value $kokoroProbeCode -Encoding UTF8
 
-    $probeExitCode = 0
-    $probeOutput = ''
-    $probeAttemptedRepair = $false
-    try {
-        $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
-        if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
-            Write-Host $probeOutput.TrimEnd()
-        }
-        $probeExitCode = $LASTEXITCODE
+        $probeExitCode = 0
+        $probeOutput = ''
+        $probeAttemptedRepair = $false
+        try {
+            $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
+            if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
+                Write-Host $probeOutput.TrimEnd()
+            }
+            $probeExitCode = $LASTEXITCODE
 
-        if ($probeExitCode -ne 0) {
-            $probeAttemptedRepair = Repair-KokoroRuntimeIfNeeded -ProbeFailureOutput $probeOutput
-            if ($probeAttemptedRepair) {
-                $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
-                if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
-                    Write-Host $probeOutput.TrimEnd()
+            if ($probeExitCode -ne 0) {
+                $probeAttemptedRepair = Repair-KokoroRuntimeIfNeeded -ProbeFailureOutput $probeOutput
+                if ($probeAttemptedRepair) {
+                    $probeOutput = (& "$VenvDir\Scripts\python.exe" $kokoroProbeFile 2>&1 | Out-String)
+                    if (-not [string]::IsNullOrWhiteSpace($probeOutput)) {
+                        Write-Host $probeOutput.TrimEnd()
+                    }
+                    $probeExitCode = $LASTEXITCODE
                 }
-                $probeExitCode = $LASTEXITCODE
             }
         }
-    }
-    finally {
-        Remove-Item -Path $kokoroProbeFile -ErrorAction SilentlyContinue
-        Remove-Item Env:ST_KOKORO_PROBE_BACKEND_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:ST_KOKORO_PROBE_VOICE_ID -ErrorAction SilentlyContinue
-    }
-
-    if ($probeExitCode -ne 0) {
-        if ($probeAttemptedRepair) {
-            Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe still failed after repair attempt. Aborting startup." -ForegroundColor Red
+        finally {
+            Remove-Item -Path $kokoroProbeFile -ErrorAction SilentlyContinue
+            Remove-Item Env:ST_KOKORO_PROBE_BACKEND_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:ST_KOKORO_PROBE_VOICE_ID -ErrorAction SilentlyContinue
         }
-        else {
-            Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe failed. Aborting startup." -ForegroundColor Red
-        }
-        exit 1
-    }
 
-    Write-Host "[VOICE_TTS_PROBE_READY] Kokoro runtime probe passed for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+        if ($probeExitCode -ne 0) {
+            if ($RequireTtsReady) {
+                if ($probeAttemptedRepair) {
+                    Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe still failed after repair attempt. Aborting startup." -ForegroundColor Red
+                }
+                else {
+                    Write-Host "[VOICE_TTS_REQUIRED_UNAVAILABLE] Kokoro runtime probe failed. Aborting startup." -ForegroundColor Red
+                }
+                exit 1
+            }
+
+            if ($probeAttemptedRepair) {
+                Write-Host "[VOICE_TTS_OPTIONAL_UNAVAILABLE] Kokoro runtime probe still failed after repair attempt. Continuing with Whisper ASR-only availability." -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "[VOICE_TTS_OPTIONAL_UNAVAILABLE] Kokoro runtime probe failed. Continuing with Whisper ASR-only availability." -ForegroundColor Yellow
+            }
+            $ttsStartupDegraded = $true
+        }
+
+        if (($probeExitCode -eq 0) -and (-not $ttsStartupDegraded)) {
+            Write-Host "[VOICE_TTS_PROBE_READY] Kokoro runtime probe passed for '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
+        }
+    }
+}
+
+if ($ttsStartupDegraded) {
+    Write-Host "[VOICE_TTS_DEGRADED_MODE] Kokoro TTS is unavailable; backend will still start for Whisper ASR. /tts requests may fail until Kokoro runtime is fixed." -ForegroundColor Yellow
 }
 
 Write-Host ""
