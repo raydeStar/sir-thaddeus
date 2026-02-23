@@ -104,6 +104,13 @@ $testArgs = @(
     '--results-directory', $TestArtifacts
 )
 
+# Exclude live integration tests in CI — they hit external APIs (NagerDate,
+# GitHub status, RSS feeds) that are flaky on hosted runners.
+if ($isCi -and -not $Filter) {
+    $Filter = 'Category!=Integration'
+    Write-Host "  CI override   : excluding Integration tests (flaky network)"
+}
+
 if ($Filter) {
     $testArgs += '--filter'
     $testArgs += $Filter
