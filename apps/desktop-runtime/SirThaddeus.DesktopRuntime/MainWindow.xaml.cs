@@ -161,6 +161,7 @@ public partial class MainWindow : Window
                 LazyLoadSettings();
                 // If no subview is visible, default to General
                 if (SettingsGeneralView.Visibility != Visibility.Visible &&
+                    VoiceSettingsView.Visibility != Visibility.Visible &&
                     MemoryView.Visibility != Visibility.Visible &&
                     ProfileView.Visibility != Visibility.Visible &&
                     LogsView.Visibility != Visibility.Visible)
@@ -184,11 +185,13 @@ public partial class MainWindow : Window
         if (!skipMainTabActivation) ActivateTab("Settings");
 
         SettingsSubGeneral.IsChecked = subtab == "General";
+        SettingsSubVoice.IsChecked = subtab == "Voice";
         SettingsSubMemory.IsChecked = subtab == "Memory";
         SettingsSubProfile.IsChecked = subtab == "Profile";
         SettingsSubLogs.IsChecked = subtab == "Logs";
 
         SettingsGeneralView.Visibility = subtab == "General" ? Visibility.Visible : Visibility.Collapsed;
+        VoiceSettingsView.Visibility = subtab == "Voice" ? Visibility.Visible : Visibility.Collapsed;
         MemoryView.Visibility = subtab == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         ProfileView.Visibility = subtab == "Profile" ? Visibility.Visible : Visibility.Collapsed;
         LogsView.Visibility = subtab == "Logs" ? Visibility.Visible : Visibility.Collapsed;
@@ -350,8 +353,10 @@ public partial class MainWindow : Window
         parentGrid.Children.Remove(ProfileView);
         parentGrid.Children.Remove(LogsView);
         parentGrid.Children.Remove(SettingsGeneralView);
+        parentGrid.Children.Remove(VoiceSettingsView);
 
         SettingsContentArea.Children.Add(SettingsGeneralView);
+        SettingsContentArea.Children.Add(VoiceSettingsView);
         SettingsContentArea.Children.Add(MemoryView);
         SettingsContentArea.Children.Add(ProfileView);
         SettingsContentArea.Children.Add(LogsView);
@@ -360,11 +365,13 @@ public partial class MainWindow : Window
         Grid.SetRow(ProfileView, 0);
         Grid.SetRow(LogsView, 0);
         Grid.SetRow(SettingsGeneralView, 0);
+        Grid.SetRow(VoiceSettingsView, 0);
 
         // Optional: Ensure all subviews hide initially
         MemoryView.Visibility = Visibility.Collapsed;
         ProfileView.Visibility = Visibility.Collapsed;
         LogsView.Visibility = Visibility.Collapsed;
+        VoiceSettingsView.Visibility = Visibility.Collapsed;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -581,6 +588,7 @@ public partial class MainWindow : Window
         if (sender is System.Windows.Controls.Button btn && btn.ContextMenu != null)
         {
             btn.ContextMenu.PlacementTarget = btn;
+            btn.ContextMenu.DataContext = btn.DataContext;
             btn.ContextMenu.IsOpen = true;
         }
     }

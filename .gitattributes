@@ -1,3 +1,7 @@
+apps/voice-backend/piper/piper.exe filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/piper/*.dll filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/piper/libtashkeel_model.ort filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/piper-voices/**/*.onnx filter=lfs diff=lfs merge=lfs -text
 apps/voice-backend/voices/*/*.onnx filter=lfs diff=lfs merge=lfs -text
 apps/voice-backend/voices/*/*.bin filter=lfs diff=lfs merge=lfs -text
 apps/voice-backend/stt-models/base/** filter=lfs diff=lfs merge=lfs -text

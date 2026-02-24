@@ -110,68 +110,29 @@ if (-not $SkipPreflight) {
     }
 }
 
-# ── Prefetch default Kokoro TTS voice assets ──────────────────────────
-# These are gitignored (~337 MB) but required in the release package so
-# fresh target machines don't need a large first-run download.
-# URLs are read from model_registry.json to stay in sync.
+# ── Verify bundled Piper TTS assets ──────────────────────────────────
+# Piper assets are committed to the repo via Git LFS, so no download
+# is needed. Just verify the critical files are present.
 
-Write-Section "Prefetch Voice Assets"
+Write-Section "Verify Piper TTS Assets"
 
 $voiceBackendDir = Join-Path $RepoRoot "apps/voice-backend"
-$voicesDir = Join-Path $voiceBackendDir "voices/bm_lewis"
-$registryPath = Join-Path $voiceBackendDir "model_registry.json"
-$modelPath = Join-Path $voicesDir "model.onnx"
-$voicesBinPath = Join-Path $voicesDir "voices.bin"
-$manifestPath = Join-Path $voicesDir "manifest.json"
+$piperExe = Join-Path $voiceBackendDir "piper/piper.exe"
+$piperVoiceModel = Join-Path $voiceBackendDir "piper-voices/en_US-ryan-medium/en_US-ryan-medium.onnx"
 
-if ((Test-Path $modelPath) -and (Test-Path $voicesBinPath)) {
-    Write-Host "  Kokoro bm_lewis assets already present — skipping download."
-}
-elseif (-not (Test-Path $registryPath)) {
-    Write-Host "  WARN: model_registry.json not found; skipping voice asset prefetch." -ForegroundColor Yellow
+if (Test-Path $piperExe) {
+    Write-Host "  piper.exe present"
 }
 else {
-    $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
-    $kokoroFiles = $registry.kokoro.'v1.0'.files
+    Write-Host "  WARN: piper.exe not found at $piperExe" -ForegroundColor Yellow
+}
 
-    if (-not (Test-Path $voicesDir)) {
-        New-Item -ItemType Directory -Force -Path $voicesDir | Out-Null
-    }
-
-    foreach ($file in $kokoroFiles) {
-        $destPath = Join-Path $voicesDir $file.localName
-        if (Test-Path $destPath) {
-            Write-Host "  Already exists: $($file.localName)"
-            continue
-        }
-
-        Write-Host "  Downloading $($file.localName) ($([math]::Round($file.sizeBytes / 1MB, 1)) MB)..."
-        $tmpPath = "$destPath.tmp"
-        try {
-            Invoke-WebRequest -Uri $file.url -OutFile $tmpPath -UseBasicParsing
-            Move-Item -Path $tmpPath -Destination $destPath -Force
-            Write-Host "  OK: $($file.localName)"
-        }
-        catch {
-            if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue }
-            Write-Host "  WARN: Failed to download $($file.localName): $_" -ForegroundColor Yellow
-        }
-    }
-
-    # Write manifest so the startup script recognizes the bundle as valid.
-    if ((Test-Path $modelPath) -and (Test-Path $voicesBinPath) -and -not (Test-Path $manifestPath)) {
-        $manifest = @{
-            voiceId = "bm_lewis"
-            generatedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            autoDownloaded = $true
-            files = @(
-                @{ path = "model.onnx"; sha256 = (Get-FileHash $modelPath -Algorithm SHA256).Hash.ToLowerInvariant() },
-                @{ path = "voices.bin"; sha256 = (Get-FileHash $voicesBinPath -Algorithm SHA256).Hash.ToLowerInvariant() }
-            )
-        }
-        $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding UTF8
-        Write-Host "  Created manifest.json for bm_lewis"
-    }
+if (Test-Path $piperVoiceModel) {
+    $voiceSize = [math]::Round((Get-Item $piperVoiceModel).Length / 1MB, 1)
+    Write-Host "  Default voice model present (${voiceSize} MB)"
+}
+else {
+    Write-Host "  WARN: Default voice model not found at $piperVoiceModel" -ForegroundColor Yellow
 }
 
 Write-Section "Publish Artifacts"
@@ -260,6 +221,30 @@ foreach ($project in $projects) {
 $voiceStageBinDir = Join-Path $binDir "voice"
 if (-not (Test-Path $voiceStageBinDir)) {
     New-Item -ItemType Directory -Force -Path $voiceStageBinDir | Out-Null
+}
+
+# Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
+$piperSource = Join-Path $voiceBackendDir "piper"
+if (Test-Path $piperSource) {
+    $piperDest = Join-Path $voiceStageBinDir "piper"
+    Copy-Item -Path $piperSource -Destination $piperDest -Recurse -Force
+    $piperCount = (Get-ChildItem -Path $piperDest -Recurse -File).Count
+    Write-Host "  Staged: piper/ ($piperCount files)"
+}
+else {
+    Write-Host "  WARN: piper/ directory not found; TTS will be unavailable" -ForegroundColor Yellow
+}
+
+# Piper voice models (default: en_US-ryan-medium)
+$piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
+if (Test-Path $piperVoicesSource) {
+    $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
+    Copy-Item -Path $piperVoicesSource -Destination $piperVoicesDest -Recurse -Force
+    $voiceCount = (Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
+    Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
+}
+else {
+    Write-Host "  WARN: piper-voices/ directory not found; no bundled voices" -ForegroundColor Yellow
 }
 
 # uv.exe — Python environment manager
@@ -366,15 +351,14 @@ Write-Section "Archive + Checksums (Lite)"
 
 $voiceStageDir = Join-Path $binDir "voice"
 $heavyAssetDirs = @(
+    (Join-Path $voiceStageDir "piper"),
+    (Join-Path $voiceStageDir "piper-voices"),
     (Join-Path $voiceStageDir "runtime"),
     (Join-Path $voiceStageDir "deps"),
     (Join-Path $voiceStageDir "stt-models"),
     (Join-Path $voiceStageDir "bin")
 )
-$heavyAssetFiles = @(
-    (Join-Path $voiceStageDir "voices/bm_lewis/model.onnx"),
-    (Join-Path $voiceStageDir "voices/bm_lewis/voices.bin")
-)
+$heavyAssetFiles = @()
 
 # Temporarily move heavy assets out of the stage tree
 $tempHoldDir = Join-Path $RepoRoot "artifacts/stage-hold"

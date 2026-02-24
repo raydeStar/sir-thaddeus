@@ -428,6 +428,45 @@ static string ResolveVoiceId(VoiceHostTtsRequest payload, string configuredVoice
         : configuredVoiceId.Trim();
 }
 
+app.MapPost("/api/piper/download", async (
+    HttpContext httpContext,
+    VoiceBackendSupervisor backendSupervisor,
+    CancellationToken cancellationToken) =>
+{
+    var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
+    if (!ensure.Success)
+    {
+        return Results.Json(new
+        {
+            error = "Voice backend unavailable.",
+            errorCode = ensure.ErrorCode,
+            message = ensure.Message
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    // Proxy the request body to the backend
+    using var bodyStream = new MemoryStream();
+    await httpContext.Request.Body.CopyToAsync(bodyStream, cancellationToken);
+    var bodyBytes = bodyStream.ToArray();
+
+    var backendUri = new UriBuilder(options.TtsUpstreamUri)
+    {
+        Path = "/api/piper/download",
+        Query = ""
+    }.Uri;
+
+    using var proxyClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+    using var proxyRequest = new HttpRequestMessage(HttpMethod.Post, backendUri)
+    {
+        Content = new ByteArrayContent(bodyBytes)
+    };
+    proxyRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+    using var response = await proxyClient.SendAsync(proxyRequest, cancellationToken);
+    var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+    return Results.Content(responseBody, "application/json", Encoding.UTF8, (int)response.StatusCode);
+});
+
 app.MapGet("/", () => Results.Json(new
 {
     service = "voicehost",

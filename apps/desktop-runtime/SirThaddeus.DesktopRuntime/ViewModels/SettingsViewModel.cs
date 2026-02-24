@@ -25,6 +25,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 public sealed partial class SettingsViewModel : ViewModelBase
 {
     private const string DefaultKokoroVoiceId = "bm_lewis";
+    private const string DefaultPiperVoiceId = "en_US-ryan-medium";
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
     private readonly YouTubeJobsHttpClient _youtubeJobsClient;
@@ -49,9 +50,9 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
     private int    _voiceHostStartupTimeoutMs = 300_000;
     private string _voiceHostHealthPath = "/health";
-    private string _voiceTtsEngine = "kokoro";
+    private string _voiceTtsEngine = "piper";
     private string _voiceTtsModelId = "";
-    private string _voiceTtsVoiceId = "bm_lewis";
+    private string _voiceTtsVoiceId = "en_US-ryan-medium";
     private string _voiceSttEngine = "faster-whisper";
     private string _voiceSttModelId = "base";
     private bool   _voicePreferLocalTts = true;
@@ -279,6 +280,72 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public ObservableCollection<AudioDeviceInfo> AvailableInputDevices  { get; } = new();
     public ObservableCollection<AudioDeviceInfo> AvailableOutputDevices { get; } = new();
     public IReadOnlyList<string> AvailableDraftTones { get; } = new[] { "professional", "playful", "direct" };
+
+    // ─── Piper Voice Catalog ─────────────────────────────────────────
+
+    /// <summary>
+    /// Available Piper voice IDs for the Voice tab dropdown.
+    /// Items with "(download)" suffix are not yet installed locally.
+    /// </summary>
+    public ObservableCollection<string> AvailablePiperVoices { get; } = new();
+
+    private string _piperVoiceDownloadStatus = "";
+    private bool _isPiperVoiceDownloading;
+
+    public string PiperVoiceDownloadStatus
+    {
+        get => _piperVoiceDownloadStatus;
+        set { SetProperty(ref _piperVoiceDownloadStatus, value); OnPropertyChanged(nameof(IsPiperStatusVisible)); }
+    }
+
+    public bool IsPiperStatusVisible => !string.IsNullOrEmpty(_piperVoiceDownloadStatus);
+
+    public bool IsPiperVoiceDownloading
+    {
+        get => _isPiperVoiceDownloading;
+        set => SetProperty(ref _isPiperVoiceDownloading, value);
+    }
+
+    /// <summary>
+    /// Currently selected Piper voice. Two-way synced with
+    /// <see cref="VoiceTtsVoiceId"/> so persistence is unchanged.
+    /// </summary>
+    public string? SelectedPiperVoice
+    {
+        get
+        {
+            var configured = (_voiceTtsVoiceId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(configured))
+                configured = DefaultPiperVoiceId;
+
+            // Match the display format used in AvailablePiperVoices
+            if (AvailablePiperVoices.Contains(configured))
+                return configured;
+            var download = $"{configured} (download)";
+            if (AvailablePiperVoices.Contains(download))
+                return download;
+            return configured;
+        }
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return; // Ignore spurious nulls from ComboBox when ItemsSource is cleared
+
+            // Strip "(download)" suffix before persisting
+            var normalized = value.Trim();
+            const string downloadSuffix = " (download)";
+            var needsDownload = normalized.EndsWith(downloadSuffix, StringComparison.Ordinal);
+            if (needsDownload)
+                normalized = normalized[..^downloadSuffix.Length];
+            if (SetProperty(ref _voiceTtsVoiceId, normalized))
+                MarkDirty();
+            OnPropertyChanged(nameof(VoiceTtsVoiceId));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
+
+            if (needsDownload && !_isPiperVoiceDownloading)
+                _ = DownloadPiperVoiceAsync(normalized);
+        }
+    }
 
     // ─── Kokoro Voice Catalog ────────────────────────────────────────
 
@@ -623,6 +690,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(LocationLabel));
         OnPropertyChanged(nameof(PersonalityProfilesDirectory));
 
+        RefreshPiperVoiceCatalog();
         RefreshKokoroVoiceCatalog();
     }
 
@@ -1719,6 +1787,92 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _locationLabel = effectiveLocation.GetResolvedLabel() ?? "";
 
         OnPropertyChanged(nameof(LocationLabel));
+    }
+
+    // ─── Piper Voice Download ───────────────────────────────────────
+
+    private async Task DownloadPiperVoiceAsync(string voiceId)
+    {
+        if (string.IsNullOrWhiteSpace(voiceId) || _isPiperVoiceDownloading)
+            return;
+
+        IsPiperVoiceDownloading = true;
+        PiperVoiceDownloadStatus = $"Downloading \"{voiceId}\" (~60 MB)…";
+
+        try
+        {
+            var baseUrl = _voiceHostBaseUrl?.TrimEnd('/') ?? "http://127.0.0.1:17845";
+            if (_voiceHostProcessManager?.CurrentBaseUrl is { } managed && !string.IsNullOrWhiteSpace(managed))
+                baseUrl = managed.TrimEnd('/');
+
+            using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { voiceId });
+            using var content = new System.Net.Http.StringContent(
+                payload, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await client.PostAsync($"{baseUrl}/api/piper/download", content);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                PiperVoiceDownloadStatus = $"✓ \"{voiceId}\" installed.";
+
+                // Refresh catalog on UI thread so the dropdown updates
+                if (System.Windows.Application.Current?.Dispatcher is { } dispatcher)
+                {
+                    await dispatcher.InvokeAsync(() =>
+                    {
+                        RefreshPiperVoiceCatalog();
+                        OnPropertyChanged(nameof(SelectedPiperVoice));
+                    });
+                }
+
+                // Clear status after a few seconds
+                await Task.Delay(4000);
+                PiperVoiceDownloadStatus = "";
+            }
+            else
+            {
+                PiperVoiceDownloadStatus = $"Download failed: {body[..Math.Min(body.Length, 120)]}";
+            }
+        }
+        catch (Exception ex)
+        {
+            PiperVoiceDownloadStatus = $"Download error: {ex.Message}";
+        }
+        finally
+        {
+            IsPiperVoiceDownloading = false;
+        }
+    }
+
+    // ─── Piper Voice Catalog ─────────────────────────────────────────
+
+    private void RefreshPiperVoiceCatalog()
+    {
+        var discovered = PiperVoiceCatalog.Discover();
+
+        AvailablePiperVoices.Clear();
+        foreach (var entry in discovered)
+        {
+            var label = entry.IsInstalled
+                ? entry.VoiceId
+                : $"{entry.VoiceId} (download)";
+            AvailablePiperVoices.Add(label);
+        }
+
+        // Ensure configured voice is present even if not in catalog
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(configured))
+            configured = DefaultPiperVoiceId;
+
+        if (!AvailablePiperVoices.Contains(configured) &&
+            !AvailablePiperVoices.Contains($"{configured} (download)"))
+        {
+            AvailablePiperVoices.Add(configured);
+        }
+
+        OnPropertyChanged(nameof(SelectedPiperVoice));
     }
 
     // ─── Kokoro Voice Catalog ────────────────────────────────────────
