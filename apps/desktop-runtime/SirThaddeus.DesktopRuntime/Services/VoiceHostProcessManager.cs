@@ -250,7 +250,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             // (e.g., Kokoro + faster-whisper), so keep a generous minimum
             // startup window to avoid process restart thrash on fresh machines.
             var startupTimeout = TimeSpan.FromMilliseconds(
-                Math.Max(30_000, settings.VoiceHostStartupTimeoutMs));
+                Math.Max(300_000, settings.VoiceHostStartupTimeoutMs));
             var deadline = _timeProvider.GetUtcNow() + startupTimeout;
             var lastHealth = preferredHealth;
             var lastStartError = "";
@@ -468,11 +468,27 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
                 return (false, "Process.Start returned null.");
             }
 
+            var logPath = Path.Combine(AppContext.BaseDirectory, "voicehost-debug.log");
+            var logLock = new object();
+            void WriteLog(string level, string? data)
+            {
+                if (string.IsNullOrWhiteSpace(data)) return;
+                try
+                {
+                    lock (logLock)
+                    {
+                        File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {data}{Environment.NewLine}");
+                    }
+                }
+                catch { }
+            }
+
             process.EnableRaisingEvents = true;
             process.OutputDataReceived += (_, e) =>
             {
                 if (!string.IsNullOrWhiteSpace(e.Data))
                 {
+                    WriteLog("OUT", e.Data.Trim());
                     WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
                     {
                         ["pid"] = process.Id,
@@ -484,6 +500,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(e.Data))
                 {
+                    WriteLog("ERR", e.Data.Trim());
                     WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
                     {
                         ["pid"] = process.Id,
@@ -493,6 +510,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             };
             process.Exited += (_, _) =>
             {
+                WriteLog("SYS", $"Process exited with code {process.ExitCode}");
                 WriteAudit("VOICEHOST_PROCESS_EXITED", "ok", new Dictionary<string, object>
                 {
                     ["pid"] = process.Id,
