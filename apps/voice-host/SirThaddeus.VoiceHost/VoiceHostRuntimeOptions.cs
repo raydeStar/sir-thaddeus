@@ -43,7 +43,7 @@ public sealed record VoiceHostRuntimeOptions(
         var ttsEngineRaw = GetOrDefault(
             values,
             "tts-engine",
-            Environment.GetEnvironmentVariable("ST_VOICE_TTS_ENGINE") ?? "windows");
+            Environment.GetEnvironmentVariable("ST_VOICE_TTS_ENGINE") ?? "piper");
         var ttsModelIdRaw = GetOrDefault(
             values,
             "tts-model-id",
@@ -201,10 +201,11 @@ public sealed record VoiceHostRuntimeOptions(
 
     private static string NormalizeTtsEngine(string raw)
     {
-        var value = string.IsNullOrWhiteSpace(raw) ? "windows" : raw.Trim().ToLowerInvariant();
+        var value = string.IsNullOrWhiteSpace(raw) ? "piper" : raw.Trim().ToLowerInvariant();
         return value switch
         {
-            "" => "windows",
+            "" => "piper",
+            "piper" => "piper",
             "windows" => "windows",
             "kokoro" => "kokoro",
             _ => value
@@ -214,10 +215,12 @@ public sealed record VoiceHostRuntimeOptions(
     private static string NormalizeTtsVoiceId(string normalizedTtsEngine, string raw)
     {
         var voiceId = string.IsNullOrWhiteSpace(raw) ? "" : raw.Trim();
-        if (string.IsNullOrWhiteSpace(voiceId) &&
-            string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(voiceId))
         {
-            return "bm_lewis";
+            if (string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+                return "bm_lewis";
+            if (string.Equals(normalizedTtsEngine, "piper", StringComparison.OrdinalIgnoreCase))
+                return "en_US-ryan-medium";
         }
 
         return voiceId;
