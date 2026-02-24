@@ -47,7 +47,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private string _shutupChord  = "Ctrl+Alt+Escape";
     private bool   _voiceHostEnabled = true;
     private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
-    private int    _voiceHostStartupTimeoutMs = 20000;
+    private int    _voiceHostStartupTimeoutMs = 300_000;
     private string _voiceHostHealthPath = "/health";
     private string _voiceTtsEngine = "kokoro";
     private string _voiceTtsModelId = "";
