@@ -5,6 +5,7 @@ x64/
 x86/
 bld/
 [Bb]in/
+!apps/voice-backend/bin/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
@@ -78,14 +79,18 @@ __pycache__/
 # These are too large for version control; see model_registry.json
 # for canonical download URLs and SHA256 verification hashes.
 *.onnx
+!apps/voice-backend/voices/*/*.onnx
 *.safetensors
-apps/voice-backend/voices/*/*.bin
+# Keep generated voice cache files ignored.
 apps/voice-backend/voices/*/*.npy
 apps/voice-backend/voices/*/*.json
 !apps/voice-backend/voices/*/manifest.json
-apps/voice-backend/stt-models/*/*.bin
-apps/voice-backend/stt-models/*/*.model
-apps/voice-backend/bin/uv*
+# Vendored voice backend dependencies/assets (tracked via Git LFS).
+!apps/voice-backend/voices/*/*.bin
+!apps/voice-backend/stt-models/**
+!apps/voice-backend/bin/uv*.exe
+!apps/voice-backend/deps/wheels/*.whl
+!apps/voice-backend/runtime/python/**
 apps/voice-backend/.seed-*/
 packages/requested-files.zip
 
