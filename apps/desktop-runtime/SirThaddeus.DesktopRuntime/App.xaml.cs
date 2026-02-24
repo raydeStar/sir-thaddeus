@@ -369,7 +369,7 @@ public partial class App : System.Windows.Application
         // ── 5. Wrap MCP client with audit + permission gate ──────────
         _splash?.SetStatus("Setting up agent…");
         var sessionId = Guid.NewGuid().ToString("N")[..12];
-        var wpfPrompter = new WpfPermissionPrompter(this);
+        var wpfPrompter = new WpfPermissionPrompter(this, _isHeadless);
         _permissionGate = new WpfPermissionGate(
             _permissionBroker!, wpfPrompter, _auditLogger, _settings, sessionId);
         _auditedMcpClient = new AuditedMcpToolClient(
@@ -2810,7 +2810,11 @@ public partial class App : System.Windows.Application
         _voiceHostProcessManager?.Stop();
         _mcpClient?.Dispose();
 
-        RequestShutdown();
+        _trayIcon?.Dispose();
+
+        // Force an immediate process exit. WPF's RequestShutdown() relies on async void OnExit
+        // which often deadlocks or leaves zombie background threads preventing recompilation.
+        Environment.Exit(0);
     }
 
     private void OverlayWindow_Closing(object? sender, CancelEventArgs e)
