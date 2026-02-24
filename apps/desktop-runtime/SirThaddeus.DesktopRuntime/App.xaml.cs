@@ -2810,7 +2810,11 @@ public partial class App : System.Windows.Application
         _voiceHostProcessManager?.Stop();
         _mcpClient?.Dispose();
 
-        RequestShutdown();
+        _trayIcon?.Dispose();
+
+        // Force an immediate process exit. WPF's RequestShutdown() relies on async void OnExit
+        // which often deadlocks or leaves zombie background threads preventing recompilation.
+        Environment.Exit(0);
     }
 
     private void OverlayWindow_Closing(object? sender, CancelEventArgs e)

@@ -1525,58 +1525,50 @@ def provider_unavailable_response(
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    # FileProbe + InitProbe warm-up for selected providers.
-    # Runs in a thread so model loading (which can take seconds) doesn't block
-    # the event loop and starve health-check responses during cold start.
-    try:
-        stt_provider = PROVIDERS.get_stt()
-        async def warm_stt_async() -> None:
-            try:
-                await asyncio.to_thread(stt_provider.init_probe, False)
-            except Exception as inner_exc:
-                logger.error("STT init probe failed on startup: %s", inner_exc)
-                
-        asyncio.create_task(warm_stt_async())
-    except Exception as exc:
-        logger.error("STT init probe scheduling failed on startup: %s", exc)
+    # We serialize STT and TTS warmups so their native C++ runtimes (CTranslate2
+    # and onnxruntime) don't fight for OpenMP/OpenBLAS threads at the exact same
+    # time, which causes silent native hard crashes.
+    
+    async def warm_all_async() -> None:
+        # 1. Warm STT
+        try:
+            stt_provider = PROVIDERS.get_stt()
+            await asyncio.to_thread(stt_provider.init_probe, False)
+        except Exception as exc:
+            logger.error("STT init probe failed on startup: %s", exc)
 
-    try:
-        tts_provider = PROVIDERS.get_tts()
-        if tts_provider.engine != "windows":
-            # Do not block backend startup on TTS warmup. ASR needs to come up
-            # as fast as possible for PTT latency.
-            async def warm_tts_async() -> None:
-                try:
-                    logger.info("[TTS Warmup] Starting TTS warmup (engine=%s, voice=%s)...",
-                                tts_provider.engine, getattr(tts_provider, "voice_id", ""))
-                    if tts_provider.engine == "kokoro" and getattr(tts_provider, "voice_id", None):
-                        from model_downloader import ensure_kokoro_models
-                        registry_path = ROOT_DIR / "model_registry.json"
-                        variant = os.environ.get("KOKORO_MODEL_VARIANT") or None
-                        logger.info("[TTS Warmup] Ensuring Kokoro models are downloaded...")
-                        await asyncio.to_thread(
-                            ensure_kokoro_models,
-                            VOICES_ROOT,
-                            tts_provider.voice_id,
-                            registry_path,
-                            variant=variant,
-                        )
-                        logger.info("[TTS Warmup] Kokoro models verified.")
+        # 2. Warm TTS
+        try:
+            tts_provider = PROVIDERS.get_tts()
+            if tts_provider.engine != "windows":
+                logger.info("[TTS Warmup] Starting TTS warmup (engine=%s, voice=%s)...",
+                            tts_provider.engine, getattr(tts_provider, "voice_id", ""))
+                if tts_provider.engine == "kokoro" and getattr(tts_provider, "voice_id", None):
+                    from model_downloader import ensure_kokoro_models
+                    registry_path = ROOT_DIR / "model_registry.json"
+                    variant = os.environ.get("KOKORO_MODEL_VARIANT") or None
+                    logger.info("[TTS Warmup] Ensuring Kokoro models are downloaded...")
+                    await asyncio.to_thread(
+                        ensure_kokoro_models,
+                        VOICES_ROOT,
+                        tts_provider.voice_id,
+                        registry_path,
+                        variant=variant,
+                    )
+                    logger.info("[TTS Warmup] Kokoro models verified.")
 
-                    logger.info("[TTS Warmup] Running TTS init probe...")
-                    await asyncio.to_thread(tts_provider.init_probe, False)
-                    cached = tts_provider.get_cached_init_probe()
-                    if cached and cached.ready:
-                        logger.info("[TTS Warmup] TTS is READY (startup_ms=%d)", cached.startup_ms)
-                    else:
-                        logger.warning("[TTS Warmup] TTS init probe completed but NOT ready: %s",
-                                       cached.last_error if cached else "no result")
-                except Exception as inner_exc:
-                    logger.error("[TTS Warmup] TTS init probe FAILED on startup: %s", inner_exc, exc_info=True)
+                logger.info("[TTS Warmup] Running TTS init probe...")
+                await asyncio.to_thread(tts_provider.init_probe, False)
+                cached = tts_provider.get_cached_init_probe()
+                if cached and cached.ready:
+                    logger.info("[TTS Warmup] TTS is READY (startup_ms=%d)", cached.startup_ms)
+                else:
+                    logger.warning("[TTS Warmup] TTS init probe completed but NOT ready: %s",
+                                   cached.last_error if cached else "no result")
+        except Exception as exc:
+            logger.error("[TTS Warmup] TTS init probe FAILED on startup: %s", exc, exc_info=True)
 
-            asyncio.create_task(warm_tts_async())
-    except Exception as exc:
-        logger.error("TTS init probe scheduling failed on startup: %s", exc)
+    asyncio.create_task(warm_all_async())
 
     try:
         youtube_dep = YOUTUBE_JOBS.dependency_status()
