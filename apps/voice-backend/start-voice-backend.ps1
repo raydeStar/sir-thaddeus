@@ -63,6 +63,13 @@ param(
 $ErrorActionPreference = "Stop"
 $VoiceBackendDir = $PSScriptRoot
 $VenvDir = Join-Path $VoiceBackendDir ".venv"
+$BundledPythonExe = Join-Path $VoiceBackendDir "runtime\python\python.exe"
+$BundledWheelsDir = Join-Path $VoiceBackendDir "deps\wheels"
+$hasBundledWheelsFile = Get-ChildItem -Path $BundledWheelsDir -Filter "*.whl" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$HasBundledWheels = $null -ne $hasBundledWheelsFile
+
+$offlineRaw = (("" + $env:ST_VOICE_OFFLINE).Trim().ToLowerInvariant())
+$VoiceOffline = @("1", "true", "yes", "on") -contains $offlineRaw
 
 # Force Python to use UTF-8 for all text I/O. Without this, Windows uses the
 # system locale encoding (e.g. cp1252) which chokes on non-ASCII bytes inside
@@ -96,8 +103,14 @@ if (-not (Test-Path $UvExe)) {
 # ── Create venv via UV ───────────────────────────────────────────
 
 if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
-    Write-Host "Creating virtual environment (downloading Python 3.11 if needed)..." -ForegroundColor Yellow
-    & $UvExe venv $VenvDir --python 3.11
+    if (Test-Path $BundledPythonExe) {
+        Write-Host "Creating virtual environment (using bundled Python runtime)..." -ForegroundColor Yellow
+        & $UvExe venv $VenvDir --python $BundledPythonExe
+    }
+    else {
+        Write-Host "Creating virtual environment (downloading Python 3.11 if needed)..." -ForegroundColor Yellow
+        & $UvExe venv $VenvDir --python 3.11
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Failed to create venv." -ForegroundColor Red
         exit 1
@@ -125,8 +138,20 @@ if (Test-Path $requirementsHashFile) {
 }
 
 if ($storedRequirementsHash -ne $currentRequirementsHash) {
-    Write-Host "Installing dependencies using uv..." -ForegroundColor Yellow
-    & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q -r $requirementsFile
+    if ($VoiceOffline -and -not $HasBundledWheels) {
+        Write-Host "[VOICE_DEPENDENCY_OFFLINE_MISSING] ST_VOICE_OFFLINE is enabled, but no bundled wheels were found at '$BundledWheelsDir'." -ForegroundColor Red
+        exit 1
+    }
+
+    if ($HasBundledWheels) {
+        Write-Host "Installing dependencies from bundled wheelhouse..." -ForegroundColor Yellow
+        & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q --no-index --find-links "$BundledWheelsDir" -r $requirementsFile
+    }
+    else {
+        Write-Host "Installing dependencies using uv..." -ForegroundColor Yellow
+        & $UvExe pip install --python "$VenvDir\Scripts\python.exe" -q -r $requirementsFile
+    }
+
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: uv pip install failed." -ForegroundColor Red
         exit 1
@@ -179,6 +204,8 @@ if ($PrefetchVoiceAssets -or $PrefetchAsrAssets) {
     $env:ST_PREFETCH_VOICE_ASSETS = [string]$PrefetchVoiceAssets
     $env:ST_PREFETCH_ASR_ASSETS = [string]$PrefetchAsrAssets
     $env:ST_PREFETCH_YT_ASR_ASSETS = [string]$PrefetchYouTubeAsrAssets
+    $env:ST_PREFETCH_STT_MODEL_ROOT = (Join-Path $VoiceBackendDir "stt-models")
+    $env:ST_PREFETCH_OFFLINE_MODE = [string]$VoiceOffline
 
     $prefetchCode = @'
 from pathlib import Path
@@ -187,10 +214,12 @@ import sys
 
 voice_backend_dir = Path(os.environ.get('ST_PREFETCH_BACKEND_DIR') or '')
 voices_root = voice_backend_dir / 'voices'
+stt_models_root = Path(os.environ.get('ST_PREFETCH_STT_MODEL_ROOT') or str(voice_backend_dir / 'stt-models'))
 registry_path = voice_backend_dir / 'model_registry.json'
 prefetch_voice_assets = (os.environ.get('ST_PREFETCH_VOICE_ASSETS') or '').strip().lower() == 'true'
 prefetch_asr_assets = (os.environ.get('ST_PREFETCH_ASR_ASSETS') or '').strip().lower() == 'true'
 prefetch_youtube_asr_assets = (os.environ.get('ST_PREFETCH_YT_ASR_ASSETS') or '').strip().lower() == 'true'
+offline_mode = (os.environ.get('ST_PREFETCH_OFFLINE_MODE') or '').strip().lower() == 'true'
 requested_voice_id = (os.environ.get('ST_PREFETCH_VOICE_ID') or '').strip() or 'bm_lewis'
 requested_stt_model = ((os.environ.get('ST_PREFETCH_STT_MODEL_ID') or '').strip() or (os.environ.get('ST_PREFETCH_STT_MODEL_ALIAS') or '').strip() or 'base')
 device = (os.environ.get('ST_PREFETCH_DEVICE') or 'cpu').strip().lower() or 'cpu'
@@ -211,8 +240,14 @@ if prefetch_voice_assets:
 if prefetch_asr_assets:
     try:
         from faster_whisper import WhisperModel
-        print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device}...")
-        whisper = WhisperModel(requested_stt_model, device=device, compute_type='int8')
+        print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device} (download_root={stt_models_root}, local_only={offline_mode})...")
+        whisper = WhisperModel(
+            requested_stt_model,
+            device=device,
+            compute_type='int8',
+            download_root=str(stt_models_root),
+            local_files_only=offline_mode,
+        )
         try:
             _ = whisper.transcribe(b"", language='en')
         except Exception:
@@ -239,6 +274,8 @@ if prefetch_asr_assets:
         Remove-Item Env:ST_PREFETCH_VOICE_ASSETS -ErrorAction SilentlyContinue
         Remove-Item Env:ST_PREFETCH_ASR_ASSETS -ErrorAction SilentlyContinue
         Remove-Item Env:ST_PREFETCH_YT_ASR_ASSETS -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_STT_MODEL_ROOT -ErrorAction SilentlyContinue
+        Remove-Item Env:ST_PREFETCH_OFFLINE_MODE -ErrorAction SilentlyContinue
     }
 }
 
@@ -587,10 +624,17 @@ $env:WHISPER_MODEL = $resolvedSttModel
 $env:WHISPER_DEVICE = $Device
 $env:ST_VOICE_STT_ENGINE = $SttEngine
 $env:ST_VOICE_STT_MODEL_ID = $resolvedSttModel
+$env:ST_VOICE_STT_MODEL_ROOT = (Join-Path $VoiceBackendDir "stt-models")
 $env:ST_VOICE_STT_LANGUAGE = $SttLanguage
 $env:ST_VOICE_TTS_ENGINE = $resolvedTtsEngine
 $env:ST_VOICE_TTS_MODEL_ID = $resolvedTtsModelId
 $env:ST_VOICE_TTS_VOICE_ID = $resolvedTtsVoiceId
+$env:ST_VOICE_OFFLINE = [string]$VoiceOffline
+
+if ($VoiceOffline) {
+    $env:HF_HUB_OFFLINE = "1"
+    $env:TRANSFORMERS_OFFLINE = "1"
+}
 
 $serverScript = Join-Path $VoiceBackendDir "server.py"
 $pythonArgs = @(
