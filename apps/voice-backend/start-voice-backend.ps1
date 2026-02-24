@@ -55,7 +55,7 @@ param(
     [string]$TtsModelId = "",
     [string]$TtsVoiceId = "",
     [bool]$PrefetchVoiceAssets = $true,
-    [bool]$PrefetchAsrAssets = $true,
+    [bool]$PrefetchAsrAssets = $false,
     [bool]$PrefetchYouTubeAsrAssets = $false,
     [bool]$RequireTtsReady = $false
 )
@@ -80,6 +80,10 @@ $env:PYTHONUTF8 = "1"
 # redirects output to a pipe, Python buffers logs and they won't appear in
 # voice-backend-debug.log until the buffer fills or the process exits.
 $env:PYTHONUNBUFFERED = "1"
+
+# Suppress non-fatal Hugging Face symlink warnings on Windows machines
+# without Developer Mode; caching still works in copy mode.
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 
 $BinDir = Join-Path $VoiceBackendDir "bin"
 $UvExe = Join-Path $BinDir "uv.exe"
