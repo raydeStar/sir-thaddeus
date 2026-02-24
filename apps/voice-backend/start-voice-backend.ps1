@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Starts the local voice backend with deterministic STT/TTS engine settings.
 
@@ -227,7 +227,7 @@ if (Test-Path $sttModelBin) {
         Write-Host "[ASSET_OK] STT model base/model.bin (${modelSize} MB)" -ForegroundColor DarkGray
     }
 } else {
-    Write-Host "[ASSET_INFO] STT model base/model.bin not found — will download on first use." -ForegroundColor DarkGray
+    Write-Host "[ASSET_INFO] STT model base/model.bin not found -- will download on first use." -ForegroundColor DarkGray
 }
 
 if ($resolvedTtsEngine -eq "piper" -and -not $ttsStartupDegraded) {
@@ -276,7 +276,7 @@ if backend_dir_str:
 
 if prefetch_voice_assets:
     # Piper voices are pre-bundled; no Python-based download needed.
-    print(f"[VOICE_PREFETCH] Piper voices are bundled — skipping download prefetch.")
+    print(f"[VOICE_PREFETCH] Piper voices are bundled -- skipping download prefetch.")
 
 if prefetch_asr_assets:
     try:
@@ -332,7 +332,7 @@ $resolvedTtsVoiceId = if ([string]::IsNullOrWhiteSpace($TtsVoiceId)) { "" } else
 $ttsStartupDegraded = $false
 
 # ── Piper TTS file check ─────────────────────────────────────────
-# Piper uses a standalone native exe — no Python dependency, no DLL hell.
+# Piper uses a standalone native exe -- no Python dependency, no DLL hell.
 # Just verify the exe and voice model files are present.
 if ($resolvedTtsEngine -eq "piper") {
     if ([string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
