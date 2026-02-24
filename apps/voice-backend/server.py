@@ -1097,6 +1097,21 @@ class FasterWhisperProvider(BaseProvider):
                     local_model_dir = Path(self._download_root) / self.model_id
                     if local_model_dir.is_dir():
                         model_ref = str(local_model_dir.resolve())
+                        # Detect Git LFS pointer files masquerading as model binaries.
+                        model_bin = local_model_dir / "model.bin"
+                        if model_bin.exists() and model_bin.stat().st_size < 1024:
+                            try:
+                                head = model_bin.read_bytes(256)
+                                if b"oid sha256:" in head or b"version https://git-lfs" in head:
+                                    msg = (
+                                        f"model.bin at {model_bin} is a Git LFS pointer "
+                                        f"({model_bin.stat().st_size} bytes), not the actual model. "
+                                        "Run 'git lfs pull' or re-download the release."
+                                    )
+                                    logger.error(msg)
+                                    return InitProbeResult(ready=False, startup_ms=0, last_error=msg)
+                            except Exception:
+                                pass
 
                 logger.info(
                     "Loading faster-whisper model '%s' (resolved=%s) on %s (%s), download_root=%s, local_only=%s...",
@@ -1118,6 +1133,12 @@ class FasterWhisperProvider(BaseProvider):
 
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
 
+                if self._model is None:
+                    return InitProbeResult(
+                        ready=False, startup_ms=0,
+                        last_error=f"WhisperModel returned None for {model_ref}",
+                    )
+
                 # Loading the model instance is enough to validate availability.
                 # A startup warmup transcribe can cause native access violations on
                 # some fresh Windows environments, so keep init_probe side-effect free.
@@ -1129,9 +1150,14 @@ class FasterWhisperProvider(BaseProvider):
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
 
     def transcribe(self, audio_bytes: bytes, request_id: str) -> str:
-        probe = self.init_probe(force=False)
-        if not probe.ready:
-            raise RuntimeError(probe.last_error or "faster_whisper_not_ready")
+        # Lazy-load: requires_init_probe is False so init_probe() skips
+        # _run_init_probe(). Load the model on first real ASR request instead
+        # of at startup (avoids native access violations on some fresh Windows).
+        if self._model is None:
+            logger.info("Lazy-loading faster-whisper model on first ASR request (model=%s)", self.model_id)
+            probe = self._run_init_probe()
+            if not probe.ready or self._model is None:
+                raise RuntimeError(probe.last_error or "faster_whisper_model_load_failed")
 
         if len(audio_bytes) < 100:
             return ""
