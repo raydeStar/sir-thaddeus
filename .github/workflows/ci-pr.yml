@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
 
       - name: Setup .NET from global.json
         uses: actions/setup-dotnet@v5
