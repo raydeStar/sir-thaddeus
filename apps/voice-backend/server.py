@@ -1091,6 +1091,21 @@ class FasterWhisperProvider(BaseProvider):
                     local_model_dir = Path(self._download_root) / self.model_id
                     if local_model_dir.is_dir():
                         model_ref = str(local_model_dir.resolve())
+                        # Detect Git LFS pointer files masquerading as model binaries.
+                        model_bin = local_model_dir / "model.bin"
+                        if model_bin.exists() and model_bin.stat().st_size < 1024:
+                            try:
+                                head = model_bin.read_bytes(256)
+                                if b"oid sha256:" in head or b"version https://git-lfs" in head:
+                                    msg = (
+                                        f"model.bin at {model_bin} is a Git LFS pointer "
+                                        f"({model_bin.stat().st_size} bytes), not the actual model. "
+                                        "Run 'git lfs pull' or re-download the release."
+                                    )
+                                    logger.error(msg)
+                                    return InitProbeResult(ready=False, startup_ms=0, last_error=msg)
+                            except Exception:
+                                pass
 
                 logger.info(
                     "Loading faster-whisper model '%s' (resolved=%s) on %s (%s), download_root=%s, local_only=%s...",
@@ -1111,6 +1126,12 @@ class FasterWhisperProvider(BaseProvider):
                     whisper_kwargs["local_files_only"] = True
 
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
+
+                if self._model is None:
+                    return InitProbeResult(
+                        ready=False, startup_ms=0,
+                        last_error=f"WhisperModel returned None for {model_ref}",
+                    )
 
                 # Warmup run to pay JIT/cache cost at init, not on the first real request.
                 silence_wav = build_silence_wav(0.25, 16000)
@@ -1139,6 +1160,15 @@ class FasterWhisperProvider(BaseProvider):
         probe = self.init_probe(force=False)
         if not probe.ready:
             raise RuntimeError(probe.last_error or "faster_whisper_not_ready")
+
+        if self._model is None:
+            logger.warning(
+                "faster-whisper model is None despite init_probe ready=True; forcing re-init (model=%s, root=%s)",
+                self.model_id, self._download_root,
+            )
+            probe = self.init_probe(force=True)
+            if not probe.ready or self._model is None:
+                raise RuntimeError(probe.last_error or "faster_whisper_model_load_failed_after_reinit")
 
         if len(audio_bytes) < 100:
             return ""
