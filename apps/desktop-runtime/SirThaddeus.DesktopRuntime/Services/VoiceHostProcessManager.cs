@@ -470,14 +470,39 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
 
             var logPath = Path.Combine(AppContext.BaseDirectory, "voicehost-debug.log");
             var logLock = new object();
+            static bool IsDebugLogError(string level, string line)
+            {
+                if (string.Equals(level, "ERR", StringComparison.OrdinalIgnoreCase))
+                {
+                    var lowered = line.ToLowerInvariant();
+                    return lowered.Contains("error") ||
+                           lowered.Contains("exception") ||
+                           lowered.Contains("fatal") ||
+                           lowered.Contains("traceback") ||
+                           lowered.Contains("critical");
+                }
+
+                if (string.Equals(level, "SYS", StringComparison.OrdinalIgnoreCase))
+                {
+                    return line.Contains("exited with code", StringComparison.OrdinalIgnoreCase) &&
+                           !line.EndsWith(" code 0", StringComparison.OrdinalIgnoreCase);
+                }
+
+                return false;
+            }
+
             void WriteLog(string level, string? data)
             {
                 if (string.IsNullOrWhiteSpace(data)) return;
+                var line = data.Trim();
+                if (!IsDebugLogError(level, line))
+                    return;
+
                 try
                 {
                     lock (logLock)
                     {
-                        File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {data}{Environment.NewLine}");
+                        File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {line}{Environment.NewLine}");
                     }
                 }
                 catch { }
