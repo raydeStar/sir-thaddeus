@@ -14,7 +14,7 @@ namespace SirThaddeus.DesktopRuntime.Services;
 public sealed class LocalTtsHttpClient : IDisposable
 {
     private const string DefaultKokoroVoiceId = "bm_lewis";
-    private const string DefaultPiperVoiceId = "en_US-ryan-medium";
+    private const string DefaultPiperVoiceId = "en_US-john-medium";
     private readonly HttpClient _httpClient;
     private readonly Func<string> _baseUrlProvider;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;

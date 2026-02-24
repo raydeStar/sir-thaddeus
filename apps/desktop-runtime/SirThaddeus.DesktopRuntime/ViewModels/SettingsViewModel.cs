@@ -25,7 +25,7 @@ namespace SirThaddeus.DesktopRuntime.ViewModels;
 public sealed partial class SettingsViewModel : ViewModelBase
 {
     private const string DefaultKokoroVoiceId = "bm_lewis";
-    private const string DefaultPiperVoiceId = "en_US-ryan-medium";
+    private const string DefaultPiperVoiceId = "en_US-john-medium";
     private readonly IAuditLogger    _audit;
     private readonly SqliteMemoryStore? _store;
     private readonly YouTubeJobsHttpClient _youtubeJobsClient;
@@ -52,7 +52,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private string _voiceHostHealthPath = "/health";
     private string _voiceTtsEngine = "piper";
     private string _voiceTtsModelId = "";
-    private string _voiceTtsVoiceId = "en_US-ryan-medium";
+    private string _voiceTtsVoiceId = "en_US-john-medium";
     private string _voiceSttEngine = "faster-whisper";
     private string _voiceSttModelId = "base";
     private bool   _voicePreferLocalTts = true;
