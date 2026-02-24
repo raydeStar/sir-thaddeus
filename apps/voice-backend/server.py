@@ -647,8 +647,8 @@ class PiperProvider(BaseProvider):
     """TTS provider using piper.exe as a native subprocess."""
 
     def __init__(self, voice_id: str):
-        super().__init__("piper", voice_id or "en_US-ryan-medium")
-        self.voice_id = voice_id or "en_US-ryan-medium"
+        super().__init__("piper", voice_id or "en_US-john-medium")
+        self.voice_id = voice_id or "en_US-john-medium"
         self._piper_exe: Optional[Path] = None
         self._model_path: Optional[Path] = None
         self._config_path: Optional[Path] = None
@@ -1397,7 +1397,7 @@ def build_runtime_config(
     resolved_tts_model = (tts_model_id or os.environ.get("ST_VOICE_TTS_MODEL_ID") or "").strip()
     resolved_tts_voice = (tts_voice_id or os.environ.get("ST_VOICE_TTS_VOICE_ID") or "").strip()
     if resolved_tts_engine == "piper" and not resolved_tts_voice:
-        resolved_tts_voice = "en_US-ryan-medium"
+        resolved_tts_voice = "en_US-john-medium"
     elif resolved_tts_engine == "kokoro" and not resolved_tts_voice:
         resolved_tts_voice = "bm_lewis"
     resolved_device = (stt_device or os.environ.get("WHISPER_DEVICE") or "cpu").strip().lower() or "cpu"
