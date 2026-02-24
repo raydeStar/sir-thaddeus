@@ -71,7 +71,6 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private string _voiceStatusText = "";
     private string _voiceTranscriptText = "";
     private bool _isVoiceActive;
-    private string _reasoningGuardrailsMode = "off";
     private bool _expectingBriefingPayload;
     
     private readonly System.Windows.Threading.DispatcherTimer _auditTimer;
@@ -354,15 +353,6 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         get => _isVoiceActive;
         set => SetProperty(ref _isVoiceActive, value);
-    }
-
-    /// <summary>
-    /// Runtime first-principles mode mirrored from settings/tray/hotkey controls.
-    /// </summary>
-    public string ReasoningGuardrailsMode
-    {
-        get => _reasoningGuardrailsMode;
-        set => SetProperty(ref _reasoningGuardrailsMode, NormalizeReasoningGuardrailsMode(value));
     }
 
     /// <summary>
@@ -1271,13 +1261,10 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// </summary>
     private void LogReasoningTraceJson(string userText, AgentResponse result)
     {
-        var normalizedMode = NormalizeReasoningGuardrailsMode(ReasoningGuardrailsMode);
         var lower = (userText ?? "").Trim().ToLowerInvariant();
         var logicPuzzleDetected = IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower);
 
-        if (!result.GuardrailsUsed &&
-            !logicPuzzleDetected &&
-            normalizedMode is not ("auto" or "always"))
+        if (!result.GuardrailsUsed && !logicPuzzleDetected)
         {
             return;
         }
@@ -1294,7 +1281,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 : logicPuzzleDetected
                     ? "logic_puzzle_chat_only"
                     : "standard_chat_or_tooling",
-            ["reasoningGuardrailsMode"] = normalizedMode,
+            ["reasoningGuardrailsMode"] = "auto",
             ["logicPuzzleDetected"] = logicPuzzleDetected,
             ["guardrailsUsed"] = result.GuardrailsUsed,
             ["llmRoundTrips"] = result.LlmRoundTrips,
@@ -1552,16 +1539,6 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private static string NormalizeNewlines(string text)
         => (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
 
-    private static string NormalizeReasoningGuardrailsMode(string? mode)
-    {
-        var normalized = (mode ?? "").Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "auto" => "auto",
-            "always" => "always",
-            _ => "off"
-        };
-    }
 
     /// <summary>
     /// Mirrors IntentFeatureExtractor.LooksLikeDeepDiveLookup so the UI

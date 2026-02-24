@@ -1849,7 +1849,7 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync("What are TSA ID requirements at the airport?");
@@ -1928,7 +1928,7 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "auto"
+        
         };
 
         var result = await agent.ProcessAsync("what is 9 plus 4?");
