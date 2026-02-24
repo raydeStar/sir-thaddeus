@@ -499,7 +499,7 @@ public static class ClassicReasoningEngine
                     $"Found {evaluations.Count} candidate clause(s) to evaluate.",
                     $"Clauses that are both grammatical and factual: {trueCount}."
                 ],
-                answer: $"{answer} In this prompt, the yolk is not white.")
+                answer: $"{answer} Egg yolks are yellow, not white.")
         };
     }
 
