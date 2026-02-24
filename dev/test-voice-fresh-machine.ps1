@@ -194,7 +194,7 @@ try {
     }
 
     $startScript = Join-Path $TestDir "start-voice-backend.ps1"
-    $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Port $Port -TtsEngine piper -TtsVoiceId en_US-ryan-medium -SttEngine faster-whisper -SttModelId base"
+    $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -Port $Port -TtsEngine piper -TtsVoiceId en_US-john-medium -SttEngine faster-whisper -SttModelId base"
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "powershell"

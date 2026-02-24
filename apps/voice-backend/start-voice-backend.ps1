@@ -32,7 +32,7 @@
     Optional TTS model id.
 
 .PARAMETER TtsVoiceId
-    TTS voice id (e.g. en_US-ryan-medium for piper).
+    TTS voice id (e.g. en_US-john-medium for piper).
 
 .PARAMETER RequireTtsReady
     When true, startup fails if TTS cannot be initialized.
@@ -41,7 +41,7 @@
 # .EXAMPLE
 #     ./dev/start-voice-backend.ps1
 #     ./dev/start-voice-backend.ps1 -SttEngine faster-whisper -SttModelId small -Device cuda
-#     ./dev/start-voice-backend.ps1 -TtsEngine piper -TtsVoiceId en_US-ryan-medium
+#     ./dev/start-voice-backend.ps1 -TtsEngine piper -TtsVoiceId en_US-john-medium
 #>
 
 param(
@@ -270,7 +270,7 @@ prefetch_voice_assets = (os.environ.get('ST_PREFETCH_VOICE_ASSETS') or '').strip
 prefetch_asr_assets = (os.environ.get('ST_PREFETCH_ASR_ASSETS') or '').strip().lower() == 'true'
 prefetch_youtube_asr_assets = (os.environ.get('ST_PREFETCH_YT_ASR_ASSETS') or '').strip().lower() == 'true'
 offline_mode = (os.environ.get('ST_PREFETCH_OFFLINE_MODE') or '').strip().lower() == 'true'
-requested_voice_id = (os.environ.get('ST_PREFETCH_VOICE_ID') or '').strip() or 'en_US-ryan-medium'
+requested_voice_id = (os.environ.get('ST_PREFETCH_VOICE_ID') or '').strip() or 'en_US-john-medium'
 requested_stt_model = ((os.environ.get('ST_PREFETCH_STT_MODEL_ID') or '').strip() or (os.environ.get('ST_PREFETCH_STT_MODEL_ALIAS') or '').strip() or 'base')
 device = (os.environ.get('ST_PREFETCH_DEVICE') or 'cpu').strip().lower() or 'cpu'
 
@@ -339,7 +339,7 @@ $ttsStartupDegraded = $false
 # Just verify the exe and voice model files are present.
 if ($resolvedTtsEngine -eq "piper") {
     if ([string]::IsNullOrWhiteSpace($resolvedTtsVoiceId)) {
-        $resolvedTtsVoiceId = "en_US-ryan-medium"
+        $resolvedTtsVoiceId = "en_US-john-medium"
         Write-Host "[VOICE_TTS_DEFAULT_APPLIED] No Piper voice specified; defaulting to '$resolvedTtsVoiceId'." -ForegroundColor DarkGray
     }
 

@@ -218,10 +218,10 @@ public sealed record VoiceHostRuntimeOptions(
 
         if (string.Equals(normalizedTtsEngine, "piper", StringComparison.OrdinalIgnoreCase))
         {
-            // Piper voices always contain a hyphen (e.g. en_US-ryan-medium).
+            // Piper voices always contain a hyphen (e.g. en_US-john-medium).
             // Fall back to the default if voice is empty or mismatched (e.g. a Kokoro ID).
             if (string.IsNullOrWhiteSpace(voiceId) || !voiceId.Contains('-'))
-                return "en_US-ryan-medium";
+                return "en_US-john-medium";
         }
         else if (string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
         {

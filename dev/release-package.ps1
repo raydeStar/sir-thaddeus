@@ -81,10 +81,6 @@ $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
 $binaryChecksumsPath = Join-Path $releaseDir "$archiveStem-binaries.sha256.txt"
 
-$liteStem = "sir-thaddeus-$Runtime-$archiveToken-lite"
-$liteName = "$liteStem.zip"
-$litePath = Join-Path $releaseDir $liteName
-$liteChecksumPath = "$litePath.sha256.txt"
 $firstRunReadmeSource = Join-Path $RepoRoot "README_FIRST_RUN.md"
 $settingsTemplateSource = Join-Path $RepoRoot "SirThaddeus.Settings.template.json"
 
@@ -118,7 +114,7 @@ Write-Section "Verify Piper TTS Assets"
 
 $voiceBackendDir = Join-Path $RepoRoot "apps/voice-backend"
 $piperExe = Join-Path $voiceBackendDir "piper/piper.exe"
-$piperVoiceModel = Join-Path $voiceBackendDir "piper-voices/en_US-ryan-medium/en_US-ryan-medium.onnx"
+$piperVoiceModel = Join-Path $voiceBackendDir "piper-voices/en_US-john-medium/en_US-john-medium.onnx"
 
 if (Test-Path $piperExe) {
     Write-Host "  piper.exe present"
@@ -235,7 +231,7 @@ else {
     Write-Host "  WARN: piper/ directory not found; TTS will be unavailable" -ForegroundColor Yellow
 }
 
-# Piper voice models (default: en_US-ryan-medium)
+# Piper voice models (default: en_US-john-medium)
 $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
 if (Test-Path $piperVoicesSource) {
     $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
@@ -324,7 +320,7 @@ if ($pdbFiles.Count -gt 0) {
 
 Write-Section "Archive + Checksums (Full Bundle)"
 
-foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath, $litePath, $liteChecksumPath)) {
+foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath)) {
     if (Test-Path $p) { Remove-Item $p -Force }
 }
 
@@ -346,66 +342,10 @@ $binaryLines = foreach ($file in $binaries) {
 }
 $binaryLines | Out-File -FilePath $binaryChecksumsPath -Encoding ASCII -Force
 
-# ── Lite zip (strips heavy bundled assets; downloads them on first run) ──
-Write-Section "Archive + Checksums (Lite)"
-
-$voiceStageDir = Join-Path $binDir "voice"
-$heavyAssetDirs = @(
-    (Join-Path $voiceStageDir "piper"),
-    (Join-Path $voiceStageDir "piper-voices"),
-    (Join-Path $voiceStageDir "runtime"),
-    (Join-Path $voiceStageDir "deps"),
-    (Join-Path $voiceStageDir "stt-models"),
-    (Join-Path $voiceStageDir "bin")
-)
-$heavyAssetFiles = @()
-
-# Temporarily move heavy assets out of the stage tree
-$tempHoldDir = Join-Path $RepoRoot "artifacts/stage-hold"
-if (Test-Path $tempHoldDir) { Remove-Item $tempHoldDir -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $tempHoldDir | Out-Null
-
-$movedItems = @()
-foreach ($dir in $heavyAssetDirs) {
-    if (Test-Path $dir) {
-        $holdDest = Join-Path $tempHoldDir (Split-Path $dir -Leaf)
-        Move-Item -Path $dir -Destination $holdDest -Force
-        $movedItems += @{ Source = $dir; Hold = $holdDest }
-        Write-Host "  Lite: excluded $(Split-Path $dir -Leaf)/"
-    }
-}
-foreach ($file in $heavyAssetFiles) {
-    if (Test-Path $file) {
-        $holdDest = Join-Path $tempHoldDir (Split-Path $file -Leaf)
-        Move-Item -Path $file -Destination $holdDest -Force
-        $movedItems += @{ Source = $file; Hold = $holdDest }
-        Write-Host "  Lite: excluded $(Split-Path $file -Leaf)"
-    }
-}
-
-Compress-Archive -Path "$sourcePath*" -DestinationPath $litePath -CompressionLevel Optimal -Force
-
-$liteHash = Get-FileHash -Path $litePath -Algorithm SHA256
-"$($liteHash.Hash) *$liteName" | Out-File -FilePath $liteChecksumPath -Encoding ASCII -Force
-
-$liteSizeMB = [math]::Round((Get-Item $litePath).Length / 1MB, 1)
-Write-Host "  Lite archive: $liteName (${liteSizeMB} MB)"
-
-# Restore heavy assets back into stage tree (for local inspection)
-foreach ($item in $movedItems) {
-    $destParent = Split-Path $item.Source -Parent
-    if (-not (Test-Path $destParent)) {
-        New-Item -ItemType Directory -Force -Path $destParent | Out-Null
-    }
-    Move-Item -Path $item.Hold -Destination $item.Source -Force
-}
-Remove-Item $tempHoldDir -Recurse -Force -ErrorAction SilentlyContinue
-
 Write-Section "Done"
 Write-Host "  Publish dir  : $publishDir"
 Write-Host "  Stage dir    : $stageDir"
 Write-Host "  Full archive : $archivePath  (${fullSizeMB} MB)"
-Write-Host "  Lite archive : $litePath  (${liteSizeMB} MB)"
 Write-Host "  Checksums    : $checksumPath"
 Write-Host "  Binary SHA   : $binaryChecksumsPath"
 
