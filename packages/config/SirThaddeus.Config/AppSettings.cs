@@ -426,10 +426,22 @@ public sealed record VoiceSettings
     public string GetResolvedTtsVoiceId()
     {
         var voiceId = string.IsNullOrWhiteSpace(TtsVoiceId) ? "" : TtsVoiceId.Trim();
-        if (string.IsNullOrEmpty(voiceId) && GetNormalizedTtsEngine() == "kokoro")
+        var engine = GetNormalizedTtsEngine();
+
+        if (string.IsNullOrEmpty(voiceId))
         {
-            return "bm_lewis";
+            if (string.Equals(engine, "kokoro", StringComparison.OrdinalIgnoreCase))
+                return "bm_lewis";
+            if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase))
+                return "en_US-ryan-medium";
+            return voiceId;
         }
+
+        // Cross-validate: Piper voices always contain a hyphen (e.g. en_US-ryan-medium).
+        // If the stored voice doesn't match the engine, fall back to the engine default.
+        if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase) && !voiceId.Contains('-'))
+            return "en_US-ryan-medium";
+
         return voiceId;
     }
 
