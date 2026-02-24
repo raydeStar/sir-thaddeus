@@ -80,6 +80,11 @@ $archiveName = "$archiveStem.zip"
 $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
 $binaryChecksumsPath = Join-Path $releaseDir "$archiveStem-binaries.sha256.txt"
+
+$liteStem = "sir-thaddeus-$Runtime-$archiveToken-lite"
+$liteName = "$liteStem.zip"
+$litePath = Join-Path $releaseDir $liteName
+$liteChecksumPath = "$litePath.sha256.txt"
 $firstRunReadmeSource = Join-Path $RepoRoot "README_FIRST_RUN.md"
 $settingsTemplateSource = Join-Path $RepoRoot "SirThaddeus.Settings.template.json"
 
@@ -332,25 +337,22 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "  Removed debug symbols: $($pdbFiles.Count)"
 }
 
-Write-Section "Archive + Checksums"
+Write-Section "Archive + Checksums (Full Bundle)"
 
-if (Test-Path $archivePath) {
-    Remove-Item $archivePath -Force
-}
-if (Test-Path $checksumPath) {
-    Remove-Item $checksumPath -Force
-}
-if (Test-Path $binaryChecksumsPath) {
-    Remove-Item $binaryChecksumsPath -Force
+foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath, $litePath, $liteChecksumPath)) {
+    if (Test-Path $p) { Remove-Item $p -Force }
 }
 
-# Using a more robust zip method for PS 5.1
+# ── Full bundle zip (includes all vendored voice-backend assets) ─────
 $sourcePath = $stageDir
 if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
 Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
 
 $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 "$($zipHash.Hash) *$archiveName" | Out-File -FilePath $checksumPath -Encoding ASCII -Force
+
+$fullSizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
+Write-Host "  Full archive: $archiveName (${fullSizeMB} MB)"
 
 $binaries = Get-ChildItem -Path $stageDir -File
 $binaryLines = foreach ($file in $binaries) {
@@ -359,11 +361,68 @@ $binaryLines = foreach ($file in $binaries) {
 }
 $binaryLines | Out-File -FilePath $binaryChecksumsPath -Encoding ASCII -Force
 
+# ── Lite zip (strips heavy bundled assets; downloads them on first run) ──
+Write-Section "Archive + Checksums (Lite)"
+
+$voiceStageDir = Join-Path $binDir "voice"
+$heavyAssetDirs = @(
+    (Join-Path $voiceStageDir "runtime"),
+    (Join-Path $voiceStageDir "deps"),
+    (Join-Path $voiceStageDir "stt-models"),
+    (Join-Path $voiceStageDir "bin")
+)
+$heavyAssetFiles = @(
+    (Join-Path $voiceStageDir "voices/bm_lewis/model.onnx"),
+    (Join-Path $voiceStageDir "voices/bm_lewis/voices.bin")
+)
+
+# Temporarily move heavy assets out of the stage tree
+$tempHoldDir = Join-Path $RepoRoot "artifacts/stage-hold"
+if (Test-Path $tempHoldDir) { Remove-Item $tempHoldDir -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $tempHoldDir | Out-Null
+
+$movedItems = @()
+foreach ($dir in $heavyAssetDirs) {
+    if (Test-Path $dir) {
+        $holdDest = Join-Path $tempHoldDir (Split-Path $dir -Leaf)
+        Move-Item -Path $dir -Destination $holdDest -Force
+        $movedItems += @{ Source = $dir; Hold = $holdDest }
+        Write-Host "  Lite: excluded $(Split-Path $dir -Leaf)/"
+    }
+}
+foreach ($file in $heavyAssetFiles) {
+    if (Test-Path $file) {
+        $holdDest = Join-Path $tempHoldDir (Split-Path $file -Leaf)
+        Move-Item -Path $file -Destination $holdDest -Force
+        $movedItems += @{ Source = $file; Hold = $holdDest }
+        Write-Host "  Lite: excluded $(Split-Path $file -Leaf)"
+    }
+}
+
+Compress-Archive -Path "$sourcePath*" -DestinationPath $litePath -CompressionLevel Optimal -Force
+
+$liteHash = Get-FileHash -Path $litePath -Algorithm SHA256
+"$($liteHash.Hash) *$liteName" | Out-File -FilePath $liteChecksumPath -Encoding ASCII -Force
+
+$liteSizeMB = [math]::Round((Get-Item $litePath).Length / 1MB, 1)
+Write-Host "  Lite archive: $liteName (${liteSizeMB} MB)"
+
+# Restore heavy assets back into stage tree (for local inspection)
+foreach ($item in $movedItems) {
+    $destParent = Split-Path $item.Source -Parent
+    if (-not (Test-Path $destParent)) {
+        New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+    }
+    Move-Item -Path $item.Hold -Destination $item.Source -Force
+}
+Remove-Item $tempHoldDir -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Section "Done"
-Write-Host "  Publish dir : $publishDir"
-Write-Host "  Stage dir   : $stageDir"
-Write-Host "  Archive     : $archivePath"
-Write-Host "  Checksums   : $checksumPath"
-Write-Host "  Binary SHA  : $binaryChecksumsPath"
+Write-Host "  Publish dir  : $publishDir"
+Write-Host "  Stage dir    : $stageDir"
+Write-Host "  Full archive : $archivePath  (${fullSizeMB} MB)"
+Write-Host "  Lite archive : $litePath  (${liteSizeMB} MB)"
+Write-Host "  Checksums    : $checksumPath"
+Write-Host "  Binary SHA   : $binaryChecksumsPath"
 
 exit 0
