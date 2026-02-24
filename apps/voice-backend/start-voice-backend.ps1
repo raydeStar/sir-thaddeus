@@ -55,7 +55,7 @@ param(
     [string]$TtsModelId = "",
     [string]$TtsVoiceId = "",
     [bool]$PrefetchVoiceAssets = $true,
-    [bool]$PrefetchAsrAssets = $true,
+    [bool]$PrefetchAsrAssets = $false,
     [bool]$PrefetchYouTubeAsrAssets = $false,
     [bool]$RequireTtsReady = $false
 )
@@ -80,6 +80,10 @@ $env:PYTHONUTF8 = "1"
 # redirects output to a pipe, Python buffers logs and they won't appear in
 # voice-backend-debug.log until the buffer fills or the process exits.
 $env:PYTHONUNBUFFERED = "1"
+
+# Suppress non-fatal Hugging Face symlink warnings on Windows machines
+# without Developer Mode; caching still works in copy mode.
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 
 $BinDir = Join-Path $VoiceBackendDir "bin"
 $UvExe = Join-Path $BinDir "uv.exe"
@@ -282,17 +286,16 @@ if prefetch_asr_assets:
     try:
         from faster_whisper import WhisperModel
         print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device} (download_root={stt_models_root}, local_only={offline_mode})...")
-        whisper = WhisperModel(
+        _ = WhisperModel(
             requested_stt_model,
             device=device,
             compute_type='int8',
             download_root=str(stt_models_root),
             local_files_only=offline_mode,
         )
-        try:
-            _ = whisper.transcribe(b"", language='en')
-        except Exception:
-            pass
+        # Model construction is enough to ensure assets exist locally.
+        # Avoid running a warmup transcribe here; on some fresh Windows
+        # systems this can trigger a native crash in ctranslate2.
     except Exception as exc:
         print(f"[ASR_PREFETCH_WARNING] faster-whisper preload failed: {exc}")
 
@@ -414,6 +417,8 @@ if ($VoiceOffline) {
     $env:HF_HUB_OFFLINE = "1"
     $env:TRANSFORMERS_OFFLINE = "1"
 }
+
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 
 $serverScript = Join-Path $VoiceBackendDir "server.py"
 $pythonArgs = @(
