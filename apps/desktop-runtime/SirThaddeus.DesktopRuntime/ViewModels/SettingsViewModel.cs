@@ -163,7 +163,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
-    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
+    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedPiperVoice)); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
     public string VoiceTtsVoiceId 
     { 
@@ -174,6 +174,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
             { 
                 MarkDirty(); 
                 OnPropertyChanged(nameof(SelectedKokoroVoice)); 
+                OnPropertyChanged(nameof(SelectedPiperVoice)); 
             } 
         } 
     }
@@ -324,7 +325,15 @@ public sealed partial class SettingsViewModel : ViewModelBase
             var download = $"{configured} (download)";
             if (AvailablePiperVoices.Contains(download))
                 return download;
-            return configured;
+
+            // Configured voice isn't a Piper voice (e.g. Kokoro ID) — fall back
+            if (AvailablePiperVoices.Contains(DefaultPiperVoiceId))
+                return DefaultPiperVoiceId;
+            var defaultDownload = $"{DefaultPiperVoiceId} (download)";
+            if (AvailablePiperVoices.Contains(defaultDownload))
+                return defaultDownload;
+
+            return AvailablePiperVoices.Count > 0 ? AvailablePiperVoices[0] : null;
         }
         set
         {
@@ -341,6 +350,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 MarkDirty();
             OnPropertyChanged(nameof(VoiceTtsVoiceId));
             OnPropertyChanged(nameof(SelectedPiperVoice));
+            OnPropertyChanged(nameof(SelectedKokoroVoice));
 
             if (needsDownload && !_isPiperVoiceDownloading)
                 _ = DownloadPiperVoiceAsync(normalized);
@@ -382,9 +392,17 @@ public sealed partial class SettingsViewModel : ViewModelBase
         set
         {
             var normalized = (value ?? "").Trim();
+
+            if (string.IsNullOrEmpty(normalized) &&
+                !string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             if (SetProperty(ref _voiceTtsVoiceId, normalized))
                 MarkDirty();
             OnPropertyChanged(nameof(VoiceTtsVoiceId));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
         }
     }
 
@@ -651,6 +669,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceTtsModelId));
         OnPropertyChanged(nameof(VoiceTtsVoiceId));
         OnPropertyChanged(nameof(SelectedKokoroVoice));
+        OnPropertyChanged(nameof(SelectedPiperVoice));
         OnPropertyChanged(nameof(VoiceSttEngine));
         OnPropertyChanged(nameof(VoiceSttModelId));
         OnPropertyChanged(nameof(VoicePreferLocalTts));
@@ -1748,12 +1767,14 @@ public sealed partial class SettingsViewModel : ViewModelBase
             _voiceTtsVoiceId = voicePreferenceResult.AppliedVoiceId;
             OnPropertyChanged(nameof(VoiceTtsVoiceId));
             OnPropertyChanged(nameof(SelectedKokoroVoice));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
             RefreshKokoroVoiceCatalog();
             StatusText = $"Personality selected. Applied preferred voice '{voicePreferenceResult.AppliedVoiceId}'.";
         }
         else
         {
             OnPropertyChanged(nameof(SelectedKokoroVoice));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
             StatusText = "Personality selected.";
         }
 
@@ -1861,15 +1882,21 @@ public sealed partial class SettingsViewModel : ViewModelBase
             AvailablePiperVoices.Add(label);
         }
 
-        // Ensure configured voice is present even if not in catalog
-        var configured = (_voiceTtsVoiceId ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(configured))
-            configured = DefaultPiperVoiceId;
-
-        if (!AvailablePiperVoices.Contains(configured) &&
-            !AvailablePiperVoices.Contains($"{configured} (download)"))
+        // Ensure the default Piper voice is always selectable
+        if (!AvailablePiperVoices.Contains(DefaultPiperVoiceId) &&
+            !AvailablePiperVoices.Contains($"{DefaultPiperVoiceId} (download)"))
         {
-            AvailablePiperVoices.Add(configured);
+            AvailablePiperVoices.Add(DefaultPiperVoiceId);
+        }
+
+        // If the configured voice is actually a Piper voice, ensure it's listed too
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(configured) &&
+            configured != DefaultPiperVoiceId &&
+            (AvailablePiperVoices.Contains(configured) ||
+             AvailablePiperVoices.Contains($"{configured} (download)")))
+        {
+            // Already present — nothing to add
         }
 
         OnPropertyChanged(nameof(SelectedPiperVoice));
