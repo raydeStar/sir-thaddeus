@@ -27,9 +27,9 @@ public sealed class ReasoningGuardrailsPipeline
     private readonly ILlmClient _llm;
     private readonly IAuditLogger _audit;
 
-    private static readonly TimeSpan DetectorStepTimeout = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan ExtractionStepTimeout = TimeSpan.FromMilliseconds(850);
-    private static readonly TimeSpan SynthesisStepTimeout = TimeSpan.FromMilliseconds(3000);
+    private static readonly TimeSpan DetectorStepTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ExtractionStepTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SynthesisStepTimeout = TimeSpan.FromSeconds(10);
 
     private sealed record FirstPrinciplesBreakdownResult(
         string Need,

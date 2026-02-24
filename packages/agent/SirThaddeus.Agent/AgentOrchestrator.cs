@@ -74,7 +74,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private DateTimeOffset _lastPlaceContextAt;
     private string? _lastUtilityContextKey;
     private DateTimeOffset _lastUtilityContextAt;
-    private string _reasoningGuardrailsMode = "auto";
     private string? _userLocationHint;
     private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
@@ -271,19 +270,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             _preferredUnits = NormalizeUnitPreference(value);
             _searchOrchestrator.PreferredUnits = _preferredUnits;
         }
-    }
-
-    /// <summary>
-    /// First principles thinking mode:
-    ///   - off: disable guardrail reasoning pipeline
-    ///   - auto: run only when detector flags likely goal-conflict prompt
-    ///   - always: run guardrail reasoning pass on each non-utility turn
-    /// </summary>
-    public string ReasoningGuardrailsMode
-    {
-        get => _reasoningGuardrailsMode;
-        set => _reasoningGuardrailsMode =
-            SirThaddeus.Agent.Guardrails.ReasoningGuardrailsMode.Normalize(value);
     }
 
     /// <inheritdoc />
@@ -623,7 +609,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var deterministicSpecialCase = _guardrailsCoordinator.TryRunDeterministicSpecialCase(
                 contextualUserMessage,
-                ReasoningGuardrailsMode);
+                Guardrails.ReasoningGuardrailsMode.Auto);
             if (deterministicSpecialCase is not null)
             {
                 var specialCaseText = deterministicSpecialCase.AnswerText;
@@ -752,7 +738,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var guardrailsResult = await _guardrailsCoordinator.TryRunAsync(
                 route,
                 contextualUserMessage,
-                ReasoningGuardrailsMode,
+                Guardrails.ReasoningGuardrailsMode.Auto,
                 memoryPackText,
                 cancellationToken);
 

@@ -118,7 +118,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
         "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)";
     private string _weatherPreferredUnits = "imperial";
     private bool _use24HourTime;
-    private string _reasoningGuardrails = "auto";
 
     // Location (manual city/ZIP)
     private string _locationLabel = "";
@@ -276,17 +275,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // Location (manual city/ZIP)
     public string LocationLabel { get => _locationLabel; set { if (SetProperty(ref _locationLabel, value)) MarkDirty(); } }
-
-    public string ReasoningGuardrails
-    {
-        get => _reasoningGuardrails;
-        set
-        {
-            var normalized = NormalizeReasoningGuardrailsMode(value);
-            if (SetProperty(ref _reasoningGuardrails, normalized))
-                MarkDirty();
-        }
-    }
 
     // ─── Audio Devices ──────────────────────────────────────────────
 
@@ -661,7 +649,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _weatherUserAgent         = s.Weather.UserAgent;
         _weatherPreferredUnits    = s.Weather.PreferredUnits;
         _use24HourTime            = s.Ui.Use24HourTime;
-        _reasoningGuardrails      = NormalizeReasoningGuardrailsMode(s.Ui.ReasoningGuardrails);
         _inputGain                = s.Audio.InputGain;
         LoadLocationForProfile(s.ActiveProfileId);
 
@@ -722,7 +709,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(WeatherUserAgent));
         OnPropertyChanged(nameof(WeatherPreferredUnits));
         OnPropertyChanged(nameof(Use24HourTime));
-        OnPropertyChanged(nameof(ReasoningGuardrails));
         OnPropertyChanged(nameof(InputGain));
         OnPropertyChanged(nameof(LocationLabel));
         OnPropertyChanged(nameof(PersonalityProfilesDirectory));
@@ -1677,7 +1663,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
             },
             Ui = _settings.Ui with
             {
-                ReasoningGuardrails = NormalizeReasoningGuardrailsMode(_reasoningGuardrails),
                 Use24HourTime = _use24HourTime
             },
             UserProfile = _settings.UserProfile with
@@ -1964,17 +1949,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
         }
 
         OnPropertyChanged(nameof(SelectedKokoroVoice));
-    }
-
-    private static string NormalizeReasoningGuardrailsMode(string? mode)
-    {
-        var normalized = (mode ?? "").Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "auto" => "auto",
-            "always" => "always",
-            _ => "off"
-        };
     }
 
     private static string ResolveFrontendSttModelIdForUi(VoiceSettings settings)

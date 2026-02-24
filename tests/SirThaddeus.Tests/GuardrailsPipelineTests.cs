@@ -14,7 +14,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -34,7 +34,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "auto"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -58,7 +58,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync("Hey there, how are you?");
@@ -103,7 +103,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync("Hello, how are you today?");
@@ -122,7 +122,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -156,7 +156,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync(prompt);
@@ -176,7 +176,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -195,7 +195,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -214,7 +214,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -234,7 +234,7 @@ public class ReasoningGuardrailsModeTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "auto"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -320,7 +320,7 @@ public class ReasoningGuardrailsBenchTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync(prompt);

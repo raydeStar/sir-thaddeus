@@ -2269,7 +2269,7 @@ public class PolicyFilteringTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "auto"
+        
         };
 
         var result = await agent.ProcessAsync(
@@ -2304,7 +2304,7 @@ public class PolicyFilteringTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-            ReasoningGuardrailsMode = "always"
+        
         };
 
         var result = await agent.ProcessAsync("Hey there, how are you?");
@@ -2337,7 +2337,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync("what's the Paris Agreement");
@@ -2374,7 +2374,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync("latest news on Nvidia today");
@@ -2396,7 +2396,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-            ReasoningGuardrailsMode = "off"
+        
         };
 
         var result = await agent.ProcessAsync("airspeed velocity of an unladen swallow");
