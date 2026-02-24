@@ -79,7 +79,6 @@ public partial class App : System.Windows.Application
     private OverlayViewModel? _overlayViewModel;
     private CommandPaletteViewModel? _commandPaletteViewModel;
     private int _commandPaletteHotkeyId = -1;
-    private int _reasoningGuardrailsHotkeyId = -1;
     private int _stopAllHotkeyId = -1;
     private bool _isShuttingDown;
     private bool _isHeadless;
@@ -417,7 +416,6 @@ public partial class App : System.Windows.Application
         _orchestrator.MemoryEnabled = _settings.Memory.Enabled;
         _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
         _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
-        _orchestrator.ReasoningGuardrailsMode = _settings.Ui.ReasoningGuardrails;
 
         // Apply manual location (if configured) as the default hint
         // for local lookups. Device geolocation remains policy-disabled.
@@ -2027,7 +2025,6 @@ public partial class App : System.Windows.Application
         _commandPaletteViewModel = chatVm;
         _overlayViewModel = overlayVm;
 
-        _commandPaletteViewModel.ReasoningGuardrailsMode = _settings?.Ui.ReasoningGuardrails ?? "off";
         _commandPaletteViewModel.Use24HourTime = _settings?.Ui.Use24HourTime ?? false;
         _commandPaletteViewModel.UpdateRuntimeSafety(
             _runtimeControls.PanicModeEnabled,
@@ -2111,14 +2108,12 @@ public partial class App : System.Windows.Application
                 _orchestrator.MemoryEnabled = updated.Memory.Enabled;
                 _orchestrator.PanicModeEnabled = _runtimeControls.PanicModeEnabled;
                 _orchestrator.SafeModeEnabled = _runtimeControls.SafeModeEnabled;
-                _orchestrator.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 _orchestrator.ActivePersonalityId = updated.ActivePersonalityId;
                 _orchestrator.PersonalityProfilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(updated);
             }
 
             if (_commandPaletteViewModel is not null)
             {
-                _commandPaletteViewModel.ReasoningGuardrailsMode = updated.Ui.ReasoningGuardrails;
                 _commandPaletteViewModel.Use24HourTime = updated.Ui.Use24HourTime;
                 _commandPaletteViewModel.UpdateRuntimeSafety(
                     updated.RuntimeSafety.PanicMode,
@@ -2491,11 +2486,6 @@ public partial class App : System.Windows.Application
             GlobalHotkeyService.VirtualKeys.Space,
             ShowCommandPalette);
 
-        _reasoningGuardrailsHotkeyId = _hotkeyService.Register(
-            GlobalHotkeyService.Modifiers.Control | GlobalHotkeyService.Modifiers.Shift,
-            GlobalHotkeyService.VirtualKeys.R,
-            CycleReasoningGuardrailsMode);
-
         _stopAllHotkeyId = _hotkeyService.Register(
             GlobalHotkeyService.Modifiers.Control | GlobalHotkeyService.Modifiers.Alt,
             GlobalHotkeyService.VirtualKeys.Escape,
@@ -2513,17 +2503,6 @@ public partial class App : System.Windows.Application
             }
         });
 
-        _auditLogger?.Append(new AuditEvent
-        {
-            Actor = "runtime",
-            Action = "HOTKEY_REGISTERED",
-            Result = _reasoningGuardrailsHotkeyId > 0 ? "ok" : "failed",
-            Details = new Dictionary<string, object>
-            {
-                ["hotkey"] = "Ctrl+Shift+R",
-                ["action"] = "Cycle First Principles Thinking"
-            }
-        });
     }
 
     private static Window CreateHiddenHotkeyWindow()
@@ -2743,56 +2722,6 @@ public partial class App : System.Windows.Application
         });
     }
 
-    private void CycleReasoningGuardrailsMode()
-    {
-        if (_settings is null)
-            return;
-
-        var current = NormalizeReasoningGuardrailsMode(_settings.Ui.ReasoningGuardrails);
-        var next = current switch
-        {
-            "off" => "auto",
-            "auto" => "always",
-            _ => "off"
-        };
-
-        var updated = _settings with
-        {
-            Ui = _settings.Ui with
-            {
-                ReasoningGuardrails = next
-            }
-        };
-
-        SettingsManager.Save(updated);
-        _settings = updated;
-
-        if (_orchestrator is not null)
-            _orchestrator.ReasoningGuardrailsMode = next;
-        if (_commandPaletteViewModel is not null)
-            _commandPaletteViewModel.ReasoningGuardrailsMode = next;
-
-        _auditLogger?.Append(new AuditEvent
-        {
-            Actor = "user",
-            Action = "SETTINGS_SAVED",
-            Result = $"reasoning_guardrails={next} (via tray/hotkey)"
-        });
-
-        AppendVoiceActivity($"First principles thinking set to {next}.", LogEntryKind.Info);
-    }
-
-    private static string NormalizeReasoningGuardrailsMode(string? mode)
-    {
-        var normalized = (mode ?? "").Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "auto" => "auto",
-            "always" => "always",
-            _ => "off"
-        };
-    }
-
     // ─────────────────────────────────────────────────────────────────────
     // STOP ALL / Shutdown
     // ─────────────────────────────────────────────────────────────────────
@@ -2868,7 +2797,6 @@ public partial class App : System.Windows.Application
             {
                 _hotkeyService.UnregisterAll();
                 _commandPaletteHotkeyId = -1;
-                _reasoningGuardrailsHotkeyId = -1;
                 _stopAllHotkeyId = -1;
 
                 _auditLogger?.Append(new AuditEvent

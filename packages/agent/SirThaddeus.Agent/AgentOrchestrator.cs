@@ -74,7 +74,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private DateTimeOffset _lastPlaceContextAt;
     private string? _lastUtilityContextKey;
     private DateTimeOffset _lastUtilityContextAt;
-    private string _reasoningGuardrailsMode = "auto";
     private string? _userLocationHint;
     private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
@@ -158,6 +157,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
         "Use first-principles logic internally, but keep reasoning private unless asked.\n" +
         "Give a direct answer first.\n" +
+        "If ALL presented options are factually wrong, say neither is correct and state the actual fact (e.g. the real color, weight, count).\n" +
         "If the user explicitly asks why or asks for your logic, include a short 'Why:' section after the answer.\n" +
         "Do not call tools. Do not invent missing facts.\n" +
         "[/LOGIC PUZZLE MODE]\n";
@@ -270,19 +270,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             _preferredUnits = NormalizeUnitPreference(value);
             _searchOrchestrator.PreferredUnits = _preferredUnits;
         }
-    }
-
-    /// <summary>
-    /// First principles thinking mode:
-    ///   - off: disable guardrail reasoning pipeline
-    ///   - auto: run only when detector flags likely goal-conflict prompt
-    ///   - always: run guardrail reasoning pass on each non-utility turn
-    /// </summary>
-    public string ReasoningGuardrailsMode
-    {
-        get => _reasoningGuardrailsMode;
-        set => _reasoningGuardrailsMode =
-            SirThaddeus.Agent.Guardrails.ReasoningGuardrailsMode.Normalize(value);
     }
 
     /// <inheritdoc />
@@ -622,7 +609,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var deterministicSpecialCase = _guardrailsCoordinator.TryRunDeterministicSpecialCase(
                 contextualUserMessage,
-                ReasoningGuardrailsMode);
+                Guardrails.ReasoningGuardrailsMode.Auto);
             if (deterministicSpecialCase is not null)
             {
                 var specialCaseText = deterministicSpecialCase.AnswerText;
@@ -751,7 +738,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var guardrailsResult = await _guardrailsCoordinator.TryRunAsync(
                 route,
                 contextualUserMessage,
-                ReasoningGuardrailsMode,
+                Guardrails.ReasoningGuardrailsMode.Auto,
                 memoryPackText,
                 cancellationToken);
 
