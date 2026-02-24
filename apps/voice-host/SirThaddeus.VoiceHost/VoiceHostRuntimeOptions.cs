@@ -94,8 +94,8 @@ public sealed record VoiceHostRuntimeOptions(
         // startup timeout floor aligned with DesktopRuntime to avoid churn.
         var backendStartupTimeoutMs = ParseInt(
             backendStartupTimeoutRaw,
-            fallback: 120_000,
-            min: 30_000,
+            fallback: 300_000,
+            min: 300_000,
             max: 1_800_000,
             argName: "--backend-startup-timeout-ms");
 
