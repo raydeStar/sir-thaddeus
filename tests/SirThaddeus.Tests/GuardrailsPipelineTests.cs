@@ -7,26 +7,6 @@ namespace SirThaddeus.Tests;
 public class ReasoningGuardrailsModeTests
 {
     [Fact]
-    public async Task GuardrailsOff_DoesNotInterceptTrickPrompt()
-    {
-        var llm = MakeGuardrailsAwareLlm(normalReply: "Normal assistant fallback.");
-        var mcp = new FakeMcpClient(returnValue: "unused");
-        var audit = new TestAuditLogger();
-        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
-        {
-        
-        };
-
-        var result = await agent.ProcessAsync(
-            "The parking garage gate is ahead. Should I drive out now or pay at the kiosk first?");
-
-        Assert.True(result.Success);
-        Assert.False(result.GuardrailsUsed);
-        Assert.Equal("Normal assistant fallback.", result.Text);
-        Assert.Empty(result.GuardrailsRationale);
-    }
-
-    [Fact]
     public async Task GuardrailsAuto_TriggersOnGoalConflictPrompt()
     {
         var llm = MakeGuardrailsAwareLlm(normalReply: "Based on the goal and constraints, complete the prerequisite before proceeding.");
@@ -70,48 +50,21 @@ public class ReasoningGuardrailsModeTests
     }
 
     [Fact]
-    public async Task GuardrailsAlways_SectionHeadingOptions_SucceedsWithGenericAnswer()
+    public async Task CasualChat_AutoMode_DoesNotTriggerGuardrails()
     {
-        // Section headings like "Preconditions"/"Action options" used to cause fallback;
-        // pipeline now completes and returns synthesis. Verify we get a non-empty answer.
-        var llm = new FakeLlmClient((messages, _) =>
-        {
-            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
-
-            if (system.Contains("Infer the practical real-world goal", StringComparison.OrdinalIgnoreCase))
-                return Respond("""{"primary_goal":"Understand and assist the user.","alternative_goals":[],"confidence":0.75}""");
-
-            if (system.Contains("Extract entities and action options", StringComparison.OrdinalIgnoreCase))
-            {
-                return Respond(
-                    """{"entities":[],"options":[{"label":"Preconditions","preconditions":[],"effects":[]},{"label":"Action options","preconditions":[],"effects":[]}]}""");
-            }
-
-            if (system.Contains("Build first-principles constraints", StringComparison.OrdinalIgnoreCase))
-                return Respond("""{"constraints":["Choose the physically feasible option that directly completes the goal."]}""");
-
-            if (system.Contains("Break this into first principles", StringComparison.OrdinalIgnoreCase))
-                return Respond("""{"need":"General help","pieces":"None","assembly":"Just help."}""");
-
-            if (system.Contains("Classify", StringComparison.OrdinalIgnoreCase))
-                return Respond("chat");
-
-            return Respond("Choose the option that satisfies the goal.");
-        });
-
+        // In auto mode, casual greetings should NOT trigger the guardrails pipeline.
+        var llm = MakeGuardrailsAwareLlm(normalReply: "Hello! How can I help you?");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
         };
 
         var result = await agent.ProcessAsync("Hello, how are you today?");
 
         Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
+        Assert.False(result.GuardrailsUsed);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
-        Assert.True(result.GuardrailsRationale.Count >= 2);
     }
 
     [Fact]
@@ -146,44 +99,39 @@ public class ReasoningGuardrailsModeTests
         "A woman is looking at a photograph of someone. Her friend asks who it is. She replies, \"I am an only child. But that woman's mother is my mother's daughter.\" Who is in the photograph?")]
     [InlineData(
         "A man is pointing to a photograph of someone. His friend asks who it is. He replies, \"I have no siblings. That man's son is my father's son.\" Who is in the photograph?")]
-    public async Task FamilyPhotoPuzzle_AlwaysMode_ProducesNonNullAnswer_NoDeterministicSolver(
+    public async Task FamilyPhotoPuzzle_AutoMode_ProducesNonNullAnswer(
         string prompt)
     {
-        // No deterministic solver for logic puzzles. Pipeline runs (goal/entity/constraint from LLM);
-        // MakeGuardrailsAwareLlm returns valid JSON for entity extraction, so pipeline completes.
+        // In auto mode, logic puzzles are routed to normal chat path by LogicPuzzleDetector.
+        // Guardrails do NOT fire — these aren't goal-conflict prompts.
         var llm = MakeGuardrailsAwareLlm(normalReply: "The person in the photograph can be determined from the clues.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
         };
 
         var result = await agent.ProcessAsync(prompt);
 
         Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
-        Assert.True(result.GuardrailsRationale.Count >= 2);
     }
 
     [Fact]
-    public async Task FamilyPhotoPuzzle_ConflictingClues_ProducesNonNullAnswer_NoDeterministicSolver()
+    public async Task FamilyPhotoPuzzle_ConflictingClues_ProducesNonNullAnswer()
     {
-        // Conflicting clues logic puzzle; no deterministic solver. Pipeline completes with generic answer.
+        // In auto mode, logic puzzles go through normal chat path.
         var llm = MakeGuardrailsAwareLlm(normalReply: "The clues may be ambiguous; additional context would help.");
         var mcp = new FakeMcpClient(returnValue: "unused");
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
         };
 
         var result = await agent.ProcessAsync(
             "A woman is looking at a photograph of someone. She says, \"Brothers and sisters, I have none. But that man's father is my father's son.\" Who is in the photograph?");
 
         Assert.True(result.Success);
-        Assert.True(result.GuardrailsUsed);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
     }
 
