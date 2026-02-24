@@ -215,12 +215,18 @@ public sealed record VoiceHostRuntimeOptions(
     private static string NormalizeTtsVoiceId(string normalizedTtsEngine, string raw)
     {
         var voiceId = string.IsNullOrWhiteSpace(raw) ? "" : raw.Trim();
-        if (string.IsNullOrWhiteSpace(voiceId))
+
+        if (string.Equals(normalizedTtsEngine, "piper", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
-                return "bm_lewis";
-            if (string.Equals(normalizedTtsEngine, "piper", StringComparison.OrdinalIgnoreCase))
+            // Piper voices always contain a hyphen (e.g. en_US-ryan-medium).
+            // Fall back to the default if voice is empty or mismatched (e.g. a Kokoro ID).
+            if (string.IsNullOrWhiteSpace(voiceId) || !voiceId.Contains('-'))
                 return "en_US-ryan-medium";
+        }
+        else if (string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(voiceId))
+                return "bm_lewis";
         }
 
         return voiceId;

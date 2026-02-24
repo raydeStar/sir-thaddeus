@@ -18,7 +18,8 @@ public static class PersonalityVoicePreferenceResolver
     private static (string VoiceId, string Source) ResolvePreferredTtsVoice(
         PersonalityProfileStore store,
         string profilesDirectory,
-        string? activePersonalityId)
+        string? activePersonalityId,
+        string? ttsEngine = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
@@ -44,7 +45,16 @@ public static class PersonalityVoicePreferenceResolver
 
             // Use a stable global fallback voice so personality switches do not
             // unexpectedly flip TTS voice ids when users leave voice blank.
-            return (DefaultVoiceId, "global_default");
+            // Only return the Kokoro default when the engine is actually Kokoro;
+            // for other engines let downstream engine-specific defaults apply.
+            var effectiveEngine = (ttsEngine ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(effectiveEngine) ||
+                string.Equals(effectiveEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+            {
+                return (DefaultVoiceId, "global_default");
+            }
+
+            return ("", "");
         }
         catch
         {
@@ -55,8 +65,9 @@ public static class PersonalityVoicePreferenceResolver
     public static string ResolvePreferredTtsVoiceId(
         PersonalityProfileStore store,
         string profilesDirectory,
-        string? activePersonalityId)
-        => ResolvePreferredTtsVoice(store, profilesDirectory, activePersonalityId).VoiceId;
+        string? activePersonalityId,
+        string? ttsEngine = null)
+        => ResolvePreferredTtsVoice(store, profilesDirectory, activePersonalityId, ttsEngine).VoiceId;
 
     public static PersonalityVoicePreferenceResult ApplyPreferredTtsVoiceIfMissing(
         AppSettings settings,
@@ -78,7 +89,8 @@ public static class PersonalityVoicePreferenceResolver
         var preferredVoice = ResolvePreferredTtsVoice(
             store,
             profilesDirectory,
-            activePersonalityId);
+            activePersonalityId,
+            settings.Voice.GetNormalizedTtsEngine());
 
         if (string.IsNullOrWhiteSpace(preferredVoice.VoiceId))
         {
