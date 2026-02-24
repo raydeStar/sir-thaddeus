@@ -383,7 +383,32 @@
                                  IsMouseOver on the outer Grid drives
                                  timestamp + overflow reveal.
                                  ═══════════════════════════════ -->
-                            <Grid x:Name="LedgerEntry" Margin="0,0,0,16">
+                            <Grid x:Name="LedgerEntry" Margin="0,0,0,16"
+                                  Opacity="0"
+                                  RenderTransformOrigin="0,0">
+                                <Grid.RenderTransform>
+                                    <TranslateTransform/>
+                                </Grid.RenderTransform>
+                                <Grid.Triggers>
+                                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                 From="0" To="1" Duration="0:0:0.2">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                 From="8" To="0" Duration="0:0:0.2">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Grid.Triggers>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="3"/>
                                     <ColumnDefinition Width="10"/>
@@ -2405,9 +2430,38 @@
                                    Foreground="{StaticResource YellowBrush}"
                                    Margin="0,0,6,0"
                                    Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
-                        <TextBlock Text="{Binding StatusText}"
+                        <TextBlock x:Name="GeneralStatusText"
+                                   Text="{Binding StatusText}"
                                    FontSize="11"
-                                   Foreground="{StaticResource Overlay0Brush}"/>
+                                   FontWeight="Normal">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSaveSuccess}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         From="0" To="1" Duration="0:0:0.2"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         To="0" Duration="0:0:0.4"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
 
                     <StackPanel Grid.Column="1"
@@ -2473,18 +2527,19 @@
                             Background="{StaticResource Surface0Brush}"
                             Margin="0,0,0,16"/>
 
-                    <!-- Piper Voice Selection -->
-                    <TextBlock Text="Voice"
+                    <!-- Voice Selection (engine-aware) -->
+                    <TextBlock Text="{Binding VoiceSectionLabel}"
                                FontSize="13"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
                                Margin="0,0,0,8"/>
-                    <TextBlock Text="Select an en_US voice for Piper TTS. Selecting a voice marked (download) will fetch it automatically (~60 MB)."
+                    <TextBlock Text="{Binding VoiceSectionDescription}"
                                FontSize="11"
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,12"/>
 
+                    <!-- Piper voice dropdown (visible when engine=piper) -->
                     <ComboBox ItemsSource="{Binding AvailablePiperVoices}"
                               SelectedItem="{Binding SelectedPiperVoice, Mode=TwoWay}"
                               IsEditable="False"
@@ -2492,7 +2547,8 @@
                               HorizontalAlignment="Left"
                               Margin="0,0,0,8"
                               Style="{StaticResource DarkComboBoxStyle}"
-                              ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                              ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                              Visibility="{Binding IsPiperEngine, Converter={StaticResource BoolToVis}}"/>
 
                     <TextBlock Text="{Binding PiperVoiceDownloadStatus}"
                                FontSize="11"
@@ -2510,6 +2566,26 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+
+                    <!-- Kokoro voice dropdown (visible when engine=kokoro) -->
+                    <ComboBox ItemsSource="{Binding AvailableKokoroVoices}"
+                              SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay}"
+                              IsEditable="False"
+                              Width="300"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              Style="{StaticResource DarkComboBoxStyle}"
+                              ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                              Visibility="{Binding IsKokoroEngine, Converter={StaticResource BoolToVis}}"/>
+
+                    <!-- Windows engine note (visible when engine=windows) -->
+                    <TextBlock Text="Using the built-in Windows speech synthesizer. No voice selection required."
+                               FontSize="11"
+                               FontStyle="Italic"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"
+                               Visibility="{Binding IsWindowsEngine, Converter={StaticResource BoolToVis}}"/>
 
                     <Border Height="1"
                             Background="{StaticResource Surface0Brush}"
@@ -2601,10 +2677,42 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="●"
+                                   FontSize="10"
+                                   Foreground="{StaticResource YellowBrush}"
+                                   Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
                         <TextBlock Text="{Binding StatusText}"
                                    FontSize="12"
-                                   Foreground="{StaticResource Subtext0Brush}"
-                                   VerticalAlignment="Center"/>
+                                   VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Subtext0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSaveSuccess}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         From="0" To="1" Duration="0:0:0.2"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         To="0" Duration="0:0:0.4"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -2673,12 +2781,38 @@
                 </ItemsControl>
 
                 <!-- Text input -->
-                <TextBox Grid.Row="1"
-                         Grid.Column="0"
-                         x:Name="ChatInput"
-                         Style="{StaticResource ChatInputStyle}"
-                         Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
-                         Margin="0,0,8,0"/>
+                <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+                    <TextBox x:Name="ChatInput"
+                             Style="{StaticResource ChatInputStyle}"
+                             Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
+                             TextWrapping="Wrap"
+                             AcceptsReturn="False"
+                             MaxHeight="120"
+                             VerticalScrollBarVisibility="Auto"
+                             PreviewKeyDown="ChatInput_PreviewKeyDown"/>
+                    <!-- Placeholder watermark -->
+                    <TextBlock Text="Type a message...  (Shift+Enter for new line)"
+                               FontSize="15"
+                               FontFamily="{StaticResource PrimaryFont}"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               VerticalAlignment="Center"
+                               Padding="16,12"
+                               IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding InputText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding InputText}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
 
                 <!-- Voice button: Hold-to-Talk (normal) / Interrupt (when AI is processing) -->
                 <Button x:Name="PttButton"

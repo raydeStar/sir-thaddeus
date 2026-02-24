@@ -452,15 +452,35 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            case Key.Enter when !e.IsRepeat:
-                // Only send in chat mode, not when editing a DataGrid cell
-                if (ChatView.Visibility == Visibility.Visible &&
-                    _viewModel?.SendCommand.CanExecute(null) == true)
+            // Enter is handled per-control (ChatInput_PreviewKeyDown), not globally.
+        }
+    }
+
+    /// <summary>
+    /// Chat input key handling: Enter sends, Shift+Enter inserts newline.
+    /// </summary>
+    private void ChatInput_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && !e.IsRepeat)
+        {
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+            {
+                // Insert newline at caret position
+                if (sender is System.Windows.Controls.TextBox tb)
                 {
-                    _viewModel.SendCommand.Execute(null);
+                    var caretIndex = tb.CaretIndex;
+                    tb.Text = tb.Text.Insert(caretIndex, Environment.NewLine);
+                    tb.CaretIndex = caretIndex + Environment.NewLine.Length;
                 }
                 e.Handled = true;
-                break;
+            }
+            else
+            {
+                // Send message
+                if (_viewModel?.SendCommand.CanExecute(null) == true)
+                    _viewModel.SendCommand.Execute(null);
+                e.Handled = true;
+            }
         }
     }
 
