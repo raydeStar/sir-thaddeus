@@ -5,7 +5,6 @@ x64/
 x86/
 bld/
 [Bb]in/
-!apps/voice-backend/bin/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
@@ -75,33 +74,23 @@ __pycache__/
 *.pyc
 *.pyo
 
-# ML model artifacts — auto-downloaded on voice-backend startup.
-# These are too large for version control; see model_registry.json
-# for canonical download URLs and SHA256 verification hashes.
-*.onnx
-# Kokoro voice models are download-on-demand; not bundled.
-# apps/voice-backend/voices/*/*.onnx  (covered by global *.onnx rule)
-!apps/voice-backend/piper-voices/**/*.onnx
-*.safetensors
-# Keep generated voice cache files ignored.
-apps/voice-backend/voices/*/*.npy
-apps/voice-backend/voices/*/*.json
-!apps/voice-backend/voices/*/manifest.json
-# Kokoro voice model binaries are download-on-demand; not bundled.
-apps/voice-backend/voices/*/*.bin
-apps/voice-backend/voices/*/*.onnx
-# Vendored voice backend dependencies/assets (tracked via Git LFS).
-!apps/voice-backend/bin/uv.exe
-apps/voice-backend/bin/uvx.exe
-!apps/voice-backend/deps/wheels/*.whl
-!apps/voice-backend/runtime/python/**
-# STT models downloaded at runtime — do NOT commit the HuggingFace cache.
-apps/voice-backend/stt-models/.locks/
-apps/voice-backend/stt-models/models--*/
-# Piper TTS native binary + voice models (bundled).
-!apps/voice-backend/piper/
-!apps/voice-backend/piper-voices/
+# Voice backend binary assets — distributed via GitHub Releases, not git.
+# These are downloaded on-demand by AssetManager or the bootstrap script.
+# See assets/manifest.json for canonical download URLs and SHA256 hashes.
+apps/voice-backend/bin/
+apps/voice-backend/deps/wheels/
+apps/voice-backend/runtime/
+apps/voice-backend/piper/
+apps/voice-backend/piper-voices/
+apps/voice-backend/stt-models/
+apps/voice-backend/voices/
 apps/voice-backend/.seed-*/
+*.onnx
+*.safetensors
+
+# Build output for release asset packs
+dist/
+
 packages/requested-files.zip
 
 # Generated YouTube transcript jobs (runtime output)

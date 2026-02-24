@@ -128,6 +128,8 @@ public sealed class VoiceBackendSupervisor : IDisposable
 
             if (!ManagedProcessAlive())
             {
+                await EnsureVoiceAssetsAsync(cancellationToken);
+
                 var backendPath = ResolveBackendExecutablePath();
                 if (!TryBuildStartInfo(backendPath, backendPort, out var startInfo, out var prepError))
                 {
@@ -756,6 +758,46 @@ public sealed class VoiceBackendSupervisor : IDisposable
     private static int SafeExitCode(Process process)
     {
         try { return process.ExitCode; } catch { return -1; }
+    }
+
+    private async Task EnsureVoiceAssetsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var repoRoot = ResolveRepoRoot();
+            if (repoRoot == null)
+            {
+                _logger.LogDebug("Could not resolve repo root; skipping asset fetch.");
+                return;
+            }
+
+            var manifestPath = Path.Combine(repoRoot, "assets", "manifest.json");
+            if (!File.Exists(manifestPath))
+            {
+                _logger.LogDebug("No asset manifest at {ManifestPath}; skipping asset fetch.", manifestPath);
+                return;
+            }
+
+            var mgr = new SirThaddeus.Core.AssetManager(repoRoot, msg => _logger.LogInformation("{AssetMsg}", msg));
+            await mgr.EnsureAllAssetsAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Asset fetch failed (non-fatal); backend may still start if assets are already present.");
+        }
+    }
+
+    private static string? ResolveRepoRoot()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(baseDir);
+        for (var i = 0; i < 10 && dir?.Parent is not null; i++)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "assets", "manifest.json")))
+                return dir.FullName;
+            dir = dir.Parent;
+        }
+        return null;
     }
 
     private static string? ResolveVoiceBackendDirectory()

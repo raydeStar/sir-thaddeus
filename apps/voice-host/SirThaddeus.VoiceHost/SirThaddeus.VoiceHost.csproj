@@ -12,6 +12,10 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\packages\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
+  </ItemGroup>
+
   <!-- Optional bundled backend sidecar (preferred publish layout: ./voice/) -->
   <ItemGroup Condition="Exists('..\..\voice-backend\dist\voice-backend.exe')">
     <None Include="..\..\voice-backend\dist\voice-backend.exe"
