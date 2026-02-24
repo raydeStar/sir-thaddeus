@@ -247,6 +247,65 @@ foreach ($project in $projects) {
     }
 }
 
+# ── Bundle vendored voice-backend assets (Git LFS) ──────────────────
+# These are tracked via Git LFS and fetched during CI with lfs: true.
+# They land under bin/voice/ alongside the Python scripts already
+# staged by the VoiceHost dotnet publish output.
+
+$voiceStageBinDir = Join-Path $binDir "voice"
+if (-not (Test-Path $voiceStageBinDir)) {
+    New-Item -ItemType Directory -Force -Path $voiceStageBinDir | Out-Null
+}
+
+# uv.exe — Python environment manager
+$uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
+if (Test-Path $uvSource) {
+    $uvDest = Join-Path $voiceStageBinDir "bin"
+    New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
+    Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
+    Write-Host "  Staged: bin/uv.exe"
+}
+else {
+    Write-Host "  WARN: bundled uv.exe not found; offline venv creation may fail" -ForegroundColor Yellow
+}
+
+# Bundled Python 3.11 runtime
+$runtimeSource = Join-Path $voiceBackendDir "runtime/python"
+if (Test-Path $runtimeSource) {
+    $runtimeDest = Join-Path $voiceStageBinDir "runtime/python"
+    Copy-Item -Path $runtimeSource -Destination $runtimeDest -Recurse -Force
+    $runtimeCount = (Get-ChildItem -Path $runtimeDest -Recurse -File).Count
+    Write-Host "  Staged: runtime/python ($runtimeCount files)"
+}
+else {
+    Write-Host "  WARN: bundled Python runtime not found; will download at first run" -ForegroundColor Yellow
+}
+
+# Python wheel dependencies (offline pip install)
+$wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
+if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
+    $wheelsDest = Join-Path $voiceStageBinDir "deps/wheels"
+    New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
+    Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
+    $wheelCount = (Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
+    $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+    Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
+}
+else {
+    Write-Host "  WARN: bundled Python wheels not found; will download at first run" -ForegroundColor Yellow
+}
+
+# Faster-Whisper base STT model
+$sttSource = Join-Path $voiceBackendDir "stt-models/base"
+if (Test-Path $sttSource) {
+    $sttDest = Join-Path $voiceStageBinDir "stt-models/base"
+    Copy-Item -Path $sttSource -Destination $sttDest -Recurse -Force
+    Write-Host "  Staged: stt-models/base"
+}
+else {
+    Write-Host "  WARN: bundled STT model not found; will download at first run" -ForegroundColor Yellow
+}
+
 if (-not (Test-Path $firstRunReadmeSource)) {
     Fail "required file is missing: $firstRunReadmeSource"
 }
