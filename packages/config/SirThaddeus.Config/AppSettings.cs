@@ -296,13 +296,13 @@ public sealed record VoiceSettings
     public string VoiceHostHealthPath { get; init; } = "/health";
 
     [JsonPropertyName("ttsEngine")]
-    public string TtsEngine { get; init; } = "kokoro";
+    public string TtsEngine { get; init; } = "piper";
 
     [JsonPropertyName("ttsModelId")]
     public string TtsModelId { get; init; } = "";
 
     [JsonPropertyName("ttsVoiceId")]
-    public string TtsVoiceId { get; init; } = "bm_lewis";
+    public string TtsVoiceId { get; init; } = "en_US-ryan-medium";
 
     [JsonPropertyName("sttEngine")]
     public string SttEngine { get; init; } = "faster-whisper";
@@ -368,12 +368,13 @@ public sealed record VoiceSettings
 
     public string GetNormalizedTtsEngine()
     {
-        if (PreferLocalTts) return "kokoro";
+        if (PreferLocalTts) return "piper";
 
         var engine = (TtsEngine ?? "").Trim().ToLowerInvariant();
         return engine switch
         {
-            "" => "windows",
+            "" => "piper",
+            "piper" => "piper",
             "windows" => "windows",
             "kokoro" => "kokoro",
             _ => engine

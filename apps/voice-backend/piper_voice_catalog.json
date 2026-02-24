@@ -1,0 +1,140 @@
+{
+  "default": "en_US-lessac-medium",
+  "voices": {
+    "en_US-amy-medium": {
+      "name": "Amy",
+      "gender": "female",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-arctic-medium": {
+      "name": "Arctic",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/arctic/medium/en_US-arctic-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/arctic/medium/en_US-arctic-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-bryce-medium": {
+      "name": "Bryce",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/bryce/medium/en_US-bryce-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/bryce/medium/en_US-bryce-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-hfc_female-medium": {
+      "name": "HFC Female",
+      "gender": "female",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-hfc_male-medium": {
+      "name": "HFC Male",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-joe-medium": {
+      "name": "Joe",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/joe/medium/en_US-joe-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/joe/medium/en_US-joe-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-john-medium": {
+      "name": "John",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/john/medium/en_US-john-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/john/medium/en_US-john-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-kristin-medium": {
+      "name": "Kristin",
+      "gender": "female",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kristin/medium/en_US-kristin-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kristin/medium/en_US-kristin-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-kusal-medium": {
+      "name": "Kusal",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kusal/medium/en_US-kusal-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kusal/medium/en_US-kusal-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-l2arctic-medium": {
+      "name": "L2 Arctic",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/l2arctic/medium/en_US-l2arctic-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/l2arctic/medium/en_US-l2arctic-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-lessac-medium": {
+      "name": "Lessac",
+      "gender": "female",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-libritts_r-medium": {
+      "name": "LibriTTS-R",
+      "gender": "neutral",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-ljspeech-medium": {
+      "name": "LJ Speech",
+      "gender": "female",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-norman-medium": {
+      "name": "Norman",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/norman/medium/en_US-norman-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/norman/medium/en_US-norman-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    },
+    "en_US-ryan-medium": {
+      "name": "Ryan",
+      "gender": "male",
+      "quality": "medium",
+      "sampleRate": 22050,
+      "onnxUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/medium/en_US-ryan-medium.onnx?download=true",
+      "configUrl": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json?download=true",
+      "sizeBytes": 63201086
+    }
+  }
+}
