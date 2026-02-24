@@ -68,18 +68,43 @@
         <Setter Property="Background"              Value="{StaticResource Surface0Brush}"/>
         <Setter Property="Foreground"              Value="{StaticResource TextBrush}"/>
         <Setter Property="CaretBrush"              Value="{StaticResource BlueBrush}"/>
-        <Setter Property="BorderBrush"             Value="Transparent"/>
-        <Setter Property="BorderThickness"         Value="0"/>
+        <Setter Property="BorderBrush"             Value="{StaticResource Surface1Brush}"/>
+        <Setter Property="BorderThickness"         Value="1"/>
         <Setter Property="Padding"                 Value="16,12"/>
         <Setter Property="FontSize"                Value="15"/>
         <Setter Property="FontFamily"              Value="{StaticResource PrimaryFont}"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="SelectionBrush"          Value="{StaticResource BlueBrush}"/>
-        <Style.Triggers>
-            <Trigger Property="IsFocused" Value="True">
-                <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
-            </Trigger>
-        </Style.Triggers>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="InputBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Focusable="False"
+                                      HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Hidden"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource Surface2Brush}"/>
+                        </Trigger>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="InputBorder" Property="Background" Value="{StaticResource Surface1Brush}"/>
+                            <Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="InputBorder" Property="Background" Value="{StaticResource Surface1Brush}"/>
+                            <Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- ── Primary Button (Send / Confirm) ───────────────────────── -->

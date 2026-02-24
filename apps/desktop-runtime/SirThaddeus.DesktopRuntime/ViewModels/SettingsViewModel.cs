@@ -144,6 +144,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private string _personalityProfilesDirectory = "";
     private bool _suppressPersonalitySelectionSave;
     private string         _statusText = "";
+    private bool            _isSaveSuccess;
+    private System.Threading.Timer? _saveSuccessTimer;
     private readonly PersonalityProfileStore _personalityStore = new();
 
     // ─── Public Properties ───────────────────────────────────────────
@@ -163,7 +165,17 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
-    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedPiperVoice)); OnPropertyChanged(nameof(SelectedKokoroVoice)); } } }
+    public string VoiceTtsEngine { get => _voiceTtsEngine; set { if (SetProperty(ref _voiceTtsEngine, value)) { MarkDirty(); OnPropertyChanged(nameof(SelectedPiperVoice)); OnPropertyChanged(nameof(SelectedKokoroVoice)); OnPropertyChanged(nameof(IsPiperEngine)); OnPropertyChanged(nameof(IsKokoroEngine)); OnPropertyChanged(nameof(IsWindowsEngine)); OnPropertyChanged(nameof(VoiceSectionLabel)); OnPropertyChanged(nameof(VoiceSectionDescription)); } } }
+
+    public bool IsPiperEngine => string.Equals((_voiceTtsEngine ?? "").Trim(), "piper", StringComparison.OrdinalIgnoreCase);
+    public bool IsKokoroEngine => string.Equals((_voiceTtsEngine ?? "").Trim(), "kokoro", StringComparison.OrdinalIgnoreCase);
+    public bool IsWindowsEngine => string.Equals((_voiceTtsEngine ?? "").Trim(), "windows", StringComparison.OrdinalIgnoreCase);
+    public string VoiceSectionLabel => IsKokoroEngine ? "Kokoro Voice" : IsPiperEngine ? "Piper Voice" : "Voice";
+    public string VoiceSectionDescription => IsKokoroEngine
+        ? "Select a Kokoro voice pack. Kokoro requires Python and provides high-quality neural TTS."
+        : IsPiperEngine
+        ? "Select an en_US voice for Piper TTS. Selecting a voice marked (download) will fetch it automatically (~60 MB)."
+        : "Windows will use the default system speech synthesizer. No additional voice configuration is needed.";
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
     public string VoiceTtsVoiceId 
     { 
@@ -504,6 +516,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     }
 
     public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
+    public bool IsSaveSuccess { get => _isSaveSuccess; private set => SetProperty(ref _isSaveSuccess, value); }
 
     // ─── Commands ────────────────────────────────────────────────────
 
@@ -666,6 +679,11 @@ public sealed partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(VoiceHostStartupTimeoutMs));
         OnPropertyChanged(nameof(VoiceHostHealthPath));
         OnPropertyChanged(nameof(VoiceTtsEngine));
+        OnPropertyChanged(nameof(IsPiperEngine));
+        OnPropertyChanged(nameof(IsKokoroEngine));
+        OnPropertyChanged(nameof(IsWindowsEngine));
+        OnPropertyChanged(nameof(VoiceSectionLabel));
+        OnPropertyChanged(nameof(VoiceSectionDescription));
         OnPropertyChanged(nameof(VoiceTtsModelId));
         OnPropertyChanged(nameof(VoiceTtsVoiceId));
         OnPropertyChanged(nameof(SelectedKokoroVoice));
@@ -1677,7 +1695,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _settings = updated;
         ClearDirty();
 
-        StatusText = "Settings saved.";
+        StatusText = "\u2713 Settings saved";
+        ShowSaveSuccess();
 
         ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
@@ -1720,6 +1739,22 @@ public sealed partial class SettingsViewModel : ViewModelBase
             Action = "SETTINGS_SAVED",
             Result = $"{(_selectedProfile?.ProfileId is not null ? $"activeProfile={_selectedProfile.ProfileId}" : "activeProfile=none")};activePersonality={updated.ActivePersonalityId}"
         });
+    }
+
+    private void ShowSaveSuccess()
+    {
+        IsSaveSuccess = true;
+        _saveSuccessTimer?.Dispose();
+        _saveSuccessTimer = new System.Threading.Timer(_ =>
+        {
+            // Marshal back to UI thread
+            System.Windows.Application.Current?.Dispatcher?.BeginInvoke(() =>
+            {
+                IsSaveSuccess = false;
+                if (StatusText.StartsWith("\u2713"))
+                    StatusText = "";
+            });
+        }, null, 3000, System.Threading.Timeout.Infinite);
     }
 
     private void SaveProfileSelectionOnly()

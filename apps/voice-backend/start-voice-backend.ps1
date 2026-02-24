@@ -95,7 +95,23 @@ if (-not (Test-Path $UvExe)) {
     $uvZipUrl = "https://github.com/astral-sh/uv/releases/download/0.5.21/uv-x86_64-pc-windows-msvc.zip"
     $uvZipPath = Join-Path $BinDir "uv.zip"
     
-    Invoke-WebRequest -Uri $uvZipUrl -OutFile $uvZipPath
+    $uvDownloadSuccess = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Write-Host "  Attempt $attempt/3..." -ForegroundColor DarkGray
+            Invoke-WebRequest -Uri $uvZipUrl -OutFile $uvZipPath -TimeoutSec 60
+            $uvDownloadSuccess = $true
+            break
+        }
+        catch {
+            Write-Host "  [UV_DOWNLOAD_RETRY] Attempt $attempt failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+        }
+    }
+    if (-not $uvDownloadSuccess) {
+        Write-Host "[UV_DOWNLOAD_FAILED] Could not download uv after 3 attempts. Check internet connectivity." -ForegroundColor Red
+        exit 1
+    }
     Expand-Archive -Path $uvZipPath -DestinationPath $BinDir -Force
     Remove-Item -Path $uvZipPath -Force
 }
@@ -121,6 +137,29 @@ if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
 
 $activateScript = "$VenvDir\Scripts\Activate.ps1"
 . $activateScript
+
+# ── Validate venv Python works ───────────────────────────────────
+
+$venvPython = "$VenvDir\Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    Write-Host "[VENV_BROKEN] python.exe not found in venv at '$venvPython'. Deleting venv for rebuild." -ForegroundColor Red
+    Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+    exit 1
+}
+try {
+    $pyVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[VENV_BROKEN] python.exe in venv exits with error. Deleting venv for rebuild." -ForegroundColor Red
+        Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+        exit 1
+    }
+    Write-Host "[VENV_OK] Python $pyVersion" -ForegroundColor DarkGray
+}
+catch {
+    Write-Host "[VENV_BROKEN] python.exe in venv cannot execute: $($_.Exception.Message)" -ForegroundColor Red
+    Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+    exit 1
+}
 
 # ── Install / update dependencies ────────────────────────────────
 
@@ -161,6 +200,43 @@ if ($storedRequirementsHash -ne $currentRequirementsHash) {
 }
 else {
     Write-Host "Dependencies already installed (requirements unchanged)." -ForegroundColor DarkGray
+}
+
+# ── Validate bundled assets (detect Git LFS pointer files) ───────────────────
+
+function Test-LfsPointer {
+    param([string]$FilePath)
+    if (-not (Test-Path $FilePath)) { return $false }
+    $size = (Get-Item $FilePath).Length
+    # LFS pointer files are tiny text files (< 200 bytes)
+    if ($size -gt 300) { return $false }
+    try {
+        $header = Get-Content -Path $FilePath -TotalCount 1 -ErrorAction SilentlyContinue
+        return ($header -and $header.StartsWith("version https://git-lfs"))
+    } catch { return $false }
+}
+
+$sttModelBin = Join-Path $VoiceBackendDir "stt-models\base\model.bin"
+if (Test-Path $sttModelBin) {
+    if (Test-LfsPointer $sttModelBin) {
+        Write-Host "[ASSET_ERROR] stt-models\base\model.bin is a Git LFS pointer, not an actual model file!" -ForegroundColor Red
+        Write-Host "  Run 'git lfs pull' in the repo root to download the real model files." -ForegroundColor Yellow
+        if ($RequireTtsReady) { exit 1 }
+    } else {
+        $modelSize = [math]::Round((Get-Item $sttModelBin).Length / 1MB, 1)
+        Write-Host "[ASSET_OK] STT model base/model.bin (${modelSize} MB)" -ForegroundColor DarkGray
+    }
+} else {
+    Write-Host "[ASSET_INFO] STT model base/model.bin not found — will download on first use." -ForegroundColor DarkGray
+}
+
+if ($resolvedTtsEngine -eq "piper" -and -not $ttsStartupDegraded) {
+    $voiceOnnx = Join-Path $VoiceBackendDir ("piper-voices\" + $resolvedTtsVoiceId + "\" + $resolvedTtsVoiceId + ".onnx")
+    if ((Test-Path $voiceOnnx) -and (Test-LfsPointer $voiceOnnx)) {
+        Write-Host "[ASSET_ERROR] piper-voices\$resolvedTtsVoiceId\$resolvedTtsVoiceId.onnx is a Git LFS pointer!" -ForegroundColor Red
+        Write-Host "  Run 'git lfs pull' in the repo root to download the real voice files." -ForegroundColor Yellow
+        $ttsStartupDegraded = $true
+    }
 }
 
 # ── Prefetch voice + ASR assets for fresh machines ──────────────────────────
@@ -228,6 +304,9 @@ if prefetch_asr_assets:
     Set-Content -Path $prefetchFile -Value $prefetchCode -Encoding UTF8
     try {
         & "$VenvDir\Scripts\python.exe" $prefetchFile
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[PREFETCH_WARNING] Prefetch script exited with code $LASTEXITCODE. Server will attempt to start anyway." -ForegroundColor Yellow
+        }
     }
     finally {
         Remove-Item -Path $prefetchFile -ErrorAction SilentlyContinue

@@ -1008,48 +1008,68 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         if (HasAnotherDesktopRuntimeAlive())
             return;
 
+        // Phase 1: Kill session-tracked PID (existing behavior).
         try
         {
-            if (!File.Exists(_sessionStatePath))
-                return;
-
-            var json = File.ReadAllText(_sessionStatePath);
-            if (string.IsNullOrWhiteSpace(json))
-                return;
-
-            using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("pid", out var pidElem))
-                return;
-            if (!pidElem.TryGetInt32(out var pid) || pid <= 0)
-                return;
-
-            using var process = Process.GetProcessById(pid);
-            if (process.HasExited)
-                return;
-
-            string name;
-            try
+            if (File.Exists(_sessionStatePath))
             {
-                name = process.ProcessName;
+                var json = File.ReadAllText(_sessionStatePath);
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("pid", out var pidElem) &&
+                        pidElem.TryGetInt32(out var pid) && pid > 0)
+                    {
+                        try
+                        {
+                            using var process = Process.GetProcessById(pid);
+                            if (!process.HasExited &&
+                                process.ProcessName.Contains("VoiceHost", StringComparison.OrdinalIgnoreCase))
+                            {
+                                process.Kill(entireProcessTree: true);
+                                process.WaitForExit(2_000);
+                                WriteAudit("VOICEHOST_STALE_PROCESS_REAPED", "ok", new Dictionary<string, object>
+                                {
+                                    ["pid"] = pid,
+                                    ["source"] = "session_file"
+                                });
+                            }
+                        }
+                        catch { /* PID may no longer exist */ }
+                    }
+                }
+
+                try { File.Delete(_sessionStatePath); } catch { /* best effort */ }
             }
-            catch
+        }
+        catch { /* best effort */ }
+
+        // Phase 2: Kill any orphaned VoiceHost processes by name.
+        // Catches stale processes from other installations (e.g., packaged
+        // releases) that hold the port range but aren't tracked in session state.
+        try
+        {
+            foreach (var process in Process.GetProcessesByName("SirThaddeus.VoiceHost"))
             {
-                return;
+                using (process)
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            var pid = process.Id;
+                            process.Kill(entireProcessTree: true);
+                            process.WaitForExit(2_000);
+                            WriteAudit("VOICEHOST_STALE_PROCESS_REAPED", "ok", new Dictionary<string, object>
+                            {
+                                ["pid"] = pid,
+                                ["source"] = "process_name_scan"
+                            });
+                        }
+                    }
+                    catch { /* best effort */ }
+                }
             }
-
-            if (!name.Contains("VoiceHost", StringComparison.OrdinalIgnoreCase))
-                return;
-
-            process.Kill(entireProcessTree: true);
-            process.WaitForExit(2_000);
-
-            WriteAudit("VOICEHOST_STALE_PROCESS_REAPED", "ok", new Dictionary<string, object>
-            {
-                ["pid"] = pid,
-                ["processName"] = name
-            });
-
-            try { File.Delete(_sessionStatePath); } catch { /* best effort */ }
         }
         catch (Exception ex)
         {
