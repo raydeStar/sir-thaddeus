@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - name: Setup .NET from global.json
         uses: actions/setup-dotnet@v5
@@ -58,6 +60,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - name: Setup .NET from global.json
         uses: actions/setup-dotnet@v5
