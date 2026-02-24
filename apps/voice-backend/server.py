@@ -1055,6 +1055,12 @@ class FasterWhisperProvider(BaseProvider):
         )
         self._local_files_only = env_bool("ST_VOICE_OFFLINE", False)
 
+    @property
+    def requires_init_probe(self) -> bool:
+        # Avoid forcing model load during /health/startup on fresh Windows
+        # machines where native runtimes can crash during eager init.
+        return False
+
     def engine_version(self) -> str:
         try:
             return importlib.metadata.version("faster-whisper")
@@ -1112,23 +1118,10 @@ class FasterWhisperProvider(BaseProvider):
 
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
 
-                # Warmup run to pay JIT/cache cost at init, not on the first real request.
-                silence_wav = build_silence_wav(0.25, 16000)
-                fd, path = tempfile.mkstemp(suffix=".wav")
-                try:
-                    with os.fdopen(fd, "wb") as fh:
-                        fh.write(silence_wav)
-                    warmup_kwargs: Dict[str, Any] = {"beam_size": 1, "condition_on_previous_text": False}
-                    if self._language:
-                        warmup_kwargs["language"] = self._language
-                    segments, _ = self._model.transcribe(path, **warmup_kwargs)
-                    _ = list(segments)
-                    logger.info("faster-whisper warmup complete for model '%s'", self.model_id)
-                finally:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
+                # Loading the model instance is enough to validate availability.
+                # A startup warmup transcribe can cause native access violations on
+                # some fresh Windows environments, so keep init_probe side-effect free.
+                logger.info("faster-whisper model '%s' loaded", self.model_id)
 
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
@@ -1688,14 +1681,8 @@ async def on_startup() -> None:
     # time, which causes silent native hard crashes.
     
     async def warm_all_async() -> None:
-        # 1. Warm STT
-        try:
-            stt_provider = PROVIDERS.get_stt()
-            await asyncio.to_thread(stt_provider.init_probe, False)
-        except Exception as exc:
-            logger.error("STT init probe failed on startup: %s", exc)
-
-        # 2. Warm TTS
+        # 1. Warm TTS only. STT init is lazy to avoid eager native crashes on
+        # some Windows hosts during first-run setup.
         try:
             tts_provider = PROVIDERS.get_tts()
             if tts_provider.engine != "windows":
