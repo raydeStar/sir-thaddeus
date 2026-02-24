@@ -140,6 +140,9 @@ public static class KokoroVoiceCatalog
         yield return Path.Combine(baseDir, "voices");
         yield return Path.Combine(baseDir, "bin", "voices");
 
+        // Packaged release layout: bin/voice/voices (from release-package.ps1)
+        yield return Path.Combine(baseDir, "bin", "voice", "voices");
+
         // Dev build layout:
         //   AppContext.BaseDirectory = apps/desktop-runtime/.../bin/Debug/net8.0-windows/
         //   5 parent jumps → apps/
@@ -153,5 +156,18 @@ public static class KokoroVoiceCatalog
         var repoRoot = Path.GetFullPath(Path.Combine(
             baseDir, "..", "..", "..", "..", "..", ".."));
         yield return Path.Combine(repoRoot, "apps", "voice-backend", "voices");
+
+        // Walk-up fallback: find apps/voice-backend/voices from any depth
+        var dir = new DirectoryInfo(baseDir);
+        for (var i = 0; i < 10 && dir?.Parent is not null; i++)
+        {
+            dir = dir.Parent;
+            var candidate = Path.Combine(dir.FullName, "apps", "voice-backend", "voices");
+            if (Directory.Exists(candidate))
+            {
+                yield return candidate;
+                break;
+            }
+        }
     }
 }

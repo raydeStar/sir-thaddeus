@@ -2125,9 +2125,7 @@ public partial class App : System.Windows.Application
                     updated.RuntimeSafety.SafeMode,
                     updated.RuntimeSafety.SafeModeReason);
 
-                // UX: Start new chat with new settings loaded, per user request.
-                _commandPaletteViewModel.ClearConversation();
-                _mainWindow?.ActivateTab("Chat");
+                // Settings saved — stay on the current tab; no conversation reset.
             }
 
             ApplyManualLocationToOrchestrator(updated, emitAuditEvent: true);

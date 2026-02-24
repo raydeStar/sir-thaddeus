@@ -124,6 +124,9 @@ public static class PiperVoiceCatalog
         yield return Path.Combine(baseDir, "piper-voices");
         yield return Path.Combine(baseDir, "bin", "piper-voices");
 
+        // Packaged release layout: bin/voice/piper-voices (from release-package.ps1)
+        yield return Path.Combine(baseDir, "bin", "voice", "piper-voices");
+
         // Dev build layout: bin\Debug\net8.0-windows\win-x64 → up 6 to apps\
         var devRoot = Path.GetFullPath(Path.Combine(
             baseDir, "..", "..", "..", "..", "..", "..",
@@ -134,5 +137,18 @@ public static class PiperVoiceCatalog
         var repoRoot = Path.GetFullPath(Path.Combine(
             baseDir, "..", "..", "..", "..", "..", "..", ".."));
         yield return Path.Combine(repoRoot, "apps", "voice-backend", "piper-voices");
+
+        // Walk-up fallback: find apps/voice-backend/piper-voices from any depth
+        var dir = new DirectoryInfo(baseDir);
+        for (var i = 0; i < 10 && dir?.Parent is not null; i++)
+        {
+            dir = dir.Parent;
+            var candidate = Path.Combine(dir.FullName, "apps", "voice-backend", "piper-voices");
+            if (Directory.Exists(candidate))
+            {
+                yield return candidate;
+                break;
+            }
+        }
     }
 }
