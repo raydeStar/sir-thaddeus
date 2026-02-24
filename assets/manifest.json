@@ -1,0 +1,46 @@
+{
+  "version": "1",
+  "baseUrl": "https://github.com/raydeStar/sir-thaddeus/releases/download/assets-v1/",
+  "assets": [
+    {
+      "id": "voice-runtime-win-x64",
+      "filename": "voice-runtime-win-x64.zip",
+      "sha256": "affa7d3ba07989299dddc13664715146be93abb38ccc80ec5ecb52bfe17f81f3",
+      "sizeBytes": 45319230,
+      "extractTo": "apps/voice-backend",
+      "description": "Python 3.11 runtime + uv package manager"
+    },
+    {
+      "id": "voice-deps-win-x64",
+      "filename": "voice-deps-win-x64.zip",
+      "sha256": "970f6ca1f4a264e544f39f913c781f8d1ae439c012d06495826e27b48280ecb1",
+      "sizeBytes": 75423836,
+      "extractTo": "apps/voice-backend/deps/wheels",
+      "description": "Python wheel packages for voice backend"
+    },
+    {
+      "id": "piper-win-x64",
+      "filename": "piper-win-x64.zip",
+      "sha256": "4b97a3072233cec7cdfff4a3f33b388d57e770f95d6e62c5623541e892011f58",
+      "sizeBytes": 22442249,
+      "extractTo": "apps/voice-backend/piper",
+      "description": "Piper TTS native binary + espeak DLLs"
+    },
+    {
+      "id": "piper-voice-en_US-john-medium",
+      "filename": "piper-voice-en_US-john-medium.zip",
+      "sha256": "77d4ce3f1c0415e42a85c5fe8e84857ecb3857abaf265d3eaa65549a7efaf4e5",
+      "sizeBytes": 58484861,
+      "extractTo": "apps/voice-backend/piper-voices/en_US-john-medium",
+      "description": "Piper voice model: en_US-john-medium"
+    },
+    {
+      "id": "stt-model-whisper-base",
+      "filename": "stt-model-whisper-base.zip",
+      "sha256": "23ca96cfe9594ab9ad968c2982ade571c7a98bb57e75d7b367ade76cda3db1ab",
+      "sizeBytes": 133337719,
+      "extractTo": "apps/voice-backend/stt-models/base",
+      "description": "Faster-Whisper base STT model"
+    }
+  ]
+}
