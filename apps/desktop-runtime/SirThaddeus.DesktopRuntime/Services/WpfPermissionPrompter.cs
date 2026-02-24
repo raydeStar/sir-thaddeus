@@ -19,13 +19,23 @@ namespace SirThaddeus.DesktopRuntime.Services;
 public sealed class WpfPermissionPrompter : IPermissionPrompter
 {
     private readonly App _app;
+    private readonly bool _isHeadless;
 
-    public WpfPermissionPrompter(App app)
-        => _app = app ?? throw new ArgumentNullException(nameof(app));
+    public WpfPermissionPrompter(App app, bool isHeadless = false)
+    {
+        _app = app ?? throw new ArgumentNullException(nameof(app));
+        _isHeadless = isHeadless;
+    }
 
     public Task<PermissionDecision> PromptAsync(
         PermissionRequest request, CancellationToken cancellationToken = default)
     {
+        if (_isHeadless)
+        {
+            // In headless mode, we cannot show a UI prompt, so auto-deny
+            return Task.FromResult(PermissionDecision.Deny("Auto-denied (headless mode)"));
+        }
+
         // Marshal to the WPF UI thread to show the modal dialog
         return _app.Dispatcher.Invoke(() =>
         {
