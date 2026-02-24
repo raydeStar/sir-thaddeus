@@ -282,17 +282,16 @@ if prefetch_asr_assets:
     try:
         from faster_whisper import WhisperModel
         print(f"[ASR_PREFETCH] Ensuring faster-whisper model '{requested_stt_model}' on {device} (download_root={stt_models_root}, local_only={offline_mode})...")
-        whisper = WhisperModel(
+        _ = WhisperModel(
             requested_stt_model,
             device=device,
             compute_type='int8',
             download_root=str(stt_models_root),
             local_files_only=offline_mode,
         )
-        try:
-            _ = whisper.transcribe(b"", language='en')
-        except Exception:
-            pass
+        # Model construction is enough to ensure assets exist locally.
+        # Avoid running a warmup transcribe here; on some fresh Windows
+        # systems this can trigger a native crash in ctranslate2.
     except Exception as exc:
         print(f"[ASR_PREFETCH_WARNING] faster-whisper preload failed: {exc}")
 
@@ -414,6 +413,8 @@ if ($VoiceOffline) {
     $env:HF_HUB_OFFLINE = "1"
     $env:TRANSFORMERS_OFFLINE = "1"
 }
+
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 
 $serverScript = Join-Path $VoiceBackendDir "server.py"
 $pythonArgs = @(

@@ -1112,23 +1112,10 @@ class FasterWhisperProvider(BaseProvider):
 
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
 
-                # Warmup run to pay JIT/cache cost at init, not on the first real request.
-                silence_wav = build_silence_wav(0.25, 16000)
-                fd, path = tempfile.mkstemp(suffix=".wav")
-                try:
-                    with os.fdopen(fd, "wb") as fh:
-                        fh.write(silence_wav)
-                    warmup_kwargs: Dict[str, Any] = {"beam_size": 1, "condition_on_previous_text": False}
-                    if self._language:
-                        warmup_kwargs["language"] = self._language
-                    segments, _ = self._model.transcribe(path, **warmup_kwargs)
-                    _ = list(segments)
-                    logger.info("faster-whisper warmup complete for model '%s'", self.model_id)
-                finally:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
+                # Loading the model instance is enough to validate availability.
+                # A startup warmup transcribe can cause native access violations on
+                # some fresh Windows environments, so keep init_probe side-effect free.
+                logger.info("faster-whisper model '%s' loaded", self.model_id)
 
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
