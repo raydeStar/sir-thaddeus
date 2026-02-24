@@ -75,7 +75,7 @@ public sealed record VoiceHostRuntimeOptions(
         var backendStartupTimeoutRaw = GetOrDefault(
             values,
             "backend-startup-timeout-ms",
-            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "120000");
+            Environment.GetEnvironmentVariable("ST_VOICEHOST_BACKEND_STARTUP_TIMEOUT_MS") ?? "300000");
 
         var backendShutdownGraceRaw = GetOrDefault(
             values,
@@ -276,8 +276,8 @@ public sealed record VoiceHostRuntimeOptions(
     {
         if (!int.TryParse(raw, out var parsed))
             return fallback;
-        if (parsed < min || parsed > max)
+        if (parsed > max)
             throw new InvalidOperationException($"Invalid {argName} value.");
-        return parsed;
+        return Math.Max(parsed, min);
     }
 }

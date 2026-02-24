@@ -1,0 +1,6 @@
+apps/voice-backend/voices/*/*.onnx filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/voices/*/*.bin filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/stt-models/base/** filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/bin/uv*.exe filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/deps/wheels/*.whl filter=lfs diff=lfs merge=lfs -text
+apps/voice-backend/runtime/python/** filter=lfs diff=lfs merge=lfs -text

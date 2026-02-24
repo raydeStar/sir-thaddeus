@@ -914,6 +914,11 @@ class FasterWhisperProvider(BaseProvider):
         self._language = normalize_stt_language(language)
         self._model = None
         self._compute_type = "int8" if self._device == "cpu" else "float16"
+        self._download_root = (
+            (os.environ.get("ST_VOICE_STT_MODEL_ROOT") or "").strip()
+            or str(STT_MODELS_ROOT)
+        )
+        self._local_files_only = env_bool("ST_VOICE_OFFLINE", False)
 
     def engine_version(self) -> str:
         try:
@@ -946,17 +951,31 @@ class FasterWhisperProvider(BaseProvider):
             from faster_whisper import WhisperModel
 
             if self._model is None:
+                model_ref = self.model_id
+                if self._download_root:
+                    local_model_dir = Path(self._download_root) / self.model_id
+                    if local_model_dir.is_dir():
+                        model_ref = str(local_model_dir.resolve())
+
                 logger.info(
-                    "Loading faster-whisper model '%s' on %s (%s)...",
+                    "Loading faster-whisper model '%s' (resolved=%s) on %s (%s), download_root=%s, local_only=%s...",
                     self.model_id,
+                    model_ref,
                     self._device,
                     self._compute_type,
+                    self._download_root,
+                    self._local_files_only,
                 )
-                self._model = WhisperModel(
-                    self.model_id,
-                    device=self._device,
-                    compute_type=self._compute_type,
-                )
+                whisper_kwargs: Dict[str, Any] = {
+                    "device": self._device,
+                    "compute_type": self._compute_type,
+                }
+                if self._download_root:
+                    whisper_kwargs["download_root"] = self._download_root
+                if self._local_files_only:
+                    whisper_kwargs["local_files_only"] = True
+
+                self._model = WhisperModel(model_ref, **whisper_kwargs)
 
                 # Warmup run to pay JIT/cache cost at init, not on the first real request.
                 silence_wav = build_silence_wav(0.25, 16000)
