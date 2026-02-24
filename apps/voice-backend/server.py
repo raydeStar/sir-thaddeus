@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -161,6 +162,9 @@ APP_VERSION = "0.2.0"
 ROOT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = ROOT_DIR.parent.parent
 VOICES_ROOT = ROOT_DIR / "voices"
+PIPER_ROOT = Path(os.environ.get("ST_VOICE_PIPER_ROOT") or str(ROOT_DIR / "piper"))
+PIPER_VOICES_ROOT = Path(os.environ.get("ST_VOICE_PIPER_VOICES_ROOT") or str(ROOT_DIR / "piper-voices"))
+PIPER_CATALOG_PATH = ROOT_DIR / "piper_voice_catalog.json"
 STT_MODELS_ROOT = ROOT_DIR / "stt-models"
 DATA_ROOT = Path(os.environ.get("THADDEUS_DATA_DIR") or str(REPO_ROOT / "data")).expanduser().resolve()
 UNSAFE_ARTIFACTS_ALLOWED = (os.environ.get("ST_VOICE_ALLOW_UNSAFE_ARTIFACTS", "").strip().lower() in {"1", "true", "yes", "on"})
@@ -239,8 +243,8 @@ def env_bool(name: str, default: bool) -> bool:
 def normalize_tts_engine(value: Optional[str]) -> str:
     normalized = (value or "").strip().lower()
     if not normalized:
-        return "windows"
-    if normalized in {"windows", "kokoro"}:
+        return "piper"
+    if normalized in {"windows", "kokoro", "piper"}:
         return normalized
     return normalized
 
@@ -637,6 +641,137 @@ class WindowsTtsProvider(BaseProvider):
 
     def synthesize(self, text: str, request_id: str) -> Tuple[bytes, int]:
         raise RuntimeError("windows_engine_external_runtime")
+
+
+class PiperProvider(BaseProvider):
+    """TTS provider using piper.exe as a native subprocess."""
+
+    def __init__(self, voice_id: str):
+        super().__init__("piper", voice_id or "en_US-ryan-medium")
+        self.voice_id = voice_id or "en_US-ryan-medium"
+        self._piper_exe: Optional[Path] = None
+        self._model_path: Optional[Path] = None
+        self._config_path: Optional[Path] = None
+        self._sample_rate: int = 22050
+
+    def _resolve_paths(self) -> None:
+        """Locate piper.exe and the selected voice model files."""
+        if self._piper_exe is not None:
+            return
+
+        # Find piper.exe — check multiple candidate locations
+        for candidate in [
+            PIPER_ROOT / "piper.exe",
+            ROOT_DIR / "piper" / "piper.exe",
+            ROOT_DIR / "bin" / "piper.exe",
+        ]:
+            if candidate.is_file():
+                self._piper_exe = candidate
+                break
+
+        # Find voice model — check piper-voices/{voice_id}/ directory
+        voice_dir = PIPER_VOICES_ROOT / self.voice_id
+        onnx_path = voice_dir / f"{self.voice_id}.onnx"
+        config_path = voice_dir / f"{self.voice_id}.onnx.json"
+
+        if onnx_path.is_file():
+            self._model_path = onnx_path
+        if config_path.is_file():
+            self._config_path = config_path
+            try:
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                self._sample_rate = cfg.get("audio", {}).get("sample_rate", 22050)
+            except Exception:
+                pass
+
+    def file_probe(self) -> FileProbeResult:
+        self._resolve_paths()
+        missing = []
+        if self._piper_exe is None:
+            missing.append("piper.exe")
+        if self._model_path is None:
+            missing.append(f"piper-voices/{self.voice_id}/{self.voice_id}.onnx")
+        if self._config_path is None:
+            missing.append(f"piper-voices/{self.voice_id}/{self.voice_id}.onnx.json")
+
+        if missing:
+            return FileProbeResult(
+                installed=False,
+                missing=missing,
+                last_error="piper_files_missing",
+            )
+        return FileProbeResult(installed=True, missing=[], last_error="")
+
+    def engine_version(self) -> str:
+        return "piper-1.2.0"
+
+    def _run_init_probe(self) -> InitProbeResult:
+        try:
+            logger.info("[Piper] Running init probe (synthesizing test phrase)...")
+            wav_bytes, sr = self._synthesize_internal("Voice engine initialization check.")
+            if len(wav_bytes) < 44:
+                logger.warning("[Piper] Init probe returned empty audio (%d bytes)", len(wav_bytes))
+                return InitProbeResult(ready=False, startup_ms=0, last_error="piper_synthesis_empty")
+            logger.info("[Piper] Init probe passed (%d bytes, %d Hz)", len(wav_bytes), sr)
+            return InitProbeResult(ready=True, startup_ms=0, last_error="")
+        except Exception as exc:
+            logger.error("[Piper] Init probe FAILED: %s", exc, exc_info=True)
+            return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
+
+    def _synthesize_internal(self, text: str) -> Tuple[bytes, int]:
+        self._resolve_paths()
+        if self._piper_exe is None:
+            raise RuntimeError("piper_exe_not_found")
+        if self._model_path is None:
+            raise RuntimeError("piper_model_not_found")
+
+        # Run piper.exe as a one-shot subprocess:
+        #   echo "text" | piper.exe --model X.onnx --output_raw
+        # stdout = raw PCM16 mono at the model's sample rate
+        cmd = [
+            str(self._piper_exe),
+            "--model", str(self._model_path),
+            "--output_raw",
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=text.encode("utf-8"),
+                capture_output=True,
+                timeout=30,
+                cwd=str(self._piper_exe.parent),
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("piper_synthesis_timeout")
+        except FileNotFoundError:
+            raise RuntimeError("piper_exe_not_found")
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            logger.error("[Piper] Synthesis failed (exit %d): %s", result.returncode, stderr[:500])
+            raise RuntimeError(f"piper_synthesis_failed: {stderr[:200]}")
+
+        raw_pcm = result.stdout
+        if len(raw_pcm) == 0:
+            raise RuntimeError("piper_synthesis_empty")
+
+        # Convert raw PCM16 mono to WAV
+        output = io.BytesIO()
+        with wave.open(output, "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(self._sample_rate)
+            writer.writeframes(raw_pcm)
+        return output.getvalue(), self._sample_rate
+
+    def synthesize(self, text: str, request_id: str) -> Tuple[bytes, int]:
+        probe = self.init_probe(force=False)
+        if not probe.ready:
+            raise RuntimeError(probe.last_error or "piper_not_ready")
+        wav_bytes, sample_rate = self._synthesize_internal(text)
+        logger.info("TTS [%s] piper voice=%s bytes=%d", request_id, self.voice_id, len(wav_bytes))
+        return wav_bytes, sample_rate
 
 
 def convert_audio_to_wav_bytes(audio_data: Any, sample_rate: int) -> bytes:
@@ -1193,6 +1328,8 @@ class Qwen3AsrProvider(BaseProvider):
 
 def create_tts_provider(engine: str, model_id: str, voice_id: str) -> BaseProvider:
     normalized = normalize_tts_engine(engine)
+    if normalized == "piper":
+        return PiperProvider(voice_id=voice_id)
     if normalized == "windows":
         return WindowsTtsProvider()
     if normalized == "kokoro":
@@ -1240,7 +1377,9 @@ def build_runtime_config(
     resolved_tts_engine = normalize_tts_engine(tts_engine or os.environ.get("ST_VOICE_TTS_ENGINE"))
     resolved_tts_model = (tts_model_id or os.environ.get("ST_VOICE_TTS_MODEL_ID") or "").strip()
     resolved_tts_voice = (tts_voice_id or os.environ.get("ST_VOICE_TTS_VOICE_ID") or "").strip()
-    if resolved_tts_engine == "kokoro" and not resolved_tts_voice:
+    if resolved_tts_engine == "piper" and not resolved_tts_voice:
+        resolved_tts_voice = "en_US-ryan-medium"
+    elif resolved_tts_engine == "kokoro" and not resolved_tts_voice:
         resolved_tts_voice = "bm_lewis"
     resolved_device = (stt_device or os.environ.get("WHISPER_DEVICE") or "cpu").strip().lower() or "cpu"
     resolved_port = port or int(os.environ.get("PORT", "8001"))
@@ -1967,6 +2106,87 @@ async def youtube_job_cancel(job_id: str, request: Request):
     state_with_request = dict(state)
     state_with_request["requestId"] = request_id
     return JSONResponse(state_with_request, headers={"X-Request-Id": request_id})
+
+
+@app.post("/api/piper/download")
+async def piper_download_voice(request: Request):
+    """Download a Piper voice from HuggingFace into piper-voices/."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body."}, status_code=400)
+
+    voice_id = (body.get("voiceId") or "").strip()
+    if not voice_id:
+        return JSONResponse({"error": "voiceId is required."}, status_code=400)
+
+    # Load catalog
+    catalog_path = PIPER_CATALOG_PATH
+    if not catalog_path.is_file():
+        # Try voice-backend directory via env var fallback
+        vb_dir = os.environ.get("ST_VOICE_PIPER_ROOT")
+        if vb_dir:
+            catalog_path = Path(vb_dir).parent / "piper_voice_catalog.json"
+    if not catalog_path.is_file():
+        return JSONResponse({"error": "piper_voice_catalog.json not found."}, status_code=500)
+
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to read catalog: {exc}"}, status_code=500)
+
+    voices = catalog.get("voices", {})
+    entry = voices.get(voice_id)
+    if not entry:
+        return JSONResponse({"error": f"Voice '{voice_id}' not found in catalog."}, status_code=404)
+
+    onnx_url = entry.get("onnxUrl")
+    config_url = entry.get("configUrl")
+    if not onnx_url or not config_url:
+        return JSONResponse({"error": f"Voice '{voice_id}' has no download URLs."}, status_code=404)
+
+    voice_dir = PIPER_VOICES_ROOT / voice_id
+    onnx_dest = voice_dir / f"{voice_id}.onnx"
+    config_dest = voice_dir / f"{voice_id}.onnx.json"
+
+    # Skip if already installed
+    if onnx_dest.is_file() and config_dest.is_file():
+        return JSONResponse({
+            "ok": True,
+            "voiceId": voice_id,
+            "status": "already_installed",
+            "message": f"Voice '{voice_id}' is already installed.",
+        })
+
+    # Download files
+    from model_downloader import _download_file
+    try:
+        voice_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("[Piper Download] Downloading voice '%s'...", voice_id)
+
+        if not config_dest.is_file():
+            logger.info("[Piper Download] Fetching config: %s", config_url)
+            await asyncio.to_thread(_download_file, config_url, config_dest)
+
+        if not onnx_dest.is_file():
+            size = entry.get("sizeBytes")
+            logger.info("[Piper Download] Fetching model: %s (%s)", onnx_url,
+                        f"{size / 1048576:.0f} MB" if size else "unknown size")
+            await asyncio.to_thread(_download_file, onnx_url, onnx_dest, expected_size=size)
+
+        logger.info("[Piper Download] Voice '%s' installed successfully.", voice_id)
+        return JSONResponse({
+            "ok": True,
+            "voiceId": voice_id,
+            "status": "downloaded",
+            "message": f"Voice '{voice_id}' downloaded successfully.",
+        })
+    except Exception as exc:
+        logger.error("[Piper Download] Failed to download voice '%s': %s", voice_id, exc, exc_info=True)
+        return JSONResponse({
+            "error": f"Download failed: {exc}",
+            "voiceId": voice_id,
+        }, status_code=500)
 
 
 @app.post("/shutdown")

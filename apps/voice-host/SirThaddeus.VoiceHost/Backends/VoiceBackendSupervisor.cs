@@ -406,6 +406,16 @@ public sealed class VoiceBackendSupervisor : IDisposable
         startInfo.Environment["ST_VOICE_STT_LANGUAGE"] = _options.SttLanguage;
         startInfo.Environment["HF_HUB_DISABLE_PROGRESS_BAR"] = "0";
 
+        // Point Piper paths to the repo's voice-backend directory so server.py
+        // can find piper.exe and voice files even when run from a copied location.
+        var voiceBackendDir = ResolveVoiceBackendDirectory();
+        if (!string.IsNullOrWhiteSpace(voiceBackendDir))
+        {
+            startInfo.Environment["ST_VOICE_PIPER_ROOT"] = Path.Combine(voiceBackendDir, "piper");
+            startInfo.Environment["ST_VOICE_PIPER_VOICES_ROOT"] = Path.Combine(voiceBackendDir, "piper-voices");
+            startInfo.Environment["ST_VOICE_STT_MODEL_ROOT"] = Path.Combine(voiceBackendDir, "stt-models");
+        }
+
         // Compose an effective PATH from process + user + machine values so
         // child processes see recently installed tools without requiring logoff.
         var effectivePath = BuildEffectivePath();
@@ -746,6 +756,33 @@ public sealed class VoiceBackendSupervisor : IDisposable
     private static int SafeExitCode(Process process)
     {
         try { return process.ExitCode; } catch { return -1; }
+    }
+
+    private static string? ResolveVoiceBackendDirectory()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(baseDir);
+        while (dir is not null && !string.Equals(dir.Name, "apps", StringComparison.OrdinalIgnoreCase))
+            dir = dir.Parent;
+
+        if (dir is not null)
+        {
+            var voiceBackend = Path.Combine(dir.FullName, "voice-backend");
+            if (Directory.Exists(voiceBackend))
+                return voiceBackend;
+        }
+
+        // Fallback: check if the repo root has apps/voice-backend
+        var repoDir = new DirectoryInfo(baseDir);
+        for (var i = 0; i < 10 && repoDir?.Parent is not null; i++)
+        {
+            repoDir = repoDir.Parent;
+            var candidate = Path.Combine(repoDir.FullName, "apps", "voice-backend");
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
     public void Dispose()

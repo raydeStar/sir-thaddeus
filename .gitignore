@@ -80,6 +80,7 @@ __pycache__/
 # for canonical download URLs and SHA256 verification hashes.
 *.onnx
 !apps/voice-backend/voices/*/*.onnx
+!apps/voice-backend/piper-voices/**/*.onnx
 *.safetensors
 # Keep generated voice cache files ignored.
 apps/voice-backend/voices/*/*.npy
@@ -87,10 +88,16 @@ apps/voice-backend/voices/*/*.json
 !apps/voice-backend/voices/*/manifest.json
 # Vendored voice backend dependencies/assets (tracked via Git LFS).
 !apps/voice-backend/voices/*/*.bin
-!apps/voice-backend/stt-models/**
-!apps/voice-backend/bin/uv*.exe
+!apps/voice-backend/bin/uv.exe
+apps/voice-backend/bin/uvx.exe
 !apps/voice-backend/deps/wheels/*.whl
 !apps/voice-backend/runtime/python/**
+# STT models downloaded at runtime — do NOT commit the HuggingFace cache.
+apps/voice-backend/stt-models/.locks/
+apps/voice-backend/stt-models/models--*/
+# Piper TTS native binary + voice models (bundled).
+!apps/voice-backend/piper/
+!apps/voice-backend/piper-voices/
 apps/voice-backend/.seed-*/
 packages/requested-files.zip
 

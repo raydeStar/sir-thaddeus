@@ -14,6 +14,7 @@ namespace SirThaddeus.DesktopRuntime.Services;
 public sealed class LocalTtsHttpClient : IDisposable
 {
     private const string DefaultKokoroVoiceId = "bm_lewis";
+    private const string DefaultPiperVoiceId = "en_US-ryan-medium";
     private readonly HttpClient _httpClient;
     private readonly Func<string> _baseUrlProvider;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
@@ -226,9 +227,12 @@ public sealed class LocalTtsHttpClient : IDisposable
         if (!string.IsNullOrWhiteSpace(resolved))
             return resolved;
 
-        return string.Equals(voiceSettings.GetNormalizedTtsEngine(), "kokoro", StringComparison.OrdinalIgnoreCase)
-            ? DefaultKokoroVoiceId
-            : "";
+        var engine = voiceSettings.GetNormalizedTtsEngine();
+        if (string.Equals(engine, "kokoro", StringComparison.OrdinalIgnoreCase))
+            return DefaultKokoroVoiceId;
+        if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase))
+            return DefaultPiperVoiceId;
+        return "";
     }
 
     private static bool IsRetryableStartupStatusCode(HttpStatusCode statusCode)

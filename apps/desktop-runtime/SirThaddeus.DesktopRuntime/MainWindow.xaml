@@ -23,6 +23,7 @@
         <conv:StringToBrushConverter  x:Key="StringToBrush"/>
         <conv:UrlToImageConverter     x:Key="UrlToImage"/>
         <conv:MarkdownToFlowDocumentConverter x:Key="MarkdownToFlowDocument"/>
+        <conv:StringMatchConverter x:Key="StringMatchConverter"/>
 
     </Window.Resources>
 
@@ -450,7 +451,6 @@
                                                 Margin="6,0,8,0"
                                                 VerticalAlignment="Center"
                                                 Opacity="0"
-                                                IsHitTestVisible="False"
                                                 Click="OverflowBtn_Click"
                                                 Visibility="Collapsed">
                                             <Button.ContextMenu>
@@ -797,12 +797,33 @@
                             </Grid>
 
                             <DataTemplate.Triggers>
-                                <!-- ── Hover: reveal timestamp + overflow ── -->
+                                <!-- ── Hover: reveal timestamp + overflow (delayed fade-out) ── -->
                                 <Trigger SourceName="LedgerEntry" Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="TimeLabel" Property="Opacity" Value="1"/>
-                                    <Setter TargetName="TimeLabel" Property="IsHitTestVisible" Value="True"/>
-                                    <Setter TargetName="OverflowBtn" Property="Opacity" Value="1"/>
-                                    <Setter TargetName="OverflowBtn" Property="IsHitTestVisible" Value="True"/>
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard x:Name="ShowHoverElements">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="TimeLabel"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="0:0:0.08"/>
+                                                <DoubleAnimation Storyboard.TargetName="OverflowBtn"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="0:0:0.08"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <StopStoryboard BeginStoryboardName="ShowHoverElements"/>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="TimeLabel"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" BeginTime="0:0:0.45" Duration="0:0:0.2"/>
+                                                <DoubleAnimation Storyboard.TargetName="OverflowBtn"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" BeginTime="0:0:0.45" Duration="0:0:0.2"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                 </Trigger>
 
                                 <!-- ── Source cards when present ── -->
@@ -1311,6 +1332,7 @@
                     BorderThickness="0,0,0,1">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <RadioButton x:Name="SettingsSubGeneral" Content="General" IsChecked="True" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="General" Style="{StaticResource MemorySubTabStyle}"/>
+                    <RadioButton x:Name="SettingsSubVoice" Content="Voice" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Voice" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubMemory" Content="Memory" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Memory" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubProfile" Content="Profile" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Profile" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubLogs" Content="Logs" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Logs" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
@@ -2394,6 +2416,198 @@
                                 Command="{Binding RefreshCommand}"
                                 Style="{StaticResource MemoryActionButtonStyle}"
                                 Margin="0,0,8,0"/>
+                        <Button Content="Save Settings"
+                                Command="{Binding SaveCommand}"
+                                Style="{StaticResource SendButtonStyle}"
+                                Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             VOICE SETTINGS SUBTAB
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="VoiceSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <!-- TTS Engine Selection -->
+                    <TextBlock Text="TTS Engine"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Choose the text-to-speech engine. Piper is the recommended default — it's fast, local, and has no Python dependencies."
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <RadioButton Content="Piper (recommended)"
+                                     IsChecked="{Binding VoiceTtsEngine, Converter={StaticResource StringMatchConverter}, ConverterParameter=piper}"
+                                     GroupName="TtsEngineGroup"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,16,0"/>
+                        <RadioButton Content="Kokoro (advanced)"
+                                     IsChecked="{Binding VoiceTtsEngine, Converter={StaticResource StringMatchConverter}, ConverterParameter=kokoro}"
+                                     GroupName="TtsEngineGroup"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,16,0"/>
+                        <RadioButton Content="Windows"
+                                     IsChecked="{Binding VoiceTtsEngine, Converter={StaticResource StringMatchConverter}, ConverterParameter=windows}"
+                                     GroupName="TtsEngineGroup"
+                                     Foreground="{StaticResource TextBrush}"/>
+                    </StackPanel>
+
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,16"/>
+
+                    <!-- Piper Voice Selection -->
+                    <TextBlock Text="Voice"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Select an en_US voice for Piper TTS. Selecting a voice marked (download) will fetch it automatically (~60 MB)."
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <ComboBox ItemsSource="{Binding AvailablePiperVoices}"
+                              SelectedItem="{Binding SelectedPiperVoice, Mode=TwoWay}"
+                              IsEditable="False"
+                              Width="300"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              Style="{StaticResource DarkComboBoxStyle}"
+                              ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+
+                    <TextBlock Text="{Binding PiperVoiceDownloadStatus}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"
+                               Visibility="{Binding IsPiperStatusVisible, Converter={StaticResource BoolToVis}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsPiperVoiceDownloading}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,16"/>
+
+                    <!-- Voice Host Status -->
+                    <TextBlock Text="Voice Backend Status"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,0,8"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,6,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding VoiceHostIsRunning}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding VoiceHostMessage}"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="STT: "
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,4,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="faster-whisper"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="TTS: "
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,4,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding VoiceTtsEngine}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Save bar (reuses same commands as General settings) -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,10"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding StatusText}"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <Button Content="Save Settings"
                                 Command="{Binding SaveCommand}"
                                 Style="{StaticResource SendButtonStyle}"
