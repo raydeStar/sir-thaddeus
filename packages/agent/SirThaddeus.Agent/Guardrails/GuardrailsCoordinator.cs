@@ -105,7 +105,15 @@ public sealed class GuardrailsCoordinator : IGuardrailsCoordinator
             return false;
         }
 
-        return route.Intent is Intents.ChatOnly or Intents.LookupSearch or Intents.LookupFact or Intents.LookupNews or Intents.LookupDeepDive or Intents.GeneralTool or Intents.MemoryRead or Intents.MemoryWrite;
+        // Blocklist approach: allow guardrails for any intent except those that
+        // require physical tool interaction. The guardrails detector heuristic
+        // quickly filters out non-reasoning messages, so this is safe.
+        return route.Intent is not (
+            Intents.FileTask or
+            Intents.SystemTask or
+            Intents.ScreenObserve or
+            Intents.BrowseOnce or
+            Intents.OneShotDiscovery);
     }
 }
 

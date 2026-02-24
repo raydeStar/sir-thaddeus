@@ -118,9 +118,9 @@ public sealed class ReasoningGuardrailsPipeline
             ct => _entityExtractor.ExtractAsync(userMessage, ct),
             ExtractionStepTimeout,
             cancellationToken);
-        if (entities is null || entities.Options.Count == 0)
+        if (entities is null)
         {
-            WriteFallback("entity_or_option_extraction_failed");
+            WriteFallback("entity_extraction_failed");
             return null;
         }
 
@@ -141,6 +141,9 @@ public sealed class ReasoningGuardrailsPipeline
         var effectiveConstraints = MergeDeterministicConstraintHints(
             constraints.Constraints,
             userMessage);
+
+        var evaluator = new OptionEvaluator();
+        var evaluation = evaluator.Evaluate(userMessage, goal, entities, constraints);
 
         var breakdown = await RunBoundedAsync(
             ct => BuildFirstPrinciplesBreakdownAsync(userMessage, goal, entities, constraints, ct),
@@ -166,6 +169,23 @@ public sealed class ReasoningGuardrailsPipeline
         contextText.AppendLine($"- Pieces: {breakdown.Pieces}");
         contextText.AppendLine($"- Assembly: {breakdown.Assembly}");
 
+        if (evaluation is not null)
+        {
+            if (evaluation.Eliminations.Count > 0)
+            {
+                foreach (var elim in evaluation.Eliminations)
+                    contextText.AppendLine($"- ELIMINATED: '{elim.Label}' — {elim.Reason}");
+            }
+
+            var viableList = string.Join(", ", evaluation.ViableLabels.Select(l => $"'{l}'"));
+            if (evaluation.ViableLabels.Count == 1)
+                contextText.AppendLine($"- Remaining: {viableList} is the ONLY viable option");
+            else if (evaluation.ViableLabels.Count > 1)
+                contextText.AppendLine($"- Remaining viable options: {viableList} (best: '{evaluation.SelectedAction}')");
+
+            contextText.AppendLine($"- Scoring basis: {evaluation.ConstraintSummary}");
+        }
+
         if (!string.IsNullOrWhiteSpace(extraContext))
         {
             contextText.AppendLine();
@@ -190,7 +210,11 @@ public sealed class ReasoningGuardrailsPipeline
                 contextText + "\n" +
                 (userAsksForReasoning
                     ? "The user explicitly asked for reasoning. Give the direct answer first, then add a short 'Why:' section using Need/Pieces/Assembly in 2-4 bullets."
-                    : "The user did not ask for reasoning. Give only the final answer in <= 8 words with no explanation."))
+                    : "The user did not ask for reasoning. Give the direct answer in one short sentence (max 15 words). " +
+                      "Mention the key object or entity involved. " +
+                      "If the decomposed context reveals that ALL presented options are factually wrong, say NEITHER is correct and state the actual fact. " +
+                      "If options were ELIMINATED, explain that the remaining option is the only one that works — not merely better or more efficient. " +
+                      "If multiple options remain viable, recommend the best one."))
         };
 
         var finalLlm = await RunBoundedAsync(
@@ -209,7 +233,7 @@ public sealed class ReasoningGuardrailsPipeline
         var answerText = finalLlm.Content;
         var deterministicDecisionLine = string.Empty;
         if (TryApplyDeterministicFeasibilityDecision(
-                userMessage,
+                evaluation,
                 entities,
                 answerText,
                 out var corrected,
@@ -252,7 +276,7 @@ public sealed class ReasoningGuardrailsPipeline
     }
 
     private static bool TryApplyDeterministicFeasibilityDecision(
-        string? userMessage,
+        EvaluationDecision? evaluation,
         EntityExtraction entities,
         string answerText,
         out string correctedAnswer,
@@ -261,28 +285,71 @@ public sealed class ReasoningGuardrailsPipeline
         correctedAnswer = answerText;
         decisionLine = string.Empty;
 
-        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
-        var isCarWashWalkDrivePrompt =
-            lower.Contains("car wash", StringComparison.Ordinal) &&
-            lower.Contains("walk", StringComparison.Ordinal) &&
-            lower.Contains("drive", StringComparison.Ordinal);
-        if (!isCarWashWalkDrivePrompt)
+        if (evaluation is null || evaluation.EvaluatedOptions.Count < 2)
             return false;
 
-        var labels = entities.Options
-            .Select(o => (o.Label ?? string.Empty).Trim().ToLowerInvariant())
-            .Where(l => l.Length > 0)
-            .ToArray();
+        var sorted = evaluation.EvaluatedOptions
+            .OrderByDescending(o => o.Score)
+            .ToList();
+        var best = sorted[0];
+        var runnerUp = sorted[1];
 
-        var hasWalk = labels.Any(l => l.Contains("walk", StringComparison.Ordinal)) ||
-                      lower.Contains("walk", StringComparison.Ordinal);
-        var hasDrive = labels.Any(l => l.Contains("drive", StringComparison.Ordinal)) ||
-                       lower.Contains("drive", StringComparison.Ordinal);
-        if (!hasWalk || !hasDrive)
+        // Only correct if there's a clear scoring gap
+        if (best.Score - runnerUp.Score < 1.5)
             return false;
 
-        correctedAnswer = "Drive.";
-        decisionLine = "for car-wash feasibility, choose the option that moves the car to the destination (drive over walk)";
+        // Check if the LLM answer already mentions the best option with correct framing.
+        // When alternatives were eliminated, also verify the answer conveys necessity
+        // (not just preference) before skipping correction.
+        var answerLower = (answerText ?? "").ToLowerInvariant();
+        var bestLower = best.Label.ToLowerInvariant();
+        if (answerLower.Contains(bestLower, StringComparison.Ordinal))
+        {
+            if (evaluation.Eliminations.Count > 0 && evaluation.ViableLabels.Count == 1)
+            {
+                var hasNecessityFraming =
+                    answerLower.Contains("only option", StringComparison.Ordinal) ||
+                    answerLower.Contains("only viable", StringComparison.Ordinal) ||
+                    answerLower.Contains("only choice", StringComparison.Ordinal) ||
+                    answerLower.Contains("only way", StringComparison.Ordinal) ||
+                    answerLower.Contains("must ", StringComparison.Ordinal) ||
+                    answerLower.Contains("have to", StringComparison.Ordinal) ||
+                    answerLower.Contains("no other", StringComparison.Ordinal);
+                if (hasNecessityFraming)
+                    return false;
+                // Falls through to correction — LLM chose the right action but with wrong framing.
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        var bestLabel = best.Label.Trim();
+        var entityNames = entities.Entities
+            .Where(e => e.Required)
+            .Select(e => e.Name)
+            .ToList();
+
+        var capitalizedBest = $"{char.ToUpperInvariant(bestLabel[0])}{bestLabel[1..]}";
+
+        if (evaluation.Eliminations.Count > 0 && evaluation.ViableLabels.Count == 1)
+        {
+            var eliminated = evaluation.Eliminations[0];
+            correctedAnswer = entityNames.Count > 0
+                ? $"{capitalizedBest} \u2014 '{eliminated.Label}' {eliminated.Reason}, so it's the only option."
+                : $"{capitalizedBest} \u2014 it's the only viable option.";
+        }
+        else if (entityNames.Count > 0)
+        {
+            var entityText = string.Join(" and ", entityNames);
+            correctedAnswer = $"{capitalizedBest} \u2014 you need the {entityText} there.";
+        }
+        else
+        {
+            correctedAnswer = $"{capitalizedBest}.";
+        }
+        decisionLine = $"deterministic evaluation selected '{best.Label}' over '{runnerUp.Label}' ({evaluation.ConstraintSummary})";
         return true;
     }
 
@@ -303,7 +370,9 @@ public sealed class ReasoningGuardrailsPipeline
         var messages = new List<ChatMessage>
         {
             ChatMessage.System(
-                "Break this into first principles. Return strict JSON only with keys: need, pieces, assembly."),
+                "Break this into first principles. " +
+                "Consider what must physically be present at the destination for the service to succeed. " +
+                "Return strict JSON only with keys: need, pieces, assembly."),
             ChatMessage.User(
                 "Question:\n" + userMessage + "\n\n" +
                 "Answer these internal questions:\n" +
@@ -320,13 +389,17 @@ public sealed class ReasoningGuardrailsPipeline
         if (string.IsNullOrWhiteSpace(response.Content))
             return null;
 
-        var cleaned = response.Content.Trim();
+        var cleaned = StripCodeFence(response.Content.Trim());
         try
         {
             using var doc = JsonDocument.Parse(cleaned);
             var root = doc.RootElement;
             var need = root.TryGetProperty("need", out var needEl) ? needEl.GetString() : null;
-            var pieces = root.TryGetProperty("pieces", out var piecesEl) ? piecesEl.GetString() : null;
+            var pieces = root.TryGetProperty("pieces", out var piecesEl)
+                ? piecesEl.ValueKind == JsonValueKind.Array
+                    ? string.Join(", ", piecesEl.EnumerateArray().Select(e => e.GetString() ?? ""))
+                    : piecesEl.GetString()
+                : null;
             var assembly = root.TryGetProperty("assembly", out var assemblyEl) ? assemblyEl.GetString() : null;
 
             if (string.IsNullOrWhiteSpace(need) ||
@@ -344,6 +417,24 @@ public sealed class ReasoningGuardrailsPipeline
         }
     }
 
+    private static string StripCodeFence(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
+            return trimmed;
+
+        var firstBreak = trimmed.IndexOf('\n');
+        if (firstBreak < 0)
+            return trimmed.Trim('`', ' ');
+
+        var inner = trimmed[(firstBreak + 1)..];
+        var closing = inner.LastIndexOf("```", StringComparison.Ordinal);
+        if (closing >= 0)
+            inner = inner[..closing];
+
+        return inner.Trim();
+    }
+
     private static IReadOnlyList<string> MergeDeterministicConstraintHints(
         IReadOnlyList<string> baseConstraints,
         string userMessage)
@@ -351,19 +442,15 @@ public sealed class ReasoningGuardrailsPipeline
         var merged = new List<string>(baseConstraints.Where(c => !string.IsNullOrWhiteSpace(c)));
         var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
 
-        var looksLikeCarWashChoice =
-            lower.Contains("car wash", StringComparison.Ordinal) &&
-            ((lower.Contains("walk", StringComparison.Ordinal) && lower.Contains("drive", StringComparison.Ordinal)) ||
-             lower.Contains("walk or drive", StringComparison.Ordinal) ||
-             lower.Contains("drive or walk", StringComparison.Ordinal));
-
-        if (looksLikeCarWashChoice)
+        var requiredEntities = EntityRequirementHeuristics.DetectRequiredEntities(lower);
+        if (requiredEntities.Count > 0)
         {
-            const string feasibilityConstraint =
-                "Feasibility: the car must physically arrive at the car wash; prefer actions that move the car to the destination.";
+            var entityList = string.Join(", ", requiredEntities);
+            var feasibilityConstraint =
+                $"Feasibility: the required object(s) ({entityList}) must physically arrive at the destination; prefer the action that transports them there.";
 
-            if (!merged.Any(c => c.Contains("car wash", StringComparison.OrdinalIgnoreCase) ||
-                                 c.Contains("physically arrive", StringComparison.OrdinalIgnoreCase)))
+            if (!merged.Any(c => c.Contains("physically arrive", StringComparison.OrdinalIgnoreCase) ||
+                                 c.Contains("must physically", StringComparison.OrdinalIgnoreCase)))
             {
                 merged.Add(feasibilityConstraint);
             }
@@ -436,19 +523,26 @@ internal sealed class GuardrailsDetector
     private readonly ILlmClient _llm;
 
     private static readonly Regex DistanceCueRegex = new(
-        @"\b\d+\s*(?:m|meter|meters|km|minute|minutes|min|away)\b",
+        @"\b\d+\s*(?:m|meter|meters|km|mile|miles|mi|block|blocks|minute|minutes|min|hour|hours|hr|hrs|feet|ft|yard|yards|away)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ServiceCueRegex = new(
-        @"\b(?:gas station|car wash|airport|pharmacy|ups store|post office|bank|hardware store|library|garage|hotel|dry[-\s]?clean(?:ing|er)|repair shop|mechanic)\b",
+        @"\b(?:gas station|car wash|airport|pharmacy|ups store|post office|bank|hardware store|library|garage|hotel|dry[-\s]?clean(?:ing|er)|repair shop|mechanic|grocery store|supermarket|hospital|clinic|dentist|gym|restaurant|mall|laundromat|vet(?:erinarian)?|school|theater|cinema|barber|salon)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex RequiredObjectCueRegex = new(
-        @"\b(?:car|passport|prescription|package|key|id|license|ticket|jacket|laptop|device)\b",
+        @"\b(?:car|passport|prescription|package|key|id|license|ticket|jacket|laptop|device|phone|wallet|bag|luggage|suitcase|document|briefcase|umbrella|glasses|medication|camera|book)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ChoicePatternRegex = new(
-        @"\b(?:should i|do i|would it be better to|is it better to)\b[\s\S]{0,120}\bor\b",
+        @"\b(?:" +
+            @"should (?:i|you|we|he|she|they)|" +
+            @"do (?:i|you|we)|" +
+            @"would (?:it be better to|you rather)|" +
+            @"is it better to|" +
+            @"which (?:is|are|was|were|would be) \w+|" +
+            @"which (?:one|option)" +
+        @")\b[\s\S]{0,120}\b(?:or|vs\.?|versus)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public GuardrailsDetector(ILlmClient llm)
@@ -474,8 +568,17 @@ internal sealed class GuardrailsDetector
         var hasNeedsCue = lower.Contains("needs ", StringComparison.Ordinal) ||
                           lower.Contains("requires ", StringComparison.Ordinal) ||
                           lower.Contains("before ", StringComparison.Ordinal);
+        var hasEvaluativeCue =
+            lower.Contains("which is correct", StringComparison.Ordinal) ||
+            lower.Contains("which is right", StringComparison.Ordinal) ||
+            lower.Contains("which is true", StringComparison.Ordinal) ||
+            lower.Contains("which are correct", StringComparison.Ordinal) ||
+            lower.Contains("true or false", StringComparison.Ordinal) ||
+            lower.Contains("weighs more", StringComparison.Ordinal) ||
+            lower.Contains("heavier", StringComparison.Ordinal) ||
+            lower.Contains("more expensive", StringComparison.Ordinal);
 
-        if (hasChoicePattern && (hasServiceCue || hasRequiredObjectCue || hasDistanceCue || hasNeedsCue))
+        if (hasChoicePattern && (hasServiceCue || hasRequiredObjectCue || hasDistanceCue || hasNeedsCue || hasEvaluativeCue))
         {
             var risk = hasDistanceCue || hasServiceCue ? "high" : "medium";
             var why = hasDistanceCue
@@ -616,7 +719,10 @@ internal sealed class GoalInferencer
         {
             ChatMessage.System(
                 "Infer the practical real-world goal. \n" +
-                "IMPORTANT: Look for destination-based requirements. If the destination is a 'car wash', the goal is to WASH THE CAR. YOU MUST BRING THE CAR TO THE CAR WASH. Walking is NOT an option for washing a car.\n" +
+                "IMPORTANT: Consider what the destination or service fundamentally acts upon. " +
+                "If a destination provides a service for a specific object (e.g. a car wash services cars, " +
+                "a gas station services vehicles, a repair shop services items), the goal includes " +
+                "bringing that object to the destination.\n" +
                 "Return STRICT JSON only: " +
                 "{\"primary_goal\":\"...\",\"alternative_goals\":[\"...\"],\"confidence\":0.0}"),
             ChatMessage.User(userMessage)
@@ -925,7 +1031,7 @@ internal sealed class EntityExtractor
     private readonly ILlmClient _llm;
 
     private static readonly Regex ChoiceRegex = new(
-        @"\b(?:should\s+(?:i|you|we|he|she|they)|do\s+(?:i|you|we)|is it better to|would it be better to)\s+(?<a>.+?)\s+or\s+(?<b>.+?)(?:[?.!]|$)",
+        @"\b(?:should\s+(?:i|you|we|he|she|they)|do\s+(?:i|you|we)|is it better to|would it be better to|would you rather|which\s+(?:is|are|was|were|would be)\s+\w+[:\s]+)\s*(?<a>.+?)\s+or\s+(?<b>.+?)(?:[?.!]|$)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public EntityExtractor(ILlmClient llm)
@@ -963,9 +1069,9 @@ internal sealed class EntityExtractor
             // Return heuristic fallback.
         }
 
-        return heuristic.Options.Count >= 2
-            ? heuristic with { LlmRoundTrips = 0 }
-            : null;
+        // Return heuristic even with < 2 options — the pipeline can still
+        // use entities + breakdown for synthesis. The evaluator handles 0 options.
+        return heuristic with { LlmRoundTrips = 0 };
     }
 
     private static EntityExtraction ExtractHeuristically(string text)
@@ -1219,6 +1325,7 @@ internal sealed class ConstraintBuilder
         {
             ChatMessage.System(
                 "Build first-principles constraints for selecting the correct option. " +
+                "Consider whether each option can physically deliver required objects to the destination. " +
                 "Return STRICT JSON only: {\"constraints\":[\"...\"]}. " +
                 "Each constraint must be short and testable."),
             ChatMessage.User(
@@ -1333,10 +1440,17 @@ internal sealed record EvaluatedOption(
     string Notes,
     int PrinciplePassCount);
 
+internal sealed record EliminationEntry(string Label, string Reason);
+
 internal sealed record EvaluationDecision(
     string SelectedAction,
     string ConstraintSummary,
-    IReadOnlyList<EvaluatedOption> EvaluatedOptions);
+    IReadOnlyList<EvaluatedOption> EvaluatedOptions,
+    IReadOnlyList<string> ViableLabels,
+    IReadOnlyList<EliminationEntry> Eliminations)
+{
+    public bool AlternativeNonViable => Eliminations.Count > 0;
+}
 
 internal sealed class OptionEvaluator
 {
@@ -1610,6 +1724,18 @@ internal sealed class OptionEvaluator
         if (selected is null)
             return null;
 
+        var eliminations = new List<EliminationEntry>();
+        var viableLabels = new List<string>();
+
+        foreach (var opt in results)
+        {
+            var reason = DeriveEliminationReason(opt, requiredEntities);
+            if (reason is not null)
+                eliminations.Add(new EliminationEntry(opt.Label, reason));
+            else
+                viableLabels.Add(opt.Label);
+        }
+
         var constraintSummary = BuildFirstPrinciplesConstraintSummary(
             goal,
             constraints,
@@ -1619,7 +1745,9 @@ internal sealed class OptionEvaluator
         return new EvaluationDecision(
             SelectedAction: selected.Label,
             ConstraintSummary: constraintSummary,
-            EvaluatedOptions: results);
+            EvaluatedOptions: results,
+            ViableLabels: viableLabels,
+            Eliminations: eliminations);
     }
 
     private static bool IsActionLikeOptionLabel(string label)
@@ -1699,6 +1827,29 @@ internal sealed class OptionEvaluator
     {
         return EntityRequirementHeuristics.OptionMentionsEntity(optionLabelLower, entityName) ||
                EntityRequirementHeuristics.OptionImpliesEntityUsage(optionLabelLower, entityName);
+    }
+
+    private static string? DeriveEliminationReason(
+        EvaluatedOption option,
+        IReadOnlyList<EntityFact> requiredEntities)
+    {
+        var notes = option.Notes ?? "";
+
+        var missingEntities = requiredEntities
+            .Where(e => notes.Contains($"missing_{e.Name}", StringComparison.Ordinal))
+            .Select(e => e.Name)
+            .ToList();
+
+        if (missingEntities.Count > 0)
+        {
+            var entityList = string.Join(" and ", missingEntities);
+            return $"does not bring the {entityList} to the destination";
+        }
+
+        if (notes.Contains("fails_physical_principle", StringComparison.Ordinal))
+            return "fails physical feasibility";
+
+        return null;
     }
 
     private static string BuildFirstPrinciplesConstraintSummary(
@@ -1797,9 +1948,9 @@ internal static class AnswerComposer
     {
         var altNotes = (alternative.Notes ?? "").ToLowerInvariant();
         if (altNotes.Contains("missing_", StringComparison.Ordinal))
-            return "it misses required prerequisites";
+            return "it cannot accomplish the goal without the required object";
         if (altNotes.Contains("fails_physical_principle", StringComparison.Ordinal))
-            return "it is less physically feasible";
+            return "it fails to satisfy physical feasibility";
         if (altNotes.Contains("indirect_action", StringComparison.Ordinal))
             return "it is more indirect";
         if (altNotes.Contains("goal_progress_risk", StringComparison.Ordinal))

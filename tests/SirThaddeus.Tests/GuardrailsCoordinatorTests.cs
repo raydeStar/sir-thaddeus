@@ -159,7 +159,9 @@ public class GuardrailsCoordinatorTests
             mode: "always");
 
         Assert.NotNull(result);
-        Assert.Contains("Feasibility: the car must physically arrive at the car wash", finalUserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Feasibility:", finalUserPrompt, StringComparison.Ordinal);
+        Assert.Contains("car", finalUserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("physically arrive", finalUserPrompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -188,7 +190,8 @@ public class GuardrailsCoordinatorTests
             mode: "always");
 
         Assert.NotNull(result);
-        Assert.Equal("Drive.", result!.AnswerText);
+        Assert.Contains("Drive", result!.AnswerText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("car", result!.AnswerText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Decision:", result.RationaleLines.Last(), StringComparison.Ordinal);
     }
 
