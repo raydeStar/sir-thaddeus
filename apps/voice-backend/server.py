@@ -1043,23 +1043,30 @@ class KokoroProvider(BaseProvider):
 
 
 class FasterWhisperProvider(BaseProvider):
+    # Ordered fallback chain for CPU compute types.  If one causes a native
+    # crash the next restart reads the crash marker and tries the next safer
+    # type.  "exhausted" is a sentinel meaning every type has been tried.
+    _CPU_COMPUTE_CHAIN = ["int8", "auto", "float32"]
+
     def __init__(self, model_id: str, device: str, language: str):
         super().__init__("faster-whisper", model_id)
         self._device = (device or "cpu").strip().lower() or "cpu"
         self._language = normalize_stt_language(language)
         self._model = None
+        # _download_root must be set before _pick_compute_type (marker path).
         self._download_root = (
             (os.environ.get("ST_VOICE_STT_MODEL_ROOT") or "").strip()
             or str(STT_MODELS_ROOT)
         )
+        self._stt_disabled = False
+        self._stt_disabled_reason = ""
         self._compute_type = self._pick_compute_type()
         self._local_files_only = env_bool("ST_VOICE_OFFLINE", False)
 
-    # Ordered fallback chain: if int8 causes a native crash, the next
-    # restart promotes the marker and we try the next safer type.
-    _CPU_COMPUTE_CHAIN = ["int8", "auto", "float32"]
+    # ── Crash-resilient compute type selection ──────────────────────────
 
     def _pick_compute_type(self) -> str:
+        """Choose compute_type, consulting the crash marker for prior failures."""
         if self._device != "cpu":
             return "float16"
         marker = self._crash_marker_path()
@@ -1069,10 +1076,37 @@ class FasterWhisperProvider(BaseProvider):
             except Exception:
                 crashed_type = ""
             chain = self._CPU_COMPUTE_CHAIN
-            idx = chain.index(crashed_type) + 1 if crashed_type in chain else 1
-            pick = chain[min(idx, len(chain) - 1)]
+            if crashed_type == "exhausted":
+                # Every type already crashed -- give up on STT entirely.
+                self._stt_disabled = True
+                self._stt_disabled_reason = (
+                    "Speech recognition is unavailable. All compute types crashed. "
+                    "Install Visual C++ Redistributable: "
+                    "https://aka.ms/vs/17/release/vc_redist.x64.exe "
+                    "then delete the file: " + str(marker)
+                )
+                logger.error("STT DISABLED: %s", self._stt_disabled_reason)
+                return chain[-1]  # value doesn't matter, STT won't run
+            idx = (chain.index(crashed_type) + 1) if crashed_type in chain else 1
+            if idx >= len(chain):
+                # Last type in chain also crashed -- mark exhausted and disable.
+                try:
+                    marker.write_text("exhausted")
+                except Exception:
+                    pass
+                self._stt_disabled = True
+                self._stt_disabled_reason = (
+                    "Speech recognition is unavailable. All compute types crashed. "
+                    "Install Visual C++ Redistributable: "
+                    "https://aka.ms/vs/17/release/vc_redist.x64.exe "
+                    "then delete the file: " + str(marker)
+                )
+                logger.error("STT DISABLED: %s", self._stt_disabled_reason)
+                return chain[-1]
+            pick = chain[idx]
             logger.warning(
-                "Previous model load crashed with compute_type=%s; falling back to %s",
+                "Previous model load crashed with compute_type=%s; "
+                "falling back to %s",
                 crashed_type, pick,
             )
             return pick
@@ -1115,6 +1149,12 @@ class FasterWhisperProvider(BaseProvider):
         return self._device
 
     def file_probe(self) -> FileProbeResult:
+        if self._stt_disabled:
+            return FileProbeResult(
+                installed=False,
+                missing=["native_runtime:vcredist"],
+                last_error=self._stt_disabled_reason or "stt_disabled_all_compute_types_crashed",
+            )
         try:
             importlib.import_module("faster_whisper")
         except Exception as exc:
@@ -1132,6 +1172,11 @@ class FasterWhisperProvider(BaseProvider):
         return FileProbeResult(installed=True, missing=[], last_error="")
 
     def _run_init_probe(self) -> InitProbeResult:
+        if self._stt_disabled:
+            return InitProbeResult(
+                ready=False, startup_ms=0,
+                last_error=self._stt_disabled_reason or "stt_disabled_all_compute_types_crashed",
+            )
         try:
             from faster_whisper import WhisperModel
 
@@ -1177,7 +1222,7 @@ class FasterWhisperProvider(BaseProvider):
 
                 # Write crash marker BEFORE the native call.  If the process
                 # dies inside WhisperModel(), the marker survives and the next
-                # restart will pick a safer compute_type.
+                # restart will pick a safer compute_type (or disable STT).
                 self._set_crash_marker()
 
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
@@ -1205,6 +1250,9 @@ class FasterWhisperProvider(BaseProvider):
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
 
     def transcribe(self, audio_bytes: bytes, request_id: str) -> str:
+        if self._stt_disabled:
+            raise RuntimeError(self._stt_disabled_reason or "stt_disabled_all_compute_types_crashed")
+
         # Lazy-load: requires_init_probe is False so init_probe() skips
         # _run_init_probe(). Load the model on first real ASR request instead
         # of at startup (avoids native access violations on some fresh Windows).
