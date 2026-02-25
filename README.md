@@ -97,6 +97,8 @@ sir-thaddeus/
 │   ├── voice-backend/                # Python ASR/TTS backend + model/voice assets
 │   └── mcp-server/                   # MCP tool server (stdio)
 │       └── Tools/                    # Memory, Browser, File, System, Screen, WebSearch
+├── assets/
+│   └── manifest.json                 # SHA-256 checksums + download URLs for voice assets
 ├── packages/
 │   ├── agent/                        # Agent orchestration loop + policy gate + router
 │   ├── llm-client/                   # LM Studio / OpenAI-compatible client + embeddings
@@ -104,7 +106,7 @@ sir-thaddeus/
 │   ├── memory-sqlite/                # SQLite-backed IMemoryStore (WAL mode, FTS5)
 │   ├── web-search/                   # Web search providers (DuckDuckGo, Google News, SearXNG)
 │   ├── config/                       # %LOCALAPPDATA% settings.json management
-│   ├── core/                         # State machine, runtime controller
+│   ├── core/                         # State machine, runtime controller, asset manager
 │   ├── audit-log/                    # JSONL audit logging
 │   ├── permission-broker/            # Time-boxed permission token management
 │   ├── tool-runner/                  # Tool execution with permission enforcement
@@ -124,6 +126,7 @@ sir-thaddeus/
 - **LM Studio** (or any OpenAI-compatible local server)
   - Default expected base URL: `http://localhost:1234`
   - Endpoints used: `/v1/chat/completions`, `/v1/embeddings` (optional)
+- **Internet connection on first run** — voice backend assets (~320 MB total) are downloaded automatically from GitHub Releases during the onboarding wizard. After the first run, the app works fully offline.
 
 ## Configuration
 
@@ -205,6 +208,9 @@ Sir Thaddeus is local-first by design.
 ```powershell
 # First-time setup / restore
 .\dev\bootstrap.ps1
+
+# Fetch voice backend assets from GitHub Releases (dev/CI)
+.\dev\fetch-assets.ps1
 
 # Fast local loop (Debug build + tests)
 .\dev\test.ps1
@@ -315,6 +321,22 @@ Use this list when you want reviewers to focus on architecture first, not implem
 - [project-notes/tool-conflict-matrix.md](project-notes/tool-conflict-matrix.md) - deterministic tool conflict resolution rules
 - [project-notes/tool-routing-v2.md](project-notes/tool-routing-v2.md) - current routing pipeline notes + MCP hook points
 - [project-notes/architectural-design.md](project-notes/architectural-design.md) - product-level architecture strategy
+
+## Voice backend assets
+
+Large binary assets (Python runtime, STT/TTS models, wheel packages) are hosted on GitHub Releases under the `assets-v1` tag instead of being checked into the repo.
+
+| Asset | Size | Description |
+|---|---|---|
+| `voice-runtime-win-x64.zip` | 43 MB | Python 3.11 runtime + uv package manager |
+| `voice-deps-win-x64.zip` | 72 MB | Python wheel packages for voice backend |
+| `piper-win-x64.zip` | 21 MB | Piper TTS native binary + espeak DLLs |
+| `piper-voice-en_US-john-medium.zip` | 56 MB | Piper voice model |
+| `stt-model-whisper-base.zip` | 127 MB | Faster-Whisper base STT model |
+
+**End users**: Assets are downloaded automatically during the first-run onboarding wizard. No manual steps required.
+
+**Developers**: Run `dev\fetch-assets.ps1` after cloning, or let `VoiceBackendSupervisor` auto-fetch on first voice use. The manifest is at `assets/manifest.json`.
 
 ## Known gaps (intentionally called out)
 
