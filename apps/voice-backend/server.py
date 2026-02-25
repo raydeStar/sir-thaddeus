@@ -1046,7 +1046,7 @@ class FasterWhisperProvider(BaseProvider):
     # Ordered fallback chain for CPU compute types.  If one causes a native
     # crash the next restart reads the crash marker and tries the next safer
     # type.  "exhausted" is a sentinel meaning every type has been tried.
-    _CPU_COMPUTE_CHAIN = ["int8", "auto", "float32"]
+    _CPU_COMPUTE_CHAIN = ["int8", "int8_float32", "float32"]
 
     def __init__(self, model_id: str, device: str, language: str):
         super().__init__("faster-whisper", model_id)
@@ -1062,6 +1062,7 @@ class FasterWhisperProvider(BaseProvider):
         self._stt_disabled_reason = ""
         self._compute_type = self._pick_compute_type()
         self._local_files_only = env_bool("ST_VOICE_OFFLINE", False)
+        self._transcribe_lock = threading.Lock()
 
     # ── Crash-resilient compute type selection ──────────────────────────
 
@@ -1072,38 +1073,47 @@ class FasterWhisperProvider(BaseProvider):
         marker = self._crash_marker_path()
         if marker and marker.exists():
             try:
-                crashed_type = marker.read_text().strip()
+                crashed_type = self._normalize_compute_type_token(marker.read_text().strip())
             except Exception:
                 crashed_type = ""
             chain = self._CPU_COMPUTE_CHAIN
             if crashed_type == "exhausted":
-                # Every type already crashed -- give up on STT entirely.
-                self._stt_disabled = True
-                self._stt_disabled_reason = (
-                    "Speech recognition is unavailable. All compute types crashed. "
-                    "Install Visual C++ Redistributable: "
-                    "https://aka.ms/vs/17/release/vc_redist.x64.exe "
-                    "then delete the file: " + str(marker)
+                # Keep service bootable even if a stale exhausted marker exists.
+                # We still retry the safest CPU mode and let runtime crashes update
+                # the marker naturally.
+                pick = chain[-1]
+                logger.warning(
+                    "Found exhausted STT crash marker; retrying with compute_type=%s",
+                    pick,
                 )
-                logger.error("STT DISABLED: %s", self._stt_disabled_reason)
-                return chain[-1]  # value doesn't matter, STT won't run
-            idx = (chain.index(crashed_type) + 1) if crashed_type in chain else 1
+                return pick
+
+            idx = (chain.index(crashed_type) + 1) if crashed_type in chain else 0
             if idx >= len(chain):
-                # Last type in chain also crashed -- mark exhausted and disable.
+                # We have no new fallback type left. Keep retrying the safest
+                # mode so startup remains available instead of hard-disabling ASR.
+                pick = chain[-1]
                 try:
                     marker.write_text("exhausted")
                 except Exception:
                     pass
-                self._stt_disabled = True
-                self._stt_disabled_reason = (
-                    "Speech recognition is unavailable. All compute types crashed. "
-                    "Install Visual C++ Redistributable: "
-                    "https://aka.ms/vs/17/release/vc_redist.x64.exe "
-                    "then delete the file: " + str(marker)
+                logger.warning(
+                    "All STT compute types have crashed previously; retrying safest compute_type=%s",
+                    pick,
                 )
-                logger.error("STT DISABLED: %s", self._stt_disabled_reason)
-                return chain[-1]
+                return pick
+
             pick = chain[idx]
+            if pick == crashed_type:
+                # Defensive guard: avoid a self-loop if mapping/chain changes.
+                pick = chain[-1]
+                logger.warning(
+                    "Detected STT compute fallback self-loop for '%s'; retrying safest compute_type=%s",
+                    crashed_type,
+                    pick,
+                )
+                return pick
+
             logger.warning(
                 "Previous model load crashed with compute_type=%s; "
                 "falling back to %s",
@@ -1111,6 +1121,17 @@ class FasterWhisperProvider(BaseProvider):
             )
             return pick
         return self._CPU_COMPUTE_CHAIN[0]
+
+    @staticmethod
+    def _normalize_compute_type_token(raw_value: str) -> str:
+        value = (raw_value or "").strip().lower()
+        aliases = {
+            "auto": "int8_float32",
+            "default": "int8",
+            "fp32": "float32",
+            "float": "float32",
+        }
+        return aliases.get(value, value)
 
     def _crash_marker_path(self) -> Optional[Path]:
         if self._download_root:
@@ -1253,58 +1274,59 @@ class FasterWhisperProvider(BaseProvider):
         if self._stt_disabled:
             raise RuntimeError(self._stt_disabled_reason or "stt_disabled_all_compute_types_crashed")
 
-        # Lazy-load: requires_init_probe is False so init_probe() skips
-        # _run_init_probe(). Load the model on first real ASR request instead
-        # of at startup (avoids native access violations on some fresh Windows).
-        first_transcribe = self._model is None
-        if first_transcribe:
-            logger.info("Lazy-loading faster-whisper model on first ASR request (model=%s)", self.model_id)
-            probe = self._run_init_probe()
-            if not probe.ready or self._model is None:
-                raise RuntimeError(probe.last_error or "faster_whisper_model_load_failed")
-
-        if len(audio_bytes) < 100:
-            return ""
-
-        started = time.perf_counter()
-        fd, temp_path = tempfile.mkstemp(suffix=".wav")
-        try:
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(audio_bytes)
-            transcribe_kwargs: Dict[str, Any] = {
-                "beam_size": 1,
-                "condition_on_previous_text": False,
-            }
-            if self._language:
-                transcribe_kwargs["language"] = self._language
-
-            # First transcription can also trigger native access violations
-            # on some fresh Windows machines.  Arm the crash marker so the
-            # supervisor restart will try a safer compute_type.
+        with self._transcribe_lock:
+            # Lazy-load: requires_init_probe is False so init_probe() skips
+            # _run_init_probe(). Load the model on first real ASR request instead
+            # of at startup (avoids native access violations on some fresh Windows).
+            first_transcribe = self._model is None
             if first_transcribe:
-                self._set_crash_marker()
+                logger.info("Lazy-loading faster-whisper model on first ASR request (model=%s)", self.model_id)
+                probe = self._run_init_probe()
+                if not probe.ready or self._model is None:
+                    raise RuntimeError(probe.last_error or "faster_whisper_model_load_failed")
 
-            segments, _info = self._model.transcribe(temp_path, **transcribe_kwargs)
-            text = " ".join(segment.text for segment in segments).strip()
+            if len(audio_bytes) < 100:
+                return ""
 
-            if first_transcribe:
-                self._clear_crash_marker()
-
-            elapsed_ms = int((time.perf_counter() - started) * 1000.0)
-            logger.info("ASR [%s] faster-whisper bytes=%d elapsed=%dms", request_id, len(audio_bytes), elapsed_ms)
-            return text
-        except Exception as exc:
-            # Python-visible errors don't need the crash marker (process
-            # stays alive), so clear it to avoid an unnecessary downgrade.
-            if first_transcribe:
-                self._clear_crash_marker()
-            logger.error("FasterWhisper transcription error: %s", exc, exc_info=True)
-            raise
-        finally:
+            started = time.perf_counter()
+            fd, temp_path = tempfile.mkstemp(suffix=".wav")
             try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(audio_bytes)
+                transcribe_kwargs: Dict[str, Any] = {
+                    "beam_size": 1,
+                    "condition_on_previous_text": False,
+                }
+                if self._language:
+                    transcribe_kwargs["language"] = self._language
+
+                # First transcription can also trigger native access violations
+                # on some fresh Windows machines.  Arm the crash marker so the
+                # supervisor restart will try a safer compute_type.
+                if first_transcribe:
+                    self._set_crash_marker()
+
+                segments, _info = self._model.transcribe(temp_path, **transcribe_kwargs)
+                text = " ".join(segment.text for segment in segments).strip()
+
+                if first_transcribe:
+                    self._clear_crash_marker()
+
+                elapsed_ms = int((time.perf_counter() - started) * 1000.0)
+                logger.info("ASR [%s] faster-whisper bytes=%d elapsed=%dms", request_id, len(audio_bytes), elapsed_ms)
+                return text
+            except Exception as exc:
+                # Python-visible errors don't need the crash marker (process
+                # stays alive), so clear it to avoid an unnecessary downgrade.
+                if first_transcribe:
+                    self._clear_crash_marker()
+                logger.error("FasterWhisper transcription error: %s", exc, exc_info=True)
+                raise
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
 
 class Qwen3AsrProvider(BaseProvider):
