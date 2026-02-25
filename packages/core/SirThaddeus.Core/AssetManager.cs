@@ -6,9 +6,26 @@ using System.Text.Json.Serialization;
 namespace SirThaddeus.Core;
 
 /// <summary>
-/// Downloads, verifies, and caches binary assets from GitHub Releases.
-/// Assets are defined in assets/manifest.json and extracted to a local cache.
+/// Structured progress report emitted during asset downloads.
 /// </summary>
+public sealed record AssetProgress(
+    string AssetId,
+    string Description,
+    int AssetIndex,
+    int TotalAssets,
+    AssetProgressPhase Phase,
+    int DownloadPercent = 0);
+
+public enum AssetProgressPhase
+{
+    Checking,
+    Downloading,
+    Verifying,
+    Extracting,
+    Installed,
+    AlreadyInstalled
+}
+
 public sealed class AssetManager
 {
     private readonly AssetManifest _manifest;
@@ -40,29 +57,41 @@ public sealed class AssetManager
     {
         var asset = _manifest.Assets.FirstOrDefault(a => a.Id == assetId)
             ?? throw new ArgumentException($"Unknown asset: {assetId}");
+        await EnsureAssetAsync(asset, 0, 1, null, ct);
+    }
 
+    private async Task EnsureAssetAsync(AssetEntry asset, int index, int total, IProgress<AssetProgress>? progress, CancellationToken ct)
+    {
         var extractDir = Path.Combine(_repoRoot, asset.ExtractTo.Replace('/', Path.DirectorySeparatorChar));
         var markerPath = Path.Combine(extractDir, ".installed.marker");
+
+        progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Checking));
 
         if (File.Exists(markerPath))
         {
             var markerContent = await File.ReadAllTextAsync(markerPath, ct);
             if (markerContent.Trim() == asset.Sha256)
             {
-                _log?.Invoke($"Asset '{assetId}' already installed (sha256 matches).");
+                _log?.Invoke($"Asset '{asset.Id}' already installed (sha256 matches).");
+                progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.AlreadyInstalled));
                 return;
             }
         }
 
         var url = _manifest.BaseUrl + asset.Filename;
-        var tempZip = Path.Combine(Path.GetTempPath(), $"st-asset-{assetId}-{Guid.NewGuid():N}.zip");
+        var tempZip = Path.Combine(Path.GetTempPath(), $"st-asset-{asset.Id}-{Guid.NewGuid():N}.zip");
 
         try
         {
             _log?.Invoke($"Downloading {asset.Filename} ({asset.SizeBytes / (1024 * 1024)} MB) from {url} ...");
-            await DownloadFileAsync(url, tempZip, asset.SizeBytes, ct);
+            progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Downloading, 0));
+            await DownloadFileAsync(url, tempZip, asset.SizeBytes, pct =>
+            {
+                progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Downloading, pct));
+            }, ct);
 
             _log?.Invoke($"Verifying SHA-256 ...");
+            progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Verifying));
             var actualHash = await ComputeSha256Async(tempZip, ct);
             if (!string.Equals(actualHash, asset.Sha256, StringComparison.OrdinalIgnoreCase))
             {
@@ -71,11 +100,13 @@ public sealed class AssetManager
             }
 
             _log?.Invoke($"Extracting to {extractDir} ...");
+            progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Extracting));
             Directory.CreateDirectory(extractDir);
             ZipFile.ExtractToDirectory(tempZip, extractDir, overwriteFiles: true);
 
             await File.WriteAllTextAsync(markerPath, asset.Sha256, ct);
-            _log?.Invoke($"Asset '{assetId}' installed successfully.");
+            _log?.Invoke($"Asset '{asset.Id}' installed successfully.");
+            progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.Installed));
         }
         finally
         {
@@ -92,6 +123,26 @@ public sealed class AssetManager
         {
             await EnsureAssetAsync(asset.Id, ct);
         }
+    }
+
+    /// <summary>
+    /// Ensures all assets are installed, reporting structured progress.
+    /// </summary>
+    public async Task EnsureAllAssetsAsync(IProgress<AssetProgress> progress, CancellationToken ct = default)
+    {
+        for (var i = 0; i < _manifest.Assets.Count; i++)
+        {
+            var asset = _manifest.Assets[i];
+            await EnsureAssetAsync(asset, i, _manifest.Assets.Count, progress, ct);
+        }
+    }
+
+    /// <summary>
+    /// Returns true when every asset in the manifest is already installed.
+    /// </summary>
+    public bool AllAssetsInstalled()
+    {
+        return _manifest.Assets.All(a => IsInstalled(a.Id));
     }
 
     /// <summary>
@@ -120,7 +171,7 @@ public sealed class AssetManager
         return string.Equals(content, asset.Sha256, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task DownloadFileAsync(string url, string destPath, long expectedSize, CancellationToken ct)
+    private async Task DownloadFileAsync(string url, string destPath, long expectedSize, Action<int>? onPercent, CancellationToken ct)
     {
         using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -145,9 +196,11 @@ public sealed class AssetManager
             if (totalBytes > 0)
             {
                 var pct = (int)(downloaded * 100 / totalBytes);
-                if (pct != lastPct && pct % 10 == 0)
+                if (pct != lastPct && pct % 2 == 0)
                 {
-                    _log?.Invoke($"  {pct}% ({downloaded / (1024 * 1024)} MB / {totalBytes / (1024 * 1024)} MB)");
+                    if (pct % 10 == 0)
+                        _log?.Invoke($"  {pct}% ({downloaded / (1024 * 1024)} MB / {totalBytes / (1024 * 1024)} MB)");
+                    onPercent?.Invoke(pct);
                     lastPct = pct;
                 }
             }
