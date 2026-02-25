@@ -2,26 +2,33 @@
 
 This package is a self-contained Windows build. You do not need to install the .NET runtime.
 
-## 1) Extract and launch
+## Quick start: Download, Unzip, Run
 
-**What do I run?** Normal user flow is **one-step**: launch `SirThaddeus.DesktopRuntime.exe` only. Do not try to start MCP/VoiceHost manually.
+1. **Download** the release ZIP from the [Releases](https://github.com/raydeStar/sir-thaddeus/releases) page.
+2. **Unzip** to a local folder, for example `C:\Apps\SirThaddeus\`.
+3. **Run** `SirThaddeus.DesktopRuntime.exe`.
 
-1. Extract the ZIP to a local folder, for example `C:\Apps\SirThaddeus\`.
-2. Open the extracted folder.
-3. Double-click `SirThaddeus.DesktopRuntime.exe`.
+That's it. Everything else happens automatically.
 
-### ⚠ Background Initialization (First Run)
-Sir Thaddeus launches **instantly**, but the voice engine (ASR/TTS) initializes in the background. On your first run:
-- **Status Banner**: A banner at the top of the chat window will show "Downloading models..." or "Starting voice backend...".
-- **PTT Disabled**: The "Hold to Talk" button is disabled until this process completes.
-- **Async Startup**: You can type messages and use other features immediately while the voice engine warms up.
+> If Windows SmartScreen appears, click **More info -> Run anyway** after verifying the source.
+> *Unsigned binaries may trigger AV heuristics; verify the checksum (see below).*
 
-If Windows SmartScreen appears, use **More info -> Run anyway** after you verify the source.
-*Note: Unsigned binaries may trigger AV heuristics; verify checksum and source.*
+## What happens on first run
 
-## 2) (Recommended) Verify checksum
+The **Setup Wizard** walks you through four steps:
 
-From PowerShell in the extracted parent folder:
+1. **Connect your LLM** — the app scans for running local LLM servers (LM Studio, Ollama, etc.) and lets you pick one or enter a custom URL.
+2. **Set your name & context** — optional operator alias and system context.
+3. **Pick a personality** — choose the assistant's behavioral profile.
+4. **Voice asset download** — while you go through steps 1-3, voice backend assets (~320 MB) download in the background from GitHub Releases. If the download isn't done by step 3, you'll see a progress bar. If it finishes early, this step is skipped automatically.
+
+After setup, the app is fully operational and works **offline** for all subsequent launches.
+
+> **Internet required**: An internet connection is needed on first run to download voice assets (STT model, TTS engine, Python runtime). After that, everything runs locally.
+
+## (Recommended) Verify checksum
+
+From PowerShell in the folder containing the ZIP:
 
 ```powershell
 Get-FileHash ".\sir-thaddeus-win-x64-v0.1.0.zip" -Algorithm SHA256
@@ -29,31 +36,33 @@ Get-FileHash ".\sir-thaddeus-win-x64-v0.1.0.zip" -Algorithm SHA256
 
 Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 
-## 3) Connect to LM Studio
+## Prerequisites
 
-1. Start LM Studio.
-2. Start the local OpenAI-compatible server in LM Studio.
-3. In the app settings, set `llm.baseUrl` to your local endpoint (default is usually `http://localhost:1234`).
-   *(Tip: A known good model to start with is `qwen2.5-coder-7b-instruct` or similar instruction-tuned models).*
-4. Save settings and run a quick test message.
+- **Windows 10/11**
+- **Visual C++ Redistributable 2015-2022** — required by the speech-to-text engine.
+  Most PCs already have this. If Whisper crashes, install it from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+- **LM Studio** (or any OpenAI-compatible local LLM server)
+  - Default expected base URL: `http://localhost:1234`
+  - Tip: A known good model to start with is `qwen2.5-coder-7b-instruct` or similar instruction-tuned models.
+- **Internet connection** on first run (for voice asset download)
 
-## 4) Validate first interaction
+## Validate first interaction
 
 1. Send one normal chat message.
 2. Trigger one approved tool action.
-3. Confirm an audit entry was written (see path below).
+3. Confirm an audit entry was written (see paths below).
 
 The MCP tool server (`SirThaddeus.McpServer.exe`) starts automatically as a child process when required.
 
-## 5) Local data paths
+## Local data paths
 
 - Settings: `%LOCALAPPDATA%\SirThaddeus\settings.json`
 - Memory DB: `%LOCALAPPDATA%\SirThaddeus\memory.db`
 - Audit log: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`
 
-## 6) Reset / delete local data
+## Reset / delete local data
 
-Close the app first, then remove any of these files if you want a clean reset:
+Close the app first, then remove any of these files for a clean reset:
 
 - `%LOCALAPPDATA%\SirThaddeus\settings.json`
 - `%LOCALAPPDATA%\SirThaddeus\memory.db`

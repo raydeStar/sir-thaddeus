@@ -1,7 +1,10 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using SirThaddeus.Core;
 using SirThaddeus.DesktopRuntime.Services;
 using Color = System.Windows.Media.Color;
 using FontFamily = System.Windows.Media.FontFamily;
@@ -18,6 +21,7 @@ namespace SirThaddeus.DesktopRuntime;
 ///   1. Connecting to a local LLM provider
 ///   2. Entering their name / about
 ///   3. Picking a personality
+///   4. (auto) Downloading voice backend assets if needed
 /// </summary>
 public partial class OnboardingWindow : Window
 {
@@ -26,6 +30,12 @@ public partial class OnboardingWindow : Window
     private string _selectedProviderName = "LM Studio";
     private string? _detectedModelName;
     private readonly List<RadioButton> _providerRadios = [];
+
+    // Background asset download state
+    private Task? _assetDownloadTask;
+    private CancellationTokenSource? _assetCts;
+    private volatile bool _assetsReady;
+    private volatile bool _assetDownloadFailed;
 
     // ── Results (read by App.xaml.cs after dialog closes) ──────────
     public string SelectedBaseUrl => _selectedBaseUrl;
@@ -52,6 +62,10 @@ public partial class OnboardingWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Start background asset download immediately while user
+        // goes through the preference steps.
+        BeginBackgroundAssetDownload();
+
         await PopulateProviderListAsync();
         DisplayNameInput.Focus();
     }
@@ -223,6 +237,142 @@ public partial class OnboardingWindow : Window
     }
 
     // ────────────────────────────────────────────────────────────────
+    // Background Asset Download
+    // ────────────────────────────────────────────────────────────────
+
+    private void BeginBackgroundAssetDownload()
+    {
+        var repoRoot = ResolveRepoRoot();
+        if (repoRoot == null)
+        {
+            _assetsReady = true;
+            return;
+        }
+
+        var manifestPath = System.IO.Path.Combine(repoRoot, "assets", "manifest.json");
+        if (!File.Exists(manifestPath))
+        {
+            _assetsReady = true;
+            return;
+        }
+
+        try
+        {
+            var mgr = new AssetManager(repoRoot);
+            if (mgr.AllAssetsInstalled())
+            {
+                _assetsReady = true;
+                return;
+            }
+
+            _assetCts = new CancellationTokenSource();
+            var progress = new Progress<AssetProgress>(OnAssetProgress);
+            _assetDownloadTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await mgr.EnsureAllAssetsAsync(progress, _assetCts.Token);
+                    _assetsReady = true;
+                }
+                catch (OperationCanceledException) { }
+                catch
+                {
+                    _assetDownloadFailed = true;
+                    _assetsReady = true;
+                }
+            });
+        }
+        catch
+        {
+            _assetsReady = true;
+        }
+    }
+
+    private void OnAssetProgress(AssetProgress p)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.InvokeAsync(() => OnAssetProgress(p));
+            return;
+        }
+
+        if (_currentStep != 4) return;
+
+        var assetNum = p.AssetIndex + 1;
+        var totalWidth = 340.0;
+
+        switch (p.Phase)
+        {
+            case AssetProgressPhase.Checking:
+                DownloadAssetLabel.Text = $"Checking {p.Description}...";
+                DownloadStatusText.Text = $"Component {assetNum} of {p.TotalAssets}";
+                break;
+
+            case AssetProgressPhase.Downloading:
+                DownloadAssetLabel.Text = p.Description;
+                DownloadStatusText.Text = $"Downloading... {p.DownloadPercent}%  ({assetNum} of {p.TotalAssets})";
+                var overallPct = ((p.AssetIndex * 100.0) + p.DownloadPercent) / p.TotalAssets;
+                DownloadProgressFill.Width = Math.Max(0, Math.Min(totalWidth, totalWidth * overallPct / 100.0));
+                break;
+
+            case AssetProgressPhase.Verifying:
+                DownloadAssetLabel.Text = $"Verifying {p.Description}...";
+                DownloadStatusText.Text = $"Component {assetNum} of {p.TotalAssets}";
+                break;
+
+            case AssetProgressPhase.Extracting:
+                DownloadAssetLabel.Text = $"Extracting {p.Description}...";
+                DownloadStatusText.Text = $"Component {assetNum} of {p.TotalAssets}";
+                break;
+
+            case AssetProgressPhase.Installed:
+            case AssetProgressPhase.AlreadyInstalled:
+                DownloadProgressFill.Width = totalWidth * (assetNum / (double)p.TotalAssets);
+                if (assetNum >= p.TotalAssets)
+                {
+                    DownloadAssetLabel.Text = "All set!";
+                    DownloadStatusText.Text = "Voice components are ready.";
+                    DownloadProgressFill.Width = totalWidth;
+                    _ = FinishAfterDelayAsync();
+                }
+                break;
+        }
+
+        // If the background task failed, let the user proceed anyway.
+        if (_assetDownloadFailed)
+        {
+            DownloadAssetLabel.Text = "Download issue -- you can continue.";
+            DownloadStatusText.Text = "Voice assets can be fetched later from Settings.";
+            _ = FinishAfterDelayAsync();
+        }
+    }
+
+    private async Task FinishAfterDelayAsync()
+    {
+        await Task.Delay(800);
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => { DialogResult = true; Close(); });
+            return;
+        }
+        DialogResult = true;
+        Close();
+    }
+
+    private static string? ResolveRepoRoot()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(baseDir);
+        for (var i = 0; i < 10 && dir?.Parent is not null; i++)
+        {
+            if (File.Exists(System.IO.Path.Combine(dir.FullName, "assets", "manifest.json")))
+                return dir.FullName;
+            dir = dir.Parent;
+        }
+        return null;
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // Step Navigation
     // ────────────────────────────────────────────────────────────────
 
@@ -244,10 +394,57 @@ public partial class OnboardingWindow : Window
         }
     }
 
+    private System.Windows.Threading.DispatcherTimer? _step4PollTimer;
+
     private void OnLetsGoClick(object sender, RoutedEventArgs e)
     {
-        DialogResult = true;
-        Close();
+        // If assets are already downloaded (finished during steps 1-3), close now.
+        if (_assetsReady)
+        {
+            DialogResult = true;
+            Close();
+            return;
+        }
+
+        // Otherwise, show the download step with a friendly spinner.
+        _currentStep = 4;
+        UpdateStepVisibility();
+        StartDownloadSpinner();
+
+        // Safety net: poll _assetsReady in case progress callbacks don't fire.
+        _step4PollTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+        _step4PollTimer.Tick += (_, _) =>
+        {
+            if (_assetsReady)
+            {
+                _step4PollTimer.Stop();
+                DownloadAssetLabel.Text = _assetDownloadFailed
+                    ? "Download issue -- you can continue."
+                    : "All set!";
+                DownloadStatusText.Text = _assetDownloadFailed
+                    ? "Voice assets can be fetched later from Settings."
+                    : "Voice components are ready.";
+                DownloadProgressFill.Width = 340;
+                _ = FinishAfterDelayAsync();
+            }
+        };
+        _step4PollTimer.Start();
+    }
+
+    private void StartDownloadSpinner()
+    {
+        var rotateAnim = new DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = new Duration(TimeSpan.FromSeconds(1)),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        DownloadSpinnerRotation.BeginAnimation(
+            System.Windows.Media.RotateTransform.AngleProperty, rotateAnim);
     }
 
     private void UpdateStepVisibility()
@@ -255,15 +452,25 @@ public partial class OnboardingWindow : Window
         Step1Panel.Visibility = _currentStep == 1 ? Visibility.Visible : Visibility.Collapsed;
         Step2Panel.Visibility = _currentStep == 2 ? Visibility.Visible : Visibility.Collapsed;
         Step3Panel.Visibility = _currentStep == 3 ? Visibility.Visible : Visibility.Collapsed;
+        Step4Panel.Visibility = _currentStep == 4 ? Visibility.Visible : Visibility.Collapsed;
 
-        BackButton.Visibility = _currentStep > 1 ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.Visibility = _currentStep > 1 && _currentStep < 4 ? Visibility.Visible : Visibility.Collapsed;
         NextButton.Visibility = _currentStep < 3 ? Visibility.Visible : Visibility.Collapsed;
         LetsGoButton.Visibility = _currentStep == 3 ? Visibility.Visible : Visibility.Collapsed;
+
+        // Hide all nav buttons on step 4 (download in progress)
+        if (_currentStep == 4)
+        {
+            BackButton.Visibility = Visibility.Collapsed;
+            NextButton.Visibility = Visibility.Collapsed;
+            LetsGoButton.Visibility = Visibility.Collapsed;
+        }
 
         // Update step dots
         UpdateDot(Dot1, _currentStep >= 1);
         UpdateDot(Dot2, _currentStep >= 2);
         UpdateDot(Dot3, _currentStep >= 3);
+        UpdateDot(Dot4, _currentStep >= 4);
 
         // Focus the first input on step 2
         if (_currentStep == 2 && string.IsNullOrWhiteSpace(DisplayNameInput.Text))

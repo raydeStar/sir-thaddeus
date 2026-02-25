@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 
 param(
     [ValidateSet("Debug", "Release")]
@@ -106,9 +106,9 @@ if (-not $SkipPreflight) {
     }
 }
 
-# ── Verify bundled Piper TTS assets ──────────────────────────────────
-# Piper assets are committed to the repo via Git LFS, so no download
-# is needed. Just verify the critical files are present.
+# -- Verify Piper TTS assets ---------------------------------------------------
+# Assets are fetched from GitHub Releases via dev/fetch-assets.ps1 (CI)
+# or downloaded at runtime by AssetManager. Verify they are present.
 
 Write-Section "Verify Piper TTS Assets"
 
@@ -159,7 +159,7 @@ foreach ($project in $projects) {
     }
 }
 
-# ── Structured staging ───────────────────────────────────────────────
+# -- Structured staging --------------------------------------------------------
 #
 #  ZIP root/
 #   ├── SirThaddeus.DesktopRuntime.exe   ← user double-clicks this
@@ -183,7 +183,7 @@ foreach ($project in $projects) {
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
 
     Write-Host "  Staging $projectName files..."
-    Get-ChildItem -Path $projectPublishDir -Recurse | ForEach-Object {
+    @(Get-ChildItem -Path $projectPublishDir -Recurse) | ForEach-Object {
         $relativePath = $_.FullName.Substring($projectPublishDir.Length).TrimStart('\')
         $isExe = ($_.Extension -eq ".exe" -and $relativePath -notmatch '\\')
 
@@ -209,8 +209,8 @@ foreach ($project in $projects) {
     }
 }
 
-# ── Bundle vendored voice-backend assets (Git LFS) ──────────────────
-# These are tracked via Git LFS and fetched during CI with lfs: true.
+# -- Bundle voice-backend assets (GitHub Releases) ---------------------------
+# These are fetched from GitHub Releases via dev/fetch-assets.ps1 in CI.
 # They land under bin/voice/ alongside the Python scripts already
 # staged by the VoiceHost dotnet publish output.
 
@@ -224,7 +224,7 @@ $piperSource = Join-Path $voiceBackendDir "piper"
 if (Test-Path $piperSource) {
     $piperDest = Join-Path $voiceStageBinDir "piper"
     Copy-Item -Path $piperSource -Destination $piperDest -Recurse -Force
-    $piperCount = (Get-ChildItem -Path $piperDest -Recurse -File).Count
+    $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
     Write-Host "  Staged: piper/ ($piperCount files)"
 }
 else {
@@ -236,7 +236,7 @@ $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
 if (Test-Path $piperVoicesSource) {
     $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
     Copy-Item -Path $piperVoicesSource -Destination $piperVoicesDest -Recurse -Force
-    $voiceCount = (Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
+    $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
     Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
 }
 else {
@@ -260,7 +260,7 @@ $runtimeSource = Join-Path $voiceBackendDir "runtime/python"
 if (Test-Path $runtimeSource) {
     $runtimeDest = Join-Path $voiceStageBinDir "runtime/python"
     Copy-Item -Path $runtimeSource -Destination $runtimeDest -Recurse -Force
-    $runtimeCount = (Get-ChildItem -Path $runtimeDest -Recurse -File).Count
+    $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
     Write-Host "  Staged: runtime/python ($runtimeCount files)"
 }
 else {
@@ -273,7 +273,7 @@ if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*
     $wheelsDest = Join-Path $voiceStageBinDir "deps/wheels"
     New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
     Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
-    $wheelCount = (Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
+    $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
     $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
     Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
 }
@@ -290,6 +290,18 @@ if (Test-Path $sttSource) {
 }
 else {
     Write-Host "  WARN: bundled STT model not found; will download at first run" -ForegroundColor Yellow
+}
+
+# Stage asset manifest so the app can self-heal (download missing assets at runtime)
+$manifestSource = Join-Path $RepoRoot "assets/manifest.json"
+if (Test-Path $manifestSource) {
+    $manifestDest = Join-Path $stageDir "assets"
+    New-Item -ItemType Directory -Force -Path $manifestDest | Out-Null
+    Copy-Item -Path $manifestSource -Destination (Join-Path $manifestDest "manifest.json") -Force
+    Write-Host "  Staged: assets/manifest.json"
+}
+else {
+    Write-Host "  WARN: assets/manifest.json not found; runtime asset download will be unavailable" -ForegroundColor Yellow
 }
 
 if (-not (Test-Path $firstRunReadmeSource)) {
@@ -310,7 +322,7 @@ else {
 }
 
 # Public MVP ZIP should not ship debug symbols.
-$pdbFiles = Get-ChildItem -Path $stageDir -File -Recurse -Filter "*.pdb"
+$pdbFiles = @(Get-ChildItem -Path $stageDir -File -Recurse -Filter "*.pdb")
 if ($pdbFiles.Count -gt 0) {
     foreach ($pdb in $pdbFiles) {
         Remove-Item -Path $pdb.FullName -Force

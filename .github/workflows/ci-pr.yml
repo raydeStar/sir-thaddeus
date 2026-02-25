@@ -68,7 +68,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
 
       - name: Setup .NET from global.json
         uses: actions/setup-dotnet@v5
@@ -83,6 +83,10 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-
+
+      - name: Fetch voice backend assets from GitHub Releases
+        shell: pwsh
+        run: ./dev/fetch-assets.ps1
 
       - name: Package build zip + checksums
         shell: pwsh

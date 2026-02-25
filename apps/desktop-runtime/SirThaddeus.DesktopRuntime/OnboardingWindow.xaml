@@ -158,10 +158,11 @@
                 </StackPanel>
 
                 <!-- Step dots -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+                <StackPanel x:Name="StepDotsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
                     <Ellipse x:Name="Dot1" Style="{StaticResource StepDotActive}"/>
                     <Ellipse x:Name="Dot2" Style="{StaticResource StepDotInactive}"/>
                     <Ellipse x:Name="Dot3" Style="{StaticResource StepDotInactive}"/>
+                    <Ellipse x:Name="Dot4" Style="{StaticResource StepDotInactive}"/>
                 </StackPanel>
             </StackPanel>
 
@@ -281,6 +282,66 @@
                                        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
                         </StackPanel>
                     </RadioButton>
+                </StackPanel>
+            </Grid>
+
+            <!-- ── Step 4: Downloading Assets ──────────────────────── -->
+            <Grid x:Name="Step4Panel" Grid.Row="1" Margin="32,16,32,0" Visibility="Collapsed">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock Text="Preparing Voice Components"
+                               FontSize="18" FontWeight="SemiBold" Foreground="#DFE5F2"
+                               HorizontalAlignment="Center" Margin="0,0,0,8"
+                               FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
+                    <TextBlock Text="Downloading required files so everything works out of the box."
+                               FontSize="13" Foreground="#9AA8C2"
+                               HorizontalAlignment="Center" Margin="0,0,0,32"
+                               TextWrapping="Wrap" TextAlignment="Center"
+                               FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
+
+                    <!-- Spinner -->
+                    <Canvas Width="28" Height="28" HorizontalAlignment="Center" Margin="0,0,0,20">
+                        <Canvas.RenderTransform>
+                            <RotateTransform x:Name="DownloadSpinnerRotation"
+                                             CenterX="14" CenterY="14" Angle="0"/>
+                        </Canvas.RenderTransform>
+                        <Path Stroke="#4C8BF5" StrokeThickness="3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                            <Path.Data>
+                                <PathGeometry>
+                                    <PathFigure StartPoint="14,2" IsClosed="False">
+                                        <ArcSegment Point="2,14" Size="12,12"
+                                                    SweepDirection="Clockwise" IsLargeArc="False"/>
+                                        <ArcSegment Point="14,26" Size="12,12"
+                                                    SweepDirection="Clockwise" IsLargeArc="False"/>
+                                        <ArcSegment Point="26,14" Size="12,12"
+                                                    SweepDirection="Clockwise" IsLargeArc="False"/>
+                                    </PathFigure>
+                                </PathGeometry>
+                            </Path.Data>
+                        </Path>
+                    </Canvas>
+
+                    <!-- Asset description -->
+                    <TextBlock x:Name="DownloadAssetLabel"
+                               Text="Checking assets..."
+                               FontSize="14" FontWeight="Medium" Foreground="#DFE5F2"
+                               HorizontalAlignment="Center" Margin="0,0,0,12"
+                               FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
+
+                    <!-- Progress bar -->
+                    <Border Background="#1E232E" CornerRadius="4"
+                            Height="8" Width="340" Margin="0,0,0,8">
+                        <Border x:Name="DownloadProgressFill"
+                                Background="#4C8BF5" CornerRadius="4"
+                                HorizontalAlignment="Left" Width="0"/>
+                    </Border>
+
+                    <!-- Status detail text -->
+                    <TextBlock x:Name="DownloadStatusText"
+                               Text=""
+                               FontSize="12" Foreground="#9AA8C2"
+                               HorizontalAlignment="Center"
+                               FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"/>
                 </StackPanel>
             </Grid>
 

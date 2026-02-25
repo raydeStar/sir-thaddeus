@@ -530,15 +530,38 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             var wasReady = IsVoiceReady;
             IsVoiceReady = health.Ready;
             
-            if (!IsVoiceReady && health.Reachable)
+            if (IsVoiceReady)
             {
-                var msg = string.IsNullOrWhiteSpace(health.Message) ? "Starting voice backend..." : health.Message;
-                if (msg.Length > 85) msg = msg.Substring(0, 82) + "...";
-                VoiceWarmupStatus = msg;
+                VoiceWarmupStatus = "";
             }
             else
             {
-                VoiceWarmupStatus = "";
+                // VC++ redist missing is the most actionable problem — show it first.
+                var vcWarn = _voiceManager.VcRedistWarning;
+                if (vcWarn is not null)
+                {
+                    VoiceWarmupStatus = "Speech recognition requires Visual C++ Redistributable. "
+                                      + "Download: aka.ms/vs/17/release/vc_redist.x64.exe";
+                    return;
+                }
+
+                // Pick the best available status message for the banner.
+                // Priority: startup phase from stdout > health message > generic fallback.
+                var phase = _voiceManager.LastStartupPhase;
+                string msg;
+                if (!string.IsNullOrWhiteSpace(phase))
+                    msg = phase;
+                else if (health.Reachable && !string.IsNullOrWhiteSpace(health.Message))
+                    msg = health.Message;
+                else if (health.Reachable)
+                    msg = "Voice backend is warming up...";
+                else if (_voiceManager.HasManagedProcessRunning)
+                    msg = "Starting voice services...";
+                else
+                    msg = "Waiting for voice backend to start...";
+
+                if (msg.Length > 100) msg = msg.Substring(0, 97) + "...";
+                VoiceWarmupStatus = msg;
             }
         }
         catch
@@ -1018,6 +1041,17 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             return;
 
         AddMessage(ChatMessageRole.User, transcript.Trim());
+    }
+
+    /// <summary>
+    /// Appends a status bubble from the voice pipeline.
+    /// </summary>
+    public void AddVoiceStatusMessage(string statusText)
+    {
+        if (string.IsNullOrWhiteSpace(statusText))
+            return;
+
+        AddMessage(ChatMessageRole.Status, statusText.Trim());
     }
 
     /// <summary>
