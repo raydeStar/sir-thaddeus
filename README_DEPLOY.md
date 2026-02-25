@@ -46,6 +46,18 @@ Outputs:
 - zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
 - per-binary checksums: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-binaries.sha256.txt`
 
+### Voice backend assets
+
+Voice backend binaries (~320 MB) are hosted on GitHub Releases (`assets-v1` tag), not in the repo.
+CI workflows run `dev\fetch-assets.ps1` automatically before packaging. For local release builds,
+run it manually or let the build scripts handle it:
+
+```powershell
+.\dev\fetch-assets.ps1
+```
+
+End users get these assets automatically during the first-run onboarding wizard.
+
 ### Required ZIP contents
 
 - `SirThaddeus.DesktopRuntime.exe` (primary app executable)
