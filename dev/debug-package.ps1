@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -46,7 +46,12 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "& `"$VoiceHostExe
 Write-Host "      Waiting for VoiceHost to initialize..." -ForegroundColor DarkGray
 $maxWait = 45
 while ($maxWait -gt 0) {
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction SilentlyContinue
+    $health = $null
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction Stop
+    } catch {
+        # Server not up yet, ignore and retry
+    }
     if ($null -ne $health -and $health.status -eq 'ok') { break }
     Start-Sleep -Seconds 1
     $maxWait--
