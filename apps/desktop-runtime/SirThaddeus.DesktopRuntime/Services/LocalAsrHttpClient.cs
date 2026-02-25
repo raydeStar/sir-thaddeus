@@ -142,8 +142,8 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
                         continue;
                     }
 
-                    throw new InvalidOperationException(
-                        $"ASR request failed ({(int)response.StatusCode}): {body}");
+                    var userFacingError = BuildUserFacingAsrError(body, response.StatusCode);
+                    throw new InvalidOperationException(userFacingError);
                 }
 
                 transcript = ParseTranscript(body, response.Content.Headers.ContentType?.MediaType);
@@ -270,6 +270,33 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
 
         value = elem.GetString() ?? "";
         return true;
+    }
+
+    private static string BuildUserFacingAsrError(string body, HttpStatusCode statusCode)
+    {
+        var normalized = (body ?? "").Trim();
+        if (LooksLikeVcRuntimeIssue(normalized))
+        {
+            return "Speech recognition failed to initialize native runtime. " +
+                   "This build bundles the VC++ runtime, so restart Sir Thaddeus once and try again. " +
+                   "If it still fails, reinstall and remove bin/voice/stt-models/.stt_load_crash.";
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+            return $"ASR request failed ({(int)statusCode}).";
+
+        return $"ASR request failed ({(int)statusCode}): {normalized}";
+    }
+
+    private static bool LooksLikeVcRuntimeIssue(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return false;
+
+        return body.Contains("Install Visual C++ Redistributable", StringComparison.OrdinalIgnoreCase) ||
+               body.Contains("vcredist", StringComparison.OrdinalIgnoreCase) ||
+               body.Contains("stt_disabled_all_compute_types_crashed", StringComparison.OrdinalIgnoreCase) ||
+               body.Contains("native_runtime:vcredist", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()
