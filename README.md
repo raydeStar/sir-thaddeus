@@ -1,32 +1,71 @@
 <p align="center">
-  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
+<img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
 </p>
 
 <h1 align="center">Sir Thaddeus</h1>
 
 <p align="center">
-  Local-first Windows agent runtime: <strong>desktop UI is optional</strong>, the runtime runs <strong>tray-only/headless</strong>, talks to a <strong>local LLM</strong>, and executes actions through an <strong>MCP tool server</strong>.
+<strong>A permissioned AI runtime that runs on your machine.</strong>
 </p>
+Most AI assistants run primarily in the cloud. That means your requests are processed on remote servers, and ongoing access typically requires a subscription.
 
----
+Sir Thaddeus takes a different approach.
 
-## What exists right now
+He is a local‑first, permissioned AI runtime for Windows. He runs on your machine, connects to your local models (such as LM Studio), and executes actions only with explicit approval.
 
-- **Layered architecture**: Frontend (WPF/tray/hotkeys) → Agent orchestrator → LLM client → MCP server (stdio JSON-RPC).
-- **Command Palette** with three tabs: **Chat**, **Memory Browser**, and **Profile/Nuggets**.
-- **Memory system**: facts, events, and text chunks stored in SQLite with hybrid BM25 + optional embeddings retrieval.
-- **Shallow memory personalization**: Profile Cards for the user and people they mention, plus Memory Nuggets (atomic personal facts) injected into context at greeting and in-conversation.
-- **Tool routing pipeline**: Intent Router (`RouterOutput`) → Policy Gate (`PolicyDecision`) → conflict resolution matrix → tool loop executor.
-- **Web search**: DuckDuckGo HTML, Google News RSS, and SearXNG providers with smart query extraction.
-- **Conflict detection**: Memory storage checks for duplicates, single-vs-multi-valued predicates, and antonym contradictions before writing.
-- **Runtime safety controls**: global panic mode, fail-closed safe mode, strict MCP handshake validation, and configurable tool budgets.
-- **Control-plane MCP hooks**: `health.check`, `capabilities.describe`, `policy.get_state`, `policy.set_panic_mode`, `audit.export_bundle`.
-- **Preview/apply contract**: file and system tools support `_preview` + `_apply` pairs for explicit dry-run style execution.
-- **Headless mode**: `--headless` starts without the overlay window (tray + hotkeys + background agent still run).
-- **PTT voice pipeline**: push-to-talk capture → local ASR (`faster-whisper`) → agent response → local TTS playback via VoiceHost.
-  - **Cold-start optimization**: Voice engine warms up in the background asynchronously to ensure an instant application splash/launch.
-  - **Streaming latency**: Aggressive phrase-based chunking provides ultra-low Time-To-First-Audio (TTFA).
-- **Audit log is always-on**: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`.
+No telemetry by default.
+No background activity without consent.
+No hidden autonomy.
+
+If he acts, you see it. If you press STOP, everything stops.
+
+What It Feels Like To Use
+
+Hold your push‑to‑talk hotkey.
+
+Say:
+
+“Summarize this page.”
+
+Thaddeus responds with a plan:
+
+Read active window
+
+Duration: 30 seconds
+
+Capability requested: SCREEN_READ (active window only)
+
+You approve.
+
+He reads.
+He summarizes.
+The action is written to a local audit log.
+The permission expires automatically.
+
+That interaction pattern applies to everything.
+
+Why Sir Thaddeus?
+
+🛡️ Local by Default Your data stays on your machine. The runtime works offline. There is no telemetry unless you explicitly enable a service connection.
+
+🔐 Explicit, Time‑Boxed Permissions Every privileged action requires a scoped permission token. Permissions are specific, short‑lived, and revocable.
+
+📜 Transparent Execution All actions are written to a local, human‑readable audit log. The overlay always shows what the assistant is doing.
+
+🎙️ Voice + Command Palette Speak naturally with push‑to‑talk or use a keyboard command palette. Release to send. Press STOP to cancel.
+
+⚙️ Action, Not Just Chat Thaddeus can read the screen, automate the browser, and interact with your system — but only after proposing a plan and receiving approval.
+
+The Contract
+
+You are the principal. He proposes plans; you approve them.
+
+Nothing runs silently. If it acts, you see it.
+
+STOP always works. The kill switch revokes permissions and halts execution immediately.
+
+Sir Thaddeus is not designed to replace your agency.
+He is designed to extend it — with boundaries.
 
 ## Architecture (4 layers)
 

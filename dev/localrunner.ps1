@@ -73,10 +73,15 @@ else {
 }
 
 $ProjectPath = Join-Path $RepoRoot "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
-# Remove --debug from args before passing to dotnet run if needed, 
-# though DesktopRuntime usually ignores unknown args.
+# Force a non-incremental build so XAML/code-behind edits are always picked up.
+& dotnet build $ProjectPath --no-incremental -v q
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nERROR: DesktopRuntime build failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
 try {
-    & dotnet run --project $ProjectPath -- $args
+    & dotnet run --project $ProjectPath --no-build -- $args
 }
 finally {
     if ($DebugMode) {
