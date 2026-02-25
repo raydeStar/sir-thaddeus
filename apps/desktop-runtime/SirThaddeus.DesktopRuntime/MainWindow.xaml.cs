@@ -161,9 +161,12 @@ public partial class MainWindow : Window
                 LazyLoadSettings();
                 // If no subview is visible, default to General
                 if (SettingsGeneralView.Visibility != Visibility.Visible &&
+                    PreferencesSettingsView.Visibility != Visibility.Visible &&
+                    McpSettingsView.Visibility != Visibility.Visible &&
                     VoiceSettingsView.Visibility != Visibility.Visible &&
                     MemoryView.Visibility != Visibility.Visible &&
                     ProfileView.Visibility != Visibility.Visible &&
+                    TranscribeSettingsView.Visibility != Visibility.Visible &&
                     LogsView.Visibility != Visibility.Visible)
                 {
                     ActivateSettingsSubtab("General", true);
@@ -185,15 +188,21 @@ public partial class MainWindow : Window
         if (!skipMainTabActivation) ActivateTab("Settings");
 
         SettingsSubGeneral.IsChecked = subtab == "General";
+        SettingsSubPreferences.IsChecked = subtab == "Preferences";
+        SettingsSubMcp.IsChecked = subtab == "MCP";
         SettingsSubVoice.IsChecked = subtab == "Voice";
         SettingsSubMemory.IsChecked = subtab == "Memory";
         SettingsSubProfile.IsChecked = subtab == "Profile";
+        SettingsSubTranscribe.IsChecked = subtab == "Transcribe";
         SettingsSubLogs.IsChecked = subtab == "Logs";
 
         SettingsGeneralView.Visibility = subtab == "General" ? Visibility.Visible : Visibility.Collapsed;
+        PreferencesSettingsView.Visibility = subtab == "Preferences" ? Visibility.Visible : Visibility.Collapsed;
+        McpSettingsView.Visibility = subtab == "MCP" ? Visibility.Visible : Visibility.Collapsed;
         VoiceSettingsView.Visibility = subtab == "Voice" ? Visibility.Visible : Visibility.Collapsed;
         MemoryView.Visibility = subtab == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         ProfileView.Visibility = subtab == "Profile" ? Visibility.Visible : Visibility.Collapsed;
+        TranscribeSettingsView.Visibility = subtab == "Transcribe" ? Visibility.Visible : Visibility.Collapsed;
         LogsView.Visibility = subtab == "Logs" ? Visibility.Visible : Visibility.Collapsed;
 
         if (subtab == "Memory")
@@ -351,26 +360,38 @@ public partial class MainWindow : Window
 
         parentGrid.Children.Remove(MemoryView);
         parentGrid.Children.Remove(ProfileView);
+        parentGrid.Children.Remove(TranscribeSettingsView);
         parentGrid.Children.Remove(LogsView);
         parentGrid.Children.Remove(SettingsGeneralView);
+        parentGrid.Children.Remove(PreferencesSettingsView);
+        parentGrid.Children.Remove(McpSettingsView);
         parentGrid.Children.Remove(VoiceSettingsView);
 
         SettingsContentArea.Children.Add(SettingsGeneralView);
+        SettingsContentArea.Children.Add(PreferencesSettingsView);
+        SettingsContentArea.Children.Add(McpSettingsView);
         SettingsContentArea.Children.Add(VoiceSettingsView);
         SettingsContentArea.Children.Add(MemoryView);
         SettingsContentArea.Children.Add(ProfileView);
+        SettingsContentArea.Children.Add(TranscribeSettingsView);
         SettingsContentArea.Children.Add(LogsView);
 
         Grid.SetRow(MemoryView, 0);
         Grid.SetRow(ProfileView, 0);
+        Grid.SetRow(TranscribeSettingsView, 0);
         Grid.SetRow(LogsView, 0);
         Grid.SetRow(SettingsGeneralView, 0);
+        Grid.SetRow(PreferencesSettingsView, 0);
+        Grid.SetRow(McpSettingsView, 0);
         Grid.SetRow(VoiceSettingsView, 0);
 
         // Optional: Ensure all subviews hide initially
         MemoryView.Visibility = Visibility.Collapsed;
         ProfileView.Visibility = Visibility.Collapsed;
+        TranscribeSettingsView.Visibility = Visibility.Collapsed;
         LogsView.Visibility = Visibility.Collapsed;
+        PreferencesSettingsView.Visibility = Visibility.Collapsed;
+        McpSettingsView.Visibility = Visibility.Collapsed;
         VoiceSettingsView.Visibility = Visibility.Collapsed;
     }
 

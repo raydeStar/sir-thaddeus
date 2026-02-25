@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -12,17 +12,11 @@ Write-Host "══════════════════════�
 
 $StageDir = Join-Path $RepoRoot "artifacts/stage/win-x64"
 
-if (-not (Test-Path $StageDir)) {
-    Write-Host "`n[1/3] Packaging application (Release) since it's missing..." -ForegroundColor Yellow
-    & "$PSScriptRoot\release-package.ps1"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "`nERROR: Packaging failed." -ForegroundColor Red
-        exit $LASTEXITCODE
-    }
-}
-else {
-    Write-Host "`n[1/3] Found existing packaged app in $StageDir." -ForegroundColor Green
-    Write-Host "      (Run .\dev\release-package.ps1 manually to rebuild it with new code changes)" -ForegroundColor DarkGray
+Write-Host "`n[1/3] Packaging application (Debug)..." -ForegroundColor Yellow
+& "$PSScriptRoot\release-package.ps1" -Configuration Debug -SkipPreflight
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nERROR: Packaging failed." -ForegroundColor Red
+    exit $LASTEXITCODE
 }
 
 Write-Host "`n[2/3] Cleaning up existing background processes..." -ForegroundColor Cyan
@@ -46,7 +40,12 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "& `"$VoiceHostExe
 Write-Host "      Waiting for VoiceHost to initialize..." -ForegroundColor DarkGray
 $maxWait = 45
 while ($maxWait -gt 0) {
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction SilentlyContinue
+    $health = $null
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -ErrorAction Stop
+    } catch {
+        # Server not up yet, ignore and retry
+    }
     if ($null -ne $health -and $health.status -eq 'ok') { break }
     Start-Sleep -Seconds 1
     $maxWait--

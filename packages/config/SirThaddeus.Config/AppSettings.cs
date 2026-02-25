@@ -302,7 +302,7 @@ public sealed record VoiceSettings
     public string TtsModelId { get; init; } = "";
 
     [JsonPropertyName("ttsVoiceId")]
-    public string TtsVoiceId { get; init; } = "en_US-ryan-medium";
+    public string TtsVoiceId { get; init; } = "en_US-john-medium";
 
     [JsonPropertyName("sttEngine")]
     public string SttEngine { get; init; } = "faster-whisper";
@@ -433,14 +433,14 @@ public sealed record VoiceSettings
             if (string.Equals(engine, "kokoro", StringComparison.OrdinalIgnoreCase))
                 return "bm_lewis";
             if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase))
-                return "en_US-ryan-medium";
+                return "en_US-john-medium";
             return voiceId;
         }
 
-        // Cross-validate: Piper voices always contain a hyphen (e.g. en_US-ryan-medium).
+        // Cross-validate: Piper voices always contain a hyphen (e.g. en_US-john-medium).
         // If the stored voice doesn't match the engine, fall back to the engine default.
         if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase) && !voiceId.Contains('-'))
-            return "en_US-ryan-medium";
+            return "en_US-john-medium";
 
         return voiceId;
     }
