@@ -596,6 +596,11 @@ public sealed partial class SettingsViewModel : ViewModelBase
         await LoadProfilesAsync();
         ClearDirty();
         StatusText = "Settings loaded.";
+
+        // If the saved Piper voice isn't installed, try to download it.
+        // On failure, fall back to the default voice.
+        if (IsPiperEngine)
+            _ = EnsureSavedPiperVoiceAsync();
     }
 
     private void LoadFromSettings(AppSettings s)
@@ -1856,13 +1861,13 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // ─── Piper Voice Download ───────────────────────────────────────
 
-    private async Task DownloadPiperVoiceAsync(string voiceId)
+    private async Task<bool> DownloadPiperVoiceAsync(string voiceId)
     {
         if (string.IsNullOrWhiteSpace(voiceId) || _isPiperVoiceDownloading)
-            return;
+            return false;
 
         IsPiperVoiceDownloading = true;
-        PiperVoiceDownloadStatus = $"Downloading \"{voiceId}\" (~60 MB)…";
+        PiperVoiceDownloadStatus = $"Downloading \"{voiceId}\" (~60 MB)\u2026";
 
         try
         {
@@ -1880,7 +1885,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
             if (response.IsSuccessStatusCode)
             {
-                PiperVoiceDownloadStatus = $"✓ \"{voiceId}\" installed.";
+                PiperVoiceDownloadStatus = $"\u2713 \"{voiceId}\" installed.";
 
                 // Refresh catalog on UI thread so the dropdown updates
                 if (System.Windows.Application.Current?.Dispatcher is { } dispatcher)
@@ -1895,19 +1900,68 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 // Clear status after a few seconds
                 await Task.Delay(4000);
                 PiperVoiceDownloadStatus = "";
+                return true;
             }
             else
             {
-                PiperVoiceDownloadStatus = $"Download failed: {body[..Math.Min(body.Length, 120)]}";
+                var detail = string.IsNullOrWhiteSpace(body)
+                    ? $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase})"
+                    : body[..Math.Min(body.Length, 200)];
+                PiperVoiceDownloadStatus = $"Download failed ({(int)response.StatusCode}): {detail}";
+                return false;
             }
+        }
+        catch (System.Net.Http.HttpRequestException ex)
+        {
+            PiperVoiceDownloadStatus = $"Download failed: VoiceHost unreachable ({ex.Message})";
+            return false;
+        }
+        catch (TaskCanceledException)
+        {
+            PiperVoiceDownloadStatus = "Download failed: request timed out (10 min limit).";
+            return false;
         }
         catch (Exception ex)
         {
             PiperVoiceDownloadStatus = $"Download error: {ex.Message}";
+            return false;
         }
         finally
         {
             IsPiperVoiceDownloading = false;
+        }
+    }
+
+    /// <summary>
+    /// Called after settings load. If the saved Piper voice is not
+    /// installed locally, attempt to download it. If that fails,
+    /// silently revert to the default voice and persist the change.
+    /// </summary>
+    private async Task EnsureSavedPiperVoiceAsync()
+    {
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(configured))
+            return;
+
+        // Already installed -- nothing to do
+        if (AvailablePiperVoices.Contains(configured))
+            return;
+
+        // Not installed -- try downloading
+        var downloaded = await DownloadPiperVoiceAsync(configured);
+        if (downloaded)
+            return;
+
+        // Download failed -- fall back to default voice
+        if (configured != DefaultPiperVoiceId)
+        {
+            _voiceTtsVoiceId = DefaultPiperVoiceId;
+            OnPropertyChanged(nameof(VoiceTtsVoiceId));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
+            PiperVoiceDownloadStatus =
+                $"Voice \"{configured}\" unavailable -- reverted to default ({DefaultPiperVoiceId}).";
+            MarkDirty();
+            SaveSettings();
         }
     }
 
