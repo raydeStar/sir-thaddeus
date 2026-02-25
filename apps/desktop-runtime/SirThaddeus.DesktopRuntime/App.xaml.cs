@@ -1217,6 +1217,7 @@ public partial class App : System.Windows.Application
             {
                 var reason = string.IsNullOrWhiteSpace(e.Reason) ? "Unknown voice error." : e.Reason!;
                 AppendVoiceActivity($"Voice faulted: {reason}", LogEntryKind.Error);
+                AppendVoiceStatusMessage($"Voice error: {reason}");
             }
             else if (e.CurrentState == VoiceState.Idle)
             {
@@ -1614,15 +1615,23 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            if (role == ChatMessageRole.User)
+            switch (role)
             {
-                _commandPaletteViewModel.AddVoiceUserMessage(text);
-                return;
+                case ChatMessageRole.User:
+                    _commandPaletteViewModel.AddVoiceUserMessage(text);
+                    return;
+                case ChatMessageRole.Status:
+                    _commandPaletteViewModel.AddVoiceStatusMessage(text);
+                    return;
+                default:
+                    _commandPaletteViewModel.AddVoiceAssistantMessage(text);
+                    return;
             }
-
-            _commandPaletteViewModel.AddVoiceAssistantMessage(text);
         });
     }
+
+    private void AppendVoiceStatusMessage(string text)
+        => AppendVoiceChatMessage(ChatMessageRole.Status, text);
 
     private void UpdateUiTokenUsageTicker(int tokensIn, int tokensOut, int contextFillPercent)
     {
@@ -1653,10 +1662,18 @@ public partial class App : System.Windows.Application
 
         foreach (var (role, content) in pendingMessages)
         {
-            if (role == ChatMessageRole.User)
-                _commandPaletteViewModel.AddVoiceUserMessage(content);
-            else
-                _commandPaletteViewModel.AddVoiceAssistantMessage(content);
+            switch (role)
+            {
+                case ChatMessageRole.User:
+                    _commandPaletteViewModel.AddVoiceUserMessage(content);
+                    break;
+                case ChatMessageRole.Status:
+                    _commandPaletteViewModel.AddVoiceStatusMessage(content);
+                    break;
+                default:
+                    _commandPaletteViewModel.AddVoiceAssistantMessage(content);
+                    break;
+            }
         }
     }
 

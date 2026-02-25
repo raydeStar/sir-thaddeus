@@ -1044,6 +1044,17 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Appends a status bubble from the voice pipeline.
+    /// </summary>
+    public void AddVoiceStatusMessage(string statusText)
+    {
+        if (string.IsNullOrWhiteSpace(statusText))
+            return;
+
+        AddMessage(ChatMessageRole.Status, statusText.Trim());
+    }
+
+    /// <summary>
     /// Appends an assistant chat bubble from the voice pipeline.
     /// Applies the same cleaning/reasoning extraction path as typed chat.
     /// </summary>

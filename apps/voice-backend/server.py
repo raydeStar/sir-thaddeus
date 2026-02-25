@@ -1078,6 +1078,15 @@ class FasterWhisperProvider(BaseProvider):
                 crashed_type = ""
             chain = self._CPU_COMPUTE_CHAIN
             if crashed_type == "exhausted":
+                # If runtime prerequisites were fixed after a previous crash loop
+                # (for example after updating bundled wheels), give STT one fresh
+                # retry pass instead of keeping it permanently disabled.
+                if self._should_retry_after_exhausted_marker(marker):
+                    logger.warning(
+                        "Found exhausted STT crash marker, but runtime prerequisites look available; retrying compute chain from %s",
+                        chain[0],
+                    )
+                    return chain[0]
                 # Every type already crashed -- give up on STT entirely.
                 self._disable_stt_after_exhausted_compute_types(marker)
                 return chain[-1]  # value doesn't matter, STT won't run
@@ -1101,6 +1110,30 @@ class FasterWhisperProvider(BaseProvider):
             )
             return pick
         return self._CPU_COMPUTE_CHAIN[0]
+
+    def _should_retry_after_exhausted_marker(self, marker: Optional[Path]) -> bool:
+        if self._device != "cpu":
+            return False
+        if marker is None:
+            return False
+        if sys.platform != "win32":
+            return False
+
+        # We can retry once when msvc_runtime is importable (bundled wheel
+        # installed) because prior crashes were commonly caused by missing VC++
+        # runtime DLLs on fresh Windows machines.
+        try:
+            has_runtime = importlib.util.find_spec("msvc_runtime") is not None
+        except Exception:
+            has_runtime = False
+        if not has_runtime:
+            return False
+
+        try:
+            marker.unlink()
+        except Exception:
+            return False
+        return True
 
     def _disable_stt_after_exhausted_compute_types(self, marker: Optional[Path]) -> None:
         if marker:
