@@ -1048,12 +1048,56 @@ class FasterWhisperProvider(BaseProvider):
         self._device = (device or "cpu").strip().lower() or "cpu"
         self._language = normalize_stt_language(language)
         self._model = None
-        self._compute_type = "int8" if self._device == "cpu" else "float16"
         self._download_root = (
             (os.environ.get("ST_VOICE_STT_MODEL_ROOT") or "").strip()
             or str(STT_MODELS_ROOT)
         )
+        self._compute_type = self._pick_compute_type()
         self._local_files_only = env_bool("ST_VOICE_OFFLINE", False)
+
+    # Ordered fallback chain: if int8 causes a native crash, the next
+    # restart promotes the marker and we try the next safer type.
+    _CPU_COMPUTE_CHAIN = ["int8", "auto", "float32"]
+
+    def _pick_compute_type(self) -> str:
+        if self._device != "cpu":
+            return "float16"
+        marker = self._crash_marker_path()
+        if marker and marker.exists():
+            try:
+                crashed_type = marker.read_text().strip()
+            except Exception:
+                crashed_type = ""
+            chain = self._CPU_COMPUTE_CHAIN
+            idx = chain.index(crashed_type) + 1 if crashed_type in chain else 1
+            pick = chain[min(idx, len(chain) - 1)]
+            logger.warning(
+                "Previous model load crashed with compute_type=%s; falling back to %s",
+                crashed_type, pick,
+            )
+            return pick
+        return self._CPU_COMPUTE_CHAIN[0]
+
+    def _crash_marker_path(self) -> Optional[Path]:
+        if self._download_root:
+            return Path(self._download_root) / ".stt_load_crash"
+        return None
+
+    def _set_crash_marker(self) -> None:
+        marker = self._crash_marker_path()
+        if marker:
+            try:
+                marker.write_text(self._compute_type)
+            except Exception:
+                pass
+
+    def _clear_crash_marker(self) -> None:
+        marker = self._crash_marker_path()
+        if marker and marker.exists():
+            try:
+                marker.unlink()
+            except Exception:
+                pass
 
     @property
     def requires_init_probe(self) -> bool:
@@ -1131,7 +1175,15 @@ class FasterWhisperProvider(BaseProvider):
                 if self._local_files_only:
                     whisper_kwargs["local_files_only"] = True
 
+                # Write crash marker BEFORE the native call.  If the process
+                # dies inside WhisperModel(), the marker survives and the next
+                # restart will pick a safer compute_type.
+                self._set_crash_marker()
+
                 self._model = WhisperModel(model_ref, **whisper_kwargs)
+
+                # Survived -- clear the marker so we keep using this type.
+                self._clear_crash_marker()
 
                 if self._model is None:
                     return InitProbeResult(
@@ -1142,10 +1194,13 @@ class FasterWhisperProvider(BaseProvider):
                 # Loading the model instance is enough to validate availability.
                 # A startup warmup transcribe can cause native access violations on
                 # some fresh Windows environments, so keep init_probe side-effect free.
-                logger.info("faster-whisper model '%s' loaded", self.model_id)
+                logger.info("faster-whisper model '%s' loaded (compute_type=%s)", self.model_id, self._compute_type)
 
             return InitProbeResult(ready=True, startup_ms=0, last_error="")
         except Exception as exc:
+            # Python-visible exception means the process survived; clear the
+            # crash marker so we don't unnecessarily downgrade compute_type.
+            self._clear_crash_marker()
             logger.error("FasterWhisper init failed: %s", exc, exc_info=True)
             return InitProbeResult(ready=False, startup_ms=0, last_error=str(exc))
 
@@ -1153,7 +1208,8 @@ class FasterWhisperProvider(BaseProvider):
         # Lazy-load: requires_init_probe is False so init_probe() skips
         # _run_init_probe(). Load the model on first real ASR request instead
         # of at startup (avoids native access violations on some fresh Windows).
-        if self._model is None:
+        first_transcribe = self._model is None
+        if first_transcribe:
             logger.info("Lazy-loading faster-whisper model on first ASR request (model=%s)", self.model_id)
             probe = self._run_init_probe()
             if not probe.ready or self._model is None:
@@ -1173,12 +1229,27 @@ class FasterWhisperProvider(BaseProvider):
             }
             if self._language:
                 transcribe_kwargs["language"] = self._language
+
+            # First transcription can also trigger native access violations
+            # on some fresh Windows machines.  Arm the crash marker so the
+            # supervisor restart will try a safer compute_type.
+            if first_transcribe:
+                self._set_crash_marker()
+
             segments, _info = self._model.transcribe(temp_path, **transcribe_kwargs)
             text = " ".join(segment.text for segment in segments).strip()
+
+            if first_transcribe:
+                self._clear_crash_marker()
+
             elapsed_ms = int((time.perf_counter() - started) * 1000.0)
             logger.info("ASR [%s] faster-whisper bytes=%d elapsed=%dms", request_id, len(audio_bytes), elapsed_ms)
             return text
         except Exception as exc:
+            # Python-visible errors don't need the crash marker (process
+            # stays alive), so clear it to avoid an unnecessary downgrade.
+            if first_transcribe:
+                self._clear_crash_marker()
             logger.error("FasterWhisper transcription error: %s", exc, exc_info=True)
             raise
         finally:

@@ -39,6 +39,8 @@ Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 ## Prerequisites
 
 - **Windows 10/11**
+- **Visual C++ Redistributable 2015-2022** — required by the speech-to-text engine.
+  Most PCs already have this. If Whisper crashes, install it from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - **LM Studio** (or any OpenAI-compatible local LLM server)
   - Default expected base URL: `http://localhost:1234`
   - Tip: A known good model to start with is `qwen2.5-coder-7b-instruct` or similar instruction-tuned models.
