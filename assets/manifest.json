@@ -13,8 +13,8 @@
     {
       "id": "voice-deps-win-x64",
       "filename": "voice-deps-win-x64.zip",
-      "sha256": "970f6ca1f4a264e544f39f913c781f8d1ae439c012d06495826e27b48280ecb1",
-      "sizeBytes": 75423836,
+      "sha256": "1ff280e0e5ae78c4dffb138fab13e03fe827d6d4bfe896427848adcb315b0bde",
+      "sizeBytes": 115924882,
       "extractTo": "apps/voice-backend/deps/wheels",
       "description": "Python wheel packages for voice backend"
     },

@@ -292,6 +292,18 @@ else {
     Write-Host "  WARN: bundled STT model not found; will download at first run" -ForegroundColor Yellow
 }
 
+# Stage asset manifest so the app can self-heal (download missing assets at runtime)
+$manifestSource = Join-Path $RepoRoot "assets/manifest.json"
+if (Test-Path $manifestSource) {
+    $manifestDest = Join-Path $stageDir "assets"
+    New-Item -ItemType Directory -Force -Path $manifestDest | Out-Null
+    Copy-Item -Path $manifestSource -Destination (Join-Path $manifestDest "manifest.json") -Force
+    Write-Host "  Staged: assets/manifest.json"
+}
+else {
+    Write-Host "  WARN: assets/manifest.json not found; runtime asset download will be unavailable" -ForegroundColor Yellow
+}
+
 if (-not (Test-Path $firstRunReadmeSource)) {
     Fail "required file is missing: $firstRunReadmeSource"
 }
