@@ -160,7 +160,18 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string PttKey         { get => _pttKey;          set { if (SetProperty(ref _pttKey, value))         MarkDirty(); } }
     public string PttChord       { get => _pttChord;        set { if (SetProperty(ref _pttChord, value))       MarkDirty(); } }
     public string ShutupChord    { get => _shutupChord;     set { if (SetProperty(ref _shutupChord, value))    MarkDirty(); } }
-    public bool VoiceHostEnabled { get => _voiceHostEnabled; set { if (SetProperty(ref _voiceHostEnabled, value)) MarkDirty(); } }
+    public bool VoiceHostEnabled
+    {
+        get => _voiceHostEnabled;
+        set
+        {
+            if (SetProperty(ref _voiceHostEnabled, value))
+            {
+                MarkDirty();
+                OnVoiceHostEnabledChanged(value);
+            }
+        }
+    }
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
@@ -1087,6 +1098,19 @@ public sealed partial class SettingsViewModel : ViewModelBase
     }
 
     // ─── VoiceHost Lifecycle ─────────────────────────────────────────
+
+    private void OnVoiceHostEnabledChanged(bool enabled)
+    {
+        SaveSettings();
+        if (enabled)
+        {
+            _ = StartVoiceHostAsync();
+        }
+        else
+        {
+            _ = StopVoiceHostAsync();
+        }
+    }
 
     private async Task StartVoiceHostAsync()
     {

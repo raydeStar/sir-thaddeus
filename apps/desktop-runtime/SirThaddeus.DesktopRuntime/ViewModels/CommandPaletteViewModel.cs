@@ -1157,7 +1157,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         try
         {
-            var recent = _audit.ReadTail(20);
+            var recent = _audit.ReadTail(40);
             var newEvents = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(recent, e => e.Timestamp > _lastAuditSync));
             if (newEvents.Count == 0) return;
 
@@ -1167,36 +1167,30 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             {
                 foreach (var ev in newEvents)
                 {
-                    var txt = $"[{ev.Action}] {ev.Result}";
+                    // ── Full debug log (Settings > Logs) — keep everything ──
+                    var debugTxt = $"[{ev.Action}] {ev.Result}";
                     if (ev.Details != null && ev.Details.Count > 0)
                     {
-                        try { txt += " " + JsonSerializer.Serialize(ev.Details); }
-                        catch { txt += " [Details omitted]"; }
+                        try { debugTxt += " " + JsonSerializer.Serialize(ev.Details); }
+                        catch { debugTxt += " [Details omitted]"; }
                     }
 
-                    var kind = ev.Result == "error" ? LogEntryKind.Error : LogEntryKind.Info;
-                    if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) kind = LogEntryKind.ToolOutput;
+                    var debugKind = ev.Result == "error" ? LogEntryKind.Error : LogEntryKind.Info;
+                    if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) debugKind = LogEntryKind.ToolOutput;
 
-                    ActivityLog.Insert(0, new LogEntry { Kind = kind, Text = txt, Timestamp = ev.Timestamp.DateTime });
+                    ActivityLog.Insert(0, new LogEntry { Kind = debugKind, Text = debugTxt, Timestamp = ev.Timestamp.DateTime });
 
-                    // Only show MCP/tool calls and state changes in the drawer — no errors, no JSON
-                    if (ev.Action.StartsWith("MCP_") || ev.Action.StartsWith("TOOL_"))
+                    // ── User-facing drawer — human-readable, relevant events only ──
+                    var (drawerText, drawerKind) = FormatDrawerEntry(ev);
+                    if (drawerText is not null)
                     {
-                        var label = ev.Action.Replace("MCP_", "").Replace("TOOL_", "").Replace("_", " ");
-                        var drawerText = $"{label} — {ev.Result}";
-                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.ToolOutput, Text = drawerText, Timestamp = ev.Timestamp.DateTime });
-                        while (DrawerLog.Count > 30)
-                            DrawerLog.RemoveAt(DrawerLog.Count - 1);
-                    }
-                    else if (ev.Action.StartsWith("STATE_"))
-                    {
-                        DrawerLog.Insert(0, new LogEntry { Kind = LogEntryKind.Info, Text = $"State → {ev.Result}", Timestamp = ev.Timestamp.DateTime });
-                        while (DrawerLog.Count > 30)
+                        DrawerLog.Insert(0, new LogEntry { Kind = drawerKind, Text = drawerText, Timestamp = ev.Timestamp.DateTime });
+                        while (DrawerLog.Count > 50)
                             DrawerLog.RemoveAt(DrawerLog.Count - 1);
                     }
                 }
                 
-                while (ActivityLog.Count > 100)
+                while (ActivityLog.Count > 200)
                 {
                     ActivityLog.RemoveAt(ActivityLog.Count - 1);
                 }
@@ -1208,6 +1202,146 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             {
                 ActivityLog.Insert(0, new LogEntry { Kind = LogEntryKind.Error, Text = $"Log Sync Error: {ex.Message}" });
             });
+        }
+    }
+
+    /// <summary>
+    /// Translates an audit event into a human-readable drawer entry.
+    /// Returns (null, _) for events that should be suppressed from the user-facing drawer.
+    /// </summary>
+    private static (string? Text, LogEntryKind Kind) FormatDrawerEntry(AuditEvent ev)
+    {
+        var d = ev.Details ?? new Dictionary<string, object>();
+
+        string? DetailStr(string key)
+        {
+            if (d.TryGetValue(key, out var v) && v is not null)
+            {
+                var s = v.ToString()?.Trim();
+                return string.IsNullOrWhiteSpace(s) ? null : s;
+            }
+            return null;
+        }
+
+        switch (ev.Action)
+        {
+            // ── MCP Tool Calls ─────────────────────────────────────────
+            case "MCP_TOOL_CALL_END":
+            {
+                var tool = ev.Target ?? "unknown";
+                var ms = DetailStr("duration_ms");
+                var perm = DetailStr("permission");
+                var timing = ms is not null ? $" ({ms}ms)" : "";
+
+                if (ev.Result == "ok")
+                    return ($"Tool: {tool}{timing}", LogEntryKind.ToolOutput);
+                if (ev.Result == "blocked")
+                {
+                    var reason = DetailStr("error_message") ?? perm ?? "denied";
+                    return ($"Tool blocked: {tool} — {reason}", LogEntryKind.Error);
+                }
+                if (ev.Result == "error")
+                    return ($"Tool error: {tool} — {DetailStr("error_message") ?? "failed"}{timing}", LogEntryKind.Error);
+                return ($"Tool: {tool} — {ev.Result}{timing}", LogEntryKind.ToolOutput);
+            }
+
+            case "MCP_TOOL_BUDGET_EXCEEDED":
+                return ($"Budget exceeded: {ev.Target ?? "tool"}", LogEntryKind.Error);
+
+            // Skip START — redundant with END
+            case "MCP_TOOL_CALL_START":
+                return (null, LogEntryKind.Info);
+
+            // ── Permission Prompts ─────────────────────────────────────
+            case "CONSENT_PROMPT_SHOWN":
+                return ($"Permission requested: {ev.Target ?? "tool"}", LogEntryKind.ToolInput);
+            case "CONSENT_GRANTED":
+                return ($"Permission granted: {ev.Target ?? "tool"}", LogEntryKind.ToolOutput);
+            case "CONSENT_DENIED":
+                return ($"Permission denied: {ev.Target ?? "tool"}", LogEntryKind.Error);
+            case "MCP_PERMISSION_BLOCKED":
+                return ($"Auto-blocked: {ev.Target ?? "tool"} — {ev.Result}", LogEntryKind.Error);
+
+            // ── Chat ───────────────────────────────────────────────────
+            case "CHAT_MESSAGE_SENT":
+                return ("You sent a message", LogEntryKind.Info);
+            case "CHAT_CLEARED":
+                return ("Conversation cleared", LogEntryKind.Info);
+
+            // ── Settings ───────────────────────────────────────────────
+            case "SETTINGS_SAVED":
+                return ("Settings saved", LogEntryKind.Info);
+            case "PERSONALITY_SELECTED":
+            {
+                var name = DetailStr("name") ?? DetailStr("personality_id") ?? "unknown";
+                return ($"Personality switched: {name}", LogEntryKind.Info);
+            }
+
+            // ── Profiles ───────────────────────────────────────────────
+            case "PROFILE_CREATED":
+                return ($"Profile created: {DetailStr("name") ?? DetailStr("id") ?? "new"}", LogEntryKind.Info);
+            case "PROFILE_EDITED":
+                return ($"Profile updated: {DetailStr("name") ?? DetailStr("id") ?? ""}", LogEntryKind.Info);
+            case "PROFILE_DELETED":
+                return ($"Profile deleted: {DetailStr("id") ?? ""}", LogEntryKind.Info);
+            case "PROFILE_SWITCHED":
+                return ($"Switched to profile: {DetailStr("name") ?? DetailStr("id") ?? ""}", LogEntryKind.Info);
+            case "PERSONALITY_PROFILE_CREATED":
+                return ($"Personality profile created: {DetailStr("name") ?? ""}", LogEntryKind.Info);
+            case "PERSONALITY_PROFILE_DUPLICATED":
+                return ($"Personality profile duplicated: {DetailStr("name") ?? ""}", LogEntryKind.Info);
+
+            // ── Memory ─────────────────────────────────────────────────
+            case "MEMORY_DELETED":
+                return ($"Memory deleted: {DetailStr("item") ?? ""}", LogEntryKind.Info);
+            case "MEMORY_EDITED":
+                return ($"Memory updated: {DetailStr("summary") ?? DetailStr("item") ?? ""}", LogEntryKind.Info);
+
+            // ── Profile Nuggets ────────────────────────────────────────
+            case "NUGGET_CREATED":
+                return ("Profile nugget added", LogEntryKind.Info);
+            case "NUGGET_DELETED":
+                return ("Profile nugget removed", LogEntryKind.Info);
+            case "NUGGET_EDITED":
+                return ("Profile nugget updated", LogEntryKind.Info);
+
+            // ── Location ───────────────────────────────────────────────
+            case "LOCATION_MANUAL_SAVED":
+                return ($"Location set: {DetailStr("label") ?? ""}", LogEntryKind.Info);
+            case "LOCATION_CLEARED":
+                return ("Location cleared", LogEntryKind.Info);
+
+            // ── YouTube Transcription ──────────────────────────────────
+            case "YOUTUBE_JOB_START_REQUESTED":
+                return ($"YouTube transcription started: {DetailStr("url") ?? ""}", LogEntryKind.ToolInput);
+
+            // ── Voice ──────────────────────────────────────────────────
+            case "VOICE_SESSION_STARTED":
+                return ("Voice session started", LogEntryKind.Info);
+            case "VOICE_SESSION_ENDED":
+                return ("Voice session ended", LogEntryKind.Info);
+
+            // ── State Changes ──────────────────────────────────────────
+            case var a when a.StartsWith("STATE_"):
+                return ($"State: {ev.Result}", LogEntryKind.Info);
+
+            // ── Runtime Safety ──────────────────────────────────────────
+            case "SAFE_MODE_ACTIVATED":
+                return ("Safe mode activated", LogEntryKind.Error);
+            case "SAFE_MODE_DEACTIVATED":
+                return ("Safe mode deactivated", LogEntryKind.Info);
+            case "PANIC_MODE_ACTIVATED":
+                return ("Panic mode activated!", LogEntryKind.Error);
+            case "PANIC_MODE_DEACTIVATED":
+                return ("Panic mode deactivated", LogEntryKind.Info);
+
+            // ── Errors from any source ─────────────────────────────────
+            case var _ when ev.Result == "error":
+                return ($"Error: {ev.Action} — {DetailStr("error_message") ?? ev.Result}", LogEntryKind.Error);
+
+            // Everything else — suppress from drawer (still in full Logs tab)
+            default:
+                return (null, LogEntryKind.Info);
         }
     }
 
@@ -1575,77 +1709,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
 
     /// <summary>
-    /// Mirrors IntentFeatureExtractor.LooksLikeDeepDiveLookup so the UI
+    /// Delegates to the canonical agent-side heuristic so the UI
     /// pre-activates the Briefing tab whenever the agent is likely to
-    /// produce a deep-dive payload. Keep these two in sync.
+    /// produce a deep-dive payload. Single source of truth.
     /// </summary>
     private static bool LooksLikeDeepDiveQuery(string userText)
-    {
-        if (string.IsNullOrWhiteSpace(userText))
-            return false;
-
-        var lower = userText.ToLowerInvariant();
-
-        // Explicit signals (shared with agent)
-        if (lower.Contains("deep dive", StringComparison.Ordinal) ||
-            lower.Contains("hours + reviews", StringComparison.Ordinal) ||
-            lower.Contains("hours and reviews", StringComparison.Ordinal) ||
-            lower.Contains("tell me when", StringComparison.Ordinal) ||
-            lower.Contains("opening hours", StringComparison.Ordinal) ||
-            lower.Contains("closing time", StringComparison.Ordinal) ||
-            lower.Contains("store hours", StringComparison.Ordinal) ||
-            lower.Contains("business hours", StringComparison.Ordinal) ||
-            lower.Contains("hours of operation", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        var hasOpenCloseLanguage =
-            lower.Contains(" open", StringComparison.Ordinal) ||
-            lower.Contains(" opens", StringComparison.Ordinal) ||
-            lower.Contains(" opening", StringComparison.Ordinal) ||
-            lower.Contains(" close", StringComparison.Ordinal) ||
-            lower.Contains(" closes", StringComparison.Ordinal) ||
-            lower.Contains(" closing", StringComparison.Ordinal);
-
-        if ((lower.Contains("tell me when", StringComparison.Ordinal) ||
-             lower.Contains("what time", StringComparison.Ordinal)) &&
-            hasOpenCloseLanguage)
-        {
-            return true;
-        }
-
-        // "is X open" / "are they open" patterns
-        if (lower.Contains("is it open", StringComparison.Ordinal) ||
-            lower.Contains("are they open", StringComparison.Ordinal) ||
-            lower.Contains("is it closed", StringComparison.Ordinal) ||
-            lower.Contains("are they closed", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (lower.StartsWith("is ", StringComparison.Ordinal) &&
-            (lower.Contains(" open", StringComparison.Ordinal) ||
-             lower.Contains(" closed", StringComparison.Ordinal)))
-        {
-            return true;
-        }
-
-        // "when does X open/close" patterns
-        if ((lower.Contains("when does", StringComparison.Ordinal) ||
-             lower.Contains("when do they", StringComparison.Ordinal) ||
-             lower.Contains("when is", StringComparison.Ordinal) ||
-             lower.Contains("what time", StringComparison.Ordinal)) &&
-            (lower.Contains(" open", StringComparison.Ordinal) ||
-             lower.Contains(" close", StringComparison.Ordinal)))
-        {
-            return true;
-        }
-
-        // Legacy: open AND close together
-        return lower.Contains("open", StringComparison.Ordinal) &&
-               lower.Contains("close", StringComparison.Ordinal);
-    }
+        => IntentFeatureExtractor.LooksLikeDeepDiveLookup(
+            (userText ?? "").Trim().ToLowerInvariant());
 
     private void TryLoadBriefingFixture()
     {

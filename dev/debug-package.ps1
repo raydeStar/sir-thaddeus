@@ -12,17 +12,11 @@ Write-Host "══════════════════════�
 
 $StageDir = Join-Path $RepoRoot "artifacts/stage/win-x64"
 
-if (-not (Test-Path $StageDir)) {
-    Write-Host "`n[1/3] Packaging application (Release) since it's missing..." -ForegroundColor Yellow
-    & "$PSScriptRoot\release-package.ps1"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "`nERROR: Packaging failed." -ForegroundColor Red
-        exit $LASTEXITCODE
-    }
-}
-else {
-    Write-Host "`n[1/3] Found existing packaged app in $StageDir." -ForegroundColor Green
-    Write-Host "      (Run .\dev\release-package.ps1 manually to rebuild it with new code changes)" -ForegroundColor DarkGray
+Write-Host "`n[1/3] Packaging application (Debug)..." -ForegroundColor Yellow
+& "$PSScriptRoot\release-package.ps1" -Configuration Debug -SkipPreflight
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nERROR: Packaging failed." -ForegroundColor Red
+    exit $LASTEXITCODE
 }
 
 Write-Host "`n[2/3] Cleaning up existing background processes..." -ForegroundColor Cyan

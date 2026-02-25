@@ -239,7 +239,7 @@ public sealed class VoiceHostProcessManagerTests
                     VoiceHostHealthPath = "/health",
                     VoiceHostStartupTimeoutMs = 8_000,
                     TtsEngine = "piper",
-                    TtsVoiceId = "en_US-ryan-medium",
+                    TtsVoiceId = "en_US-john-medium",
                     SttEngine = "faster-whisper",
                     SttModelId = ""
                 },
@@ -259,7 +259,7 @@ public sealed class VoiceHostProcessManagerTests
             Assert.Contains("--tts-engine", startArgs);
             Assert.Contains("piper", startArgs, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("--tts-voice-id", startArgs);
-            Assert.Contains("en_US-ryan-medium", startArgs, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("en_US-john-medium", startArgs, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("--stt-engine", startArgs);
             Assert.Contains("faster-whisper", startArgs, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("--stt-model-id", startArgs);

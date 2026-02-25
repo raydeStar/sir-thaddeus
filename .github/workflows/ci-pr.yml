@@ -104,10 +104,42 @@ jobs:
             artifacts/release/*.zip.sha256.txt
           if-no-files-found: error
 
-  publish:
-    name: Publish Rolling Release
+  smoke-test:
+    name: Smoke Test Package
     needs: package
     if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/dev'
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Download build package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: build-package-assets-${{ github.ref_name }}
+          path: artifacts/release
+
+      - name: Run smoke test on packaged zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-*.zip" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) { Write-Error "No zip found in artifacts/release"; exit 1 }
+          ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
+
+  publish:
+    name: Publish Rolling Release
+    needs: [package, smoke-test]
+    if: >
+      always() &&
+      needs.package.result == 'success' &&
+      (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped') &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
