@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text.Json;
+using Microsoft.Win32;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 
@@ -36,6 +37,9 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     private int _warmupScheduled;
     private int _staleSessionReaped;
     private bool _disposed;
+    private volatile string _lastStartupPhase = "";
+    private string? _vcRedistWarning;
+    private bool _vcRedistChecked;
 
     public VoiceHostProcessManager(
         IAuditLogger auditLogger,
@@ -72,6 +76,39 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     }
 
     public int? CurrentPort => _currentPort;
+
+    /// <summary>
+    /// Human-friendly description of the current startup phase, derived from
+    /// stdout/stderr of the managed VoiceHost process.  Empty when idle or ready.
+    /// </summary>
+    public string LastStartupPhase => _lastStartupPhase;
+
+    /// <summary>True if a managed child process is currently alive.</summary>
+    public bool HasManagedProcessRunning => HasManagedProcessAlive();
+
+    /// <summary>
+    /// Non-null when the VC++ 2015-2022 x64 Redistributable appears to be missing.
+    /// Checked once and cached.  The message includes a download link.
+    /// </summary>
+    public string? VcRedistWarning
+    {
+        get
+        {
+            if (!_vcRedistChecked)
+            {
+                _vcRedistWarning = CheckVcRedistInstalled();
+                _vcRedistChecked = true;
+                if (_vcRedistWarning is not null)
+                {
+                    WriteAudit("VCREDIST_MISSING", "warn", new Dictionary<string, object>
+                    {
+                        ["message"] = _vcRedistWarning
+                    });
+                }
+            }
+            return _vcRedistWarning;
+        }
+    }
 
     /// <summary>
     /// Probes the health endpoint without starting a process.
@@ -513,11 +550,13 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(e.Data))
                 {
-                    WriteLog("OUT", e.Data.Trim());
+                    var trimmed = e.Data.Trim();
+                    UpdateStartupPhase(trimmed);
+                    WriteLog("OUT", trimmed);
                     WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
                     {
                         ["pid"] = process.Id,
-                        ["line"] = e.Data.Trim()
+                        ["line"] = trimmed
                     });
                 }
             };
@@ -525,11 +564,13 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(e.Data))
                 {
-                    WriteLog("ERR", e.Data.Trim());
+                    var trimmed = e.Data.Trim();
+                    UpdateStartupPhase(trimmed);
+                    WriteLog("ERR", trimmed);
                     WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
                     {
                         ["pid"] = process.Id,
-                        ["line"] = e.Data.Trim()
+                        ["line"] = trimmed
                     });
                 }
             };
@@ -582,6 +623,77 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             });
             return (false, ex.Message);
         }
+    }
+
+    private void UpdateStartupPhase(string line)
+    {
+        // Map well-known stdout/stderr markers emitted by start-voice-backend.ps1
+        // and server.py to short, user-friendly descriptions.
+        if (line.Contains("[VENV_OK]", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Setting up Python environment...";
+        else if (line.Contains("Installing dependencies", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("uv pip install", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Installing voice dependencies...";
+        else if (line.Contains("Dependencies already installed", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Preparing voice engine...";
+        else if (line.Contains("[ASSET_OK]", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Voice models verified.";
+        else if (line.Contains("Preparing voice/ASR", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("[VOICE_PREFETCH]", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Preparing voice assets...";
+        else if (line.Contains("[VOICE_TTS_READY]", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "TTS engine ready, starting server...";
+        else if (line.Contains("Voice Backend starting", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Starting voice server...";
+        else if (line.Contains("Application startup complete", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Voice server started, loading models...";
+        else if (line.Contains("Lazy-loading faster-whisper", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("Loading faster-whisper", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Loading speech recognition model...";
+        else if (line.Contains("faster-whisper model", StringComparison.OrdinalIgnoreCase) &&
+                 line.Contains("loaded", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Speech recognition ready.";
+        else if (line.Contains("TTS Warmup", StringComparison.OrdinalIgnoreCase) &&
+                 line.Contains("READY", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Voice engine ready.";
+        else if (line.Contains("Uvicorn running", StringComparison.OrdinalIgnoreCase))
+            _lastStartupPhase = "Voice backend online, waiting for readiness...";
+    }
+
+    /// <summary>
+    /// Checks whether the Visual C++ 2015-2022 x64 Redistributable is installed.
+    /// CTranslate2 (used by faster-whisper) requires it for native DLL loading.
+    /// Returns a user-friendly warning message, or null if the runtime is present.
+    /// </summary>
+    internal static string? CheckVcRedistInstalled()
+    {
+        try
+        {
+            // The VC++ 2015-2022 x64 redist registers under this key.
+            // "Installed" DWORD = 1 means it's present.
+            using var key = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64");
+            if (key is not null)
+            {
+                var installed = key.GetValue("Installed");
+                if (installed is int i && i == 1)
+                    return null; // present
+            }
+
+            // Fallback: check if the DLL itself exists in System32.
+            var sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            if (File.Exists(Path.Combine(sys32, "vcruntime140.dll")))
+                return null;
+        }
+        catch
+        {
+            // Registry access failed — can't confirm either way, assume OK.
+            return null;
+        }
+
+        return "Visual C++ Redistributable is not installed. "
+             + "Speech recognition may crash without it. "
+             + "Download it from: https://aka.ms/vs/17/release/vc_redist.x64.exe";
     }
 
     private static string QuoteArg(string value)
@@ -975,6 +1087,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
 
     private void StopManagedProcessIfAny()
     {
+        _lastStartupPhase = "";
         lock (_processGate)
         {
             if (_managedProcess is null)
