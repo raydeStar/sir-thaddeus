@@ -75,6 +75,7 @@ public partial class App : System.Windows.Application
     private VoiceSessionOrchestrator? _voiceOrchestrator;
     private TrayIconService? _trayIcon;
     private RuntimeStateStore? _stateStore;
+    private CancellationTokenSource? _readAloudCts;
     private MainWindow? _mainWindow;
     private OverlayViewModel? _overlayViewModel;
     private CommandPaletteViewModel? _commandPaletteViewModel;
@@ -327,6 +328,35 @@ public partial class App : System.Windows.Application
         try
         {
             await _mcpClient.StartAsync();
+
+            // Clear any previously-persisted safe mode from a prior handshake failure
+            if (_settings.RuntimeSafety.SafeMode &&
+                _settings.RuntimeSafety.SafeModeReason is "mcp_handshake_failed" or "mcp_start_failed")
+            {
+                _settings = _settings with
+                {
+                    RuntimeSafety = _settings.RuntimeSafety with
+                    {
+                        SafeMode = false,
+                        SafeModeReason = "",
+                        SafeModeSinceUtc = ""
+                    }
+                };
+                SettingsManager.Save(_settings);
+                _runtimeControls = RuntimeControlState.FromSettings(_settings);
+                _runtimeSafeModeReason = "";
+
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "SAFE_MODE_DEACTIVATED",
+                    Result = "ok",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["reason"] = "mcp_handshake_succeeded_after_prior_failure"
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -634,13 +664,26 @@ public partial class App : System.Windows.Application
 
     private void OnPttShutup()
     {
+        // Cancel any in-flight read-aloud playback
+        CancelReadAloud();
+
         if (_audioPlaybackService?.IsPlaying != true)
             return;
+
+        // Stop playback immediately so it doesn't keep speaking
+        try { _ = _audioPlaybackService.StopAsync(CancellationToken.None); } catch { }
 
         _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
         PublishVoiceStatus("Canceled.");
         _voiceOrchestrator?.EnqueueShutup();
         AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
+    }
+
+    private void CancelReadAloud()
+    {
+        try { _readAloudCts?.Cancel(); } catch { }
+        _readAloudCts?.Dispose();
+        _readAloudCts = null;
     }
 
     private async Task TryHandleMicUpAsync()
@@ -2087,6 +2130,31 @@ public partial class App : System.Windows.Application
             }
         }
 
+        // Resolve preferred_name from the active profile in the store.
+        // UserProfile.DisplayName in settings.json can be stale; the profile's
+        // preferred_name is the authoritative display name for the chat UI.
+        if (settingsStore is not null && !string.IsNullOrWhiteSpace(_settings.ActiveProfileId))
+        {
+            try
+            {
+                var profiles = settingsStore.ListProfilesAsync().GetAwaiter().GetResult();
+                var active = profiles.FirstOrDefault(p =>
+                    string.Equals(p.ProfileId, _settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
+                if (active is not null && !string.IsNullOrWhiteSpace(active.ProfileJson))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(active.ProfileJson);
+                    if (doc.RootElement.TryGetProperty("preferred_name", out var nameEl) &&
+                        nameEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var preferred = nameEl.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(preferred))
+                            chatVm.UserDisplayName = preferred;
+                    }
+                }
+            }
+            catch { /* non-critical — falls back to UserProfile.DisplayName */ }
+        }
+
         // ── Settings View ────────────────────────────────────────────
         var settingsVm = new SettingsViewModel(
             _settings!,
@@ -2095,10 +2163,12 @@ public partial class App : System.Windows.Application
             youtubeJobsClient: null,
             voiceHostProcessManager: _voiceHostProcessManager);
         
-        settingsVm.ActiveProfileChanged += profileId =>
+        settingsVm.ActiveProfileChanged += (profileId, displayName) =>
         {
             if (_orchestrator is not null)
                 _orchestrator.ActiveProfileId = profileId;
+            if (_commandPaletteViewModel is not null && !string.IsNullOrWhiteSpace(displayName))
+                _commandPaletteViewModel.UserDisplayName = displayName;
             Environment.SetEnvironmentVariable("ST_ACTIVE_PROFILE_ID", profileId ?? "");
         };
 
@@ -2296,14 +2366,30 @@ public partial class App : System.Windows.Application
 
             foreach (var tfmDir in Directory.GetDirectories(mcpBinDebug))
             {
+                // Check TFM root (e.g. net8.0-windows10.0.19041.0/McpServer.exe)
                 var candidate = Path.Combine(tfmDir, exeName);
-                if (!File.Exists(candidate)) continue;
-
-                var writeTime = File.GetLastWriteTimeUtc(candidate);
-                if (writeTime > newestTime)
+                if (File.Exists(candidate))
                 {
-                    newest     = candidate;
-                    newestTime = writeTime;
+                    var writeTime = File.GetLastWriteTimeUtc(candidate);
+                    if (writeTime > newestTime)
+                    {
+                        newest     = candidate;
+                        newestTime = writeTime;
+                    }
+                }
+
+                // Check RID subdirectories (e.g. net8.0-windows10.0.19041.0/win-x64/McpServer.exe)
+                foreach (var ridDir in Directory.GetDirectories(tfmDir))
+                {
+                    candidate = Path.Combine(ridDir, exeName);
+                    if (!File.Exists(candidate)) continue;
+
+                    var writeTime = File.GetLastWriteTimeUtc(candidate);
+                    if (writeTime > newestTime)
+                    {
+                        newest     = candidate;
+                        newestTime = writeTime;
+                    }
                 }
             }
 
@@ -2558,9 +2644,16 @@ public partial class App : System.Windows.Application
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
+        // Cancel any previous read-aloud so clicking "Read Aloud" again interrupts.
+        CancelReadAloud();
+
         // Stop any in-flight playback so voices don't overlap.
         try { await playback.StopAsync(CancellationToken.None); }
         catch { /* best effort */ }
+
+        // Create a new CTS that links to the caller's token.
+        _readAloudCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cancellationToken = _readAloudCts.Token;
 
         var voiceSettings = _settings?.Voice ?? new VoiceSettings();
         var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();

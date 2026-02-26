@@ -87,7 +87,7 @@ public sealed partial class DeepDiveCoordinator
             try
             {
                 output = await _mcp.CallToolAsync(primaryName, argumentsJson, cancellationToken);
-                ok = true;
+                ok = output is null || !output.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception firstEx)
             {
@@ -95,7 +95,7 @@ public sealed partial class DeepDiveCoordinator
                 {
                     toolName = alternateName;
                     output = await _mcp.CallToolAsync(alternateName, argumentsJson, cancellationToken);
-                    ok = true;
+                    ok = output is null || !output.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
                 }
                 catch (Exception secondEx)
                 {
@@ -350,6 +350,16 @@ public sealed partial class DeepDiveCoordinator
         briefing = default!;
         if (string.IsNullOrWhiteSpace(placesJson))
             return false;
+
+        // Guard: AuditedMcpToolClient returns plain "Error: ..." strings
+        // when a tool is blocked (permission denied, safe mode, etc.).
+        // These are not JSON and must be handled before attempting parse.
+        if (placesJson.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+            placesJson.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add($"Places lookup was blocked: {placesJson}");
+            return false;
+        }
 
         try
         {

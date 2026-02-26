@@ -3,6 +3,7 @@ name: Smoke - Web Search
 user_message: "Search for a recent technology headline and summarize it in two sentences."
 allowed_tools:
   - web_search
+  - browser_navigate
   - memory_retrieve
 mode: live
 assertions:

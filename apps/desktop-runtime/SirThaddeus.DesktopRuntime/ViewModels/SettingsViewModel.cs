@@ -528,7 +528,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// Raised when the active profile selection changes so the host
     /// can propagate the choice to the agent and MCP layers.
     /// </summary>
-    public event Action<string?>? ActiveProfileChanged;
+    public event Action<string?, string?>? ActiveProfileChanged;
 
     /// <summary>
     /// Raised when the active personality changes.
@@ -773,6 +773,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
                 OnPropertyChanged(nameof(SelectedProfile));
                 LoadLocationForProfile(_selectedProfile?.ProfileId);
+
+                // Propagate the resolved display name to the chat UI on initial load.
+                // Without this, UserDisplayName stays stale from UserProfile.DisplayName.
+                var resolvedName = ResolveProfileDisplayName(_selectedProfile?.ProfileId);
+                if (!string.IsNullOrWhiteSpace(resolvedName))
+                    ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, resolvedName);
             });
         }
         catch (Exception ex)
@@ -1712,7 +1718,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         StatusText = "\u2713 Settings saved";
         ShowSaveSuccess();
 
-        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, ResolveProfileDisplayName(_selectedProfile?.ProfileId));
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);
 
@@ -1782,7 +1788,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _settings = updated;
         StatusText = "Profile selected.";
 
-        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, ResolveProfileDisplayName(_selectedProfile?.ProfileId));
         SettingsChanged?.Invoke(updated);
 
         _audit.Append(new AuditEvent

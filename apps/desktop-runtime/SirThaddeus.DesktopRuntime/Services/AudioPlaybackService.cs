@@ -46,6 +46,14 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         @"\s+",
         RegexOptions.Compiled);
 
+    private static readonly Regex SignatureLineRegex = new(
+        @"^\s*--\s*Sir\s+Thaddeus\s*$",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ActionTagRegex = new(
+        @"^\s*\[Action:\s*[^\]]*\]\s*$",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly IAuditLogger _auditLogger;
     private readonly LocalTtsHttpClient? _localTtsClient;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
@@ -420,6 +428,13 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
         normalized = normalized.Replace("(truncated)", "", StringComparison.OrdinalIgnoreCase);
         normalized = MarkdownLinkRegex.Replace(normalized, "$1");
         normalized = UrlRegex.Replace(normalized, " ");
+
+        // Strip agent signature lines (e.g. "-- Sir Thaddeus") so TTS doesn't speak them.
+        // The signature is still displayed visually in the chat bubble.
+        normalized = SignatureLineRegex.Replace(normalized, "");
+
+        // Strip [Action: ...] directives the LLM sometimes emits
+        normalized = ActionTagRegex.Replace(normalized, "");
 
         var chunks = new List<string>();
         var currentChunk = new System.Text.StringBuilder();

@@ -952,7 +952,7 @@ public sealed partial class AgentOrchestrator
                 try
                 {
                     var altResult = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                    return (alternateToolName, altResult, true);
+                    return (alternateToolName, altResult, !IsErrorResponse(altResult));
                 }
                 catch (Exception alternateError)
                 {
@@ -961,14 +961,14 @@ public sealed partial class AgentOrchestrator
                 }
             }
 
-            return (primaryToolName, result, true);
+            return (primaryToolName, result, !IsErrorResponse(result));
         }
         catch (Exception primaryError)
         {
             try
             {
                 var result = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                return (alternateToolName, result, true);
+                return (alternateToolName, result, !IsErrorResponse(result));
             }
             catch (Exception alternateError)
             {
@@ -3427,6 +3427,15 @@ public sealed partial class AgentOrchestrator
 
         return copy;
     }
+
+    /// <summary>
+    /// Detects "Error:" prefixed responses from AuditedMcpToolClient
+    /// (permission denied, safe mode, budget exceeded, execution failure).
+    /// </summary>
+    private static bool IsErrorResponse(string? result) =>
+        result is not null &&
+        (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+         result.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsUnknownToolError(string payload, string requestedTool)
     {

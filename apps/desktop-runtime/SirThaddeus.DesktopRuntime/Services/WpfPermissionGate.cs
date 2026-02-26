@@ -167,6 +167,7 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         {
             Capability = MapGroupToCapability(group),
             Purpose    = purpose,
+            ToolName   = canonical,
             Duration   = TokenTtl,
             Requester  = "agent"
         };
