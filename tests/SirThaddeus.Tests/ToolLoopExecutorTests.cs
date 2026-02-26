@@ -68,7 +68,7 @@ public class ToolLoopExecutorTests
         };
         var records = new List<ToolCallRecord>();
 
-        var response = await executor.ExecuteAsync(new ToolLoopExecutionRequest
+        var request = new ToolLoopExecutionRequest
         {
             History = history,
             Tools =
@@ -79,8 +79,11 @@ public class ToolLoopExecutorTests
             ToolCallsMade = records,
             InitialRoundTrips = 0,
             MaxRoundTrips = 10,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "FileTask" },
             SanitizeAssistantText = static s => s
-        });
+        };
+
+        var response = await executor.ExecuteAsync(request);
 
         Assert.True(response.Success);
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("get_active_window", StringComparison.OrdinalIgnoreCase));
@@ -96,12 +99,12 @@ public class ToolLoopExecutorTests
     [Fact]
     public async Task ExecuteAsync_DoesNotExpandToolAvailabilityBeyondFilteredSet()
     {
-        var firstTurn = true;
+        var turnCount = 0;
         var llm = new FakeLlmClient((messages, tools) =>
         {
-            if (firstTurn)
+            turnCount++;
+            if (turnCount == 1)
             {
-                firstTurn = false;
                 return new LlmResponse
                 {
                     IsComplete = false,
@@ -129,6 +132,27 @@ public class ToolLoopExecutorTests
                     ]
                 };
             }
+            else if (turnCount == 2)
+            {
+                // Respond to the PlanValidator's rejection by just calling the valid tool
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_ping_2",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "tool_ping",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                };
+            }
 
             return new LlmResponse
             {
@@ -148,7 +172,7 @@ public class ToolLoopExecutorTests
             FakeMcpClient.StandardToolSet);
 
         var executor = new ToolLoopExecutor(llm, mcp);
-        var response = await executor.ExecuteAsync(new ToolLoopExecutionRequest
+        var request = new ToolLoopExecutionRequest
         {
             History =
             [
@@ -159,18 +183,18 @@ public class ToolLoopExecutorTests
             ToolCallsMade = [],
             InitialRoundTrips = 0,
             MaxRoundTrips = 10,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "SystemExecute" },
             SanitizeAssistantText = static s => s
-        });
+        };
+        var response = await executor.ExecuteAsync(request);
 
         Assert.True(response.Success);
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("tool_ping", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
 
-        var blocked = response.ToolCallsMade.FirstOrDefault(t =>
-            t.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(blocked);
-        Assert.False(blocked!.Success);
-        Assert.Contains("tool_not_permitted", blocked.Result, StringComparison.OrdinalIgnoreCase);
+        // The PlanValidator should have intercepted the web_search tool and injected a System Error into the history.
+        var systemErrorInHistory = request.History.Any(h => h.Content != null && h.Content.Contains("System Error", StringComparison.OrdinalIgnoreCase) && h.Content.Contains("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.True(systemErrorInHistory, "Expected PlanValidator to inject a System Error for the unpermitted web_search tool.");
     }
 
     private static ToolDefinition MakeToolDefinition(string name)

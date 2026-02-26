@@ -437,6 +437,35 @@ public partial class App : System.Windows.Application
             activePersonalityId: _settings.ActivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings));
 
+        IAgentOrchestrator baseOrchestrator = _orchestrator;
+
+        if (_settings.Dialogue.OrchestrationV2Enabled)
+        {
+            var embedder = new DummyEmbedderForV2Stub();
+            var nnClassifier = new SirThaddeus.Agent.Orchestration.NnIntentClassifier(embedder);
+            var llmClassifier = new SirThaddeus.Agent.Orchestration.LlmIntentClassifier(_llmClient);
+            var router = new SirThaddeus.Agent.Orchestration.RouterV2(nnClassifier, llmClassifier);
+            var clarificationGate = new SirThaddeus.Agent.Orchestration.ClarificationGate();
+            var toolRetriever = new SirThaddeus.Agent.Orchestration.ToolRetriever(embedder);
+            var toolLoop = new SirThaddeus.Agent.ToolLoop.ToolLoopExecutor(_llmClient, _auditedMcpClient);
+            var toolBuilder = new SirThaddeus.Agent.Tools.ToolDefinitionBuilder(_auditedMcpClient);
+
+            baseOrchestrator = new SirThaddeus.Agent.Orchestration.V2AgentOrchestratorAdapter(
+                _orchestrator,
+                toolBuilder,
+                _auditLogger,
+                _settings.Llm.SystemPrompt,
+                deterministicExecutor => new SirThaddeus.Agent.Orchestration.TurnPipeline(
+                    router,
+                    clarificationGate,
+                    toolRetriever,
+                    toolLoop,
+                    deterministicExecutor)
+            );
+
+            _auditLogger.Append(new AuditEvent { Actor = "runtime", Action = "V2_ORCHESTRATOR_ENABLED", Result = "ok" });
+        }
+
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
         _orchestrator.ActiveProfileId = _settings.ActiveProfileId;
@@ -469,7 +498,7 @@ public partial class App : System.Windows.Application
         });
 
         _agentEntryPoint = new LocationAwareAgentOrchestrator(
-            _orchestrator,
+            baseOrchestrator,
             getSettings: () => _settings,
             getActiveProfileId: () => _orchestrator?.ActiveProfileId,
             saveManualLocation: SaveManualLocationFromConversation,
@@ -3032,6 +3061,59 @@ public partial class App : System.Windows.Application
         _auditLogger?.Dispose();
 
         base.OnExit(e);
+    }
+
+    class DummyEmbedderForV2Stub : SirThaddeus.Agent.Orchestration.ITextEmbedder
+    {
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken)
+        {
+            const int vectorSize = 128;
+            var vector = new float[vectorSize];
+
+            if (string.IsNullOrWhiteSpace(text))
+                return Task.FromResult(vector);
+
+            var tokens = text
+                .Split([' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(t => t.ToLowerInvariant());
+
+            foreach (var token in tokens)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var idx = (int)(StableHash(token) % vectorSize);
+                vector[idx] += 1f;
+            }
+
+            // L2 normalize so cosine similarity is meaningful.
+            var norm = 0f;
+            for (var i = 0; i < vector.Length; i++)
+                norm += vector[i] * vector[i];
+
+            if (norm > 0f)
+            {
+                var inv = 1f / (float)Math.Sqrt(norm);
+                for (var i = 0; i < vector.Length; i++)
+                    vector[i] *= inv;
+            }
+
+            return Task.FromResult(vector);
+        }
+
+        private static uint StableHash(string value)
+        {
+            // FNV-1a 32-bit for deterministic lightweight hashing.
+            const uint offset = 2166136261;
+            const uint prime = 16777619;
+
+            var hash = offset;
+            foreach (var ch in value)
+            {
+                hash ^= ch;
+                hash *= prime;
+            }
+
+            return hash;
+        }
     }
 
     private void RequestShutdown()

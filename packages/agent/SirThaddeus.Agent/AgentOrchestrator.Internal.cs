@@ -368,6 +368,7 @@ public sealed partial class AgentOrchestrator
                 ToolCallsMade = toolCallsMade,
                 InitialRoundTrips = roundTrips,
                 MaxRoundTrips = MaxToolRoundTrips,
+                Decision = new Orchestration.IntentDecisionV2 { Intent = "GeneralTool", Confidence = 1.0 },
                 SanitizeAssistantText = text =>
                 {
                     var responseKind = _responseKindClassifier.Classify(text, hasToolEvidence: true);

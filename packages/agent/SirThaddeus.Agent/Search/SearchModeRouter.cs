@@ -44,7 +44,7 @@ public static class SearchModeRouter
         "more detail", "more details", "more about",
         "go deeper", "dig into", "elaborate",
         "expand on", "continue", "keep going",
-        "what else", "anything else"
+        "what else", "anything else", "show me"
     ];
 
     // ── "More sources" phrases (triggers MoreSources branch) ─────────
@@ -109,6 +109,11 @@ public static class SearchModeRouter
     /// </summary>
     public static bool IsFollowUpMessage(string lowerMessage)
     {
+        // A direct local business search ("show me a bakery nearby") is never a follow-up, 
+        // even if it starts with "show me".
+        if (Routing.IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerMessage))
+            return false;
+
         // Check direct follow-up phrases
         foreach (var phrase in FollowUpPhrases)
         {

@@ -390,6 +390,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (string.IsNullOrWhiteSpace(userMessage))
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
 
+        // Reset per-turn budget so each user message gets a fresh budget.
+        (_mcp as AuditedMcpToolClient)?.NotifyNewTurn();
+
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";
         var personalityTurnContext = _personalityRuntime.BuildTurnContext(userMessage);

@@ -40,6 +40,9 @@
     <Content Include="continuity\scripts\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Evals\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- Compile VoiceHost process manager directly for focused supervision tests

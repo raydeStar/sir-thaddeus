@@ -1,5 +1,6 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -1938,6 +1939,213 @@ public class SearchPipelineGoldenTests
         Assert.Contains("9 + 4 = **13**", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+#endregion
+
+#region ── Local Business Detection + Briefing Signals ───────────────────
+
+public class LocalBusinessDetectionTests
+{
+    [Fact]
+    public async Task DemoSequence_LogicPuzzle_To_Discovery_To_Briefing()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var userText = messages.LastOrDefault(m => m.Role == "user")?.Content ?? "";
+            
+            if (userText.Contains("walk or drive", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { Content = "Drive, because you need the car at the destination.", IsComplete = true };
+            
+            if (userText.Contains("bakery nearby", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { Content = "Here are some bakeries nearby: Left Bank Pastry.", IsComplete = true };
+                
+            if (userText.Contains("Left Bank Pastry", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { Content = "Here is a briefing on Left Bank Pastry.", IsComplete = true };
+
+            return new LlmResponse { Content = "Generic response.", IsComplete = true };
+        });
+
+        var callCount = 0;
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            callCount++;
+            if (tool.Contains("search"))
+            {
+                if (args.Contains("bakery"))
+                {
+                    return "Here is some raw search data about bakeries.\n" +
+                           "<!-- SOURCES_JSON -->\n" +
+                           "[{\"url\":\"https://example.com/bakeries\",\"title\":\"Best Bakeries in Olympia\",\"domain\":\"example.com\"}]";
+                }
+            }
+            if (tool.Contains("places_lookup") || tool.Contains("PlacesLookup"))
+            {
+                return "{\"name\":\"Left Bank Pastry\",\"address\":\"1008 4th Ave E, Olympia, WA\"}";
+            }
+            return "dummy content";
+        });
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        // Step 1: Logic Question
+        var result1 = await agent.ProcessAsync("The car wash is 50m away. Do I walk or drive?");
+        Assert.True(result1.Success);
+        // Expect 1 call (memory_retrieve). Logic puzzle should NOT trigger search.
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Drive", result1.Text);
+
+        // Step 2: Discovery
+        var result2 = await agent.ProcessAsync("Show me a bakery nearby");
+        Assert.True(result2.Success);
+        Assert.Contains(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("bakeries nearby", result2.Text);
+        
+        // Ensure the session recorded that this was a local business discovery
+        var sessionFlagFound = false;
+        var orchestratorField = typeof(AgentOrchestrator).GetField("_searchOrchestrator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (orchestratorField?.GetValue(agent) is SirThaddeus.Agent.Search.SearchOrchestrator searchOrch)
+        {
+            sessionFlagFound = searchOrch.Session.LastWasLocalBusinessDiscovery;
+        }
+        Assert.True(sessionFlagFound, "Session should flag the search as a local business discovery.");
+
+        var priorCallCount = mcp.Calls.Count;
+
+        // Step 3: Follow-up Briefing
+        var result3 = await agent.ProcessAsync("Show me Left Bank Pastry");
+        Assert.True(result3.Success);
+        
+        // It should have routed to the briefing pipeline and called places_lookup (or search again)
+        Assert.True(mcp.Calls.Count > priorCallCount, "Should have called tools for the briefing.");
+        Assert.NotNull(result3.DeepDiveBriefing);
+    }
+
+    [Theory]
+    [InlineData("florists nearby", true)]
+    [InlineData("restaurants near me", true)]
+    [InlineData("any coffee shop around me", true)]
+    [InlineData("dentist close by", true)]
+    [InlineData("pharmacy in my area", true)]
+    [InlineData("bakery around here", true)]
+    [InlineData("bakeries nearby", true)]             // -ies plural
+    [InlineData("pharmacies near me", true)]          // -ies plural
+    [InlineData("groceries near me", true)]           // -ies plural
+    [InlineData("find me some bakeries nearby", true)]
+    [InlineData("florists in portland", false)]       // no proximity cue
+    [InlineData("tell me about quantum computing", false)] // no business term
+    [InlineData("what is a florist", false)]           // no proximity cue
+    [InlineData("nearby attractions", false)]          // no business term
+    public void HasLocalBusinessProximitySignals_DetectsCorrectly(string input, bool expected)
+    {
+        var result = IntentFeatureExtractor.HasLocalBusinessProximitySignals(input.ToLowerInvariant());
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("can you tell me about some florists nearby")]   // discovery, not specific-place
+    [InlineData("florists nearby")]                              // discovery
+    [InlineData("restaurants near me")]                           // discovery
+    [InlineData("where is a good bakery around me")]              // discovery
+    [InlineData("find me a salon close by")]                      // discovery
+    [InlineData("find me some bakeries nearby")]                  // discovery
+    [InlineData("bakeries nearby")]                               // discovery
+    public void LooksLikeDeepDiveLookup_RejectsDiscoveryQueries(string input)
+    {
+        var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
+        Assert.False(result, $"Discovery queries should NOT match deep dive: {input}");
+    }
+
+    [Theory]
+    [InlineData("is left bank pastry open")]                     // "is X open" pattern
+    [InlineData("what time does walmart close")]                 // "what time does X close" pattern
+    [InlineData("hours and reviews for target")]                 // hours + reviews signal
+    public void LooksLikeDeepDiveLookup_MatchesSpecificPlaceQueries(string input)
+    {
+        var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
+        Assert.True(result, $"Expected deep dive match for specific-place query: {input}");
+    }
+
+    [Theory]
+    [InlineData("create a briefing on french market")]
+    [InlineData("give me a briefing on target")]
+    [InlineData("brief me on the new bakery downtown")]
+    [InlineData("briefing on walmart hours")]
+    [InlineData("briefing for trader joe's")]
+    public void LooksLikeDeepDiveLookup_MatchesBriefingSignals(string input)
+    {
+        var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
+        Assert.True(result, $"Expected deep dive match for: {input}");
+    }
+
+    [Theory]
+    [InlineData("tell me about quantum computing")]    // no business term
+    [InlineData("what is the news today")]              // news, not local business
+    [InlineData("open source software")]                // "open source" guard
+    public void LooksLikeDeepDiveLookup_RejectsNonLocalBusiness(string input)
+    {
+        var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
+        Assert.False(result, $"Expected no deep dive match for: {input}");
+    }
+}
+
+public class AuditedMcpToolClientBudgetTests
+{
+    [Fact]
+    public async Task TurnBudget_ResetsAfterNotifyNewTurn()
+    {
+        var callCount = 0;
+        var inner = new FakeMcpClient((_, _) => { callCount++; return "ok"; });
+        var audit = new TestAuditLogger();
+        var gate = new AllowAllGate();
+
+        var settings = new SirThaddeus.Config.ToolBudgetSettings
+        {
+            Enabled = true,
+            MaxToolCallsPerTurn = 2,
+            MaxToolCallsPerSession = 100,
+            MaxWebPullsPerTurn = 1,
+            MaxFileOpsPerMinute = 30
+        };
+        var controls = new RuntimeControlState
+        {
+            ToolBudgets = settings
+        };
+
+        var client = new AuditedMcpToolClient(
+            inner, audit, gate, "test-session",
+            () => controls);
+
+        // First turn: use up the web budget (1 web call allowed)
+        var r1 = await client.CallToolAsync("web_search", "{}", default);
+        Assert.Equal("ok", r1);
+
+        // Second web call in same turn should be blocked
+        var r2 = await client.CallToolAsync("web_search", "{}", default);
+        Assert.Contains("budget", r2, StringComparison.OrdinalIgnoreCase);
+
+        // Reset turn
+        client.NotifyNewTurn();
+
+        // Now web call should succeed again
+        var r3 = await client.CallToolAsync("web_search", "{}", default);
+        Assert.Equal("ok", r3);
+    }
+
+    private sealed class AllowAllGate : IToolPermissionGate
+    {
+        public Task<ToolPermissionResult> CheckAsync(
+            string toolName, string argumentsJson, CancellationToken ct)
+            => Task.FromResult(new ToolPermissionResult
+            {
+                Granted = true,
+                PermissionRequired = false
+            });
     }
 }
 

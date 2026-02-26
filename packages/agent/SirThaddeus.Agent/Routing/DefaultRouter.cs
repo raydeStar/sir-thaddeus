@@ -74,6 +74,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return MakeRoute(Intents.LookupNews, confidence: 0.93, needsWeb: true, needsSearch: true);
 
+        if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower))
+            return MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
+
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return MakeRoute(Intents.LookupFact, confidence: 0.9, needsWeb: true, needsSearch: true);
 

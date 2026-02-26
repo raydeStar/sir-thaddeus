@@ -513,7 +513,12 @@ public static class IntentFeatureExtractor
             "closing time",
             "store hours",
             "business hours",
-            "hours of operation"
+            "hours of operation",
+            "create a briefing",
+            "give me a briefing",
+            "brief me on",
+            "briefing on",
+            "briefing for"
         ];
 
         if (ContainsAny(lower, explicitSignals))
@@ -540,9 +545,10 @@ public static class IntentFeatureExtractor
         if (LooksLikeWhenOpenQuery(lower))
             return true;
 
-        // ── Local business discovery ("find open restaurants near X") ─
-        if (LooksLikeLocalBusinessDiscovery(lower))
-            return true;
+        // NOTE: LooksLikeLocalBusinessDiscovery is intentionally NOT called
+        // here. Discovery queries ("find bakeries nearby") should route to
+        // WebFactFind so users see multiple options. Only specific-place
+        // queries (hours, briefings, "is X open") belong in DeepDive.
 
         var hasHoursVerb =
             lower.Contains("open", StringComparison.Ordinal) ||
@@ -609,7 +615,7 @@ public static class IntentFeatureExtractor
     /// open places or business options in a location.
     /// Example: "find me open restaurants in Rexburg right now".
     /// </summary>
-    private static bool LooksLikeLocalBusinessDiscovery(string lower)
+    public static bool LooksLikeLocalBusinessDiscovery(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower))
             return false;
@@ -621,8 +627,10 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
-            "florist", "bakery", "bar", "pub", "store", "shop",
-            "grocery", "supermarket", "pharmacy", "hotel", "motel",
+            "florist", "florists", "bakery", "bakeries",
+            "bar", "pub", "store", "shop",
+            "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
             "gym", "dentist", "clinic", "doctor", "urgent care"
         ];
@@ -638,21 +646,74 @@ public static class IntentFeatureExtractor
             lower.Contains("good ", StringComparison.Ordinal) ||
             lower.Contains("open", StringComparison.Ordinal) ||
             lower.Contains("hours", StringComparison.Ordinal) ||
-            lower.Contains("close", StringComparison.Ordinal);
+            lower.Contains("close", StringComparison.Ordinal) ||
+            lower.Contains("tell", StringComparison.Ordinal) ||
+            lower.Contains("where", StringComparison.Ordinal) ||
+            lower.Contains("bring up", StringComparison.Ordinal) ||
+            lower.Contains("look up", StringComparison.Ordinal) ||
+            lower.Contains("search", StringComparison.Ordinal) ||
+            lower.Contains("any ", StringComparison.Ordinal) ||
+            lower.Contains("some ", StringComparison.Ordinal);
+
+        // Hard proximity cues are unambiguous enough that business term +
+        // proximity alone is sufficient — no action cue needed.
+        // "florists nearby" is always a local business query.
+        var hasHardProximityCue =
+            lower.Contains("near me", StringComparison.Ordinal) ||
+            lower.Contains("nearby", StringComparison.Ordinal) ||
+            lower.Contains("around me", StringComparison.Ordinal) ||
+            lower.Contains("close by", StringComparison.Ordinal) ||
+            lower.Contains("in my area", StringComparison.Ordinal) ||
+            lower.Contains("local", StringComparison.Ordinal);
+
+        if (hasHardProximityCue)
+            return true;
 
         if (!hasActionCue)
             return false;
 
         var hasLocalCue =
-            lower.Contains("near me", StringComparison.Ordinal) ||
-            lower.Contains("nearby", StringComparison.Ordinal) ||
-            lower.Contains("around me", StringComparison.Ordinal) ||
+            hasHardProximityCue ||
             lower.Contains(" in ", StringComparison.Ordinal) ||
             lower.Contains("right now", StringComparison.Ordinal) ||
             lower.Contains("today", StringComparison.Ordinal) ||
             lower.Contains("tonight", StringComparison.Ordinal);
 
         return hasLocalCue;
+    }
+
+    /// <summary>
+    /// Returns true when the message contains a local business type term
+    /// combined with a proximity cue (near me, nearby, etc.). Used by the
+    /// search pipeline to inject location context or return early guidance
+    /// when no location hint is available.
+    /// </summary>
+    public static bool HasLocalBusinessProximitySignals(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        ReadOnlySpan<string> businessTerms =
+        [
+            "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "florist", "florists", "bakery", "bakeries",
+            "bar", "pub", "store", "shop",
+            "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "hotel", "motel",
+            "gas station", "car wash", "laundromat", "salon", "barber",
+            "gym", "dentist", "clinic", "doctor", "urgent care"
+        ];
+
+        if (!ContainsAny(lower, businessTerms))
+            return false;
+
+        return lower.Contains("near me", StringComparison.Ordinal) ||
+               lower.Contains("nearby", StringComparison.Ordinal) ||
+               lower.Contains("around me", StringComparison.Ordinal) ||
+               lower.Contains("close by", StringComparison.Ordinal) ||
+               lower.Contains("in my area", StringComparison.Ordinal) ||
+               lower.Contains("around here", StringComparison.Ordinal) ||
+               lower.Contains("local", StringComparison.Ordinal);
     }
 
     public static bool LooksLikeFactLookup(string lower)
