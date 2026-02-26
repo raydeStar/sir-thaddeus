@@ -26,10 +26,42 @@ public partial class PermissionPromptWindow : Window
     /// </summary>
     public void SetRequest(PermissionRequest request)
     {
-        CapabilityText.Text = request.Capability.ToString();
-        PurposeText.Text = request.Purpose ?? "(No purpose specified)";
+        ToolNameText.Text = request.ToolName ?? "(unknown tool)";
+        CapabilityText.Text = request.Capability.ToDisplayName();
+        DescriptionText.Text = request.Capability.ToDescription();
+        PurposeText.Text = FormatPurposeDetails(request.ToolName, request.Purpose);
         ScopeText.Text = request.Scope?.ToSummary() ?? "No restrictions";
-        DurationText.Text = FormatDuration(request.Duration);
+
+        WarningText.Text = request.Capability switch
+        {
+            Capability.SystemExecute => "This tool can run commands on your system. Review the details carefully before allowing.",
+            Capability.FileAccess    => "This tool can read or write files on your computer. Review the path before allowing.",
+            Capability.ScreenRead    => "This tool will capture what is currently visible on your screen.",
+            Capability.WebAccess     => "This tool will make an outbound internet request on your behalf.",
+            Capability.MemoryWrite   => "This tool will store or modify data in your local memory database.",
+            Capability.MemoryRead    => "This tool will read from your local memory database.",
+            _                        => "Sir Thaddeus is requesting access to a tool on your behalf. Choose how to proceed."
+        };
+    }
+
+    private static string FormatPurposeDetails(string? toolName, string? purpose)
+    {
+        if (string.IsNullOrWhiteSpace(purpose))
+            return "(no additional details)";
+
+        // Strip the "Use tool 'xxx'." or "Use 'xxx': " prefix so we only show the args
+        var cleaned = purpose;
+        if (toolName is not null)
+        {
+            var prefixFull = $"Use tool '{toolName}'.";
+            var prefixArgs = $"Use '{toolName}': ";
+            if (cleaned.Equals(prefixFull, StringComparison.Ordinal))
+                return "(no additional details)";
+            if (cleaned.StartsWith(prefixArgs, StringComparison.Ordinal))
+                cleaned = cleaned[prefixArgs.Length..];
+        }
+
+        return cleaned;
     }
 
     /// <summary>
@@ -68,14 +100,4 @@ public partial class PermissionPromptWindow : Window
         Close();
     }
 
-    private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration.TotalMinutes < 1)
-            return $"{(int)duration.TotalSeconds} seconds";
-        if (duration.TotalHours < 1)
-            return $"{(int)duration.TotalMinutes} minutes";
-        if (duration.TotalDays < 1)
-            return $"{duration.TotalHours:F1} hours";
-        return $"{duration.TotalDays:F1} days";
-    }
 }

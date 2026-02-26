@@ -1,11 +1,14 @@
-<p align="center">
-<img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
-</p>
+<div align="center">
+  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
 
-<h1 align="center">Sir Thaddeus</h1>
-<p align="center">
-<strong>A permissioned AI runtime that runs on your machine.</strong>
-</p>
+  <div style="font-size: 2em; font-weight: bold; margin-top: 0.5em;">Sir Thaddeus</div>
+  
+  <p>
+    <strong>A permissioned AI runtime that runs on your machine.</strong>
+  </p>
+
+  <hr width="100%" />
+</div>
 
 ## A Local‑First AI Runtime
 

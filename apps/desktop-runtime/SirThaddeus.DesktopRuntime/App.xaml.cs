@@ -327,6 +327,35 @@ public partial class App : System.Windows.Application
         try
         {
             await _mcpClient.StartAsync();
+
+            // Clear any previously-persisted safe mode from a prior handshake failure
+            if (_settings.RuntimeSafety.SafeMode &&
+                _settings.RuntimeSafety.SafeModeReason is "mcp_handshake_failed" or "mcp_start_failed")
+            {
+                _settings = _settings with
+                {
+                    RuntimeSafety = _settings.RuntimeSafety with
+                    {
+                        SafeMode = false,
+                        SafeModeReason = "",
+                        SafeModeSinceUtc = ""
+                    }
+                };
+                SettingsManager.Save(_settings);
+                _runtimeControls = RuntimeControlState.FromSettings(_settings);
+                _runtimeSafeModeReason = "";
+
+                _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "runtime",
+                    Action = "SAFE_MODE_DEACTIVATED",
+                    Result = "ok",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["reason"] = "mcp_handshake_succeeded_after_prior_failure"
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -2095,10 +2124,12 @@ public partial class App : System.Windows.Application
             youtubeJobsClient: null,
             voiceHostProcessManager: _voiceHostProcessManager);
         
-        settingsVm.ActiveProfileChanged += profileId =>
+        settingsVm.ActiveProfileChanged += (profileId, displayName) =>
         {
             if (_orchestrator is not null)
                 _orchestrator.ActiveProfileId = profileId;
+            if (_commandPaletteViewModel is not null && !string.IsNullOrWhiteSpace(displayName))
+                _commandPaletteViewModel.UserDisplayName = displayName;
             Environment.SetEnvironmentVariable("ST_ACTIVE_PROFILE_ID", profileId ?? "");
         };
 
@@ -2296,14 +2327,30 @@ public partial class App : System.Windows.Application
 
             foreach (var tfmDir in Directory.GetDirectories(mcpBinDebug))
             {
+                // Check TFM root (e.g. net8.0-windows10.0.19041.0/McpServer.exe)
                 var candidate = Path.Combine(tfmDir, exeName);
-                if (!File.Exists(candidate)) continue;
-
-                var writeTime = File.GetLastWriteTimeUtc(candidate);
-                if (writeTime > newestTime)
+                if (File.Exists(candidate))
                 {
-                    newest     = candidate;
-                    newestTime = writeTime;
+                    var writeTime = File.GetLastWriteTimeUtc(candidate);
+                    if (writeTime > newestTime)
+                    {
+                        newest     = candidate;
+                        newestTime = writeTime;
+                    }
+                }
+
+                // Check RID subdirectories (e.g. net8.0-windows10.0.19041.0/win-x64/McpServer.exe)
+                foreach (var ridDir in Directory.GetDirectories(tfmDir))
+                {
+                    candidate = Path.Combine(ridDir, exeName);
+                    if (!File.Exists(candidate)) continue;
+
+                    var writeTime = File.GetLastWriteTimeUtc(candidate);
+                    if (writeTime > newestTime)
+                    {
+                        newest     = candidate;
+                        newestTime = writeTime;
+                    }
                 }
             }
 

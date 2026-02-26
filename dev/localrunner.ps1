@@ -13,15 +13,15 @@ Write-Host "══════════════════════�
 $DebugMode = $args -contains "--debug"
 
 # 1. Bootstrap (Restores dependencies, validates SDK)
-Write-Host "`n[1/3] Bootstrapping environment..." -ForegroundColor Yellow
+Write-Host "`n[1/4] Bootstrapping environment..." -ForegroundColor Yellow
 & "$PSScriptRoot\bootstrap.ps1"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nERROR: Bootstrap failed. Cannot start application." -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
-# 2. Build VoiceHost (DesktopRuntime doesn't reference it directly)
-Write-Host "`n[2/3] Building VoiceHost..." -ForegroundColor Yellow
+# 2. Build VoiceHost & MCP Server (DesktopRuntime doesn't reference them directly)
+Write-Host "`n[2/4] Building VoiceHost..." -ForegroundColor Yellow
 $VoiceHostPath = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
 & dotnet build $VoiceHostPath
 if ($LASTEXITCODE -ne 0) {
@@ -29,9 +29,17 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# 3. Preparation & Execution
+Write-Host "`n[3/4] Building MCP Server..." -ForegroundColor Yellow
+$McpServerPath = Join-Path $RepoRoot "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"
+& dotnet build $McpServerPath
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nERROR: MCP Server build failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+# 4. Preparation & Execution
 if ($DebugMode) {
-    Write-Host "`n[3/3] DEBUG MODE: Cleaning up existing background processes..." -ForegroundColor Cyan
+    Write-Host "`n[4/4] DEBUG MODE: Cleaning up existing background processes..." -ForegroundColor Cyan
     Stop-Process -Name "SirThaddeus.VoiceHost" -Force -ErrorAction SilentlyContinue
     
     foreach ($p in @(8001, 17845)) {
@@ -67,7 +75,7 @@ if ($DebugMode) {
     Write-Host "      Starting Desktop Runtime..." -ForegroundColor Yellow
 }
 else {
-    Write-Host "`n[3/3] Starting Sir Thaddeus (Desktop Runtime)..." -ForegroundColor Yellow
+    Write-Host "`n[4/4] Starting Sir Thaddeus (Desktop Runtime)..." -ForegroundColor Yellow
     Write-Host "      VoiceHost and Backend services will auto-start as needed." -ForegroundColor DarkGray
     Write-Host "      (Use --debug to see background service logs in separate windows)" -ForegroundColor DarkGray
 }

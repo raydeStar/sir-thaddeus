@@ -1253,13 +1253,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                     var debugKind = ev.Result == "error" ? LogEntryKind.Error : LogEntryKind.Info;
                     if (ev.Action.StartsWith("TOOL_") || ev.Action.StartsWith("MCP_")) debugKind = LogEntryKind.ToolOutput;
 
-                    ActivityLog.Insert(0, new LogEntry { Kind = debugKind, Text = debugTxt, Timestamp = ev.Timestamp.DateTime });
+                    ActivityLog.Insert(0, new LogEntry { Kind = debugKind, Text = debugTxt, Timestamp = ev.Timestamp.LocalDateTime });
 
                     // ── User-facing drawer — human-readable, relevant events only ──
                     var (drawerText, drawerKind) = FormatDrawerEntry(ev);
                     if (drawerText is not null)
                     {
-                        DrawerLog.Insert(0, new LogEntry { Kind = drawerKind, Text = drawerText, Timestamp = ev.Timestamp.DateTime });
+                        DrawerLog.Insert(0, new LogEntry { Kind = drawerKind, Text = drawerText, Timestamp = ev.Timestamp.LocalDateTime });
                         while (DrawerLog.Count > 50)
                             DrawerLog.RemoveAt(DrawerLog.Count - 1);
                     }
