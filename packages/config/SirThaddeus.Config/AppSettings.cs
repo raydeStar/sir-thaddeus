@@ -610,7 +610,7 @@ public sealed record McpPermissionsSettings
     /// Overridden to "off" when memory.enabled is false.
     /// </summary>
     [JsonPropertyName("memoryRead")]
-    public string MemoryRead { get; init; } = "ask";
+    public string MemoryRead { get; init; } = "always";
 
     /// <summary>
     /// Memory write tools: memory_store_facts, memory_update_fact, memory_delete_fact.
