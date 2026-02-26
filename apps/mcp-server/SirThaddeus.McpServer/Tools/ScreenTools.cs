@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -16,32 +17,46 @@ namespace SirThaddeus.McpServer.Tools;
 // Screen Observation Tools
 //
 // Captures the display and extracts visible text via Windows 10 OCR.
+// When the active window is a web browser, also fetches the actual page
+// content via HTTP for much richer text than OCR alone can provide.
 // These are observation-only tools — they read the screen but never
 // modify it. All results are text; no raw image data crosses the wire.
 //
 // Bounds:
 //   - Capture limited to primary monitor (or active window rect).
 //   - OCR text capped at 8 000 characters.
+//   - Page content capped at 6 000 characters.
 //   - Single capture per call, no video/streaming.
 // ─────────────────────────────────────────────────────────────────────────
 
 [McpServerToolType]
 public static class ScreenTools
 {
-    private const int MaxOcrChars = 8_000;
+    private const int MaxOcrChars  = 8_000;
+    private const int MaxPageChars = 6_000;
+
+    private static readonly HashSet<string> BrowserProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "chrome", "msedge", "firefox", "brave", "opera", "vivaldi",
+        "chromium", "iexplore", "ApplicationFrameHost" // Edge PWA / UWP
+    };
+
+    private static readonly Regex UrlPattern = new(
+        @"https?://[^\s""<>\]\)]{8,}",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // ═══════════════════════════════════════════════════════════════════
     // MCP Tool: ScreenCapture
     // ═══════════════════════════════════════════════════════════════════
 
     [McpServerTool, Description(
-        "Captures the user's entire display and extracts all visible text " +
-        "using OCR. Returns the active window info, screen resolution, " +
-        "and readable text from the display. IMPORTANT: Almost always use " +
-        "target='full_screen' (the default). Only use 'active_window' " +
-        "when the user explicitly says 'this window' or 'the active " +
-        "window'. If in doubt, use 'full_screen' — the user wants you " +
-        "to see everything on their monitor, not just our own app.")]
+        "Captures the user's screen and extracts visible text via OCR. " +
+        "If the active window is a web browser, also fetches the actual " +
+        "page content via HTTP for a much richer summary. Returns active " +
+        "window info, screen resolution, OCR text, and (for browsers) " +
+        "the full page content. Use this when the user asks about what " +
+        "is on their screen, asks to summarize a page, or wants you to " +
+        "read what they are looking at.")]
     public static async Task<string> ScreenCapture(
         [Description(
             "'full_screen' (default — captures the entire monitor, use this " +
@@ -65,6 +80,9 @@ public static class ScreenTools
             sb.AppendLine($"Active Window: \"{windowInfo.Title}\"");
             sb.AppendLine($"Process: {windowInfo.ProcessName} (PID {windowInfo.ProcessId})");
             sb.AppendLine($"Screen: {screenW}x{screenH}");
+
+            var isBrowser = IsBrowserProcess(windowInfo.ProcessName);
+            sb.AppendLine($"Browser Detected: {(isBrowser ? "yes" : "no")}");
         }
         catch (Exception ex)
         {
@@ -97,16 +115,17 @@ public static class ScreenTools
         }
 
         // ── Phase 3: OCR (requires WinRT, may fail on threading) ────────
+        string? ocrText = null;
         sb.AppendLine();
         if (bitmap != null)
         {
             try
             {
-                var ocrText = await RunOcrAsync(bitmap);
+                ocrText = await RunOcrAsync(bitmap);
 
                 if (string.IsNullOrWhiteSpace(ocrText))
                 {
-                    sb.AppendLine("=== Extracted Text ===");
+                    sb.AppendLine("=== Extracted Text (OCR) ===");
                     sb.AppendLine("(No readable text detected on screen)");
                 }
                 else
@@ -115,7 +134,7 @@ public static class ScreenTools
                         ? ocrText[..MaxOcrChars] + "\n[...truncated]"
                         : ocrText;
 
-                    sb.AppendLine("=== Extracted Text ===");
+                    sb.AppendLine("=== Extracted Text (OCR) ===");
                     sb.AppendLine(trimmed);
                 }
             }
@@ -132,6 +151,12 @@ public static class ScreenTools
         else
         {
             sb.AppendLine("[No bitmap available for OCR]");
+        }
+
+        // ── Phase 4: Browser page fetch (if active window is a browser) ─
+        if (windowInfo is not null && IsBrowserProcess(windowInfo.ProcessName))
+        {
+            await TryFetchBrowserPageAsync(sb, windowInfo, ocrText, cancellationToken);
         }
 
         return sb.ToString();
@@ -158,6 +183,160 @@ public static class ScreenTools
         {
             return $"Error getting active window: {ex.Message}";
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Browser Detection & Page Fetch
+    // ─────────────────────────────────────────────────────────────────
+
+    private static bool IsBrowserProcess(string? processName)
+    {
+        if (string.IsNullOrWhiteSpace(processName)) return false;
+        return BrowserProcessNames.Contains(processName);
+    }
+
+    /// <summary>
+    /// When the active window is a browser, try to extract a URL from the
+    /// OCR text (the address bar is visible on screen) and fetch the
+    /// actual page content for a much richer result.
+    /// </summary>
+    private static async Task TryFetchBrowserPageAsync(
+        StringBuilder sb,
+        WindowInfo windowInfo,
+        string? ocrText,
+        CancellationToken cancellationToken)
+    {
+        sb.AppendLine();
+
+        // Try to extract a URL from the OCR text (address bar is captured)
+        var url = TryExtractBrowserUrl(ocrText, windowInfo.Title);
+        if (url is null)
+        {
+            sb.AppendLine("=== Browser Page Content ===");
+            sb.AppendLine("(Could not determine the page URL from screen content. " +
+                          "The OCR text above is the best available information.)");
+            return;
+        }
+
+        sb.AppendLine($"Detected URL: {url}");
+
+        try
+        {
+            var result = await ContentExtractor.ExtractAsync(url, 15, cancellationToken);
+
+            if (result.Error is not null)
+            {
+                sb.AppendLine($"=== Browser Page Content ===");
+                sb.AppendLine($"(Page fetch failed: {result.Error}. Using OCR text above.)");
+                return;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("=== Browser Page Content (fetched via HTTP) ===");
+            sb.AppendLine($"Title: \"{result.Title}\"");
+
+            if (!string.IsNullOrWhiteSpace(result.Author))
+                sb.AppendLine($"Author: {result.Author}");
+
+            if (result.PublishedDate.HasValue)
+                sb.AppendLine($"Date: {result.PublishedDate.Value:yyyy-MM-dd}");
+
+            sb.AppendLine($"Source: {result.Domain}");
+            sb.AppendLine($"Word Count: {result.WordCount:N0}");
+
+            if (!result.IsArticle)
+                sb.AppendLine("Extraction: basic (non-article page)");
+
+            sb.AppendLine();
+            sb.AppendLine("=== Content ===");
+            var content = ContentExtractor.Truncate(result.TextContent, MaxPageChars);
+            sb.AppendLine(content);
+
+            sb.AppendLine();
+            sb.AppendLine("NOTE: The content above was fetched directly from the web page " +
+                          "and is much more accurate than the OCR text. Prefer this content " +
+                          "for summarization and answering questions about the page.");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"=== Browser Page Content ===");
+            sb.AppendLine($"(Page fetch error: {ex.GetType().Name}: {ex.Message}. " +
+                          "Using OCR text above.)");
+        }
+    }
+
+    /// <summary>
+    /// Extracts a URL from OCR text or the window title.
+    /// The browser address bar is typically captured by OCR as a line
+    /// containing https:// near the top of the text.
+    /// </summary>
+    private static string? TryExtractBrowserUrl(string? ocrText, string? windowTitle)
+    {
+        // First: look for URLs in the OCR text
+        if (!string.IsNullOrWhiteSpace(ocrText))
+        {
+            // Search the first ~1500 chars (address bar is near the top)
+            var searchRegion = ocrText.Length > 1500 ? ocrText[..1500] : ocrText;
+            var match = UrlPattern.Match(searchRegion);
+            if (match.Success)
+            {
+                var candidate = CleanOcrUrl(match.Value);
+                if (IsPlausiblePageUrl(candidate))
+                    return candidate;
+            }
+
+            // Fallback: search full OCR text
+            match = UrlPattern.Match(ocrText);
+            if (match.Success)
+            {
+                var candidate = CleanOcrUrl(match.Value);
+                if (IsPlausiblePageUrl(candidate))
+                    return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Cleans up OCR artifacts from a captured URL.
+    /// </summary>
+    private static string CleanOcrUrl(string raw)
+    {
+        // Trim trailing punctuation that OCR might attach
+        var cleaned = raw.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '\u2026');
+
+        // OCR sometimes captures trailing UI text
+        var spaceIdx = cleaned.IndexOf(' ');
+        if (spaceIdx > 0)
+            cleaned = cleaned[..spaceIdx];
+
+        return cleaned;
+    }
+
+    /// <summary>
+    /// Checks if a URL looks like a real page URL (not an internal/resource URL).
+    /// </summary>
+    private static bool IsPlausiblePageUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+
+        // Skip localhost, internal, and resource URLs
+        if (uri.Host is "localhost" or "127.0.0.1" or "0.0.0.0")
+            return false;
+
+        // Must have a real domain
+        if (!uri.Host.Contains('.'))
+            return false;
+
+        // Skip obvious non-page resources
+        var path = uri.AbsolutePath.ToLowerInvariant();
+        if (path.EndsWith(".png") || path.EndsWith(".jpg") || path.EndsWith(".gif") ||
+            path.EndsWith(".css") || path.EndsWith(".js") || path.EndsWith(".ico"))
+            return false;
+
+        return true;
     }
 
     // ─────────────────────────────────────────────────────────────────

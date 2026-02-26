@@ -263,6 +263,90 @@ public sealed partial class AgentOrchestrator
 
 
     // ─────────────────────────────────────────────────────────────────
+    // Screen Observe: deterministic capture + LLM describe
+    //
+    // Local models are unreliable at calling tools via function
+    // calling. For ScreenObserve we call screen_capture directly
+    // and inject the result, then ask the LLM to describe it.
+    // ─────────────────────────────────────────────────────────────────
+
+    private async Task<AgentResponse> ExecuteDeterministicScreenCaptureAsync(
+        string contextualUserMessage,
+        string memoryPackText,
+        string personalityAnchor,
+        string personalityTurnTag,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        LlmUsageSnapshot? usageBaseline,
+        CancellationToken cancellationToken)
+    {
+        var screenResult = await CallToolWithAliasAsync(
+            ScreenCaptureToolName, ScreenCaptureToolNameAlt,
+            "{}", cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = screenResult.ToolName,
+            Arguments = "{}",
+            Result = screenResult.Result,
+            Success = screenResult.Success
+        });
+
+        if (!screenResult.Success || string.IsNullOrWhiteSpace(screenResult.Result))
+        {
+            var errorText = "I wasn't able to capture your screen. " +
+                            "Make sure the ScreenRead permission is enabled in Settings.";
+            _history.Add(ChatMessage.Assistant(errorText));
+            LogEvent("SCREEN_CAPTURE_FAILED", screenResult.Result ?? "(empty)");
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = errorText,
+                Success = false,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            }, usageBaseline);
+        }
+
+        LogEvent("SCREEN_CAPTURE_OK",
+            $"Captured {screenResult.Result.Length} chars of screen data.");
+
+        if (!string.IsNullOrWhiteSpace(memoryPackText))
+            InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
+        InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
+
+        _history.Add(ChatMessage.System(
+            "The following is the result of capturing the user's current screen. " +
+            "Describe what you see accurately. Do NOT fabricate details. " +
+            "If the text is unclear or partial, say so.\n\n" +
+            screenResult.Result));
+
+        var messages = _history.ToList();
+        InjectFewShotExamplesInPlace(messages, _personalityRuntime.Snapshot.Profile.Instructions.FewShotExamples);
+
+        roundTrips++;
+        var screenResponse = await CallLlmWithRetrySafe(
+            messages, roundTrips, MaxTokensCasual, cancellationToken);
+
+        var screenText = _postProcessor.ProcessChatOnlyDraft(
+            screenResponse.Content ?? "[No response]",
+            contextualUserMessage,
+            toolCallsMade,
+            LogEvent);
+
+        _history.Add(ChatMessage.Assistant(screenText));
+        LogEvent("AGENT_RESPONSE", screenText);
+
+        return AttachContextSnapshot(new AgentResponse
+        {
+            Text = screenText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips,
+            AllowToolResultPersonalityPresentation = true
+        }, usageBaseline);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // Tool Loop
     //
     // Shared by both casual (memory-only tools) and tooling (all tools)

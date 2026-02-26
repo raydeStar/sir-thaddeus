@@ -478,6 +478,29 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Opens a file picker for document attachment (.txt, .csv, .html, .md).
+    /// </summary>
+    private void AttachFileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Attach a document",
+            Filter = "Supported Documents|*.txt;*.csv;*.html;*.htm;*.md|" +
+                     "Text Files (*.txt)|*.txt|" +
+                     "CSV Files (*.csv)|*.csv|" +
+                     "HTML Files (*.html;*.htm)|*.html;*.htm|" +
+                     "Markdown Files (*.md)|*.md",
+            Multiselect = false
+        };
+
+        if (dlg.ShowDialog(this) == true)
+        {
+            _viewModel?.AttachFile(dlg.FileName);
+            ChatInput?.Focus();
+        }
+    }
+
+    /// <summary>
     /// Chat input key handling: Enter sends, Shift+Enter inserts newline.
     /// </summary>
     private void ChatInput_PreviewKeyDown(object sender, KeyEventArgs e)

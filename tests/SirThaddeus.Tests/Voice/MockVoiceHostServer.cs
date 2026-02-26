@@ -31,20 +31,45 @@ public sealed class MockVoiceHostServer : IDisposable
 
     public MockVoiceHostServer()
     {
-        // Find a free port by binding to 0 then releasing.
-        var tempListener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        tempListener.Start();
-        Port = ((IPEndPoint)tempListener.LocalEndpoint).Port;
-        tempListener.Stop();
+        // Find a free ephemeral port and bind the HttpListener to it.
+        // Retry up to 5 times to handle the TOCTOU race where another
+        // process grabs the port between TcpListener.Stop and
+        // HttpListener.Start.
+        const int maxAttempts = 5;
+        HttpListener? listener = null;
+        int port = 0;
 
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var temp = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            temp.Start();
+            port = ((IPEndPoint)temp.LocalEndpoint).Port;
+            temp.Stop();
+
+            listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            try
+            {
+                listener.Start();
+                break; // success
+            }
+            catch (HttpListenerException) when (attempt < maxAttempts)
+            {
+                listener.Close();
+                listener = null;
+            }
+        }
+
+        _listener = listener ?? throw new InvalidOperationException(
+            $"Failed to bind MockVoiceHostServer after {maxAttempts} attempts.");
+        Port = port;
         BaseUrl = $"http://127.0.0.1:{Port}";
-        _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
     }
 
     public void Start()
     {
-        _listener.Start();
+        // Listener is already started in the constructor to avoid the
+        // TOCTOU race. This method just kicks off the request loop.
         _loop = Task.Run(async () =>
         {
             while (!_cts.IsCancellationRequested)

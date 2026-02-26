@@ -2551,8 +2551,10 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -2560,7 +2562,7 @@
 
                 <!-- Context chips -->
                 <ItemsControl Grid.Row="0"
-                              Grid.ColumnSpan="3"
+                              Grid.ColumnSpan="4"
                               ItemsSource="{Binding ContextChips}"
                               Margin="0,0,0,8">
                     <ItemsControl.ItemsPanel>
@@ -2594,8 +2596,90 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Attached file chip (row 1, visible only when a file is attached) -->
+                <Border Grid.Row="1" Grid.ColumnSpan="4"
+                        Margin="0,0,0,8"
+                        Padding="8,5,6,5"
+                        CornerRadius="12"
+                        Background="#1889B2E5"
+                        BorderBrush="#4489B2E5"
+                        BorderThickness="1"
+                        Visibility="{Binding HasAttachedFile, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8A5;"
+                                   FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                   Foreground="{StaticResource BlueBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding AttachedFileName}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   VerticalAlignment="Center"
+                                   MaxWidth="220" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding AttachedFileSizeLabel}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
+                        <Button Command="{Binding RemoveAttachedFileCommand}"
+                                ToolTip="Remove attached file"
+                                Cursor="Hand" Margin="8,0,0,0"
+                                Padding="0" BorderThickness="0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="XBg" Background="Transparent"
+                                            CornerRadius="8" Padding="4,2">
+                                        <TextBlock Text="&#xE711;"
+                                                   FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                                   Foreground="{StaticResource Overlay0Brush}"
+                                                   VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="XBg" Property="Background" Value="#33F38BA8"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- Attach file button (+) -->
+                <Button x:Name="AttachFileButton"
+                        Grid.Row="2" Grid.Column="0"
+                        Click="AttachFileButton_Click"
+                        ToolTip="Attach a document (.txt, .csv, .html, .md)"
+                        Cursor="Hand"
+                        VerticalAlignment="Center"
+                        Margin="0,0,6,0">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="AttachBg"
+                                    Background="Transparent"
+                                    BorderBrush="{StaticResource Surface2Brush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Width="38" Height="38">
+                                <TextBlock Text="&#xE710;"
+                                           FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                           Foreground="{StaticResource Subtext1Brush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="AttachBg" Property="Background" Value="{StaticResource Surface1Brush}"/>
+                                    <Setter TargetName="AttachBg" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="AttachBg" Property="Background" Value="{StaticResource Surface2Brush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
                 <!-- Text input -->
-                <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+                <Grid Grid.Row="2" Grid.Column="1" Margin="0,0,8,0">
                     <TextBox x:Name="ChatInput"
                              Style="{StaticResource ChatInputStyle}"
                              Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
@@ -2630,7 +2714,7 @@
 
                 <!-- Voice button: Hold-to-Talk (normal) / Interrupt (when AI is processing) -->
                 <Button x:Name="PttButton"
-                        Grid.Row="1" Grid.Column="1"
+                        Grid.Row="2" Grid.Column="2"
                         IsEnabled="{Binding IsVoiceReady}"
                         PreviewMouseLeftButtonDown="PttButton_MouseDown"
                         PreviewMouseLeftButtonUp="PttButton_MouseUp"
@@ -2668,6 +2752,14 @@
                                     <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource CrustBrush}"/>
                                     <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource CrustBrush}"/>
                                 </Trigger>
+                                <!-- Hotkey recording (mirrors IsPressed style for global PTT hotkey) -->
+                                <DataTrigger Binding="{Binding IsVoiceActive}" Value="True">
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Text" Value="Listening…"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                </DataTrigger>
                                 <!-- Disabled -->
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter TargetName="HoldBg" Property="Opacity" Value="0.4"/>
@@ -2707,7 +2799,7 @@
                 </Button>
 
                 <!-- Send / Cancel button swap -->
-                <Grid Grid.Row="1" Grid.Column="2">
+                <Grid Grid.Row="2" Grid.Column="3">
                     <!-- Send (visible when NOT processing) -->
                     <Button Content="Send ↵"
                             Command="{Binding SendCommand}">

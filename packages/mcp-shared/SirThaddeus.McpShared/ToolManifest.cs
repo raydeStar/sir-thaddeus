@@ -428,8 +428,8 @@ public static class ToolManifest
             Category    = "screen",
             ReadWrite   = "read",
             Permission  = "required",
-            Description = "Captures the screen and extracts text via OCR.",
-            Limits      = "OCR text <= 8000 chars. Single snapshot."
+            Description = "Captures the screen and extracts text via OCR. If the active window is a browser, also fetches the actual page content via HTTP.",
+            Limits      = "OCR text <= 8000 chars. Page content <= 6000 chars. Single snapshot."
         },
         new()
         {
