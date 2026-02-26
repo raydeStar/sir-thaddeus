@@ -562,9 +562,9 @@ public sealed record McpSettings
 //   "ask"    — prompt every call (Allow once / Allow session / Deny)
 //   "always" — auto-approve without prompting
 //
-// The developer override applies only to "dangerous" groups
-// (Screen/Files/System/Web) and wins over their per-group setting.
-// Memory groups are unaffected by the developer override.
+// The developer override applies to ALL tool groups (Screen/Files/System/Web
+// and Memory) and wins over their per-group setting. Valid values are
+// "none" (use per-group), "ask", or "always".
 //
 // When memory.enabled is false, memoryRead and memoryWrite are
 // treated as "off" regardless of what's stored here.

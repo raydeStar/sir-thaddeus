@@ -208,7 +208,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
         try
         {
             var result = await _mcp.CallToolAsync(primaryToolName, argsJson, cancellationToken);
-            return new ToolCallOutcome(primaryToolName, result, true);
+            return new ToolCallOutcome(primaryToolName, result, !IsErrorResponse(result));
         }
         catch (Exception exPrimary)
         {
@@ -218,7 +218,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             try
             {
                 var result = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                return new ToolCallOutcome(alternateToolName, result, true);
+                return new ToolCallOutcome(alternateToolName, result, !IsErrorResponse(result));
             }
             catch (Exception exAlt)
             {
@@ -226,6 +226,11 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             }
         }
     }
+
+    private static bool IsErrorResponse(string? result) =>
+        result is not null &&
+        (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+         result.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase));
 
     private static bool LooksLikeUnknownTool(string? payload, string requestedTool)
     {

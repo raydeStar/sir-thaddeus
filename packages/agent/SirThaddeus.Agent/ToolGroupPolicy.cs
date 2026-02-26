@@ -100,11 +100,11 @@ public static class ToolGroupPolicy
 
     /// <summary>
     /// Groups subject to the developer override.
-    /// Memory groups are excluded by design.
+    /// Covers all tool groups except meta (which is always allowed).
     /// </summary>
-    public static readonly HashSet<string> DangerousGroups =
+    public static readonly HashSet<string> OverridableGroups =
         new(StringComparer.OrdinalIgnoreCase)
-        { "screen", "files", "system", "web" };
+        { "screen", "files", "system", "web", "memoryRead", "memoryWrite" };
 
     /// <summary>
     /// Groups that should be blocked in panic mode.
@@ -157,8 +157,8 @@ public static class ToolGroupPolicy
             (group == "memoryRead" || group == "memoryWrite"))
             return "off";
 
-        // Developer override applies to dangerous groups only
-        if (DangerousGroups.Contains(group) && snapshot.DeveloperOverride != "none")
+        // Developer override applies to all overridable groups
+        if (OverridableGroups.Contains(group) && snapshot.DeveloperOverride != "none")
             return snapshot.DeveloperOverride;
 
         // Per-group policy
@@ -306,10 +306,9 @@ public static class ToolGroupPolicy
     {
         return value?.ToLowerInvariant() switch
         {
-            "off"    => "off",
             "ask"    => "ask",
             "always" => "always",
-            _        => "none"
+            _        => "none"   // "off" normalizes to "none" — use per-group settings to disable individual groups
         };
     }
 }

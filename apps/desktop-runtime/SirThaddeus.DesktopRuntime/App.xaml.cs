@@ -75,6 +75,7 @@ public partial class App : System.Windows.Application
     private VoiceSessionOrchestrator? _voiceOrchestrator;
     private TrayIconService? _trayIcon;
     private RuntimeStateStore? _stateStore;
+    private CancellationTokenSource? _readAloudCts;
     private MainWindow? _mainWindow;
     private OverlayViewModel? _overlayViewModel;
     private CommandPaletteViewModel? _commandPaletteViewModel;
@@ -663,13 +664,26 @@ public partial class App : System.Windows.Application
 
     private void OnPttShutup()
     {
+        // Cancel any in-flight read-aloud playback
+        CancelReadAloud();
+
         if (_audioPlaybackService?.IsPlaying != true)
             return;
+
+        // Stop playback immediately so it doesn't keep speaking
+        try { _ = _audioPlaybackService.StopAsync(CancellationToken.None); } catch { }
 
         _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
         PublishVoiceStatus("Canceled.");
         _voiceOrchestrator?.EnqueueShutup();
         AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
+    }
+
+    private void CancelReadAloud()
+    {
+        try { _readAloudCts?.Cancel(); } catch { }
+        _readAloudCts?.Dispose();
+        _readAloudCts = null;
     }
 
     private async Task TryHandleMicUpAsync()
@@ -2116,6 +2130,31 @@ public partial class App : System.Windows.Application
             }
         }
 
+        // Resolve preferred_name from the active profile in the store.
+        // UserProfile.DisplayName in settings.json can be stale; the profile's
+        // preferred_name is the authoritative display name for the chat UI.
+        if (settingsStore is not null && !string.IsNullOrWhiteSpace(_settings.ActiveProfileId))
+        {
+            try
+            {
+                var profiles = settingsStore.ListProfilesAsync().GetAwaiter().GetResult();
+                var active = profiles.FirstOrDefault(p =>
+                    string.Equals(p.ProfileId, _settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
+                if (active is not null && !string.IsNullOrWhiteSpace(active.ProfileJson))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(active.ProfileJson);
+                    if (doc.RootElement.TryGetProperty("preferred_name", out var nameEl) &&
+                        nameEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var preferred = nameEl.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(preferred))
+                            chatVm.UserDisplayName = preferred;
+                    }
+                }
+            }
+            catch { /* non-critical — falls back to UserProfile.DisplayName */ }
+        }
+
         // ── Settings View ────────────────────────────────────────────
         var settingsVm = new SettingsViewModel(
             _settings!,
@@ -2605,9 +2644,16 @@ public partial class App : System.Windows.Application
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
+        // Cancel any previous read-aloud so clicking "Read Aloud" again interrupts.
+        CancelReadAloud();
+
         // Stop any in-flight playback so voices don't overlap.
         try { await playback.StopAsync(CancellationToken.None); }
         catch { /* best effort */ }
+
+        // Create a new CTS that links to the caller's token.
+        _readAloudCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cancellationToken = _readAloudCts.Token;
 
         var voiceSettings = _settings?.Voice ?? new VoiceSettings();
         var selectedTtsEngine = voiceSettings.GetNormalizedTtsEngine();

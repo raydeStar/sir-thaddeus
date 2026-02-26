@@ -1608,12 +1608,14 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 if (IsLikelyInternalMarkerLine(trimmed))
                     return false;
 
-                // Remove [END OF ...], [INSTRUCTIONS ...], [REFERENCE DATA ...] etc.
+                // Remove [END OF ...], [INSTRUCTIONS ...], [REFERENCE DATA ...], [Action: ...] etc.
                 if (trimmed.StartsWith('[') && trimmed.EndsWith(']') &&
                     (trimmed.Contains("END OF", StringComparison.OrdinalIgnoreCase) ||
                      trimmed.Contains("INSTRUCTIONS", StringComparison.OrdinalIgnoreCase) ||
                      trimmed.Contains("REFERENCE DATA", StringComparison.OrdinalIgnoreCase) ||
-                     trimmed.Contains("ASSISTANT RESPONSE", StringComparison.OrdinalIgnoreCase)))
+                     trimmed.Contains("ASSISTANT RESPONSE", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.StartsWith("[Action:", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.StartsWith("[action:", StringComparison.OrdinalIgnoreCase)))
                     return false;
 
                 return true;

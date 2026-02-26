@@ -773,6 +773,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
                 OnPropertyChanged(nameof(SelectedProfile));
                 LoadLocationForProfile(_selectedProfile?.ProfileId);
+
+                // Propagate the resolved display name to the chat UI on initial load.
+                // Without this, UserDisplayName stays stale from UserProfile.DisplayName.
+                var resolvedName = ResolveProfileDisplayName(_selectedProfile?.ProfileId);
+                if (!string.IsNullOrWhiteSpace(resolvedName))
+                    ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, resolvedName);
             });
         }
         catch (Exception ex)

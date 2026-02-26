@@ -434,21 +434,20 @@
                                         </Grid.ColumnDefinitions>
 
                                         <!-- Author + Role label -->
-                                        <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                            <TextBlock Text="{Binding AuthorLabel}"
-                                                       FontSize="11"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource Subtext1Brush}"/>
-                                            <TextBlock Text=" — "
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource Overlay0Brush}"/>
-                                            <TextBlock x:Name="RoleTag"
-                                                       Text="{Binding RoleLabel}"
-                                                       FontSize="10"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource Overlay0Brush}"
-                                                       VerticalAlignment="Center"/>
-                                        </StackPanel>
+                                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                                            <Run Text="{Binding AuthorLabel, Mode=OneWay}"
+                                                 FontSize="11"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{StaticResource Subtext1Brush}"/>
+                                            <Run Text=" — "
+                                                 FontSize="11"
+                                                 Foreground="{StaticResource Overlay0Brush}"/>
+                                            <Run x:Name="RoleTag"
+                                                 Text="{Binding RoleLabel, Mode=OneWay}"
+                                                 FontSize="10"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{StaticResource Overlay0Brush}"/>
+                                        </TextBlock>
 
                                         <!-- Timestamp (reveal on hover) -->
                                         <TextBlock x:Name="TimeLabel"
@@ -2057,12 +2056,11 @@
                                   Style="{StaticResource DarkComboBoxStyle}"
                                   ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
                             <ComboBoxItem Content="none"/>
-                            <ComboBoxItem Content="off"/>
                             <ComboBoxItem Content="ask"/>
                             <ComboBoxItem Content="always"/>
                         </ComboBox>
                     </Grid>
-                    <TextBlock Text="Overrides Screen/Files/System/Web at runtime when not 'none'. Per-group settings are preserved and apply when override is reverted."
+                    <TextBlock Text="Overrides ALL tool group permissions at runtime when not 'none'. Set to 'always' to auto-approve everything, or 'ask' to be prompted for every tool. Per-group settings are preserved and apply when reverted to 'none'."
                                FontSize="10.5"
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
