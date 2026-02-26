@@ -48,7 +48,9 @@ Nothing runs silently. Nothing lingers.
 
 That same interaction pattern applies to everything.
 
-<img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus screenshot depicting the front page" width="180" />
+<div align="center">
+  <img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus screenshot depicting the front page" width="800" />
+</div>
 
 ---
 
