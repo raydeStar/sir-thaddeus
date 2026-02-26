@@ -455,16 +455,41 @@ app.MapPost("/api/piper/download", async (
         Query = ""
     }.Uri;
 
-    using var proxyClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-    using var proxyRequest = new HttpRequestMessage(HttpMethod.Post, backendUri)
+    try
     {
-        Content = new ByteArrayContent(bodyBytes)
-    };
-    proxyRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        using var proxyClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        using var proxyRequest = new HttpRequestMessage(HttpMethod.Post, backendUri)
+        {
+            Content = new ByteArrayContent(bodyBytes)
+        };
+        proxyRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
-    using var response = await proxyClient.SendAsync(proxyRequest, cancellationToken);
-    var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-    return Results.Content(responseBody, "application/json", Encoding.UTF8, (int)response.StatusCode);
+        using var response = await proxyClient.SendAsync(proxyRequest, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+            Console.Error.WriteLine($"[VoiceHost] Piper download proxy got {(int)response.StatusCode} from backend: {responseBody[..Math.Min(responseBody.Length, 300)]}");
+
+        return Results.Content(responseBody, "application/json", Encoding.UTF8, (int)response.StatusCode);
+    }
+    catch (HttpRequestException ex)
+    {
+        Console.Error.WriteLine($"[VoiceHost] Piper download proxy failed (backend unreachable): {ex.Message}");
+        return Results.Json(new
+        {
+            error = $"Voice backend unreachable at {backendUri}: {ex.Message}",
+            errorCode = "BACKEND_UNREACHABLE"
+        }, statusCode: StatusCodes.Status502BadGateway);
+    }
+    catch (TaskCanceledException)
+    {
+        Console.Error.WriteLine("[VoiceHost] Piper download proxy timed out (10 min).");
+        return Results.Json(new
+        {
+            error = "Download request to voice backend timed out (10 min limit).",
+            errorCode = "PROXY_TIMEOUT"
+        }, statusCode: StatusCodes.Status504GatewayTimeout);
+    }
 });
 
 app.MapGet("/", () => Results.Json(new

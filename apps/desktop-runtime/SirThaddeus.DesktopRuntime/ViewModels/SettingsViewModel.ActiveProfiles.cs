@@ -102,7 +102,7 @@ public sealed partial class SettingsViewModel
 
         _settings = _settings with { ActiveProfileId = fallbackId };
         SettingsManager.Save(_settings);
-        ActiveProfileChanged?.Invoke(fallbackId);
+        ActiveProfileChanged?.Invoke(fallbackId, ResolveProfileDisplayName(fallbackId));
         SettingsChanged?.Invoke(_settings);
     }
 
@@ -216,6 +216,34 @@ public sealed partial class SettingsViewModel
                 ["source"] = "settings"
             }
         });
+    }
+
+    private string? ResolveProfileDisplayName(string? profileId)
+    {
+        if (string.IsNullOrWhiteSpace(profileId))
+            return null;
+
+        if (!_profilesById.TryGetValue(profileId, out var card))
+            return null;
+
+        // Prefer preferred_name from profile JSON, fall back to DisplayName
+        if (!string.IsNullOrWhiteSpace(card.ProfileJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(card.ProfileJson);
+                if (doc.RootElement.TryGetProperty("preferred_name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String)
+                {
+                    var preferred = nameEl.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(preferred))
+                        return preferred;
+                }
+            }
+            catch { /* malformed JSON — fall through */ }
+        }
+
+        return string.IsNullOrWhiteSpace(card.DisplayName) ? null : card.DisplayName;
     }
 
     private static string BuildDefaultProfileJson(string displayName)

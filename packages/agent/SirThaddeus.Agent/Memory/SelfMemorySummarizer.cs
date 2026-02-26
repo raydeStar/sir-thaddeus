@@ -213,14 +213,14 @@ public sealed class SelfMemorySummarizer : ISelfMemorySummarizer
         try
         {
             var result = await _mcp.CallToolAsync(primaryToolName, argsJson, cancellationToken);
-            return (primaryToolName, result, true);
+            return (primaryToolName, result, !IsErrorResponse(result));
         }
         catch (Exception primaryError)
         {
             try
             {
                 var result = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                return (alternateToolName, result, true);
+                return (alternateToolName, result, !IsErrorResponse(result));
             }
             catch (Exception alternateError)
             {
@@ -229,6 +229,11 @@ public sealed class SelfMemorySummarizer : ISelfMemorySummarizer
             }
         }
     }
+
+    private static bool IsErrorResponse(string? result) =>
+        result is not null &&
+        (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+         result.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase));
 
     private sealed record SelfMemoryFact(
         string Subject,

@@ -1663,7 +1663,7 @@ public class ToolLoopTests
     [Fact]
     public async Task ToolLoop_ProcessesMultipleToolCallsInOneResponse()
     {
-        // The LLM requests two tools at once: memory_store_facts AND screen_capture
+        // The LLM requests two tools at once: memory_store_facts AND memory_update_fact
         var toolsRequested = false;
         var llm = new FakeLlmClient((messages, tools) =>
         {
@@ -1686,8 +1686,8 @@ public class ToolLoopTests
                             Id = "call_001",
                             Function = new FunctionCallDetails
                             {
-                                Name = "screen_capture",
-                                Arguments = "{}"
+                                Name = "memory_store_facts",
+                                Arguments = """{"factsJson":"[{\"subject\":\"user\",\"predicate\":\"name\",\"object\":\"Alice\"}]"}"""
                             }
                         },
                         new ToolCallRequest
@@ -1695,8 +1695,8 @@ public class ToolLoopTests
                             Id = "call_002",
                             Function = new FunctionCallDetails
                             {
-                                Name = "memory_store_facts",
-                                Arguments = """{"factsJson":"[{\"subject\":\"user\",\"predicate\":\"asked_about\",\"object\":\"screen\"}]"}"""
+                                Name = "memory_update_fact",
+                                Arguments = """{"memoryId":"fact_001","newObject":"Bob"}"""
                             }
                         }
                     ]
@@ -1706,7 +1706,7 @@ public class ToolLoopTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Here's what I see, and I noted that you asked about your screen.",
+                Content = "I stored your name and updated the record.",
                 FinishReason = "stop"
             };
         });
@@ -1715,8 +1715,8 @@ public class ToolLoopTests
             (tool, _) => tool switch
             {
                 "MemoryRetrieve"     => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "screen_capture"     => """{"base64":"data","width":1920,"height":1080}""",
                 "memory_store_facts" => """{"stored":1,"replaced":0,"skipped":0,"conflicts":[],"message":"Stored 1 fact(s)."}""",
+                "memory_update_fact" => """{"updated":true}""",
                 _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
@@ -1724,7 +1724,7 @@ public class ToolLoopTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("What's on my screen right now?");
+        var result = await agent.ProcessAsync("Remember my name is Alice and update fact_001 to Bob");
 
         Assert.True(result.Success);
 
@@ -1732,8 +1732,8 @@ public class ToolLoopTests
         var toolCalls = result.ToolCallsMade
             .Where(t => t.ToolName != "MemoryRetrieve").ToList();
         Assert.Equal(2, toolCalls.Count);
-        Assert.Contains(toolCalls, t => t.ToolName == "screen_capture");
         Assert.Contains(toolCalls, t => t.ToolName == "memory_store_facts");
+        Assert.Contains(toolCalls, t => t.ToolName == "memory_update_fact");
     }
 
     [Fact]
@@ -1761,8 +1761,8 @@ public class ToolLoopTests
                             Id = "call_001",
                             Function = new FunctionCallDetails
                             {
-                                Name = "screen_capture",
-                                Arguments = "{}"
+                                Name = "memory_store_facts",
+                                Arguments = """{"factsJson":"[{\"subject\":\"user\",\"predicate\":\"name\",\"object\":\"Alice\"}]"}"""
                             }
                         }
                     ]
@@ -1773,7 +1773,7 @@ public class ToolLoopTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "I wasn't able to capture the screen — it seems the tool hit an error.",
+                Content = "I wasn't able to store that — it seems the tool hit an error.",
                 FinishReason = "stop"
             };
         });
@@ -1782,7 +1782,7 @@ public class ToolLoopTests
             (tool, _) => tool switch
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "screen_capture" => throw new InvalidOperationException("Monitor not available"),
+                "memory_store_facts" => throw new InvalidOperationException("Database not available"),
                 _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
@@ -1790,17 +1790,17 @@ public class ToolLoopTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("Take a screenshot please");
+        var result = await agent.ProcessAsync("Remember that my name is Alice");
 
         // The overall flow should succeed (error is caught per-tool)
         Assert.True(result.Success);
 
         // The failed tool call should be recorded with Success = false
         var failedCall = result.ToolCallsMade
-            .FirstOrDefault(t => t.ToolName == "screen_capture");
+            .FirstOrDefault(t => t.ToolName == "memory_store_facts");
         Assert.NotNull(failedCall);
         Assert.False(failedCall.Success);
-        Assert.Contains("Monitor not available", failedCall.Result);
+        Assert.Contains("Database not available", failedCall.Result);
     }
 
     [Fact]
@@ -1993,62 +1993,34 @@ public class PolicyFilteringTests
     }
 
     [Fact]
-    public async Task ScreenRequest_OnlyExposesScreenTools()
+    public async Task ScreenRequest_DeterministicCapture_CallsScreenToolDirectly()
     {
         // "What can you see on my screen?" → screen_observe intent
-        // → only screen tools exposed
-        IReadOnlyList<ToolDefinition>? toolsSeen = null;
-        var toolRequested = false;
-
+        // → deterministic path: screen_capture called directly via MCP,
+        //   result injected as context, LLM describes what it sees.
         var llm = new FakeLlmClient((messages, tools) =>
         {
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
 
-            // Older path: router asks the LLM to classify first.
-            // New path: obvious screen requests are routed deterministically and
-            // the classify call is skipped. Handle both.
             if (sysMsg.Contains("Classify"))
                 return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
 
-            if (tools is not null)
-                toolsSeen = tools;
+            // The deterministic path injects screen data as a system message.
+            // The LLM should see it and describe the screen.
+            var hasScreenData = messages.Any(m =>
+                m.Role == "system" && (m.Content?.Contains("fakeOcrText") ?? false));
+            var content = hasScreenData
+                ? "I can see a code editor on your screen."
+                : "No screen data available.";
 
-            // First executor call: request a screen capture.
-            if (!toolRequested && tools is { Count: > 0 })
-            {
-                toolRequested = true;
-                return new LlmResponse
-                {
-                    IsComplete = false,
-                    FinishReason = "tool_calls",
-                    ToolCalls =
-                    [
-                        new ToolCallRequest
-                        {
-                            Id = "call_scr_001",
-                            Function = new FunctionCallDetails
-                            {
-                                Name = "screen_capture",
-                                Arguments = "{}"
-                            }
-                        }
-                    ]
-                };
-            }
-
-            return new LlmResponse
-            {
-                IsComplete = true,
-                Content = "I can see a code editor on your screen.",
-                FinishReason = "stop"
-            };
+            return new LlmResponse { IsComplete = true, Content = content, FinishReason = "stop" };
         });
 
         var mcp = new FakeMcpClient(
             (tool, _) => tool switch
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "screen_capture" => """{"base64":"fakeData","width":1920,"height":1080}""",
+                "screen_capture" => """{"ocrText":"fakeOcrText: code editor open","width":1920,"height":1080}""",
                 _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
@@ -2059,19 +2031,27 @@ public class PolicyFilteringTests
         var result = await agent.ProcessAsync("What can you see on the screen right now?");
 
         Assert.True(result.Success);
-        Assert.NotNull(toolsSeen);
+        Assert.Contains("code editor", result.Text);
 
-        // Should only have screen tools
-        var toolNames = toolsSeen!.Select(t => t.Function.Name).ToHashSet();
-        Assert.Contains("screen_capture", toolNames);
-        Assert.DoesNotContain("web_search", toolNames);
-        Assert.DoesNotContain("system_execute", toolNames);
-        Assert.DoesNotContain("memory_store_facts", toolNames);
+        // screen_capture should have been called directly via MCP
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+
+        // No forbidden tools should have been called
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+
+        // The tool call should be recorded
+        var screenCall = result.ToolCallsMade
+            .FirstOrDefault(t => t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(screenCall);
+        Assert.True(screenCall!.Success);
     }
 
     [Fact]
     public async Task ToolLoop_BlocksToolCallsOutsidePolicyAllowList()
     {
+        // Memory write intent: LLM tries to call web_search (forbidden)
         var requestedForbiddenTool = false;
         var llm = new FakeLlmClient((messages, tools) =>
         {
@@ -2113,7 +2093,7 @@ public class PolicyFilteringTests
             (tool, _) => tool switch
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "screen_capture" => """{"base64":"fakeData","width":1920,"height":1080}""",
+                "memory_store_facts" => """{"stored":1}""",
                 "web_search" => "this should never run",
                 _ => "{}"
             },
@@ -2122,7 +2102,7 @@ public class PolicyFilteringTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("What can you see on the screen right now?");
+        var result = await agent.ProcessAsync("Remember that my favorite color is blue");
 
         Assert.True(result.Success);
         Assert.DoesNotContain(mcp.Calls, c =>
@@ -2136,50 +2116,20 @@ public class PolicyFilteringTests
     }
 
     [Fact]
-    public async Task ToolLoop_ResolvesConflictsBeforeExecution_ExecutesWinnersOnly()
+    public async Task DeterministicScreenCapture_HandlesError_ReturnsGracefulMessage()
     {
-        var requestedConflictingTools = false;
+        // When screen_capture fails in the deterministic path, the user
+        // should get a clear error message instead of a hallucinated answer.
         var llm = new FakeLlmClient((messages, tools) =>
         {
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
             if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
 
-            if (!requestedConflictingTools && tools is { Count: > 0 })
-            {
-                requestedConflictingTools = true;
-                return new LlmResponse
-                {
-                    IsComplete = false,
-                    FinishReason = "tool_calls",
-                    ToolCalls =
-                    [
-                        new ToolCallRequest
-                        {
-                            Id = "call_capture",
-                            Function = new FunctionCallDetails
-                            {
-                                Name = "screen_capture",
-                                Arguments = "{}"
-                            }
-                        },
-                        new ToolCallRequest
-                        {
-                            Id = "call_window",
-                            Function = new FunctionCallDetails
-                            {
-                                Name = "get_active_window",
-                                Arguments = "{}"
-                            }
-                        }
-                    ]
-                };
-            }
-
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Window inspected.",
+                Content = "This should not be reached.",
                 FinishReason = "stop"
             };
         });
@@ -2188,8 +2138,7 @@ public class PolicyFilteringTests
             (tool, _) => tool switch
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "screen_capture" => "this should not run",
-                "get_active_window" => """{"title":"IDE","process":"cursor"}""",
+                "screen_capture" or "ScreenCapture" => throw new InvalidOperationException("Monitor not available"),
                 _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
@@ -2199,16 +2148,15 @@ public class PolicyFilteringTests
 
         var result = await agent.ProcessAsync("What can you see on my screen right now?");
 
-        Assert.True(result.Success);
-        Assert.Contains(mcp.Calls, c => c.Tool.Equals("get_active_window", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        // The deterministic path should return an error, not hallucinate
+        Assert.False(result.Success);
+        Assert.Contains("screen", result.Text, StringComparison.OrdinalIgnoreCase);
 
-        var skipped = result.ToolCallsMade.FirstOrDefault(t =>
-            t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(skipped);
-        Assert.False(skipped!.Success);
-        Assert.Contains("tool_conflict_skipped", skipped.Result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("deterministic_priority", skipped.Result, StringComparison.OrdinalIgnoreCase);
+        // The failed tool call should be recorded
+        var failedCall = result.ToolCallsMade
+            .FirstOrDefault(t => t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(failedCall);
+        Assert.False(failedCall!.Success);
     }
 
     [Fact]

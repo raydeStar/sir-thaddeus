@@ -434,21 +434,20 @@
                                         </Grid.ColumnDefinitions>
 
                                         <!-- Author + Role label -->
-                                        <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                            <TextBlock Text="{Binding AuthorLabel}"
-                                                       FontSize="11"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource Subtext1Brush}"/>
-                                            <TextBlock Text=" — "
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource Overlay0Brush}"/>
-                                            <TextBlock x:Name="RoleTag"
-                                                       Text="{Binding RoleLabel}"
-                                                       FontSize="10"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource Overlay0Brush}"
-                                                       VerticalAlignment="Center"/>
-                                        </StackPanel>
+                                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                                            <Run Text="{Binding AuthorLabel, Mode=OneWay}"
+                                                 FontSize="11"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{StaticResource Subtext1Brush}"/>
+                                            <Run Text=" — "
+                                                 FontSize="11"
+                                                 Foreground="{StaticResource Overlay0Brush}"/>
+                                            <Run x:Name="RoleTag"
+                                                 Text="{Binding RoleLabel, Mode=OneWay}"
+                                                 FontSize="10"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{StaticResource Overlay0Brush}"/>
+                                        </TextBlock>
 
                                         <!-- Timestamp (reveal on hover) -->
                                         <TextBlock x:Name="TimeLabel"
@@ -1301,6 +1300,211 @@
         <views:DeepDiveBriefingView Grid.Row="1" x:Name="BriefingView" Visibility="Collapsed" DataContext="{Binding BriefingPanel}"/>
 
         <!-- ═══════════════════════════════════════════════════════════
+             TRANSCRIBE SUBTAB
+             YouTube transcription controls
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="TranscribeSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <TextBlock Text="YOUTUBE TRANSCRIPTION"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource MauveBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Download, transcribe, and summarize a YouTube video using the voice backend's ASR pipeline."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,16"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Video URL"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding YouTubeUrl, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="ASR Provider"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding YouTubeAsrProvider, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="ASR Model"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding YouTubeAsrModelId, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Language Hint"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding YouTubeLanguageHint, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Draft Tone"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableDraftTones}"
+                                  SelectedItem="{Binding YouTubeDraftTone, Mode=TwoWay}"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                    </Grid>
+
+                    <CheckBox Content="Keep converted audio files (do not clean work folder)"
+                              IsChecked="{Binding YouTubeKeepAudio}"
+                              Foreground="{StaticResource TextBrush}"
+                              FontSize="12"
+                              Margin="0,0,0,12"/>
+
+                    <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,0,0,16"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Start YouTube Job"
+                                Command="{Binding StartYouTubeJobCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Cancel"
+                                Command="{Binding CancelYouTubeJobCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding YouTubeJobStatus}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource Subtext0Brush}"/>
+                    <TextBlock Text="{Binding YouTubeJobStage}"
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               Margin="0,2,0,6"/>
+
+                    <ProgressBar Height="8"
+                                 IsIndeterminate="{Binding YouTubeJobIsRunning, Mode=OneWay}"
+                                 Value="{Binding YouTubeJobProgressPercent, Mode=OneWay}"
+                                 Maximum="100"
+                                 Margin="0,0,0,6"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Progress: " FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock Text="{Binding YouTubeJobProgressPercent}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock Text="%" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding YouTubeErrorMessage}"
+                               Foreground="{StaticResource RedBrush}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Transcript" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding YouTubeTranscriptPath}" FontSize="11" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Output Folder" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding YouTubeOutputDir}" FontSize="11" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                    </Grid>
+
+                    <TextBlock Text="Summary"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource Subtext0Brush}"
+                               Margin="0,4,0,4"/>
+                    <TextBox Text="{Binding YouTubeSummary, Mode=OneWay}"
+                             IsReadOnly="True"
+                             MinHeight="140"
+                             MaxHeight="260"
+                             VerticalScrollBarVisibility="Auto"
+                             TextWrapping="Wrap"
+                             Style="{StaticResource ChatInputStyle}"
+                             FontSize="12"
+                             Padding="8,6"/>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Save bar -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,10"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="●" FontSize="10" Foreground="{StaticResource YellowBrush}" Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="Save Settings" Command="{Binding SaveCommand}" Style="{StaticResource SendButtonStyle}" Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
              LOGS TAB
              Full audit log feed and system activity
              ═══════════════════════════════════════════════════════ -->
@@ -1357,9 +1561,12 @@
                     BorderThickness="0,0,0,1">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <RadioButton x:Name="SettingsSubGeneral" Content="General" IsChecked="True" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="General" Style="{StaticResource MemorySubTabStyle}"/>
+                    <RadioButton x:Name="SettingsSubPreferences" Content="Preferences" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Preferences" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="SettingsSubMcp" Content="MCP" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="MCP" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubVoice" Content="Voice" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Voice" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubMemory" Content="Memory" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Memory" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubProfile" Content="Profile" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Profile" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="SettingsSubTranscribe" Content="Transcribe" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Transcribe" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubLogs" Content="Logs" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Logs" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                 </StackPanel>
             </Border>
@@ -1391,7 +1598,7 @@
                                FontSize="11" FontWeight="Bold"
                                Foreground="{StaticResource MauveBrush}"
                                Margin="0,0,0,8"/>
-                    <TextBlock Text="Who is using the assistant right now? The selected profile is injected automatically. You can also set a profile-specific Near Me location here."
+                    <TextBlock Text="Who is using the assistant right now? The selected profile is injected automatically. Edit the Near Me location in the Preferences tab."
                                FontSize="11.5"
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
@@ -1418,29 +1625,6 @@
                                 Style="{StaticResource MemoryActionButtonStyle}"
                                 Margin="0,0,0,8"/>
                     </WrapPanel>
-
-                    <Grid Margin="0,0,0,20">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="140"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Near Me location"
-                                   FontSize="12"
-                                   Foreground="{StaticResource Subtext0Brush}"
-                                   VerticalAlignment="Center"/>
-                        <TextBox Grid.Column="1"
-                                 Text="{Binding LocationLabel, UpdateSourceTrigger=LostFocus}"
-                                 Style="{StaticResource ChatInputStyle}"
-                                 FontSize="12"
-                                 Padding="8,6"
-                                 Margin="8,0,8,0"
-                                 ToolTip="City, State or ZIP for this profile"/>
-                        <Button Grid.Column="2"
-                                Content="Clear"
-                                Click="ClearManualLocation_Click"
-                                Style="{StaticResource MemoryActionButtonStyle}"/>
-                    </Grid>
 
                     <!-- ── Separator ───────────────────────────────────── -->
                     <Border Height="1"
@@ -1514,6 +1698,486 @@
                     </Grid>
 
 
+                    <TextBlock Text="HOTKEYS"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,0,6"/>
+                               
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="HotkeyLabels"/>
+                            <ColumnDefinition Width="200"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        
+                        <TextBlock Grid.Row="0" Grid.Column="0" 
+                                   Text="Push-to-Talk (Global):"
+                                   FontSize="12"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   Margin="0,0,8,4"/>
+                        <TextBox Grid.Row="0" Grid.Column="1"
+                                 Text="{Binding PttChord, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="4,2" Margin="0,0,0,4"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" 
+                                   Text="Stop Listening (Global):"
+                                   FontSize="12"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   Margin="0,0,8,4"/>
+                        <TextBox Grid.Row="1" Grid.Column="1"
+                                 Text="{Binding ShutupChord, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="4,2" Margin="0,0,0,4"/>
+                    </Grid>
+
+                    <TextBlock Text="Killswitch / STOP ALL (Global): Ctrl+Alt+Esc"
+                               FontSize="12"
+                               Foreground="{StaticResource RedBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="Command Palette (Global): Ctrl+Space"
+                               FontSize="12"
+                               Foreground="{StaticResource Subtext0Brush}"
+                               Margin="0,0,0,20"/>
+
+                    <!-- ── Advanced Section ─────────────────────────────── -->
+                    <Expander Header="Advanced Settings" 
+                              Foreground="{StaticResource TextBrush}" 
+                              FontSize="13" 
+                              FontWeight="SemiBold" 
+                              Margin="0,0,0,20">
+                        <StackPanel Margin="0,12,0,0">
+                            <!-- ── Runtime Safety ───────────────────── -->
+                            <Expander Header="Runtime Safety" Foreground="{StaticResource RedBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
+                                <StackPanel Margin="0,12,0,0">
+                                    <CheckBox Content="Enable panic mode (block side-effect tools)"
+                                              IsChecked="{Binding RuntimePanicMode}"
+                                              Foreground="{StaticResource TextBrush}"
+                                              FontSize="12"
+                                              Margin="0,0,0,4"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="140"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Safe mode status"
+                                                   FontSize="12"
+                                                   Foreground="{StaticResource Subtext0Brush}"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding RuntimeSafeMode, StringFormat=Active: {0}}"
+                                                   FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock Text="{Binding RuntimeSafeModeReason}"
+                                               FontSize="10.5"
+                                               Foreground="{StaticResource Overlay0Brush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,8"/>
+                                    <TextBlock Text="Safe mode is fail-closed and runtime-managed. Use diagnostics to investigate and clear root causes."
+                                               FontSize="10.5"
+                                               Foreground="{StaticResource Overlay0Brush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,8"/>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- ── Memory ────────────────────────────── -->
+                            <Expander Header="Memory" Foreground="{StaticResource GreenBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
+                                <StackPanel Margin="0,12,0,0">
+                                    <CheckBox Content="Enable memory (read + write)"
+                                              IsChecked="{Binding MemoryEnabled}"
+                                              Foreground="{StaticResource TextBrush}"
+                                              FontSize="12"
+                                              Margin="0,0,0,4"/>
+                                    <TextBlock Text="When off, all memory features are disabled — no retrieval, no storage, no prompts."
+                                               FontSize="10.5"
+                                               Foreground="{StaticResource Overlay0Brush}"
+                                               TextWrapping="Wrap"
+                                               Margin="18,0,0,6"/>
+                                    <CheckBox Content="Use embeddings for semantic search"
+                                              IsChecked="{Binding EmbeddingsEnabled}"
+                                              Foreground="{StaticResource TextBrush}"
+                                              FontSize="12"
+                                              Margin="0,0,0,8"/>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- Privacy, Preferences, MCP, Voice Config, YouTube moved to dedicated tabs -->
+                        </StackPanel>
+                    </Expander>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ── Sticky Save Bar ───────────────────────────────── -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="32,10">
+                <Grid MaxWidth="560" HorizontalAlignment="Left">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="●"
+                                   FontSize="10"
+                                   Foreground="{StaticResource YellowBrush}"
+                                   Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock x:Name="GeneralStatusText"
+                                   Text="{Binding StatusText}"
+                                   FontSize="11"
+                                   FontWeight="Normal">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSaveSuccess}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         From="0" To="1" Duration="0:0:0.2"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         To="0" Duration="0:0:0.4"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal">
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Save Settings"
+                                Command="{Binding SaveCommand}"
+                                Style="{StaticResource SendButtonStyle}"
+                                Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             PREFERENCES SUBTAB
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="PreferencesSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <!-- ── Weather & Location ────────────────────────── -->
+                    <TextBlock Text="WEATHER &amp; LOCATION"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource BlueBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Configure time format, weather units, and your Near Me location for weather and local context."
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Time Format"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding Use24HourTime, Mode=TwoWay}"
+                                  SelectedValuePath="Tag"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                                  ToolTip="Toggle between 12-hour and 24-hour time formats.">
+                            <ComboBoxItem Tag="False">12-hour (1:30 PM)</ComboBoxItem>
+                            <ComboBoxItem Tag="True">24-hour (13:30)</ComboBoxItem>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Weather Units"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding WeatherPreferredUnits, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
+                                  ToolTip="Unit system for weather and measurements.">
+                            <ComboBoxItem Content="imperial"/>
+                            <ComboBoxItem Content="metric"/>
+                            <ComboBoxItem Content="auto"/>
+                        </ComboBox>
+                    </Grid>
+
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,0,0,16"/>
+
+                    <!-- ── Near Me Location ──────────────────────────── -->
+                    <TextBlock Text="NEAR ME LOCATION"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource MauveBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Profile-scoped location used for weather and local context. Set a city, state, or ZIP code."
+                               FontSize="11"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Near Me location"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LocationLabel, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12"
+                                 Padding="8,6"
+                                 Margin="8,0,8,0"
+                                 ToolTip="City, State or ZIP for this profile"/>
+                        <Button Grid.Column="2"
+                                Content="Clear"
+                                Click="ClearManualLocation_Click"
+                                Style="{StaticResource MemoryActionButtonStyle}"/>
+                    </Grid>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Save bar -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,10"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="●" FontSize="10" Foreground="{StaticResource YellowBrush}" Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="Save Settings" Command="{Binding SaveCommand}" Style="{StaticResource SendButtonStyle}" Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             MCP PERMISSIONS SUBTAB
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="McpSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <TextBlock Text="MCP PERMISSIONS"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource YellowBrush}"
+                               Margin="0,0,0,8"/>
+                    <TextBlock Text="Controls which tool groups the assistant may use. Off = hard block (no prompt). Ask = prompt every call. Always = auto-approve."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,16"/>
+
+                    <!-- Developer Override -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Developer override"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource PeachBrush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  SelectedValue="{Binding McpPermDeveloperOverride, Mode=TwoWay}"
+                                  SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="none"/>
+                            <ComboBoxItem Content="ask"/>
+                            <ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock Text="Overrides ALL tool group permissions at runtime when not 'none'. Set to 'always' to auto-approve everything, or 'ask' to be prompted for every tool. Per-group settings are preserved and apply when reverted to 'none'."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,16"/>
+
+                    <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,0,0,16"/>
+
+                    <!-- Per-group dropdowns -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Screen" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermScreen, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Files" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermFiles, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="System" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermSystem, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Web" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermWeb, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Memory Read" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermMemoryRead, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Memory Write" FontSize="12" Foreground="{StaticResource Subtext0Brush}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding McpPermMemoryWrite, Mode=TwoWay}" SelectedValuePath="Content"
+                                  Style="{StaticResource DarkComboBoxStyle}" ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
+                            <ComboBoxItem Content="off"/><ComboBoxItem Content="ask"/><ComboBoxItem Content="always"/>
+                        </ComboBox>
+                    </Grid>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Save bar -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,10"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="●" FontSize="10" Foreground="{StaticResource YellowBrush}" Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="Save Settings" Command="{Binding SaveCommand}" Style="{StaticResource SendButtonStyle}" Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             VOICE SETTINGS SUBTAB
+             ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="VoiceSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <!-- ── Audio Devices ─────────────────────────────── -->
                     <TextBlock Text="AUDIO DEVICES"
                                FontSize="11" FontWeight="Bold"
                                Foreground="{StaticResource TealBrush}"
@@ -1641,858 +2305,6 @@
                     <Border Height="1"
                             Background="{StaticResource Surface0Brush}"
                             Margin="0,0,0,20"/>
-
-                    <TextBlock Text="HOTKEYS"
-                               FontSize="11" FontWeight="Bold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,6"/>
-                               
-                    <Grid Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" SharedSizeGroup="HotkeyLabels"/>
-                            <ColumnDefinition Width="200"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        
-                        <TextBlock Grid.Row="0" Grid.Column="0" 
-                                   Text="Push-to-Talk (Global):"
-                                   FontSize="12"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource Subtext0Brush}"
-                                   Margin="0,0,8,4"/>
-                        <TextBox Grid.Row="0" Grid.Column="1"
-                                 Text="{Binding PttChord, UpdateSourceTrigger=PropertyChanged}"
-                                 Padding="4,2" Margin="0,0,0,4"/>
-
-                        <TextBlock Grid.Row="1" Grid.Column="0" 
-                                   Text="Stop Listening (Global):"
-                                   FontSize="12"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource Subtext0Brush}"
-                                   Margin="0,0,8,4"/>
-                        <TextBox Grid.Row="1" Grid.Column="1"
-                                 Text="{Binding ShutupChord, UpdateSourceTrigger=PropertyChanged}"
-                                 Padding="4,2" Margin="0,0,0,4"/>
-                    </Grid>
-
-                    <TextBlock Text="Killswitch / STOP ALL (Global): Ctrl+Alt+Esc"
-                               FontSize="12"
-                               Foreground="{StaticResource RedBrush}"
-                               Margin="0,0,0,4"/>
-                    <TextBlock Text="Command Palette (Global): Ctrl+Space"
-                               FontSize="12"
-                               Foreground="{StaticResource Subtext0Brush}"
-                               Margin="0,0,0,20"/>
-
-                    <!-- ── Advanced Section ─────────────────────────────── -->
-                    <Expander Header="Advanced Settings" 
-                              Foreground="{StaticResource TextBrush}" 
-                              FontSize="13" 
-                              FontWeight="SemiBold" 
-                              Margin="0,0,0,20">
-                        <StackPanel Margin="0,12,0,0">
-                            <!-- ── Runtime Safety ───────────────────── -->
-                            <Expander Header="Runtime Safety" Foreground="{StaticResource RedBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <CheckBox Content="Enable panic mode (block side-effect tools)"
-                                              IsChecked="{Binding RuntimePanicMode}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,4"/>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Safe mode status"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding RuntimeSafeMode, StringFormat=Active: {0}}"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource TextBrush}"
-                                                   VerticalAlignment="Center"/>
-                                    </Grid>
-                                    <TextBlock Text="{Binding RuntimeSafeModeReason}"
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,8"/>
-                                    <TextBlock Text="Safe mode is fail-closed and runtime-managed. Use diagnostics to investigate and clear root causes."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,8"/>
-                                </StackPanel>
-                            </Expander>
-
-                            <!-- ── Memory ────────────────────────────── -->
-                            <Expander Header="Memory" Foreground="{StaticResource GreenBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <CheckBox Content="Enable memory (read + write)"
-                                              IsChecked="{Binding MemoryEnabled}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,4"/>
-                                    <TextBlock Text="When off, all memory features are disabled — no retrieval, no storage, no prompts."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="18,0,0,6"/>
-                                    <CheckBox Content="Use embeddings for semantic search"
-                                              IsChecked="{Binding EmbeddingsEnabled}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,8"/>
-                                </StackPanel>
-                            </Expander>
-
-                            <!-- ── Privacy ───────────────────────────── -->
-                            <Expander Header="Privacy" Foreground="{StaticResource BlueBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <TextBlock Text="Device location: OFF (not used)"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               Foreground="{StaticResource TextBrush}"
-                                               Margin="0,0,0,4"/>
-                                    <TextBlock Text="This app does not request OS location permission."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,2"/>
-                                    <TextBlock Text="Near Me location is profile-scoped and can be edited in the Active Profile section above."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,10"/>
-                                </StackPanel>
-                            </Expander>
-
-                            <!-- ── Preferences & Weather ─────────────── -->
-                            <Expander Header="Preferences &amp; Weather" Foreground="{StaticResource BlueBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <Grid Margin="0,0,0,12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Time Format"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding Use24HourTime, Mode=TwoWay}"
-                                                  SelectedValuePath="Tag"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
-                                                  ToolTip="Toggle between 12-hour and 24-hour time formats.">
-                                            <ComboBoxItem Tag="False">12-hour (1:30 PM)</ComboBoxItem>
-                                            <ComboBoxItem Tag="True">24-hour (13:30)</ComboBoxItem>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Weather Units"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding WeatherPreferredUnits, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
-                                                  ToolTip="Unit system for weather and measurements.">
-                                            <ComboBoxItem Content="imperial"/>
-                                            <ComboBoxItem Content="metric"/>
-                                            <ComboBoxItem Content="auto"/>
-                                        </ComboBox>
-                                    </Grid>
-                                </StackPanel>
-                            </Expander>
-
-                            <!-- ── MCP Permissions ─────────────────────────────── -->
-                            <Expander Header="MCP Permissions" Foreground="{StaticResource YellowBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <TextBlock Text="Controls which tool groups the assistant may use. Off = hard block (no prompt). Ask = prompt every call. Always = auto-approve."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,12"/>
-                                    
-                                    <!-- Developer Override -->
-                                    <Grid Margin="0,0,0,12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Developer override"
-                                                   FontSize="12"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PeachBrush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermDeveloperOverride, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="none"/>
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <TextBlock Text="Overrides Screen/Files/System/Web at runtime when not 'none'. Per-group settings are preserved and apply when override is reverted."
-                                               FontSize="10.5"
-                                               Foreground="{StaticResource Overlay0Brush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,12"/>
-
-                                    <!-- Per-group dropdowns -->
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Screen"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermScreen, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Files"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermFiles, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="System"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermSystem, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Web"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermWeb, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Memory Read"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermMemoryRead, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Memory Write"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <ComboBox Grid.Column="1"
-                                                  SelectedValue="{Binding McpPermMemoryWrite, Mode=TwoWay}"
-                                                  SelectedValuePath="Content"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBoxItem Content="off"/>
-                                            <ComboBoxItem Content="ask"/>
-                                            <ComboBoxItem Content="always"/>
-                                        </ComboBox>
-                                    </Grid>
-                                </StackPanel>
-                            </Expander>
-
-                    <!-- ── Separator ───────────────────────────────────── -->
-                    <Border Height="1"
-                            Background="{StaticResource Surface0Brush}"
-                            Margin="0,0,0,20"/>
-
-
-                            <!-- ── Voice Configuration ───────────────── -->
-                            <Expander Header="Voice Configuration &amp; Services" Foreground="{StaticResource PeachBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <CheckBox Content="Enable text-to-speech"
-                                              IsChecked="{Binding TtsEnabled}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,6"/>
-
-                                    <CheckBox Content="Enable VoiceHost"
-                                              IsChecked="{Binding VoiceHostEnabled}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,8"/>
-                                    
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="120"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="TTS Engine"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <TextBox Grid.Column="1"
-                                                 Text="{Binding VoiceTtsEngine, UpdateSourceTrigger=LostFocus}"
-                                                 Style="{StaticResource ChatInputStyle}"
-                                                 FontSize="12" Padding="8,6"/>
-                                    </Grid>
-
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="120"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="TTS Voice"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"
-                                                   ToolTip="Select an installed voice. Defaults to personality's preferred voice if blank."/>
-                                        <ComboBox Grid.Column="1"
-                                                  ItemsSource="{Binding AvailableKokoroVoices}"
-                                                  SelectedItem="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Text="{Binding SelectedKokoroVoice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  IsEditable="True"
-                                                  IsTextSearchEnabled="True"
-                                                  Style="{StaticResource DarkComboBoxStyle}"
-                                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}">
-                                            <ComboBox.ToolTip>
-                                                <ToolTip>
-                                                    <TextBlock Text="Select an installed Kokoro voice pack or type a custom voice ID.&#x0a;Leave blank to automatically use the selected personality's preferred voice."/>
-                                                </ToolTip>
-                                            </ComboBox.ToolTip>
-                                        </ComboBox>
-                                    </Grid>
-
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="120"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="STT Engine"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource Subtext0Brush}"
-                                                   VerticalAlignment="Center"/>
-                                        <TextBox Grid.Column="1"
-                                                 Text="{Binding VoiceSttEngine, UpdateSourceTrigger=LostFocus}"
-                                                 Style="{StaticResource ChatInputStyle}"
-                                                 FontSize="12" Padding="8,6"
-                                                 IsReadOnly="True"
-                                                 ToolTip="Live voice-to-text is pinned to faster-whisper."/>
-                                    </Grid>
-                                    <CheckBox Content="Prefer local TTS endpoint"
-                                              IsChecked="{Binding VoicePreferLocalTts}"
-                                              Foreground="{StaticResource TextBrush}"
-                                              FontSize="12"
-                                              Margin="0,0,0,16"/>
-
-                                    <!-- ─── VoiceHost Server ──────────────────────── -->
-                                    <Border Background="{StaticResource Surface0Brush}"
-                                            BorderBrush="{StaticResource Surface1Brush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8"
-                                            Padding="12"
-                                            Margin="0,0,0,20">
-                                        <StackPanel>
-                                            <TextBlock Text="VoiceHost Status"
-                                                       FontSize="13"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource TextBrush}"
-                                                       Margin="0,0,0,10"/>
-
-                                            <!-- Status row: indicator dot + status text -->
-                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                                <Ellipse Width="10" Height="10"
-                                                         VerticalAlignment="Center"
-                                                         Margin="0,0,8,0">
-                                                    <Ellipse.Style>
-                                                        <Style TargetType="Ellipse">
-                                                            <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding VoiceHostIsReady}" Value="True">
-                                                                    <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding VoiceHostIsReachable}" Value="True">
-                                                                    <Setter Property="Fill" Value="{StaticResource YellowBrush}"/>
-                                                                </DataTrigger>
-                                                                <!-- Ready overrides reachable — must come after -->
-                                                                <MultiDataTrigger>
-                                                                    <MultiDataTrigger.Conditions>
-                                                                        <Condition Binding="{Binding VoiceHostIsReady}" Value="True"/>
-                                                                        <Condition Binding="{Binding VoiceHostIsReachable}" Value="True"/>
-                                                                    </MultiDataTrigger.Conditions>
-                                                                    <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
-                                                                </MultiDataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Ellipse.Style>
-                                                </Ellipse>
-                                                <TextBlock FontSize="12"
-                                                           FontWeight="SemiBold"
-                                                           VerticalAlignment="Center">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Text" Value="{Binding VoiceHostStatusText}"/>
-                                                            <Setter Property="Foreground" Value="{StaticResource Subtext0Brush}"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding VoiceHostIsReady}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                            </StackPanel>
-
-                                            <!-- Subsystem readiness indicators -->
-                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
-                                                    <Ellipse Width="7" Height="7"
-                                                             VerticalAlignment="Center"
-                                                             Margin="0,0,5,0">
-                                                        <Ellipse.Style>
-                                                            <Style TargetType="Ellipse">
-                                                                <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="True">
-                                                                        <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding VoiceHostAsrReady}" Value="False">
-                                                                        <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Ellipse.Style>
-                                                    </Ellipse>
-                                                    <TextBlock Text="ASR"
-                                                               FontSize="11"
-                                                               Foreground="{StaticResource Overlay0Brush}"
-                                                               VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
-                                                    <Ellipse Width="7" Height="7"
-                                                             VerticalAlignment="Center"
-                                                             Margin="0,0,5,0">
-                                                        <Ellipse.Style>
-                                                            <Style TargetType="Ellipse">
-                                                                <Setter Property="Fill" Value="{StaticResource Overlay0Brush}"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="True">
-                                                                        <Setter Property="Fill" Value="{StaticResource GreenBrush}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding VoiceHostTtsReady}" Value="False">
-                                                                        <Setter Property="Fill" Value="{StaticResource RedBrush}"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Ellipse.Style>
-                                                    </Ellipse>
-                                                    <TextBlock Text="TTS"
-                                                               FontSize="11"
-                                                               Foreground="{StaticResource Overlay0Brush}"
-                                                               VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                                <TextBlock Text="{Binding VoiceHostVersion}"
-                                                           FontSize="10"
-                                                           Foreground="{StaticResource Overlay0Brush}"
-                                                           VerticalAlignment="Center"/>
-                                            </StackPanel>
-
-                                            <!-- Status message -->
-                                            <TextBlock Text="{Binding VoiceHostMessage}"
-                                                       FontSize="11"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,10">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding VoiceHostIsRunning}" Value="False">
-                                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="Health check timed out.">
-                                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="VoiceHost is not running.">
-                                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding VoiceHostMessage}" Value="Process manager unavailable.">
-                                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
-
-                                            <!-- Action buttons -->
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button Content="Start"
-                                                        Command="{Binding StartVoiceHostCommand}"
-                                                        Style="{StaticResource MemoryActionButtonStyle}"
-                                                        Margin="0,0,8,0"/>
-                                                <Button Content="Stop"
-                                                        Command="{Binding StopVoiceHostCommand}"
-                                                        Style="{StaticResource MemoryActionButtonStyle}"
-                                                        Margin="0,0,8,0"/>
-                                                <Button Content="Refresh"
-                                                        Command="{Binding RefreshVoiceHostCommand}"
-                                                        Style="{StaticResource MemoryActionButtonStyle}"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Expander>
-
-                            <!-- ─── YouTube Transcribe ───────────────────────── -->
-                            <Expander Header="YouTube Transcription" Foreground="{StaticResource PeachBrush}" Margin="0,0,0,12" FontWeight="SemiBold">
-                                <StackPanel Margin="0,12,0,0">
-                                    <Border Background="{StaticResource Surface0Brush}"
-                                            BorderBrush="{StaticResource Surface1Brush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8"
-                                            Padding="12"
-                                            Margin="0,0,0,20">
-                        <StackPanel>
-                            <TextBlock Text="YouTube Transcribe"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextBrush}"
-                                       Margin="0,0,0,8"/>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Video URL"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding YouTubeUrl, UpdateSourceTrigger=LostFocus}"
-                                         Style="{StaticResource ChatInputStyle}"
-                                         FontSize="12" Padding="8,6"/>
-                            </Grid>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="ASR Provider"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding YouTubeAsrProvider, UpdateSourceTrigger=LostFocus}"
-                                         Style="{StaticResource ChatInputStyle}"
-                                         FontSize="12" Padding="8,6"/>
-                            </Grid>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="ASR Model"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding YouTubeAsrModelId, UpdateSourceTrigger=LostFocus}"
-                                         Style="{StaticResource ChatInputStyle}"
-                                         FontSize="12" Padding="8,6"/>
-                            </Grid>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Language Hint"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding YouTubeLanguageHint, UpdateSourceTrigger=LostFocus}"
-                                         Style="{StaticResource ChatInputStyle}"
-                                         FontSize="12" Padding="8,6"/>
-                            </Grid>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Draft Tone"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <ComboBox Grid.Column="1"
-                                          ItemsSource="{Binding AvailableDraftTones}"
-                                          SelectedItem="{Binding YouTubeDraftTone, Mode=TwoWay}"
-                                          Style="{StaticResource DarkComboBoxStyle}"
-                                          ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
-                            </Grid>
-
-                            <CheckBox Content="Keep converted audio files (do not clean work folder)"
-                                      IsChecked="{Binding YouTubeKeepAudio}"
-                                      Foreground="{StaticResource TextBrush}"
-                                      FontSize="12"
-                                      Margin="0,0,0,8"/>
-
-                            <StackPanel Orientation="Horizontal"
-                                        Margin="0,0,0,8">
-                                <Button Content="Start YouTube Job"
-                                        Command="{Binding StartYouTubeJobCommand}"
-                                        Style="{StaticResource MemoryActionButtonStyle}"
-                                        Margin="0,0,8,0"/>
-                                <Button Content="Cancel"
-                                        Command="{Binding CancelYouTubeJobCommand}"
-                                        Style="{StaticResource MemoryActionButtonStyle}"/>
-                            </StackPanel>
-
-                            <TextBlock Text="{Binding YouTubeJobStatus}"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource Subtext0Brush}"/>
-                            <TextBlock Text="{Binding YouTubeJobStage}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource Overlay0Brush}"
-                                       Margin="0,2,0,6"/>
-
-                            <ProgressBar Height="8"
-                                         IsIndeterminate="{Binding YouTubeJobIsRunning, Mode=OneWay}"
-                                         Value="{Binding YouTubeJobProgressPercent, Mode=OneWay}"
-                                         Maximum="100"
-                                         Margin="0,0,0,6"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <TextBlock Text="Progress: "
-                                           FontSize="11"
-                                           Foreground="{StaticResource Overlay0Brush}"/>
-                                <TextBlock Text="{Binding YouTubeJobProgressPercent}"
-                                           FontSize="11"
-                                           Foreground="{StaticResource Overlay0Brush}"/>
-                                <TextBlock Text="%"
-                                           FontSize="11"
-                                           Foreground="{StaticResource Overlay0Brush}"/>
-                            </StackPanel>
-
-                            <TextBlock Text="{Binding YouTubeErrorMessage}"
-                                       Foreground="{StaticResource RedBrush}"
-                                       FontSize="11"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,8"/>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Transcript"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1"
-                                           Text="{Binding YouTubeTranscriptPath}"
-                                           FontSize="11"
-                                           Foreground="{StaticResource TextBrush}"
-                                           TextWrapping="Wrap"/>
-                            </Grid>
-
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Output Folder"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Subtext0Brush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1"
-                                           Text="{Binding YouTubeOutputDir}"
-                                           FontSize="11"
-                                           Foreground="{StaticResource TextBrush}"
-                                           TextWrapping="Wrap"/>
-                            </Grid>
-
-                                            <TextBlock Text="Summary"
-                                                       FontSize="12"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource Subtext0Brush}"
-                                                       Margin="0,4,0,4"/>
-                                            <TextBox Text="{Binding YouTubeSummary, Mode=OneWay}"
-                                                     IsReadOnly="True"
-                                                     MinHeight="140"
-                                                     MaxHeight="260"
-                                                     VerticalScrollBarVisibility="Auto"
-                                                     TextWrapping="Wrap"
-                                                     Style="{StaticResource ChatInputStyle}"
-                                                     FontSize="12"
-                                                     Padding="8,6"/>
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Expander>
-                        </StackPanel>
-                    </Expander>
-
-                </StackPanel>
-            </ScrollViewer>
-
-            <!-- ── Sticky Save Bar ───────────────────────────────── -->
-            <Border Grid.Row="1"
-                    Background="{StaticResource MantleBrush}"
-                    BorderBrush="{StaticResource Surface0Brush}"
-                    BorderThickness="0,1,0,0"
-                    Padding="32,10">
-                <Grid MaxWidth="560" HorizontalAlignment="Left">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <StackPanel Grid.Column="0"
-                                Orientation="Horizontal"
-                                VerticalAlignment="Center">
-                        <TextBlock Text="●"
-                                   FontSize="10"
-                                   Foreground="{StaticResource YellowBrush}"
-                                   Margin="0,0,6,0"
-                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
-                        <TextBlock x:Name="GeneralStatusText"
-                                   Text="{Binding StatusText}"
-                                   FontSize="11"
-                                   FontWeight="Normal">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{StaticResource Overlay0Brush}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsSaveSuccess}" Value="True">
-                                            <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
-                                            <Setter Property="FontWeight" Value="SemiBold"/>
-                                            <DataTrigger.EnterActions>
-                                                <BeginStoryboard>
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                                         From="0" To="1" Duration="0:0:0.2"/>
-                                                    </Storyboard>
-                                                </BeginStoryboard>
-                                            </DataTrigger.EnterActions>
-                                            <DataTrigger.ExitActions>
-                                                <BeginStoryboard>
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                                         To="0" Duration="0:0:0.4"/>
-                                                    </Storyboard>
-                                                </BeginStoryboard>
-                                            </DataTrigger.ExitActions>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal">
-                        <Button Content="Refresh"
-                                Command="{Binding RefreshCommand}"
-                                Style="{StaticResource MemoryActionButtonStyle}"
-                                Margin="0,0,8,0"/>
-                        <Button Content="Save Settings"
-                                Command="{Binding SaveCommand}"
-                                Style="{StaticResource SendButtonStyle}"
-                                Padding="14,8"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
-        </Grid>
-
-        <!-- ═══════════════════════════════════════════════════════════
-             VOICE SETTINGS SUBTAB
-             ═══════════════════════════════════════════════════════ -->
-        <Grid Grid.Row="1" x:Name="VoiceSettingsView" Visibility="Collapsed">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-
-            <ScrollViewer Grid.Row="0"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          Background="{StaticResource BaseBrush}">
-                <StackPanel Margin="32,24,32,24" MaxWidth="560">
 
                     <!-- TTS Engine Selection -->
                     <TextBlock Text="TTS Engine"
@@ -2737,8 +2549,10 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -2746,7 +2560,7 @@
 
                 <!-- Context chips -->
                 <ItemsControl Grid.Row="0"
-                              Grid.ColumnSpan="3"
+                              Grid.ColumnSpan="4"
                               ItemsSource="{Binding ContextChips}"
                               Margin="0,0,0,8">
                     <ItemsControl.ItemsPanel>
@@ -2780,8 +2594,90 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Attached file chip (row 1, visible only when a file is attached) -->
+                <Border Grid.Row="1" Grid.ColumnSpan="4"
+                        Margin="0,0,0,8"
+                        Padding="8,5,6,5"
+                        CornerRadius="12"
+                        Background="#1889B2E5"
+                        BorderBrush="#4489B2E5"
+                        BorderThickness="1"
+                        Visibility="{Binding HasAttachedFile, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8A5;"
+                                   FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                   Foreground="{StaticResource BlueBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding AttachedFileName}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   VerticalAlignment="Center"
+                                   MaxWidth="220" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding AttachedFileSizeLabel}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
+                        <Button Command="{Binding RemoveAttachedFileCommand}"
+                                ToolTip="Remove attached file"
+                                Cursor="Hand" Margin="8,0,0,0"
+                                Padding="0" BorderThickness="0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="XBg" Background="Transparent"
+                                            CornerRadius="8" Padding="4,2">
+                                        <TextBlock Text="&#xE711;"
+                                                   FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                                   Foreground="{StaticResource Overlay0Brush}"
+                                                   VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="XBg" Property="Background" Value="#33F38BA8"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- Attach file button (+) -->
+                <Button x:Name="AttachFileButton"
+                        Grid.Row="2" Grid.Column="0"
+                        Click="AttachFileButton_Click"
+                        ToolTip="Attach a document (.txt, .csv, .html, .md)"
+                        Cursor="Hand"
+                        VerticalAlignment="Center"
+                        Margin="0,0,6,0">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="AttachBg"
+                                    Background="Transparent"
+                                    BorderBrush="{StaticResource Surface2Brush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Width="38" Height="38">
+                                <TextBlock Text="&#xE710;"
+                                           FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                           Foreground="{StaticResource Subtext1Brush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="AttachBg" Property="Background" Value="{StaticResource Surface1Brush}"/>
+                                    <Setter TargetName="AttachBg" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="AttachBg" Property="Background" Value="{StaticResource Surface2Brush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
                 <!-- Text input -->
-                <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+                <Grid Grid.Row="2" Grid.Column="1" Margin="0,0,8,0">
                     <TextBox x:Name="ChatInput"
                              Style="{StaticResource ChatInputStyle}"
                              Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
@@ -2816,7 +2712,7 @@
 
                 <!-- Voice button: Hold-to-Talk (normal) / Interrupt (when AI is processing) -->
                 <Button x:Name="PttButton"
-                        Grid.Row="1" Grid.Column="1"
+                        Grid.Row="2" Grid.Column="2"
                         IsEnabled="{Binding IsVoiceReady}"
                         PreviewMouseLeftButtonDown="PttButton_MouseDown"
                         PreviewMouseLeftButtonUp="PttButton_MouseUp"
@@ -2854,6 +2750,14 @@
                                     <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource CrustBrush}"/>
                                     <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource CrustBrush}"/>
                                 </Trigger>
+                                <!-- Hotkey recording (mirrors IsPressed style for global PTT hotkey) -->
+                                <DataTrigger Binding="{Binding IsVoiceActive}" Value="True">
+                                    <Setter TargetName="HoldBg" Property="Background" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldBg" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                    <Setter TargetName="HoldLabel" Property="Text" Value="Listening…"/>
+                                    <Setter TargetName="HoldLabel" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                    <Setter TargetName="MicIcon" Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                </DataTrigger>
                                 <!-- Disabled -->
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter TargetName="HoldBg" Property="Opacity" Value="0.4"/>
@@ -2893,7 +2797,7 @@
                 </Button>
 
                 <!-- Send / Cancel button swap -->
-                <Grid Grid.Row="1" Grid.Column="2">
+                <Grid Grid.Row="2" Grid.Column="3">
                     <!-- Send (visible when NOT processing) -->
                     <Button Content="Send ↵"
                             Command="{Binding SendCommand}">

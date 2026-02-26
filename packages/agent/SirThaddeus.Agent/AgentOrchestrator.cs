@@ -112,6 +112,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
     private const string MemoryStoreFactsToolName   = "memory_store_facts";
     private const string MemoryStoreFactsToolNameAlt = "MemoryStoreFacts";
+    private const string ScreenCaptureToolName       = "screen_capture";
+    private const string ScreenCaptureToolNameAlt    = "ScreenCapture";
 
     // ── Summary instruction injected after search results ────────────
     private const string WebSummaryInstruction =
@@ -810,6 +812,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(
                     _contextAnchoringService.AddLocationInferenceDisclosure(searchResponse, validatedSlots),
                     usageBaseline);
+            }
+
+            // ── Screen observe: deterministic capture + LLM describe ──
+            if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return await ExecuteDeterministicScreenCaptureAsync(
+                    contextualUserMessage, memoryPackText,
+                    personalityAnchor, personalityTurnTag,
+                    toolCallsMade, roundTrips, usageBaseline,
+                    cancellationToken);
             }
 
             // ── Inject memory context ─────────────────────────────────

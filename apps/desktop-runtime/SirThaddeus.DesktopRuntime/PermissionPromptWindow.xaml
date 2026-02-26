@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Permission Required"
-        Width="560"
-        Height="320"
+        Width="600"
+        Height="420"
         WindowStartupLocation="CenterOwner"
         WindowStyle="SingleBorderWindow"
         ResizeMode="NoResize"
@@ -40,39 +40,51 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Capability:" 
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Tool:" 
                            Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="0" Grid.Column="1" 
-                           x:Name="CapabilityText"
+                           x:Name="ToolNameText"
                            Foreground="{DynamicResource PeachBrush}"
-                           FontWeight="Bold"/>
+                           FontWeight="Bold"
+                           FontFamily="Consolas"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Purpose:" 
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Category:" 
                            Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="1" Grid.Column="1" 
-                           x:Name="PurposeText"
-                           TextWrapping="Wrap"/>
+                           x:Name="CapabilityText"
+                           FontWeight="Bold"/>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Scope:" 
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="What it does:" 
                            Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,8"/>
                 <TextBlock Grid.Row="2" Grid.Column="1" 
-                           x:Name="ScopeText"
+                           x:Name="DescriptionText"
                            TextWrapping="Wrap"/>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Duration:" 
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Details:" 
+                           Foreground="{DynamicResource Subtext0Brush}"
+                           FontWeight="SemiBold" Margin="0,0,12,8"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" 
+                           x:Name="PurposeText"
+                           TextWrapping="Wrap"
+                           FontFamily="Consolas"
+                           FontSize="12"/>
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Scope:" 
                            Foreground="{DynamicResource Subtext0Brush}"
                            FontWeight="SemiBold" Margin="0,0,12,0"/>
-                <TextBlock Grid.Row="3" Grid.Column="1" 
-                           x:Name="DurationText"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" 
+                           x:Name="ScopeText"
+                           TextWrapping="Wrap"/>
             </Grid>
         </Border>
 
@@ -84,7 +96,8 @@
                 Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0"/>
-                <TextBlock Text="This action will grant the specified capability. Review carefully."
+                <TextBlock x:Name="WarningText"
+                           Text="Sir Thaddeus is requesting access to a tool on your behalf. Choose how to proceed."
                            Foreground="{DynamicResource PeachBrush}"
                            TextWrapping="Wrap"
                            FontSize="12"/>

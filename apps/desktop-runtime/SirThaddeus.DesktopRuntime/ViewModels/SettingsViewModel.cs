@@ -160,7 +160,18 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string PttKey         { get => _pttKey;          set { if (SetProperty(ref _pttKey, value))         MarkDirty(); } }
     public string PttChord       { get => _pttChord;        set { if (SetProperty(ref _pttChord, value))       MarkDirty(); } }
     public string ShutupChord    { get => _shutupChord;     set { if (SetProperty(ref _shutupChord, value))    MarkDirty(); } }
-    public bool VoiceHostEnabled { get => _voiceHostEnabled; set { if (SetProperty(ref _voiceHostEnabled, value)) MarkDirty(); } }
+    public bool VoiceHostEnabled
+    {
+        get => _voiceHostEnabled;
+        set
+        {
+            if (SetProperty(ref _voiceHostEnabled, value))
+            {
+                MarkDirty();
+                OnVoiceHostEnabledChanged(value);
+            }
+        }
+    }
     public string VoiceHostBaseUrl { get => _voiceHostBaseUrl; set { if (SetProperty(ref _voiceHostBaseUrl, value)) MarkDirty(); } }
     public int VoiceHostStartupTimeoutMs { get => _voiceHostStartupTimeoutMs; set { if (SetProperty(ref _voiceHostStartupTimeoutMs, value)) MarkDirty(); } }
     public string VoiceHostHealthPath { get => _voiceHostHealthPath; set { if (SetProperty(ref _voiceHostHealthPath, value)) MarkDirty(); } }
@@ -517,7 +528,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// Raised when the active profile selection changes so the host
     /// can propagate the choice to the agent and MCP layers.
     /// </summary>
-    public event Action<string?>? ActiveProfileChanged;
+    public event Action<string?, string?>? ActiveProfileChanged;
 
     /// <summary>
     /// Raised when the active personality changes.
@@ -585,6 +596,11 @@ public sealed partial class SettingsViewModel : ViewModelBase
         await LoadProfilesAsync();
         ClearDirty();
         StatusText = "Settings loaded.";
+
+        // If the saved Piper voice isn't installed, try to download it.
+        // On failure, fall back to the default voice.
+        if (IsPiperEngine)
+            _ = EnsureSavedPiperVoiceAsync();
     }
 
     private void LoadFromSettings(AppSettings s)
@@ -757,6 +773,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
                 OnPropertyChanged(nameof(SelectedProfile));
                 LoadLocationForProfile(_selectedProfile?.ProfileId);
+
+                // Propagate the resolved display name to the chat UI on initial load.
+                // Without this, UserDisplayName stays stale from UserProfile.DisplayName.
+                var resolvedName = ResolveProfileDisplayName(_selectedProfile?.ProfileId);
+                if (!string.IsNullOrWhiteSpace(resolvedName))
+                    ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, resolvedName);
             });
         }
         catch (Exception ex)
@@ -1087,6 +1109,19 @@ public sealed partial class SettingsViewModel : ViewModelBase
     }
 
     // ─── VoiceHost Lifecycle ─────────────────────────────────────────
+
+    private void OnVoiceHostEnabledChanged(bool enabled)
+    {
+        SaveSettings();
+        if (enabled)
+        {
+            _ = StartVoiceHostAsync();
+        }
+        else
+        {
+            _ = StopVoiceHostAsync();
+        }
+    }
 
     private async Task StartVoiceHostAsync()
     {
@@ -1683,7 +1718,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         StatusText = "\u2713 Settings saved";
         ShowSaveSuccess();
 
-        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, ResolveProfileDisplayName(_selectedProfile?.ProfileId));
         ActivePersonalityChanged?.Invoke(updated.ActivePersonalityId);
         SettingsChanged?.Invoke(updated);
 
@@ -1753,7 +1788,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _settings = updated;
         StatusText = "Profile selected.";
 
-        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId);
+        ActiveProfileChanged?.Invoke(_selectedProfile?.ProfileId, ResolveProfileDisplayName(_selectedProfile?.ProfileId));
         SettingsChanged?.Invoke(updated);
 
         _audit.Append(new AuditEvent
@@ -1832,13 +1867,13 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // ─── Piper Voice Download ───────────────────────────────────────
 
-    private async Task DownloadPiperVoiceAsync(string voiceId)
+    private async Task<bool> DownloadPiperVoiceAsync(string voiceId)
     {
         if (string.IsNullOrWhiteSpace(voiceId) || _isPiperVoiceDownloading)
-            return;
+            return false;
 
         IsPiperVoiceDownloading = true;
-        PiperVoiceDownloadStatus = $"Downloading \"{voiceId}\" (~60 MB)…";
+        PiperVoiceDownloadStatus = $"Downloading \"{voiceId}\" (~60 MB)\u2026";
 
         try
         {
@@ -1856,7 +1891,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
             if (response.IsSuccessStatusCode)
             {
-                PiperVoiceDownloadStatus = $"✓ \"{voiceId}\" installed.";
+                PiperVoiceDownloadStatus = $"\u2713 \"{voiceId}\" installed.";
 
                 // Refresh catalog on UI thread so the dropdown updates
                 if (System.Windows.Application.Current?.Dispatcher is { } dispatcher)
@@ -1871,19 +1906,68 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 // Clear status after a few seconds
                 await Task.Delay(4000);
                 PiperVoiceDownloadStatus = "";
+                return true;
             }
             else
             {
-                PiperVoiceDownloadStatus = $"Download failed: {body[..Math.Min(body.Length, 120)]}";
+                var detail = string.IsNullOrWhiteSpace(body)
+                    ? $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase})"
+                    : body[..Math.Min(body.Length, 200)];
+                PiperVoiceDownloadStatus = $"Download failed ({(int)response.StatusCode}): {detail}";
+                return false;
             }
+        }
+        catch (System.Net.Http.HttpRequestException ex)
+        {
+            PiperVoiceDownloadStatus = $"Download failed: VoiceHost unreachable ({ex.Message})";
+            return false;
+        }
+        catch (TaskCanceledException)
+        {
+            PiperVoiceDownloadStatus = "Download failed: request timed out (10 min limit).";
+            return false;
         }
         catch (Exception ex)
         {
             PiperVoiceDownloadStatus = $"Download error: {ex.Message}";
+            return false;
         }
         finally
         {
             IsPiperVoiceDownloading = false;
+        }
+    }
+
+    /// <summary>
+    /// Called after settings load. If the saved Piper voice is not
+    /// installed locally, attempt to download it. If that fails,
+    /// silently revert to the default voice and persist the change.
+    /// </summary>
+    private async Task EnsureSavedPiperVoiceAsync()
+    {
+        var configured = (_voiceTtsVoiceId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(configured))
+            return;
+
+        // Already installed -- nothing to do
+        if (AvailablePiperVoices.Contains(configured))
+            return;
+
+        // Not installed -- try downloading
+        var downloaded = await DownloadPiperVoiceAsync(configured);
+        if (downloaded)
+            return;
+
+        // Download failed -- fall back to default voice
+        if (configured != DefaultPiperVoiceId)
+        {
+            _voiceTtsVoiceId = DefaultPiperVoiceId;
+            OnPropertyChanged(nameof(VoiceTtsVoiceId));
+            OnPropertyChanged(nameof(SelectedPiperVoice));
+            PiperVoiceDownloadStatus =
+                $"Voice \"{configured}\" unavailable -- reverted to default ({DefaultPiperVoiceId}).";
+            MarkDirty();
+            SaveSettings();
         }
     }
 

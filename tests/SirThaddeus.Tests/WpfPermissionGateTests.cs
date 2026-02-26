@@ -169,12 +169,13 @@ public class ToolGroupResolutionTests
             var group = ToolGroupPolicy.ResolveGroup(canonicalName);
             var effective = ToolGroupPolicy.ResolveEffectivePolicy(group, snapshot);
 
-            if (group is "meta" or "memoryRead")
+            if (group is "meta")
             {
                 Assert.Equal("always", effective);
                 continue;
             }
 
+            // All non-meta groups default to "ask" so the user is prompted on first use.
             Assert.Equal("ask", effective);
         }
     }
@@ -232,14 +233,16 @@ public class EffectivePolicyResolutionTests
         Assert.Equal("always", effective);
     }
 
-    // ── Developer override wins for dangerous groups ─────────────────
+    // ── Developer override wins for overridable groups ────────────────
 
     [Fact]
-    public void DeveloperOverrideOff_WinsOver_PerGroupAsk_ForDangerousGroup()
+    public void DeveloperOverrideOff_NormalizesToNone_FallsBackToPerGroup()
     {
+        // "off" as a developer override normalizes to "none",
+        // so the per-group policy ("ask") takes effect.
         var snapshot = MakeSnapshot(screen: "ask", devOverride: "off");
         var effective = ToolGroupPolicy.ResolveEffectivePolicy("screen", snapshot);
-        Assert.Equal("off", effective);
+        Assert.Equal("ask", effective);
     }
 
     [Fact]
@@ -251,14 +254,15 @@ public class EffectivePolicyResolutionTests
     }
 
     [Fact]
-    public void DeveloperOverride_DoesNotAffect_MemoryGroups()
+    public void DeveloperOverrideAlways_CoversMemoryGroups()
     {
-        var snapshot1 = MakeSnapshot(memoryRead: "always", devOverride: "off");
+        // Developer override now covers ALL overridable groups including memory.
+        var snapshot1 = MakeSnapshot(memoryRead: "ask", devOverride: "always");
         Assert.Equal("always",
             ToolGroupPolicy.ResolveEffectivePolicy("memoryRead", snapshot1));
 
-        var snapshot2 = MakeSnapshot(memoryWrite: "ask", devOverride: "off");
-        Assert.Equal("ask",
+        var snapshot2 = MakeSnapshot(memoryWrite: "ask", devOverride: "always");
+        Assert.Equal("always",
             ToolGroupPolicy.ResolveEffectivePolicy("memoryWrite", snapshot2));
     }
 
@@ -287,9 +291,9 @@ public class EffectivePolicyResolutionTests
     // ── Meta tools always allowed ────────────────────────────────────
 
     [Fact]
-    public void MetaGroup_AlwaysAllowed_EvenWithDevOverrideOff()
+    public void MetaGroup_AlwaysAllowed_EvenWithDevOverrideAsk()
     {
-        var snapshot = MakeSnapshot(devOverride: "off");
+        var snapshot = MakeSnapshot(devOverride: "ask");
         Assert.Equal("always",
             ToolGroupPolicy.ResolveEffectivePolicy("meta", snapshot));
     }

@@ -460,10 +460,9 @@ public static class SettingsManager
     {
         return (value ?? "").Trim().ToLowerInvariant() switch
         {
-            "off" => "off",
             "ask" => "ask",
             "always" => "always",
-            _ => "none"
+            _ => "none"   // "off" normalizes to "none" — use per-group settings to disable individual groups
         };
     }
 

@@ -16,6 +16,11 @@ public sealed record PermissionRequest
     public required string Purpose { get; init; }
 
     /// <summary>
+    /// The canonical MCP tool name being invoked (e.g. "weather_geocode").
+    /// </summary>
+    public string? ToolName { get; init; }
+
+    /// <summary>
     /// The scope/constraints of the requested permission.
     /// </summary>
     public PermissionScope Scope { get; init; } = PermissionScope.Empty;

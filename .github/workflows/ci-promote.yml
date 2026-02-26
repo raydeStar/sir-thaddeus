@@ -1,0 +1,232 @@
+name: Promote Dev to Production
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Promotion Pipeline: dev → master → tagged release
+#
+#  Triggered manually from the Actions tab. Runs the full gate:
+#    1) Preflight   — restore + full Release test suite
+#    2) Package     — self-contained release zip + checksums
+#    3) Smoke test  — validate the packaged zip (file structure, checksums)
+#    4) Merge       — fast-forward merge dev into master
+#    5) Tag + Release — create a versioned GitHub Release
+#
+#  The version tag is provided as an input (e.g. v1.2.0).
+#  If the tag already exists, the workflow fails before merging.
+# ═══════════════════════════════════════════════════════════════════════
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag (e.g. v1.2.0)"
+        required: true
+        type: string
+      skip_merge:
+        description: "Skip the merge step (tag master as-is)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 1: Full test suite (Release config)
+  # ─────────────────────────────────────────────────────────────────
+  preflight:
+    name: "Gate: Preflight Tests"
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          lfs: false
+          fetch-depth: 0
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Run preflight gate
+        shell: pwsh
+        run: ./dev/preflight.ps1
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: promote-test-results
+          path: |
+            artifacts/test-results/**/*.trx
+            **/TestResults/**/*.trx
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 2: Package release zip
+  # ─────────────────────────────────────────────────────────────────
+  package:
+    name: "Gate: Package Release"
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Fetch voice backend assets
+        shell: pwsh
+        run: ./dev/fetch-assets.ps1
+
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ inputs.version }}"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: promote-release-assets
+          path: |
+            artifacts/release/*.zip
+            artifacts/release/*.zip.sha256.txt
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 3: Smoke test the packaged zip
+  # ─────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: "Gate: Smoke Test"
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          lfs: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: promote-release-assets
+          path: artifacts/release
+
+      - name: Run smoke test
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-*.zip" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) { Write-Error "No zip found"; exit 1 }
+          ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 4: Merge dev → master (fast-forward)
+  # ─────────────────────────────────────────────────────────────────
+  merge:
+    name: "Merge dev → master"
+    needs: smoke-test
+    if: ${{ !inputs.skip_merge }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history for merge)
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify tag does not already exist
+        run: |
+          if git rev-parse "refs/tags/${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "ERROR: Tag ${{ inputs.version }} already exists."
+            exit 1
+          fi
+
+      - name: Merge dev into master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git merge origin/dev --ff-only \
+            -m "Promote dev to master for release ${{ inputs.version }}"
+          git push origin master
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 5: Tag + publish GitHub Release
+  # ─────────────────────────────────────────────────────────────────
+  release:
+    name: "Tag & Publish Release"
+    needs: [smoke-test, merge]
+    if: >
+      always() &&
+      needs.smoke-test.result == 'success' &&
+      (needs.merge.result == 'success' || needs.merge.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create version tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ inputs.version }}" -m "Release ${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: promote-release-assets
+          path: release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: "Sir Thaddeus ${{ inputs.version }}"
+          generate_release_notes: true
+          prerelease: false
+          make_latest: true
+          files: |
+            release-assets/*.zip
+            release-assets/*.zip.sha256.txt
