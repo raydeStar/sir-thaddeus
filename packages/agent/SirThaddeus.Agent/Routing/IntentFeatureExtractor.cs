@@ -23,7 +23,37 @@ public static class IntentFeatureExtractor
             "look at my editor",     "look at my ide",
             "look at my code",       "look at this code",
             "see my code",           "see what i'm working on",
-            "see what im working on"
+            "see what im working on",
+
+            // Machine / computer observation
+            "what is going on on my machine",
+            "what's going on on my machine",
+            "whats going on on my machine",
+            "what's happening on my machine",
+            "whats happening on my machine",
+            "what is happening on my computer",
+            "what's happening on my computer",
+            "what is my computer doing",
+            "what's my computer doing",
+            "whats my computer doing",
+            "what is my machine doing",
+            "show me what's happening",
+            "show me whats happening",
+
+            // Browser / page observation
+            "summarize this page",   "summarize the page",
+            "summarize this site",   "summarize this website",
+            "what's on this page",   "whats on this page",
+            "read this page",        "read the page",
+            "what page is this",     "what site is this",
+            "what am i looking at",  "what am i reading",
+            "what's this page about", "whats this page about",
+            "tell me about this page",
+            "can you read this",     "can you see this",
+            "what does this say",    "what does this page say",
+            "describe what i see",   "describe this page",
+            "summarize what i'm looking at",
+            "summarize what im looking at"
         ];
 
         foreach (var p in patterns)

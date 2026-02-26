@@ -72,6 +72,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private string _voiceTranscriptText = "";
     private bool _isVoiceActive;
     private bool _expectingBriefingPayload;
+
+    // ── File attachment state ──────────────────────────────────────────────
+    private Services.AttachedDocumentContext? _attachedDocument;
+    private string _attachedFileName = "";
+    private bool _hasAttachedFile;
     
     private readonly System.Windows.Threading.DispatcherTimer _auditTimer;
     private DateTimeOffset _lastAuditSync = DateTimeOffset.MinValue;
@@ -117,6 +122,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         SendCommand   = new AsyncRelayCommand(SendAsync, CanSend);
         ClearCommand  = new RelayCommand(ClearConversation);
         CancelCommand = new RelayCommand(CancelProcessing, () => _isProcessing);
+        RemoveAttachedFileCommand = new RelayCommand(_ => ClearAttachedFile());
         ToggleContextLockCommand = new RelayCommand(_ => ContextLocked = !ContextLocked);
         LoadChatSessionCommand = new RelayCommand(LoadChatSession);
         DeleteChatSessionCommand = new RelayCommand(DeleteChatSession);
@@ -375,7 +381,62 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public ICommand SendCommand   { get; }
     public ICommand ClearCommand  { get; }
     public ICommand CancelCommand { get; }
+    public ICommand RemoveAttachedFileCommand { get; }
     public ICommand ToggleContextLockCommand { get; }
+
+    // ─────────────────────────────────────────────────────────────────
+    // File Attachment
+    // ─────────────────────────────────────────────────────────────────
+
+    public string AttachedFileName
+    {
+        get => _attachedFileName;
+        private set => SetProperty(ref _attachedFileName, value);
+    }
+
+    public bool HasAttachedFile
+    {
+        get => _hasAttachedFile;
+        private set => SetProperty(ref _hasAttachedFile, value);
+    }
+
+    public string AttachedFileSizeLabel =>
+        _attachedDocument is null ? "" :
+        _attachedDocument.IsSmall ? $"{_attachedDocument.RawContent.Length:N0} chars (inline)" :
+        $"{_attachedDocument.RawContent.Length:N0} chars (RAG)";
+
+    /// <summary>
+    /// Called from code-behind after a successful file pick.
+    /// </summary>
+    public void AttachFile(string filePath)
+    {
+        try
+        {
+            var content = System.IO.File.ReadAllText(filePath);
+            var fileName = System.IO.Path.GetFileName(filePath);
+
+            _attachedDocument = new Services.AttachedDocumentContext(fileName, content);
+            AttachedFileName = fileName;
+            HasAttachedFile = true;
+            OnPropertyChanged(nameof(AttachedFileSizeLabel));
+
+            AddLog(LogEntryKind.Info,
+                $"Attached: {fileName} ({content.Length:N0} chars, " +
+                $"{(_attachedDocument.IsSmall ? "inline" : "RAG")})");
+        }
+        catch (Exception ex)
+        {
+            AddLog(LogEntryKind.Error, $"File attach failed: {ex.Message}");
+        }
+    }
+
+    public void ClearAttachedFile()
+    {
+        _attachedDocument = null;
+        AttachedFileName = "";
+        HasAttachedFile = false;
+        OnPropertyChanged(nameof(AttachedFileSizeLabel));
+    }
 
     // ─────────────────────────────────────────────────────────────────
     // Events
@@ -619,8 +680,20 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         try
         {
+            // ── Inject attached document context ─────────────────
+            var orchestratorText = userText;
+            if (_attachedDocument is not null)
+            {
+                var docBlock = _attachedDocument.BuildContextBlock(userText);
+                orchestratorText = $"{docBlock}\n{userText}";
+                AddLog(LogEntryKind.Info,
+                    $"Injected document context: {_attachedDocument.FileName} " +
+                    $"({(_attachedDocument.IsSmall ? "full inline" : "RAG chunks")})");
+                ClearAttachedFile();
+            }
+
             var result = await _orchestrator.ProcessAsync(
-                userText, _processingCts.Token);
+                orchestratorText, _processingCts.Token);
 
             // Remove the placeholder
             Messages.Remove(thinkingMsg);
@@ -779,6 +852,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         Messages.Clear();
         ContextChips.Clear();
+        ClearAttachedFile();
         AddLog(LogEntryKind.Info, "--- Started new chat session ---");
         UpdateTokenUsageTicker(0, 0, 0);
         _orchestrator.ResetConversation();
@@ -911,6 +985,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         _currentSessionId = session.Id;
 
         Messages.Clear();
+        ClearAttachedFile();
 
         AddLog(LogEntryKind.Info, $"--- Loaded chat session: {session.Title} ---");
 

@@ -3,13 +3,15 @@
 </p>
 
 <h1 align="center">Sir Thaddeus</h1>
-
 <p align="center">
 <strong>A permissioned AI runtime that runs on your machine.</strong>
 </p>
+
+## A Local‑First AI Runtime
+
 Most AI assistants run primarily in the cloud. That means your requests are processed on remote servers, and ongoing access typically requires a subscription.
 
-Sir Thaddeus takes a different approach.
+**Sir Thaddeus** takes a different approach.
 
 He is a local‑first, permissioned AI runtime for Windows. He runs on your machine, connects to your local models (such as LM Studio), and executes actions only with explicit approval.
 
@@ -19,21 +21,19 @@ No hidden autonomy.
 
 If he acts, you see it. If you press STOP, everything stops.
 
-What It Feels Like To Use
+## What It Feels Like To Use
 
 Hold your push‑to‑talk hotkey.
 
 Say:
 
-“Summarize this page.”
+> “Summarize this page.”
 
 Thaddeus responds with a plan:
 
-Read active window
-
-Duration: 30 seconds
-
-Capability requested: SCREEN_READ (active window only)
+- Read active window
+- Duration: 30 seconds
+- Capability requested: SCREEN_READ (active window only)
 
 You approve.
 
@@ -44,28 +44,30 @@ The permission expires automatically.
 
 That interaction pattern applies to everything.
 
-Why Sir Thaddeus?
 
-🛡️ Local by Default Your data stays on your machine. The runtime works offline. There is no telemetry unless you explicitly enable a service connection.
+## Why Sir Thaddeus?
 
-🔐 Explicit, Time‑Boxed Permissions Every privileged action requires a scoped permission token. Permissions are specific, short‑lived, and revocable.
+- 🛡️ **Local by Default** Your data stays on your machine. The runtime works offline. There is no telemetry unless you explicitly enable a service connection.
 
-📜 Transparent Execution All actions are written to a local, human‑readable audit log. The overlay always shows what the assistant is doing.
+- 🔐 **Explicit, Time‑Boxed Permissions** Every privileged action requires a scoped permission token. Permissions are specific, short‑lived, and revocable.
 
-🎙️ Voice + Command Palette Speak naturally with push‑to‑talk or use a keyboard command palette. Release to send. Press STOP to cancel.
+- 📜 **Transparent Execution** All actions are written to a local, human‑readable audit log. The overlay always shows what the assistant is doing.
 
-⚙️ Action, Not Just Chat Thaddeus can read the screen, automate the browser, and interact with your system — but only after proposing a plan and receiving approval.
+- 🎙️ **Voice + Command Palette** Speak naturally with push‑to‑talk or use a keyboard command palette. Release to send. Press STOP to cancel.
 
-The Contract
+- ⚙️ **Action, Not Just Chat** Thaddeus can read the screen, automate the browser, and interact with your system — but only after proposing a plan and receiving approval.
 
-You are the principal. He proposes plans; you approve them.
+---
 
-Nothing runs silently. If it acts, you see it.
+## The Contract
 
-STOP always works. The kill switch revokes permissions and halts execution immediately.
+1. **You are the principal.** He proposes plans; you approve them.
+2. **Nothing runs silently.** If it acts, you see it.
+3. **STOP always works.** The kill switch revokes permissions and halts execution immediately.
 
 Sir Thaddeus is not designed to replace your agency.
 He is designed to extend it — with boundaries.
+
 
 ## Architecture (4 layers)
 

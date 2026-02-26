@@ -53,6 +53,8 @@
              Link="DesktopRuntime\DeviceLocationProviders.cs" />
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\LocationAwareAgentOrchestrator.cs"
              Link="DesktopRuntime\LocationAwareAgentOrchestrator.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\AttachedDocumentContext.cs"
+             Link="DesktopRuntime\AttachedDocumentContext.cs" />
   </ItemGroup>
 
 </Project>
