@@ -1,0 +1,34 @@
+id: thinking_web_search_no_think_leak
+name: Thinking Model - Web search result has no raw <think> tags
+user_message: "What is the latest stable version of Python?"
+allowed_tools:
+  - web_search
+  - memory_retrieve
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools: []
+  allowed_tools_only: false
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - Python
+  forbidden_keywords:
+    - "<think>"
+    - "</think>"
+    - "Final Answer:"
+    - "Thinking:"
+    - error
+    - timeout
+  max_response_chars: 1000
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/llm-client/SirThaddeus.LlmClient/LmStudioClient.cs
+    - packages/agent/SirThaddeus.Agent/OrchestratorMessageHelpers.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

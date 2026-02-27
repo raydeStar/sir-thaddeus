@@ -1,0 +1,36 @@
+id: thinking_multi_turn_clean
+name: Thinking Model - Multi-turn stays coherent with no think tag leakage
+user_message: "My name is Alex. What is 2 + 2? Then tell me what my name is."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+  allowed_tools_only: false
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "4"
+    - Alex
+  forbidden_keywords:
+    - "<think>"
+    - "</think>"
+    - "Final Answer:"
+    - "Thinking:"
+    - error
+    - timeout
+  max_response_chars: 1200
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/llm-client/SirThaddeus.LlmClient/LmStudioClient.cs
+    - packages/agent/SirThaddeus.Agent/OrchestratorMessageHelpers.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

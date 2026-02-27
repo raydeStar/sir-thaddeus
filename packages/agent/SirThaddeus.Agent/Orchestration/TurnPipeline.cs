@@ -2,6 +2,7 @@ using System.Text.Json;
 using SirThaddeus.LlmClient;
 using SirThaddeus.Agent.Tools;
 using SirThaddeus.Agent.ToolLoop;
+using static SirThaddeus.Agent.OrchestratorMessageHelpers;
 
 namespace SirThaddeus.Agent.Orchestration;
 
@@ -92,7 +93,7 @@ public sealed class TurnPipeline
                     Decision = decision,
                     MaxRoundTrips = 1,
                     LogEvent = context.LogEvent,
-                    SanitizeAssistantText = text => text
+                    SanitizeAssistantText = static text => StripThinkingScaffold(text)
                 };
 
                 return await _toolLoopExecutor.ExecuteAsync(chatRequest, cancellationToken);
@@ -141,7 +142,7 @@ public sealed class TurnPipeline
             Decision = decision,
             MaxRoundTrips = 10,
             LogEvent = context.LogEvent,
-            SanitizeAssistantText = text => text // simplified for this stub
+            SanitizeAssistantText = static text => StripThinkingScaffold(text)
         };
 
         var response = await _toolLoopExecutor.ExecuteAsync(request, cancellationToken);

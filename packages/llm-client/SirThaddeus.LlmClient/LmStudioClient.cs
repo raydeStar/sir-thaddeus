@@ -143,6 +143,15 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 $"Original LLM error: {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
         }
 
+        var options = GetOptionsSnapshot();
+        
+        // Handle LM Studio 500 HTML errors (often means model not loaded or crashed)
+        if ((int)response.StatusCode == 500 && errorBody.Contains("<!DOCTYPE html>", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HttpRequestException(
+                $"The LLM server encountered an internal error. Please verify that the model '{options.Model}' is currently loaded and running in LM Studio.");
+        }
+
         throw new HttpRequestException(
             $"LLM returned {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
     }
@@ -258,7 +267,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         {
             ["model"]       = options.Model,
             ["messages"]    = messages,
-            ["max_tokens"]  = maxTokensOverride ?? options.MaxTokens,
+            ["max_tokens"]  = options.EffectiveMaxTokens(maxTokensOverride),
             ["temperature"] = options.Temperature,
             ["stream"]      = false
         };
@@ -314,13 +323,23 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         var hasToolCalls = message?.ToolCalls is { Count: > 0 };
 
+        // Strip thinking scaffold at the transport layer so callers never
+        // see raw <think> blocks regardless of model or path.
+        var content = StripThinkBlocks(message?.Content);
+
+        // When the model emitted only thinking in Content alongside tool
+        // calls, null out Content so it doesn't leak into history.
+        if (hasToolCalls && string.IsNullOrWhiteSpace(content))
+            content = null;
+
         return new LlmResponse
         {
-            IsComplete   = !hasToolCalls,
-            Content      = message?.Content,
-            ToolCalls    = message?.ToolCalls,
-            FinishReason = choice.FinishReason,
-            Usage        = completion.Usage
+            IsComplete      = !hasToolCalls,
+            Content         = content,
+            ReasoningContent = message?.ReasoningContent,
+            ToolCalls       = message?.ToolCalls,
+            FinishReason    = choice.FinishReason,
+            Usage           = completion.Usage
         };
     }
 
@@ -374,6 +393,46 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+    }
+
+    /// <summary>
+    /// Strips all <c>&lt;think&gt;...&lt;/think&gt;</c> blocks at the transport
+    /// layer. Handles multiple blocks and truncated (unclosed) tags so
+    /// callers never see raw chain-of-thought regardless of model.
+    /// </summary>
+    private static string? StripThinkBlocks(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return content;
+
+        const string openTag  = "<think>";
+        const string closeTag = "</think>";
+
+        // Fast-path: no think tags at all → return content unchanged
+        // (avoids .Trim() side-effects for non-thinking models).
+        if (content.IndexOf(openTag, StringComparison.OrdinalIgnoreCase) < 0 &&
+            content.IndexOf(closeTag, StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return content;
+        }
+
+        var cleaned = content.Trim();
+        while (true)
+        {
+            var openIdx = cleaned.IndexOf(openTag, StringComparison.OrdinalIgnoreCase);
+            if (openIdx < 0) break;
+
+            var closeIdx = cleaned.IndexOf(closeTag, openIdx, StringComparison.OrdinalIgnoreCase);
+            if (closeIdx < 0)
+            {
+                cleaned = cleaned[..openIdx].Trim();
+                break;
+            }
+
+            cleaned = (cleaned[..openIdx] + cleaned[(closeIdx + closeTag.Length)..]).Trim();
+        }
+
+        return cleaned.Length == 0 ? null : cleaned;
     }
 
     private LlmClientOptions GetOptionsSnapshot()
@@ -444,6 +503,15 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         [JsonPropertyName("content")]
         public string? Content { get; init; }
+
+        /// <summary>
+        /// Some providers (LM Studio ≥ 0.3.x with thinking models) surface
+        /// the chain-of-thought in a dedicated field rather than (or in
+        /// addition to) embedding it inside <c>&lt;think&gt;</c> tags in
+        /// <see cref="Content"/>.
+        /// </summary>
+        [JsonPropertyName("reasoning_content")]
+        public string? ReasoningContent { get; init; }
 
         [JsonPropertyName("tool_calls")]
         public List<ToolCallRequest>? ToolCalls { get; init; }
