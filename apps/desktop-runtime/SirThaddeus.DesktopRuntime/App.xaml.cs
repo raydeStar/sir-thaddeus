@@ -47,7 +47,6 @@ public partial class App : System.Windows.Application
 
     private LmStudioClient? _llmClient;
     private LmStudioClient? _gatekeeperLlmClient;
-    private IGatekeeperService? _gatekeeperService;
     private Agent.Routing.IFootmanRouter? _footmanRouter;
     private McpProcessClient? _mcpClient;
     private AuditedMcpToolClient? _auditedMcpClient;
@@ -304,11 +303,12 @@ public partial class App : System.Windows.Application
         });
 
         // ── 3b. Create gatekeeper LLM client (Dynamic Context Decoupler) ──
-        // A separate LmStudioClient instance configured for the lightweight
-        // gatekeeper model. Same endpoint, different model + deterministic params.
-        var gatekeeperOptions = BuildGatekeeperLlmClientOptions(_settings);
-        _gatekeeperLlmClient = new LmStudioClient(gatekeeperOptions);
-        _gatekeeperService = new FastLlmGatekeeperService(_gatekeeperLlmClient);
+        if (!string.IsNullOrWhiteSpace(_settings.Llm.GatekeeperModelId))
+        {
+            Log.Information("Initializing Gatekeeper LLM client for context isolation. Model: {Model}", _settings.Llm.GatekeeperModelId);
+            var gatekeeperOptions = BuildGatekeeperLlmClientOptions(_settings);
+            _gatekeeperLlmClient = new LmStudioClient(gatekeeperOptions);
+        }
 
         // ── 3c. Create Footman router (fast LLM-based routing) ──────────
         // Uses the gatekeeper model for sub-200ms routing decisions.

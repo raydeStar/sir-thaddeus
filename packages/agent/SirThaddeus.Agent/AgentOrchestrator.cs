@@ -63,7 +63,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
     private readonly UnifiedResponseComposer _unifiedResponseComposer;
     private readonly ResponseKindClassifier _responseKindClassifier = new();
-    private readonly IGatekeeperService? _gatekeeper;
     private readonly IFootmanRouter? _footmanRouter;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
@@ -325,7 +324,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         IPersonalityRuntime? personalityRuntime = null,
         string? activePersonalityId = null,
         string? personalityProfilesDirectory = null,
-        IGatekeeperService? gatekeeper = null,
         IFootmanRouter? footmanRouter = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
@@ -376,7 +374,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
         _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
         _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
-        _gatekeeper = gatekeeper;
         _footmanRouter = footmanRouter;
 
         // Seed the conversation with the system prompt
@@ -1050,43 +1047,5 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public void AppendAssistantMessage(string message)
     {
         _history.Add(ChatMessage.Assistant(message));
-    }
-
-    /// <summary>
-    /// Evaluates if the current message requires context and strips history if not.
-    /// Used by the V2 pipeline adapter.
-    /// </summary>
-    public async Task EvaluateGatekeeperContextAsync(string userMessage, CancellationToken cancellationToken)
-    {
-        if (_gatekeeper is null) return;
-
-        try
-        {
-            var isContextDependent = await _gatekeeper.IsContextDependentAsync(
-                userMessage, cancellationToken);
-
-            if (!isContextDependent)
-            {
-                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
-                var currentUserMsg = _history.LastOrDefault(m => m.Role == "user");
-                _history.Clear();
-                if (sysPrompt is not null) _history.Add(sysPrompt);
-                if (currentUserMsg is not null) _history.Add(currentUserMsg);
-
-                LogEvent("CONTEXT_DECOUPLER",
-                    "Gatekeeper verdict: INDEPENDENT — prior history stripped.");
-            }
-            else
-            {
-                LogEvent("CONTEXT_DECOUPLER",
-                    "Gatekeeper verdict: DEPENDENT — full history retained.");
-            }
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            LogEvent("CONTEXT_DECOUPLER_ERROR",
-                $"Gatekeeper failed ({ex.Message}) — retaining full history (fail-open).");
-        }
     }
 }
