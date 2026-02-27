@@ -4,6 +4,7 @@ using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine.Profiles;
 using Microsoft.Extensions.Time.Testing;
+using Xunit.Abstractions;
 
 namespace SirThaddeus.Tests;
 
@@ -22,6 +23,8 @@ namespace SirThaddeus.Tests;
 
 public class IntentClassificationTests
 {
+    private readonly ITestOutputHelper _output;
+    public IntentClassificationTests(ITestOutputHelper output) => _output = output;
 
     [Theory]
     [InlineData("chat",   false)]  // Casual → no tool calls
@@ -29,6 +32,7 @@ public class IntentClassificationTests
     [InlineData("tool",   true)]   // Tooling → tool call loop
     public async Task ClassifiesIntent_BasedOnLlmResponse(string llmReply, bool expectsToolCall)
     {
+        using var t = TestTimer.Start(_output, $"ClassifiesIntent({llmReply})");
         // The LLM returns the classification when the system prompt asks for it,
         // and a summary for any other requests (e.g. parallel slot extraction).
         var llm = new FakeLlmClient(messages =>
@@ -72,6 +76,7 @@ public class IntentClassificationTests
     [InlineData("search: bitcoin price")]
     public async Task ExplicitOverrides_BypassLlmClassification(string userMessage)
     {
+        using var t = TestTimer.Start(_output, "ExplicitOverrides");
         var classifyCalled = false;
         var callIndex = 0;
 
@@ -101,6 +106,7 @@ public class IntentClassificationTests
     [Fact]
     public async Task DeterministicTemperatureConversion_BypassesLlmClassification()
     {
+        using var t = TestTimer.Start(_output, "DeterministicTempConversion");
         var classifyCalled = false;
 
         var llm = new FakeLlmClient((messages, tools) =>
@@ -134,6 +140,7 @@ public class IntentClassificationTests
     [Fact]
     public async Task ClassificationFailure_FallsBackToCasual()
     {
+        using var t = TestTimer.Start(_output, "ClassificationFailure");
         // LLM throws on EVERY call — classification fails, falls back to casual.
         // The casual path also fails, but the error is caught at the top level.
         var callCount = 0;
@@ -162,6 +169,7 @@ public class IntentClassificationTests
     [Fact]
     public async Task GarbageLlmClassification_DefaultsToCasual()
     {
+        using var t = TestTimer.Start(_output, "GarbageClassification");
         var callIndex = 0;
         var llm = new FakeLlmClient(_ =>
         {
@@ -189,10 +197,13 @@ public class IntentClassificationTests
 
 public class SearchQueryExtractionTests
 {
+    private readonly ITestOutputHelper _output;
+    public SearchQueryExtractionTests(ITestOutputHelper output) => _output = output;
 
     [Fact]
     public async Task ExtractsQuery_AndRecency_FromLlm()
     {
+        using var t = TestTimer.Start(_output, "ExtractsQuery_AndRecency");
         var callIndex = 0;
         var llm = new FakeLlmClient(messages =>
         {
@@ -311,10 +322,13 @@ public class SearchQueryExtractionTests
 
 public class AgentFlowTests
 {
+    private readonly ITestOutputHelper _output;
+    public AgentFlowTests(ITestOutputHelper output) => _output = output;
 
     [Fact]
     public async Task WebLookup_CallsToolThenSummarizes()
     {
+        using var t = TestTimer.Start(_output, "WebLookup_CallsToolThenSummarizes");
         // New pipeline: entity extraction → query construction → web_search → summary.
         var llmCalls = new List<string>();
 
@@ -1083,9 +1097,13 @@ public class AgentFlowTests
 
 public class MemoryRetrievalAuditTests
 {
+    private readonly ITestOutputHelper _output;
+    public MemoryRetrievalAuditTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public async Task MemoryRetrieval_WritesAuditEvent_WhenPackReturned()
     {
+        using var t = TestTimer.Start(_output, "MemoryRetrieval_WritesAudit");
         var callIndex = 0;
         var llm = new FakeLlmClient(messages =>
         {
@@ -1587,9 +1605,13 @@ public class MemoryRetrievalAuditTests
 /// </summary>
 public class ToolLoopTests
 {
+    private readonly ITestOutputHelper _output;
+    public ToolLoopTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public async Task ToolLoop_ProcessesSingleToolCall()
     {
+        using var t = TestTimer.Start(_output, "ToolLoop_SingleToolCall");
         // LLM flow: classify → tool_call → final text
         var toolRequested = false;
         var llm = new FakeLlmClient((messages, tools) =>
@@ -1860,9 +1882,13 @@ public class ToolLoopTests
 /// </summary>
 public class PolicyFilteringTests
 {
+    private readonly ITestOutputHelper _output;
+    public PolicyFilteringTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public async Task CasualChat_SkipsToolLoop_NoToolsExposed()
     {
+        using var t = TestTimer.Start(_output, "CasualChat_SkipsToolLoop");
         // Chat-only intent: UseToolLoop = false, no tools at all.
         // The LLM should receive NO tools — not even memory tools.
         IReadOnlyList<ToolDefinition>? toolsSeen = null;
@@ -2365,9 +2391,13 @@ public class PolicyFilteringTests
 
 public class MultiIntentSegmentationTests
 {
+    private readonly ITestOutputHelper _output;
+    public MultiIntentSegmentationTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public async Task MixedTurn_ComposesUnifiedResponse_AndExecutesActionables()
     {
+        using var t = TestTimer.Start(_output, "MixedTurn_ComposesUnified");
         var llm = new FakeLlmClient((messages, _) =>
         {
             var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";

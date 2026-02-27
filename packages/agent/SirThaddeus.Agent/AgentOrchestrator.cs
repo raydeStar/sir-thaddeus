@@ -446,6 +446,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var slotStateBefore = _dialogueStore.Get();
         var slotTask = _slotExtract.RunAsync(userMessage, slotStateBefore, cancellationToken);
 
+        // Pre-warm tool definitions in the background (MCP IPC).
+        // Many paths short-circuit before needing tools, but if we
+        // reach the tool loop the round-trip is already done.
+        var toolDefsTask = _toolDefinitionBuilder.BuildAsync(
+            MemoryEnabled, PanicModeEnabled, SafeModeEnabled, LogEvent, cancellationToken);
+
         // ── Route: classify intent + determine requirements ──────────
         var routeRequest = new RouterRequest
         {
@@ -962,14 +968,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }
 
             // ── Policy-filtered tool loop ────────────────────────────
-            // Build the full tool set, then filter through the policy
-            // gate. The executor only sees what the policy allows.
-            var allTools = await _toolDefinitionBuilder.BuildAsync(
-                MemoryEnabled,
-                PanicModeEnabled,
-                SafeModeEnabled,
-                LogEvent,
-                cancellationToken);
+            // Await the pre-warmed tool definitions (kicked off early
+            // alongside memory/slots to overlap with routing latency).
+            var allTools = await toolDefsTask;
             var tools = PolicyGate.FilterTools(allTools, policy);
 
             LogEvent("AGENT_TOOLS_POLICY_FILTERED",
@@ -1016,6 +1017,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }, usageBaseline);
         }
     }
+
+    /// <summary>
+    /// Clears the cached MCP tool list so the next turn re-fetches from the server.
+    /// Call after MCP reconnect or tool manifest changes.
+    /// </summary>
+    public void InvalidateToolCache() => _toolDefinitionBuilder.InvalidateCache();
 
     /// <summary>
     /// Gets the current state of the conversation history.

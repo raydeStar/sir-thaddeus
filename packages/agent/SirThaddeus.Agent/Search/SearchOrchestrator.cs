@@ -307,6 +307,16 @@ public sealed class SearchOrchestrator
         if (financeFreshnessFailure is not null)
             return financeFreshnessFailure;
 
+        if (sources.Count == 0)
+        {
+            return await BuildNoResultsFallbackAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                ct);
+        }
+
         // ── 5. Story clustering ──────────────────────────────────────
         var clusters = StoryClustering.Cluster(sources);
         Session.LastClusters = clusters;
@@ -462,6 +472,16 @@ public sealed class SearchOrchestrator
             toolCallsMade);
         if (financeFreshnessFailure is not null)
             return financeFreshnessFailure;
+
+        if (sources.Count == 0)
+        {
+            return await BuildNoResultsFallbackAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                ct);
+        }
 
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
