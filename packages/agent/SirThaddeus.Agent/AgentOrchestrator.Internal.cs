@@ -4571,6 +4571,31 @@ public sealed partial class AgentOrchestrator
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
     /// </summary>
+    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(string userMessage, CancellationToken cancellationToken)
+    {
+        if (!MemoryEnabled)
+            return new MemoryContextResult();
+
+        try
+        {
+            return await _memoryContextProvider.GetContextAsync(
+                new MemoryContextRequest
+                {
+                    UserMessage = userMessage,
+                    MemoryEnabled = MemoryEnabled,
+                    IsColdGreeting = IsColdGreeting(userMessage),
+                    ActiveProfileId = ActiveProfileId,
+                    Timeout = MemoryRetrievalTimeout
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Memory is best-effort; on failure or timeout, return empty
+            return new MemoryContextResult();
+        }
+    }
+
     private static ChatIntent MapRouteToLegacyIntent(RouterOutput route)
     {
         return route.Intent switch

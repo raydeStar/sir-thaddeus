@@ -29,14 +29,12 @@ public class IntentClassificationTests
     [InlineData("tool",   true)]   // Tooling → tool call loop
     public async Task ClassifiesIntent_BasedOnLlmResponse(string llmReply, bool expectsToolCall)
     {
-        // The LLM returns the classification on the first call,
-        // then a summary on subsequent calls.
-        var callIndex = 0;
+        // The LLM returns the classification when the system prompt asks for it,
+        // and a summary for any other requests (e.g. parallel slot extraction).
         var llm = new FakeLlmClient(messages =>
         {
-            callIndex++;
-            // First call = classification, second+ = actual response
-            if (callIndex == 1)
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
                 return llmReply;
             return "Here's a helpful summary of the results.";
         });

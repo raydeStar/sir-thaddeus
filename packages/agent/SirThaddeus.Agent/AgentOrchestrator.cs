@@ -439,15 +439,25 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(multiIntentResponse, usageBaseline);
         }
 
-        // ── Route: classify intent + determine requirements ──────────
-        var route = await _router.RouteAsync(
-            new RouterRequest
-            {
-                UserMessage = userMessage,
-                HasRecentFirstPrinciplesRationale = HasRecentFirstPrinciplesRationale(),
-                HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
-            },
+        // ── Parallel I/O Setup ───────────────────────────────────────
+        // Kick off independent async tasks simultaneously to minimize
+        // total turn latency.
+        var memoryTask = SafeModeEnabled ? Task.FromResult(new MemoryContextResult()) : GetMemoryContextSafeAsync(
+            userMessage,
             cancellationToken);
+
+        var slotStateBefore = _dialogueStore.Get();
+        var slotTask = _slotExtract.RunAsync(userMessage, slotStateBefore, cancellationToken);
+
+        // ── Route: classify intent + determine requirements ──────────
+        var routeRequest = new RouterRequest
+        {
+            UserMessage = userMessage,
+            HasRecentFirstPrinciplesRationale = HasRecentFirstPrinciplesRationale(),
+            HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
+        };
+        var route = await _router.RouteAsync(routeRequest, cancellationToken);
+
         LogEvent("ROUTER_OUTPUT",
             $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
             $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
@@ -459,8 +469,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // When the tripwire router didn't make a high-confidence
         // deterministic match (< 0.95), invoke the Footman for a
         // second opinion using a small, fast gatekeeper model.
-        // If the Footman returns an authoritative decision, override
-        // the route. On abstain/failure, keep the tripwire result.
         RoutingDecision? footmanDecision = null;
         if (_footmanRouter is not null && route.Confidence < 0.95)
         {
@@ -500,8 +508,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
 
         // ── Apply Footman context policy ─────────────────────────────
-        // If the Footman made an authoritative decision, apply its
-        // context policy to trim history before the primary model sees it.
         if (footmanDecision is { IsAuthoritative: true })
         {
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
@@ -519,76 +525,36 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // Keep the old intent for the WebLookup deterministic path
         var intent = MapRouteToLegacyIntent(route);
 
-        // ── Retrieve memory context (best-effort, hard timeout) ──
-        // Called after classification but before the main LLM call.
-        // The pack text is injected into the system prompt so the
-        // model has relevant facts/events/chunks for its answer.
-        // If retrieval takes longer than the timeout, we skip it
-        // entirely rather than stalling the user's conversation.
-        //
-        // When MemoryEnabled is false (master memory off), skip
-        // retrieval entirely — no MCP call, no timeout wait.
-        var memoryPackText = "";
-        var onboardingNeeded = false;
-        var memoryError = "";
-        if (SafeModeEnabled)
+        // ── Await Memory and Slots ───────────────────────────────────
+        var memoryContext = await memoryTask;
+        var memoryPackText = memoryContext.PackText ?? "";
+        var onboardingNeeded = memoryContext.OnboardingNeeded;
+        var memoryError = memoryContext.Error ?? "";
+
+        if (!SafeModeEnabled)
         {
-            LogEvent("SAFE_MODE_MEMORY_DISABLED", "Safe mode active - skipping memory retrieval.");
-        }
-        else
-        {
-            try
+            if (!MemoryEnabled)
             {
-                var memoryContext = await _memoryContextProvider.GetContextAsync(
-                    new MemoryContextRequest
-                    {
-                        UserMessage = userMessage,
-                        MemoryEnabled = MemoryEnabled,
-                        IsColdGreeting = IsColdGreeting(userMessage),
-                        ActiveProfileId = ActiveProfileId,
-                        Timeout = MemoryRetrievalTimeout
-                    },
-                    cancellationToken);
-
-                memoryPackText = memoryContext.PackText;
-                onboardingNeeded = memoryContext.OnboardingNeeded;
-                memoryError = memoryContext.Error ?? "";
-
-                if (!MemoryEnabled)
-                {
-                    LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
-                }
-                else if (memoryContext.Provenance.TimedOut)
-                {
-                    LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
-                }
-
-                if (MemoryEnabled)
-                {
-                    toolCallsMade.Add(new ToolCallRecord
-                    {
-                        ToolName = "MemoryRetrieve",
-                        Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
-                        Result = memoryContext.Provenance.Summary,
-                        Success = memoryContext.Provenance.Success
-                    });
-                }
+                LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
             }
-            catch
+            else if (memoryContext.Provenance.TimedOut)
             {
-                // Swallow — memory is best-effort
+                LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
+            }
+
+            if (MemoryEnabled && memoryContext.Provenance.Success)
+            {
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = "MemoryRetrieve",
+                    Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
+                    Result = memoryContext.Provenance.Summary,
+                    Success = memoryContext.Provenance.Success
+                });
             }
         }
 
         // ── Onboarding injection ──────────────────────────────────────
-        // When no active profile is loaded and this is the first turn,
-        // inject the "get to know you" prompt. On subsequent turns,
-        // inject a lighter reminder that passively captures info.
-        //
-        // Also force the tool loop on so the LLM can call
-        // memory_store_facts when the user shares their name.
-        //
-        // Suppressed when memory is off — the model can't store facts anyway.
         if (onboardingNeeded && MemoryEnabled)
         {
             var isFirstTurn = _history.Count(m => m.Role == "user") <= 1;
@@ -596,15 +562,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 ? OnboardingColdPrompt
                 : OnboardingFollowUpPrompt;
 
-            // Upgrade chat-only → memory_write so the LLM has access
-            // to memory tools. Without this, the model is told to call
-            // memory_store_facts but has no tools available.
-            //
-            // IMPORTANT: only override Casual intent. Do NOT touch
-            // WebLookup, Tooling, or other intents — their routing
-            // takes priority over onboarding. The onboarding prompt
-            // is still injected into the system context regardless,
-            // so the LLM can passively capture info during any flow.
             if (intent == ChatIntent.Casual)
             {
                 route = DefaultRouter.MakeRoute(Intents.MemoryWrite, confidence: 0.9,
@@ -616,12 +573,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             LogEvent("ONBOARDING_INJECTED", isFirstTurn ? "First turn — introducing and asking who the user is." : "Follow-up — passively capturing info.");
         }
 
-        var stateBefore = _dialogueStore.Get();
-        var extractedSlots = await _slotExtract.RunAsync(userMessage, stateBefore, cancellationToken);
-        var mergedSlots = _mergeSlots.Run(stateBefore, extractedSlots, _timeProvider.GetUtcNow());
-        var validatedSlots = _validateSlots.Run(stateBefore, mergedSlots);
+        var extractedSlots = await slotTask;
+        var mergedSlots = _mergeSlots.Run(slotStateBefore, extractedSlots, _timeProvider.GetUtcNow());
+        var validatedSlots = _validateSlots.Run(slotStateBefore, mergedSlots);
         UpdateDialogueStateFromValidatedSlots(validatedSlots);
-        var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore, UserLocationHint, PreferredUnits);
+        var toolPlan = _toolPlanner.Plan(validatedSlots, slotStateBefore, UserLocationHint, PreferredUnits);
         if (toolPlan.InjectionMitigationApplied)
             LogEvent("PROMPT_INJECTION_FILTER_APPLIED", $"reason={toolPlan.InjectionMitigationReason}");
         var contextualUserMessage = string.IsNullOrWhiteSpace(validatedSlots.NormalizedMessage)
