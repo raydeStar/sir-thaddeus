@@ -299,7 +299,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _toolPlanner = toolPlanner ?? new ToolPlanner();
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(llm, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
-        _router = router ?? new DefaultRouter(llm, _deterministicUtilityEngine);
+        _router = router ?? new Routing.RouterV2(llm, _deterministicUtilityEngine);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, _timeProvider);
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
