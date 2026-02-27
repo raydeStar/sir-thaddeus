@@ -39,7 +39,7 @@ public partial class OnboardingWindow : Window
 
     // ── Results (read by App.xaml.cs after dialog closes) ──────────
     public string SelectedBaseUrl => _selectedBaseUrl;
-    public string SelectedModel => _detectedModelName ?? "local-model";
+    public string SelectedModel => _detectedModelName ?? "";
     public string UserDisplayName => DisplayNameInput.Text.Trim();
     public string UserAboutMe => AboutMeInput.Text.Trim();
     public string SelectedPersonalityId

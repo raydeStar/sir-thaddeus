@@ -64,6 +64,7 @@ public sealed class RouterV2
             return new IntentDecisionV2 { Intent = "ChatOnly", Confidence = 1.0, RouteReasonCodes = ["tier1_empty"] };
         }
 
+        // ── Slash commands ────────────────────────────────────────────
         if (lower.StartsWith("/search ", StringComparison.Ordinal) || lower.StartsWith("search:", StringComparison.Ordinal))
         {
             var query = lower.StartsWith("/search ") ? lower[8..] : lower[7..];
@@ -95,6 +96,48 @@ public sealed class RouterV2
                 Intent = "ChatOnly",
                 Confidence = 1.0,
                 RouteReasonCodes = ["tier1_slash_command"]
+            };
+        }
+
+        // ── Heuristic hard rules (IntentFeatureExtractor) ─────────────
+        if (Routing.IntentFeatureExtractor.LooksLikeScreenRequest(lower))
+        {
+            return new IntentDecisionV2
+            {
+                Intent = "ScreenObserve",
+                Confidence = 1.0,
+                RouteReasonCodes = ["tier1_heuristic"]
+            };
+        }
+
+        // Deep-dive before local business: specific-place queries take priority
+        if (Routing.IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
+        {
+            return new IntentDecisionV2
+            {
+                Intent = "LookupDeepDive",
+                Confidence = 1.0,
+                RouteReasonCodes = ["tier1_heuristic"]
+            };
+        }
+
+        if (Routing.IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
+        {
+            return new IntentDecisionV2
+            {
+                Intent = "LookupNews",
+                Confidence = 1.0,
+                RouteReasonCodes = ["tier1_heuristic"]
+            };
+        }
+
+        if (Routing.IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower))
+        {
+            return new IntentDecisionV2
+            {
+                Intent = "LookupFact",
+                Confidence = 1.0,
+                RouteReasonCodes = ["tier1_heuristic"]
             };
         }
 

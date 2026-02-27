@@ -2914,6 +2914,70 @@ public sealed partial class AgentOrchestrator
             $"Trimmed to {_history.Count} messages ({MaxHistoryTurns} turns)");
     }
 
+    /// <summary>
+    /// Applies the Footman router's context policy to shape the history
+    /// before the primary model receives it. This reduces context poisoning
+    /// and token waste by stripping irrelevant prior turns.
+    /// </summary>
+    private void ApplyFootmanContextPolicy(Routing.ContextPolicy contextPolicy)
+    {
+        switch (contextPolicy)
+        {
+            case Routing.ContextPolicy.None:
+            {
+                // Isolated query — keep only system prompt + current user message
+                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
+                var currentUserMsg = _history.LastOrDefault(m => m.Role == "user");
+                _history.Clear();
+                if (sysPrompt is not null) _history.Add(sysPrompt);
+                if (currentUserMsg is not null) _history.Add(currentUserMsg);
+                LogEvent("FOOTMAN_CONTEXT_POLICY", "None — stripped to system + current user message.");
+                break;
+            }
+
+            case Routing.ContextPolicy.LastAssistantOnly:
+            {
+                // Keep system prompt + last assistant message + current user message
+                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
+                var lastAssistant = _history.LastOrDefault(m => m.Role == "assistant");
+                var currentUserMsg = _history.LastOrDefault(m => m.Role == "user");
+                _history.Clear();
+                if (sysPrompt is not null) _history.Add(sysPrompt);
+                if (lastAssistant is not null) _history.Add(lastAssistant);
+                if (currentUserMsg is not null) _history.Add(currentUserMsg);
+                LogEvent("FOOTMAN_CONTEXT_POLICY", "LastAssistantOnly — kept system + last assistant + current user.");
+                break;
+            }
+
+            case Routing.ContextPolicy.LastTurns:
+            {
+                // Keep system prompt + last 3 user/assistant pairs + current user message
+                const int keepTurns = 6; // 3 pairs of user+assistant
+                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
+                var nonSystem = _history.Where(m => m.Role != "system").TakeLast(keepTurns).ToList();
+                _history.Clear();
+                if (sysPrompt is not null) _history.Add(sysPrompt);
+                _history.AddRange(nonSystem);
+                LogEvent("FOOTMAN_CONTEXT_POLICY", $"LastTurns — kept system + last {nonSystem.Count} messages.");
+                break;
+            }
+
+            case Routing.ContextPolicy.ChatSessionSnapshot:
+                // Full history retained — no trimming
+                LogEvent("FOOTMAN_CONTEXT_POLICY", "ChatSessionSnapshot — full history retained.");
+                break;
+
+            case Routing.ContextPolicy.ScreenSnapshot:
+                // Full history retained; screen capture will be appended downstream
+                LogEvent("FOOTMAN_CONTEXT_POLICY", "ScreenSnapshot — full history retained (capture appended downstream).");
+                break;
+
+            default:
+                LogEvent("FOOTMAN_CONTEXT_POLICY", $"Unknown policy {contextPolicy} — retaining full history.");
+                break;
+        }
+    }
+
     /// <inheritdoc />
     public void ResetConversation()
     {

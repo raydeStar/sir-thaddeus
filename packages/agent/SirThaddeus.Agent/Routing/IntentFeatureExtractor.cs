@@ -110,6 +110,44 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    /// <summary>
+    /// Detects when the user explicitly names a tool for invocation,
+    /// e.g. "use tool_ping", "call the tool_capabilities tool".
+    /// These should route to GeneralTool with high confidence so
+    /// the Footman does not override with a chat-only decision.
+    /// </summary>
+    public static bool LooksLikeExplicitToolInvocation(string lower)
+    {
+        ReadOnlySpan<string> actionPhrases =
+        [
+            "use ", "call ", "invoke ", "run ", "execute ", "try "
+        ];
+
+        ReadOnlySpan<string> toolNamePatterns =
+        [
+            "tool_ping", "tool_capabilities", "tool_list",
+            "memory_retrieve", "memory_store",
+            "web_search", "browser_navigate",
+            "places_lookup", "weather_geocode", "weather_forecast",
+            "file_read", "file_list", "file_write",
+            "screen_capture", "system_execute"
+        ];
+
+        foreach (var toolName in toolNamePatterns)
+        {
+            if (!lower.Contains(toolName, StringComparison.Ordinal))
+                continue;
+
+            foreach (var action in actionPhrases)
+            {
+                if (lower.Contains(action, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool LooksLikeBrowseRequest(string lower)
     {
         ReadOnlySpan<string> patterns =
@@ -662,6 +700,7 @@ public static class IntentFeatureExtractor
             lower.Contains("near me", StringComparison.Ordinal) ||
             lower.Contains("nearby", StringComparison.Ordinal) ||
             lower.Contains("around me", StringComparison.Ordinal) ||
+            lower.Contains("around here", StringComparison.Ordinal) ||
             lower.Contains("close by", StringComparison.Ordinal) ||
             lower.Contains("in my area", StringComparison.Ordinal) ||
             lower.Contains("local", StringComparison.Ordinal);

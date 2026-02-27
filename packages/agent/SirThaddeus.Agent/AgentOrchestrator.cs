@@ -63,6 +63,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
     private readonly UnifiedResponseComposer _unifiedResponseComposer;
     private readonly ResponseKindClassifier _responseKindClassifier = new();
+    private readonly IGatekeeperService? _gatekeeper;
+    private readonly IFootmanRouter? _footmanRouter;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -322,7 +324,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         UnifiedResponseComposer? unifiedResponseComposer = null,
         IPersonalityRuntime? personalityRuntime = null,
         string? activePersonalityId = null,
-        string? personalityProfilesDirectory = null)
+        string? personalityProfilesDirectory = null,
+        IGatekeeperService? gatekeeper = null,
+        IFootmanRouter? footmanRouter = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -372,6 +376,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
         _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
         _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
+        _gatekeeper = gatekeeper;
+        _footmanRouter = footmanRouter;
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
@@ -448,6 +454,58 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"file={route.NeedsFileAccess}, memory_w={route.NeedsMemoryWrite}, " +
             $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
             $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
+
+        // ── Footman: LLM-based routing refinement ────────────────────
+        // When the tripwire router didn't make a high-confidence
+        // deterministic match (< 0.95), invoke the Footman for a
+        // second opinion using a small, fast gatekeeper model.
+        // If the Footman returns an authoritative decision, override
+        // the route. On abstain/failure, keep the tripwire result.
+        RoutingDecision? footmanDecision = null;
+        if (_footmanRouter is not null && route.Confidence < 0.95)
+        {
+            var features = RoutingFeatures.Extract(
+                userMessage,
+                hasRecentRationale: HasRecentFirstPrinciplesRationale(),
+                hasRecentSearchResults: _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow()));
+
+            footmanDecision = await _footmanRouter.RouteAsync(
+                userMessage, features, cancellationToken);
+
+            if (footmanDecision.IsAuthoritative)
+            {
+                var footmanIntent = AgentStateMapper.ToIntentString(footmanDecision.NextState);
+                route = DefaultRouter.MakeRoute(
+                    footmanIntent,
+                    confidence: footmanDecision.Confidence,
+                    needsWeb: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.WebSearch),
+                    needsBrowser: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.BrowserNavigate),
+                    needsScreen: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.ScreenCapture),
+                    needsFile: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.FileSystem),
+                    needsSystem: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.SystemExecute),
+                    needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
+                    needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
+
+                LogEvent("FOOTMAN_OVERRIDE",
+                    $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
+                    $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
+                    $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}");
+            }
+            else
+            {
+                LogEvent("FOOTMAN_DEFERRED",
+                    $"abstain={footmanDecision.Abstain}, confidence={footmanDecision.Confidence:F2}, " +
+                    $"reason={footmanDecision.ReasonCode} — keeping tripwire route");
+            }
+        }
+
+        // ── Apply Footman context policy ─────────────────────────────
+        // If the Footman made an authoritative decision, apply its
+        // context policy to trim history before the primary model sees it.
+        if (footmanDecision is { IsAuthoritative: true })
+        {
+            ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
+        }
 
         // ── Policy: determine which tools the executor may see ───────
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
@@ -1003,6 +1061,76 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
             }, usageBaseline);
+        }
+    }
+
+    /// <summary>
+    /// Gets the current state of the conversation history.
+    /// </summary>
+    public IReadOnlyList<ChatMessage> GetCurrentHistory() => _history;
+
+    /// <summary>
+    /// Adds a user message to the history and triggers trimming.
+    /// </summary>
+    public void AddUserMessageToHistory(string message)
+    {
+        _history.Add(ChatMessage.User(message));
+        TrimHistory();
+        LogEvent("AGENT_USER_MESSAGE", message);
+    }
+
+    /// <summary>
+    /// Removes the last message from the history if it exists.
+    /// </summary>
+    public void PopUserMessage()
+    {
+        if (_history.Count > 0)
+            _history.RemoveAt(_history.Count - 1);
+    }
+
+    /// <summary>
+    /// Appends a new assistant message to the history.
+    /// </summary>
+    public void AppendAssistantMessage(string message)
+    {
+        _history.Add(ChatMessage.Assistant(message));
+    }
+
+    /// <summary>
+    /// Evaluates if the current message requires context and strips history if not.
+    /// Used by the V2 pipeline adapter.
+    /// </summary>
+    public async Task EvaluateGatekeeperContextAsync(string userMessage, CancellationToken cancellationToken)
+    {
+        if (_gatekeeper is null) return;
+
+        try
+        {
+            var isContextDependent = await _gatekeeper.IsContextDependentAsync(
+                userMessage, cancellationToken);
+
+            if (!isContextDependent)
+            {
+                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
+                var currentUserMsg = _history.LastOrDefault(m => m.Role == "user");
+                _history.Clear();
+                if (sysPrompt is not null) _history.Add(sysPrompt);
+                if (currentUserMsg is not null) _history.Add(currentUserMsg);
+
+                LogEvent("CONTEXT_DECOUPLER",
+                    "Gatekeeper verdict: INDEPENDENT — prior history stripped.");
+            }
+            else
+            {
+                LogEvent("CONTEXT_DECOUPLER",
+                    "Gatekeeper verdict: DEPENDENT — full history retained.");
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            LogEvent("CONTEXT_DECOUPLER_ERROR",
+                $"Gatekeeper failed ({ex.Message}) — retaining full history (fail-open).");
         }
     }
 }

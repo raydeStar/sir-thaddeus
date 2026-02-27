@@ -1,0 +1,31 @@
+id: web_local_florist_nearby
+name: Location - Is there a florist nearby?
+user_message: "Is there a florist nearby?"
+allowed_tools:
+  - memory_retrieve
+  - places_lookup
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - florist
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - i cannot
+  max_response_chars: 2000
+min_score: 7.0

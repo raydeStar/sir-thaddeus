@@ -45,41 +45,69 @@ public sealed class V2AgentOrchestratorAdapter : IAgentOrchestrator
 
     public async Task<AgentResponse> ProcessAsync(string userMessage, CancellationToken cancellationToken = default)
     {
+        // ── Early exit if no legacy agent exists to hold state ────────
+        if (_legacyAgent == null)
+        {
+            return await _legacyFallback.ProcessAsync(userMessage, cancellationToken);
+        }
+
         try
         {
+            // ── 1. Gatekeeper / Context Decoupling ───────────────────────
+            // Apply the Dynamic Context Decoupler to strip history if the 
+            // query is independent. This prevents V2 from suffering context poisoning.
+            await _legacyAgent.EvaluateGatekeeperContextAsync(userMessage, cancellationToken);
+
+            // Add the current user message to the legacy history tracker
+            _legacyAgent.AddUserMessageToHistory(userMessage);
+
+            // ── 2. Build Tools ───────────────────────────────────────────
             var tools = await _toolBuilder.BuildAsync(
-                memoryEnabled: _legacyAgent?.MemoryEnabled ?? true,
-                panicModeEnabled: _legacyAgent?.PanicModeEnabled ?? false,
-                safeModeEnabled: _legacyAgent?.SafeModeEnabled ?? false,
+                memoryEnabled: _legacyAgent.MemoryEnabled,
+                panicModeEnabled: _legacyAgent.PanicModeEnabled,
+                safeModeEnabled: _legacyAgent.SafeModeEnabled,
                 logEvent: LogEvent,
                 cancellationToken: cancellationToken);
 
-            // Phase A/B adapter: lightweight history scaffold.
-            // Full history ownership remains in legacy orchestrator until full cutover.
+            // ── 3. Run Pipeline ──────────────────────────────────────────
+            // Note: History is pulled dynamically from the legacy agent, meaning
+            // gatekeeper history-stripping is respected and state is unified.
             var context = new TurnContext(
                 userMessage,
-                [
-                    LlmClient.ChatMessage.System(_systemPrompt),
-                    LlmClient.ChatMessage.User(userMessage)
-                ],
+                _legacyAgent.GetCurrentHistory(),
                 tools,
                 LogEvent
             );
 
-            return await _pipeline.ExecuteAsync(context, cancellationToken);
+            var result = await _pipeline.ExecuteAsync(context, cancellationToken);
+
+            // ── 4. Save Assistant Response to History ────────────────────
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+            {
+                _legacyAgent.AppendAssistantMessage(result.Text);
+            }
+
+            return result;
         }
         catch (NotSupportedException ex) when (ex.Message.StartsWith("v2_", StringComparison.OrdinalIgnoreCase))
         {
             LogEvent("V2_PIPELINE_FALLBACK", ex.Message);
+
+            // Back out the user message since the legacy ProcessAsync will add it again
+            _legacyAgent?.PopUserMessage();
             return await _legacyFallback.ProcessAsync(userMessage, cancellationToken);
         }
         catch (OperationCanceledException)
         {
+            _legacyAgent?.PopUserMessage();
             throw;
         }
         catch (Exception ex)
         {
             LogEvent("V2_PIPELINE_ERROR", ex.Message);
+
+            // Back out the user message since the legacy ProcessAsync will add it again
+            _legacyAgent?.PopUserMessage();
             return await _legacyFallback.ProcessAsync(userMessage, cancellationToken);
         }
     }
