@@ -131,10 +131,12 @@ flowchart LR
   end
 
   subgraph agent [Layer 2: Agent Orchestrator — packages/agent]
-    Loop[Agent Loop]
-    Context[Conversation History]
+    Loop[Agent Loop & Repair]
+    Context[Run Context & History]
     Router[Intent Router]
     Gate[Policy Gate]
+    Validation[Plan & Completion Validation]
+    Utilities[Deterministic Utility Engine]
   end
 
   subgraph llm [Layer 3: LLM Client — packages/llm-client]
@@ -148,17 +150,20 @@ flowchart LR
 
   subgraph mcp [Layer 4: MCP Tool Server — apps/mcp-server]
     Server[MCP Server — stdio]
-    Tools[Memory / Browser / File / System / Screen / WebSearch]
+    Tools[Memory / Browser / File / System / Screen / WebSearch / Weather / Utilities]
   end
 
   PTT -->|audio file| Loop
   Palette -->|typed request| Loop
-  Loop --> Router -->|RouterOutput| Gate
+  Loop --> Router -->|RouterOutput| Validation
+  Validation -->|Valid/Repair| Gate
   Gate -->|allowed tools| LmStudio
   LmStudio -->|tool_calls| Loop
   Loop -->|tools/call| Server
-  Server -->|tool result| Loop
+  Server -->|tool result| Validation
+  Validation -->|Complete/Partial| Loop
   Loop --> Retriever --> Store
+  Loop --> Utilities
   Loop -->|final text| TTS
   Loop -->|events| Overlay
   Tray --> Overlay
@@ -169,7 +174,7 @@ flowchart LR
 | Layer          | Project(s)                                  | Responsibility                                                                  | Talks to                        |
 | -------------- | ------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------- |
 | **Frontend**   | `apps/desktop-runtime`                      | Hotkeys, tray, overlay, PTT capture trigger, TTS output, Chat/Memory/Profile UI | Agent orchestrator (in-process) |
-| **Agent**      | `packages/agent`                            | Conversation loop, intent routing, policy gate, tool execution orchestration    | LLM client + MCP client         |
+| **Agent**      | `packages/agent`                            | Routing, policy gates, validation, bounded repair loops, deterministic utilities| LLM client + MCP client         |
 | **LLM client** | `packages/llm-client`                       | OpenAI-style `/v1/chat/completions` + `/v1/embeddings` calls                    | LM Studio HTTP server           |
 | **Memory**     | `packages/memory`, `packages/memory-sqlite` | Retrieval engine (BM25 + embeddings), scoring, gating, SQLite store             | —                               |
 | **MCP server** | `apps/mcp-server`                           | Exposes tools over MCP stdio: memory, browser, file, system, screen, web search | Desktop runtime (child process) |

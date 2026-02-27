@@ -63,6 +63,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
     private readonly UnifiedResponseComposer _unifiedResponseComposer;
     private readonly ResponseKindClassifier _responseKindClassifier = new();
+    private readonly Tools.ToolAliasResolver _toolAliasResolver;
     private readonly IFootmanRouter? _footmanRouter;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
@@ -87,60 +88,40 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private static readonly TimeSpan FirstPrinciplesFollowUpTtl = TimeSpan.FromMinutes(15);
 
     // ── Web search tool names ────────────────────────────────────────
-    // MCP stacks may register tools in snake_case or PascalCase.
-    // Try the canonical name first, fall back to the alternate.
-    private const string WebSearchToolName    = "web_search";
-    private const string WebSearchToolNameAlt = "WebSearch";
-    private const string WeatherGeocodeToolName    = "weather_geocode";
-    private const string WeatherGeocodeToolNameAlt = "WeatherGeocode";
-    private const string WeatherForecastToolName    = "weather_forecast";
-    private const string WeatherForecastToolNameAlt = "WeatherForecast";
-    private const string ResolveTimezoneToolName    = "resolve_timezone";
-    private const string ResolveTimezoneToolNameAlt = "ResolveTimezone";
-    private const string HolidaysGetToolName        = "holidays_get";
-    private const string HolidaysGetToolNameAlt     = "HolidaysGet";
-    private const string HolidaysNextToolName       = "holidays_next";
-    private const string HolidaysNextToolNameAlt    = "HolidaysNext";
-    private const string HolidaysIsTodayToolName    = "holidays_is_today";
-    private const string HolidaysIsTodayToolNameAlt = "HolidaysIsToday";
-    private const string FeedFetchToolName          = "feed_fetch";
-    private const string FeedFetchToolNameAlt       = "FeedFetch";
-    private const string StatusCheckToolName        = "status_check_url";
-    private const string StatusCheckToolNameAlt     = "StatusCheckUrl";
-    private const string MemoryRetrieveToolName     = "memory_retrieve";
-    private const string MemoryRetrieveToolNameAlt  = "MemoryRetrieve";
-    private const string MemoryListFactsToolName    = "memory_list_facts";
-    private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
-    private const string MemoryStoreFactsToolName   = "memory_store_facts";
-    private const string MemoryStoreFactsToolNameAlt = "MemoryStoreFacts";
-    private const string ScreenCaptureToolName       = "screen_capture";
-    private const string ScreenCaptureToolNameAlt    = "ScreenCapture";
+    // Canonical tool names live in ToolNames static class.
+    // These aliases keep the internal code unchanged during extraction.
+    private const string WebSearchToolName    = ToolNames.WebSearch;
+    private const string WebSearchToolNameAlt = ToolNames.WebSearchAlt;
+    private const string WeatherGeocodeToolName    = ToolNames.WeatherGeocode;
+    private const string WeatherGeocodeToolNameAlt = ToolNames.WeatherGeocodeAlt;
+    private const string WeatherForecastToolName    = ToolNames.WeatherForecast;
+    private const string WeatherForecastToolNameAlt = ToolNames.WeatherForecastAlt;
+    private const string ResolveTimezoneToolName    = ToolNames.ResolveTimezone;
+    private const string ResolveTimezoneToolNameAlt = ToolNames.ResolveTimezoneAlt;
+    private const string HolidaysGetToolName        = ToolNames.HolidaysGet;
+    private const string HolidaysGetToolNameAlt     = ToolNames.HolidaysGetAlt;
+    private const string HolidaysNextToolName       = ToolNames.HolidaysNext;
+    private const string HolidaysNextToolNameAlt    = ToolNames.HolidaysNextAlt;
+    private const string HolidaysIsTodayToolName    = ToolNames.HolidaysIsToday;
+    private const string HolidaysIsTodayToolNameAlt = ToolNames.HolidaysIsTodayAlt;
+    private const string FeedFetchToolName          = ToolNames.FeedFetch;
+    private const string FeedFetchToolNameAlt       = ToolNames.FeedFetchAlt;
+    private const string StatusCheckToolName        = ToolNames.StatusCheck;
+    private const string StatusCheckToolNameAlt     = ToolNames.StatusCheckAlt;
+    private const string MemoryRetrieveToolName     = ToolNames.MemoryRetrieve;
+    private const string MemoryRetrieveToolNameAlt  = ToolNames.MemoryRetrieveAlt;
+    private const string MemoryListFactsToolName    = ToolNames.MemoryListFacts;
+    private const string MemoryListFactsToolNameAlt = ToolNames.MemoryListFactsAlt;
+    private const string MemoryStoreFactsToolName   = ToolNames.MemoryStoreFacts;
+    private const string MemoryStoreFactsToolNameAlt = ToolNames.MemoryStoreFactsAlt;
+    private const string ScreenCaptureToolName       = ToolNames.ScreenCapture;
+    private const string ScreenCaptureToolNameAlt    = ToolNames.ScreenCaptureAlt;
 
-    // ── Summary instruction injected after search results ────────────
-    private const string WebSummaryInstruction =
-        "\n\nSearch results are in the next message. " +
-        "Synthesize across all sources into a concise, practical answer. " +
-        "Lead with the bottom line in one sentence, then 3-5 short points. " +
-        "No markdown tables. No URLs. " +
-        "ONLY use facts from the provided sources. " +
-        "Do NOT invent or guess details not in the results.";
-
-    // ── Summary instruction injected for follow-up deep dives ───────
-    private const string WebFollowUpInstruction =
-        "\n\nFull article content from prior sources is in the next message. " +
-        "Answer the user's latest question using ONLY the provided content. " +
-        "Be thorough. No markdown tables. No URLs. " +
-        "If a detail is not present in the content, say so.";
-
-    private const string WebFollowUpWithRelatedInstruction =
-        "\n\nYou are answering a follow-up question about a specific news story. " +
-        "Full text from the primary article(s) is included first, followed by " +
-        "related coverage search results.\n" +
-        "Answer the user's question. Lead with the bottom line. Then explain:\n" +
-        "- What the primary article(s) say\n" +
-        "- What related sources add or contradict\n" +
-        "- Whether key details are confirmed or still alleged\n" +
-        "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.";
+    // ── Summary instructions ─────────────────────────────────────────
+    // Canonical prompt strings live in OrchestratorPrompts.
+    private const string WebSummaryInstruction = OrchestratorPrompts.WebSummaryInstruction;
+    private const string WebFollowUpInstruction = OrchestratorPrompts.WebFollowUpInstruction;
+    private const string WebFollowUpWithRelatedInstruction = OrchestratorPrompts.WebFollowUpWithRelatedInstruction;
 
     // ── Token budget per intent ──────────────────────────────────────
     // Tight caps reduce filler from small models while still leaving
@@ -153,17 +134,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensUtilityRouting = 120;
 
     // ── Logic puzzle decomposition scaffold ──────────────────────────
-    // For small models, force a minimal first-principles structure so
-    // reasoning prompts stay grounded and reproducible.
-    private const string LogicPuzzleDecompositionModeSuffix =
-        "\n[LOGIC PUZZLE MODE]\n" +
-        "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
-        "Use first-principles logic internally, but keep reasoning private unless asked.\n" +
-        "Give a direct answer first.\n" +
-        "If ALL presented options are factually wrong, say neither is correct and state the actual fact (e.g. the real color, weight, count).\n" +
-        "If the user explicitly asks why or asks for your logic, include a short 'Why:' section after the answer.\n" +
-        "Do not call tools. Do not invent missing facts.\n" +
-        "[/LOGIC PUZZLE MODE]\n";
+    private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
 
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
     // optional embeddings don't finish in this window, we skip memory
@@ -171,37 +142,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
 
     // ── Onboarding prompts ────────────────────────────────────────────
-    // Injected when no active profile is loaded for this session.
-    //
-    // Cold prompt: first turn — actively introduce yourself and ask.
-    // Follow-up: subsequent turns — passively capture info if shared.
-    //
-    // The LLM MUST have memory tools available when these are active
-    // (see the policy override in ProcessAsync). Without tools, the
-    // model can't persist anything the user shares.
-
-    private const string OnboardingColdPrompt =
-        "\n\n[ONBOARDING]\n" +
-        "No profile is loaded — you don't know who you're talking to yet.\n" +
-        "Introduce yourself warmly (stay in character) and ask who they are.\n" +
-        "If they share their name, IMMEDIATELY call memory_store_facts to save it:\n" +
-        "  {\"subject\": \"user\", \"predicate\": \"name\", \"object\": \"<their name>\"}\n" +
-        "Then ask 2-3 light questions to get to know them — what they work on, " +
-        "a preference or two, how they like to be addressed.\n" +
-        "Keep it casual and brief. If they say they'd rather not share or " +
-        "want to skip, that is perfectly fine — just say something like " +
-        "'No problem at all' and help them with whatever they need.\n" +
-        "Do NOT ignore their original message — answer it too, " +
-        "just weave the introduction in naturally.\n" +
-        "[/ONBOARDING]\n";
-
-    private const string OnboardingFollowUpPrompt =
-        "\n\n[ONBOARDING]\n" +
-        "You still don't know who this user is.\n" +
-        "If they share personal details (name, preferences, etc.), " +
-        "use memory_store_facts to save them.\n" +
-        "Do NOT keep asking if they clearly want to move on — just help them.\n" +
-        "[/ONBOARDING]\n";
+    private const string OnboardingColdPrompt = OrchestratorPrompts.OnboardingColdPrompt;
+    private const string OnboardingFollowUpPrompt = OrchestratorPrompts.OnboardingFollowUpPrompt;
 
     // ── History sliding window ───────────────────────────────────────
     // Keep the last N user+assistant turns so the context window stays
@@ -374,6 +316,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
         _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
         _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
+        _toolAliasResolver = new Tools.ToolAliasResolver(mcp);
         _footmanRouter = footmanRouter;
 
         // Seed the conversation with the system prompt

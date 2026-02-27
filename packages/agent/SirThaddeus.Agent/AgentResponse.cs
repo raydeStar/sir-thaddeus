@@ -79,6 +79,27 @@ public sealed record AgentResponse
     /// </summary>
     public bool AllowToolResultPersonalityPresentation { get; init; }
 
+    /// <summary>
+    /// When true, the response is incomplete — one or more required fields
+    /// from the completion contract could not be satisfied. The LLM's answer
+    /// is still returned (best-effort), but the UI may want to indicate
+    /// that some information is missing.
+    /// </summary>
+    public bool IsPartial { get; init; }
+
+    /// <summary>
+    /// Names of required fields that could not be satisfied by tool results.
+    /// Empty when <see cref="IsPartial"/> is false.
+    /// </summary>
+    public IReadOnlyList<string> MissingFields { get; init; } = [];
+
+    /// <summary>
+    /// Correlation ID linking this response to its orchestrator turn.
+    /// Matches the <see cref="Orchestration.Correlation.RunContext.CorrelationId"/>
+    /// and all audit events for this turn.
+    /// </summary>
+    public string? CorrelationId { get; init; }
+
     public static AgentResponse FromError(string error) => new()
     {
         Text = error,
