@@ -11,6 +11,7 @@ public sealed record ToolLoopExecutionRequest
     public required IReadOnlyList<ToolDefinition> Tools { get; init; }
     public required List<ToolCallRecord> ToolCallsMade { get; init; }
     public required int InitialRoundTrips { get; init; }
+    public required Orchestration.IntentDecisionV2 Decision { get; init; }
     public int MaxRoundTrips { get; init; } = 10;
     public required Func<string, string> SanitizeAssistantText { get; init; }
     public Action<string, string>? LogEvent { get; init; }

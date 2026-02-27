@@ -1,0 +1,35 @@
+id: reasoning_car_wash_goal
+name: Reasoning - Implied goal trap (car wash walk vs drive)
+user_message: "You're going to the car wash and it's only 50 meters away. Should you walk or drive?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+    - weather_geocode
+    - weather_forecast
+    - places_lookup
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "drive"
+    - "car"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+    - i can't
+    - i cannot
+    - "walk is"
+    - "you should walk"
+  max_response_chars: 2400
+min_score: 8.0

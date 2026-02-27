@@ -169,13 +169,13 @@ public class ToolGroupResolutionTests
             var group = ToolGroupPolicy.ResolveGroup(canonicalName);
             var effective = ToolGroupPolicy.ResolveEffectivePolicy(group, snapshot);
 
-            if (group is "meta")
+            if (group is "meta" or "memoryRead")
             {
                 Assert.Equal("always", effective);
                 continue;
             }
 
-            // All non-meta groups default to "ask" so the user is prompted on first use.
+            // All non-meta/non-memoryRead groups default to "ask" so the user is prompted on first use.
             Assert.Equal("ask", effective);
         }
     }

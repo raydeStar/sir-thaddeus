@@ -11,11 +11,13 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 {
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;
+    private readonly Orchestration.IPlanValidator _planValidator;
 
-    public ToolLoopExecutor(ILlmClient llm, IMcpToolClient mcp)
+    public ToolLoopExecutor(ILlmClient llm, IMcpToolClient mcp, Orchestration.IPlanValidator? planValidator = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
+        _planValidator = planValidator ?? new Orchestration.PlanValidator();
     }
 
     public async Task<AgentResponse> ExecuteAsync(
@@ -37,6 +39,9 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         var allowedToolNames = new HashSet<string>(
             tools.Select(t => t.Function.Name),
             StringComparer.OrdinalIgnoreCase);
+
+        const int MaxPlanRejections = 2;
+        var planRejections = 0;
 
         while (true)
         {
@@ -75,6 +80,43 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             }
 
             request.History.Add(ChatMessage.AssistantToolCalls(response.ToolCalls));
+
+            // Validate the proposed plan against the IntentV2 contract
+            var proposedCalls = response.ToolCalls.Select(tc => new Orchestration.ProposedToolCall(tc.Function.Name, tc.Function.Arguments, tc.Id)).ToList();
+            var validationResult = _planValidator.Validate(request.Decision, proposedCalls, request.Tools);
+
+            if (!validationResult.IsValid)
+            {
+                planRejections++;
+                log("AGENT_PLAN_REJECTED", $"reason={validationResult.RejectReasonCode}, attempt={planRejections}/{MaxPlanRejections}, details={validationResult.RepairPrompt}");
+
+                if (planRejections >= MaxPlanRejections)
+                {
+                    var bailMsg = $"I tried to use tools for this request but kept selecting ones that aren't appropriate. Let me answer without tools instead.";
+                    // Inject error results so the LLM sees the rejection, then fall through to a chat-only response.
+                    foreach (var toolCall in response.ToolCalls)
+                        request.History.Add(ChatMessage.ToolResult(toolCall.Id, $"System Error: {validationResult.RepairPrompt}"));
+
+                    request.History.Add(ChatMessage.Assistant(bailMsg));
+                    log("AGENT_PLAN_REJECTED_BAIL", bailMsg);
+                    return new AgentResponse
+                    {
+                        Text = bailMsg,
+                        Success = true,
+                        ToolCallsMade = request.ToolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    };
+                }
+
+                // Add tool results as errors for all tools so the LLM doesn't hang waiting for them
+                foreach (var toolCall in response.ToolCalls)
+                {
+                    request.History.Add(ChatMessage.ToolResult(toolCall.Id, $"System Error: {validationResult.RepairPrompt}"));
+                }
+                
+                // Continue loop so the LLM can try again
+                continue;
+            }
 
             // Conflict resolution happens BEFORE any MCP side effect.
             var conflictResolution = ToolConflictMatrix.ResolveTurn(

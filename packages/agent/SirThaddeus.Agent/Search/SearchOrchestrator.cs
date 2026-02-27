@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.LlmClient;
 
@@ -73,6 +74,7 @@ public sealed class SearchOrchestrator
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 1024;
     private const int MaxTokensWebSummaryRetry = 2048;
+    private const int MinRichContentLength = 1500;
     private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
@@ -110,6 +112,8 @@ public sealed class SearchOrchestrator
         "Synthesize into a clear, factual answer. Lead with the bottom line. " +
         "Include key facts. No URLs. " +
         "ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
+        "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. specific line prefixes, headings, structure), follow it exactly.";
 
@@ -121,6 +125,8 @@ public sealed class SearchOrchestrator
         "snippets. Be thorough — use all available information, do not " +
         "summarize down to generalities. No URLs. " +
         "ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
+        "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. specific line prefixes, headings, structure), follow it exactly.";
 
@@ -315,7 +321,7 @@ public sealed class SearchOrchestrator
             sources, DateTimeOffset.UtcNow);
 
         // ── 7. Summarize via LLM ─────────────────────────────────────
-        var summaryInput = "[Search results — reference only, do not display to user]\n" +
+        var summaryInput = "[Web search results — use these facts to answer the user's question]\n" +
                            StripSourcesJson(toolResult);
 
         var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
@@ -354,9 +360,56 @@ public sealed class SearchOrchestrator
             };
         }
 
-        // ── 1. Entity resolution (always attempt) ────────────────────
-        var entity = await _entityResolver.ResolveAsync(
-            userMessage, Session, toolCallsMade, ct);
+        // ── 0. Local business + proximity with no location hint ──────
+        // When the user asks about businesses "nearby" but hasn't set a
+        // location, return guidance instead of hallucinating fake results.
+        var lowerMessage = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(UserLocationHint) &&
+            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "search",
+                Action = "LOCAL_BUSINESS_NO_LOCATION",
+                Result = "guidance_returned",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? "", 80)
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = "I need a location to search for local businesses. " +
+                       "You can set your location in **Settings → Profile**, " +
+                       "or include a city in your request " +
+                       "(e.g., \"florists in Portland, OR\").",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
+        // ── 1. Entity resolution ──────────────────────────────────────
+        // Skip for local business discovery ("bakery nearby") — there's no
+        // named entity to canonicalize, and the LLM + web_search cost is
+        // wasted overhead (5-15s on a local model).
+        var isLocalBusinessQuery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+        EntityResolver.ResolvedEntity? entity = null;
+        if (!isLocalBusinessQuery)
+        {
+            entity = await _entityResolver.ResolveAsync(
+                userMessage, Session, toolCallsMade, ct);
+        }
+        else
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "search",
+                Action = "SKIP_ENTITY_RESOLUTION",
+                Result = "local_business_discovery"
+            });
+        }
 
         // ── 2. Query construction (factfind-mode) ────────────────────
         var query = await _queryBuilder.BuildAsync(
@@ -413,61 +466,87 @@ public sealed class SearchOrchestrator
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
+        Session.LastWasLocalBusinessDiscovery =
+            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
 
         // ── 5. Fetch top articles for deep synthesis ──────────────────
-        // Prefer direct article URLs over aggregator wrappers.
-        // If all parsed sources are junk URLs, do a supplementary search
-        // to find actual article pages.
-        var navigable = sources
-            .Where(s => !IsJunkUrl(s.Url))
-            .Take(MaxFollowUpUrls)
-            .ToList();
+        // The MCP WebSearch tool already auto-reads pages via ContentExtractor
+        // and embeds up to 1000-char excerpts in the output. For most queries
+        // this is sufficient. Only re-fetch via browser_navigate when the
+        // tool result lacks rich content (snippet-only mode).
+        var strippedContent = StripSourcesJson(toolResult);
+        var toolResultHasRichContent = strippedContent.Length >= MinRichContentLength;
+        var isLocalBizDiscovery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
 
-        if (navigable.Count == 0 && sources.Count > 0)
+        string? articleContent = null;
+
+        if (!toolResultHasRichContent && !isLocalBizDiscovery)
         {
-            // All source URLs are aggregator wrappers. Run a supplementary
-            // search using the best source title to find direct article pages.
-            var bestTitle = sources
-                .OrderByDescending(s => s.Snippet?.Length ?? 0)
-                .First().Title;
+            // Prefer direct article URLs over aggregator wrappers.
+            // If all parsed sources are junk URLs, do a supplementary search
+            // to find actual article pages.
+            var navigable = sources
+                .Where(s => !IsJunkUrl(s.Url))
+                .Take(MaxFollowUpUrls)
+                .ToList();
 
-            if (!string.IsNullOrWhiteSpace(bestTitle))
+            if (navigable.Count == 0 && sources.Count > 0)
             {
-                var suppResult = await CallWebSearchAsync(
-                    bestTitle, "any", toolCallsMade, ct);
+                var bestTitle = sources
+                    .OrderByDescending(s => s.Snippet?.Length ?? 0)
+                    .First().Title;
 
-                if (!string.IsNullOrWhiteSpace(suppResult))
+                if (!string.IsNullOrWhiteSpace(bestTitle))
                 {
-                    var suppSources = ParseSourcesFromToolResult(suppResult);
-                    navigable = suppSources
-                        .Where(s => !IsJunkUrl(s.Url))
-                        .Take(MaxFollowUpUrls)
-                        .ToList();
+                    var suppResult = await CallWebSearchAsync(
+                        bestTitle, "any", toolCallsMade, ct);
 
-                    // Merge supplementary snippets into the summary input
-                    if (navigable.Count > 0)
+                    if (!string.IsNullOrWhiteSpace(suppResult))
                     {
-                        var suppText = StripSourcesJson(suppResult);
-                        if (!string.IsNullOrWhiteSpace(suppText))
-                            toolResult += "\n" + suppText;
+                        var suppSources = ParseSourcesFromToolResult(suppResult);
+                        navigable = suppSources
+                            .Where(s => !IsJunkUrl(s.Url))
+                            .Take(MaxFollowUpUrls)
+                            .ToList();
+
+                        if (navigable.Count > 0)
+                        {
+                            var suppText = StripSourcesJson(suppResult);
+                            if (!string.IsNullOrWhiteSpace(suppText))
+                                toolResult += "\n" + suppText;
+                        }
                     }
                 }
             }
-        }
 
-        var articleContent = await FetchArticleContentAsync(
-            navigable, toolCallsMade, ct);
+            articleContent = await FetchArticleContentAsync(
+                navigable, toolCallsMade, ct);
+        }
+        else
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "search",
+                Action = "SKIP_ARTICLE_FETCH",
+                Result = toolResultHasRichContent ? "rich_content_in_tool_result" : "local_business_discovery",
+                Details = new Dictionary<string, object>
+                {
+                    ["stripped_content_length"] = strippedContent.Length,
+                    ["is_local_biz"] = isLocalBizDiscovery
+                }
+            });
+        }
 
         // ── 6. Summarize ─────────────────────────────────────────────
         var hasArticleContent = !string.IsNullOrWhiteSpace(articleContent);
         var sb = new StringBuilder();
-        sb.AppendLine("[Search results — reference only, do not display to user]");
+        sb.AppendLine("[Web search results — use these facts to answer the user's question]");
         sb.AppendLine(StripSourcesJson(toolResult));
 
         if (hasArticleContent)
         {
             sb.AppendLine();
-            sb.AppendLine("[Full article content — reference only, do not display to user]");
+            sb.AppendLine("[Full article content — use these details to give a thorough answer]");
             sb.AppendLine(articleContent);
         }
 
@@ -498,6 +577,26 @@ public sealed class SearchOrchestrator
     {
         var branch = SearchModeRouter.ClassifyFollowUpBranch(userMessage);
 
+        // When the prior search was a place/business lookup or local
+        // business discovery, redirect "tell me more about X" to the
+        // briefing pipeline so the user gets a structured briefing card.
+        if (branch == FollowUpBranch.DeepDive &&
+            (Session.LastMode == SearchMode.DeepDiveBriefing ||
+             Session.LastWasLocalBusinessDiscovery))
+        {
+            var subject = ExtractFollowUpSubject(userMessage);
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor  = "agent",
+                    Action = "FOLLOWUP_PLACE_BRIEFING_REDIRECT",
+                    Result = subject
+                });
+                return await ExecuteDeepDiveBriefingAsync(subject, toolCallsMade, ct);
+            }
+        }
+
         _audit.Append(new AuditEvent
         {
             Actor  = "agent",
@@ -512,6 +611,44 @@ public sealed class SearchOrchestrator
             _ =>
                 await ExecuteDeepDiveAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
         };
+    }
+
+    /// <summary>
+    /// Strips common follow-up prefixes to isolate the subject the user
+    /// is asking about. "Tell me more about Left Bank Pastry" → "Left Bank Pastry".
+    /// </summary>
+    private static string ExtractFollowUpSubject(string userMessage)
+    {
+        var trimmed = (userMessage ?? "").Trim();
+
+        ReadOnlySpan<string> prefixes =
+        [
+            "tell me more about ",
+            "tell me about ",
+            "more about ",
+            "more on ",
+            "details on ",
+            "details about ",
+            "what about ",
+            "how about ",
+            "info on ",
+            "info about ",
+            "information on ",
+            "information about ",
+            "can you tell me about ",
+            "can you tell me more about ",
+            "show me more about ",
+            "show me about ",
+            "show me "
+        ];
+
+        foreach (var prefix in prefixes)
+        {
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return trimmed[prefix.Length..].TrimEnd('?', '.', '!');
+        }
+
+        return trimmed;
     }
 
     // ── Branch: DeepDive ─────────────────────────────────────────────
@@ -561,7 +698,7 @@ public sealed class SearchOrchestrator
                 userMessage, memoryPackText, history, toolCallsMade, ct);
         }
 
-        var summaryInput = "[Primary article content — reference only, do not display to user]\n" +
+        var summaryInput = "[Primary article content — use these details to give a thorough answer]\n" +
                            content;
 
         return await SummarizeAndRespond(
@@ -634,13 +771,13 @@ public sealed class SearchOrchestrator
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(primaryContent))
         {
-            sb.AppendLine("[Primary article content — reference only, do not display to user]");
+            sb.AppendLine("[Primary article content — use these details to give a thorough answer]");
             sb.AppendLine(primaryContent);
             sb.AppendLine();
         }
         if (!string.IsNullOrWhiteSpace(toolResult))
         {
-            sb.AppendLine("[Related coverage search results — reference only, do not display to user]");
+            sb.AppendLine("[Related coverage — use these additional facts to enrich your answer]");
             sb.AppendLine(StripSourcesJson(toolResult));
         }
 
@@ -792,6 +929,7 @@ public sealed class SearchOrchestrator
         string? originalUserMessage = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
+        effectiveQuery = InjectLocationForLocalBusinessQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoLocalNewsQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoDistanceQuery(effectiveQuery);
         effectiveQuery = InjectUnitPreferenceIntoDistanceQuery(effectiveQuery);
@@ -887,6 +1025,49 @@ public sealed class SearchOrchestrator
             Details = new Dictionary<string, object>
             {
                 ["original"] = query,
+                ["effective"] = result,
+                ["locationHint"] = UserLocationHint.Trim()
+            }
+        });
+
+        return result;
+    }
+
+    /// <summary>
+    /// Safety net for local business queries where the query builder stripped
+    /// the proximity signal. If the original user message has business + proximity
+    /// signals and the constructed query doesn't already contain the user's
+    /// location, append it.
+    /// </summary>
+    private string InjectLocationForLocalBusinessQuery(string query, string? originalUserMessage)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return query;
+        if (string.IsNullOrWhiteSpace(originalUserMessage))
+            return query;
+
+        // Already contains location — nothing to do.
+        if (query.Contains(UserLocationHint, StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        // Already has a proximity signal that InjectLocationIfProximityQuery handled.
+        if (ProximitySignalRegex.IsMatch(query))
+            return query;
+
+        var lowerOriginal = originalUserMessage.Trim().ToLowerInvariant();
+        if (!IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerOriginal))
+            return query;
+
+        var result = $"{query.TrimEnd('?', '.', '!', ',')} near {UserLocationHint.Trim()}";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCATION_INJECTED_FOR_LOCAL_BUSINESS",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["original_query"] = query,
                 ["effective"] = result,
                 ["locationHint"] = UserLocationHint.Trim()
             }
@@ -1165,8 +1346,17 @@ public sealed class SearchOrchestrator
         }
 
         var effectiveInstruction = instruction + BuildGlobalUnitsInstruction(originalRequest);
-        var messages = InjectInstruction(history, effectiveInstruction);
-        messages.Add(ChatMessage.User(summaryInput));
+
+        // Build a minimal message list: system prompt + search instruction
+        // + the current search data. Full conversation history is excluded
+        // to prevent prior Q&A from contaminating the search summary —
+        // small models easily confuse unrelated prior context with the
+        // current search results.
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(_systemPrompt + " " + effectiveInstruction),
+            ChatMessage.User(summaryInput)
+        };
 
         LlmResponse response;
         IReadOnlyList<ChatMessage> requestMessages = messages;
@@ -1663,8 +1853,23 @@ public sealed class SearchOrchestrator
             lower.Contains("restaurant", StringComparison.Ordinal) ||
             lower.Contains("restaurants", StringComparison.Ordinal) ||
             lower.Contains("florist", StringComparison.Ordinal) ||
+            lower.Contains("bakery", StringComparison.Ordinal) ||
+            lower.Contains("bakeries", StringComparison.Ordinal) ||
             lower.Contains("cafe", StringComparison.Ordinal) ||
             lower.Contains("coffee", StringComparison.Ordinal) ||
+            lower.Contains("bar", StringComparison.Ordinal) ||
+            lower.Contains("pub", StringComparison.Ordinal) ||
+            lower.Contains("store", StringComparison.Ordinal) ||
+            lower.Contains("shop", StringComparison.Ordinal) ||
+            lower.Contains("salon", StringComparison.Ordinal) ||
+            lower.Contains("gym", StringComparison.Ordinal) ||
+            lower.Contains("pharmacy", StringComparison.Ordinal) ||
+            lower.Contains("gas station", StringComparison.Ordinal) ||
+            lower.Contains("car wash", StringComparison.Ordinal) ||
+            lower.Contains("laundromat", StringComparison.Ordinal) ||
+            lower.Contains("grocery", StringComparison.Ordinal) ||
+            lower.Contains("dentist", StringComparison.Ordinal) ||
+            lower.Contains("clinic", StringComparison.Ordinal) ||
             lower.Contains("open", StringComparison.Ordinal) ||
             lower.Contains("hours", StringComparison.Ordinal);
     }
