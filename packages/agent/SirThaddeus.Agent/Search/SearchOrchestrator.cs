@@ -115,7 +115,8 @@ public sealed class SearchOrchestrator
         "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
         "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
-        "(e.g. specific line prefixes, headings, structure), follow it exactly.";
+        "(e.g. specific line prefixes, headings, structure), follow it exactly.\n" +
+        "CRITICAL: If the user's premise is factually flawed (e.g. asking for the plot of a cancelled TV season that does not exist), DO NOT summarize irrelevant fallback search results (e.g. results for a different show's season). Instead, state the reality (e.g. the show was cancelled) using your internal knowledge, and summarize any facts about what was planned.";
 
     private const string FactFindSnippetOnlyInstruction =
         "\n\nSearch result snippets are in the next message (no full articles " +
@@ -128,7 +129,8 @@ public sealed class SearchOrchestrator
         "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
         "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
-        "(e.g. specific line prefixes, headings, structure), follow it exactly.";
+        "(e.g. specific line prefixes, headings, structure), follow it exactly.\n" +
+        "CRITICAL: If the user's premise is factually flawed (e.g. asking for the plot of a cancelled TV season that does not exist), DO NOT summarize irrelevant fallback search results (e.g. results for a different show's season). Instead, state the reality (e.g. the show was cancelled) using your internal knowledge, and summarize any facts about what was planned.";
 
     private const string DeepDiveInstruction =
         "\n\nFull article content from a prior source is in the next message. " +

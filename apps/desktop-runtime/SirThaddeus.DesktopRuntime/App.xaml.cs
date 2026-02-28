@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Context;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -467,6 +468,23 @@ public partial class App : System.Windows.Application
             "SirThaddeus");
         _chatHistoryPersistence = new Services.ChatHistoryPersistence(chatDataDir, _auditLogger);
 
+        IAutoMemoryExtractor? autoMemoryExtractor = null;
+        if (_settings.Memory.Enabled)
+        {
+            var memDbPath = ResolveMemoryDbPath(_settings);
+            var memStore = new SqliteMemoryStore(memDbPath);
+            autoMemoryExtractor = new AutoMemoryExtractor(
+                _llmClient,
+                memStore,
+                log: (action, message) => _auditLogger?.Append(new AuditEvent
+                {
+                    Actor = "auto_memory",
+                    Action = action,
+                    Result = "info",
+                    Details = new Dictionary<string, object> { ["message"] = message }
+                }));
+        }
+
         _orchestrator = new AgentOrchestrator(
             _llmClient,
             _auditedMcpClient,
@@ -475,7 +493,8 @@ public partial class App : System.Windows.Application
             geocodeMismatchMode: _settings.Dialogue.GeocodeMismatchMode,
             activePersonalityId: _settings.ActivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings),
-            footmanRouter: _footmanRouter);
+            footmanRouter: _footmanRouter,
+            autoMemoryExtractor: autoMemoryExtractor);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.

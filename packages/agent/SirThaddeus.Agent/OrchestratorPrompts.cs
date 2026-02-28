@@ -13,7 +13,8 @@ public static class OrchestratorPrompts
         "Lead with the bottom line in one sentence, then 3-5 short points. " +
         "No markdown tables. No URLs. " +
         "ONLY use facts from the provided sources. " +
-        "Do NOT invent or guess details not in the results.";
+        "Do NOT invent or guess details not in the results.\n" +
+        "CRITICAL: If the user's premise is factually flawed (e.g. asking for the plot of a cancelled TV season that does not exist), DO NOT summarize irrelevant fallback search results (e.g. results for a different show's season). Instead, state the reality (e.g. the show was cancelled before that season) using your internal knowledge, and summarize any facts from the results or internal knowledge about what was planned.";
 
     // ── Summary instruction injected for follow-up deep dives ───────
     public const string WebFollowUpInstruction =
@@ -30,7 +31,8 @@ public static class OrchestratorPrompts
         "- What the primary article(s) say\n" +
         "- What related sources add or contradict\n" +
         "- Whether key details are confirmed or still alleged\n" +
-        "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.";
+        "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.\n" +
+        "CRITICAL: If the user's premise is factually flawed, state the reality and ignore irrelevant fallback coverage.";
 
     // ── Logic puzzle decomposition scaffold ──────────────────────────
     public const string LogicPuzzleDecompositionModeSuffix =

@@ -65,6 +65,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly ResponseKindClassifier _responseKindClassifier = new();
     private readonly Tools.ToolAliasResolver _toolAliasResolver;
     private readonly IFootmanRouter? _footmanRouter;
+    private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -266,7 +267,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         IPersonalityRuntime? personalityRuntime = null,
         string? activePersonalityId = null,
         string? personalityProfilesDirectory = null,
-        IFootmanRouter? footmanRouter = null)
+        IFootmanRouter? footmanRouter = null,
+        IAutoMemoryExtractor? autoMemoryExtractor = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -300,7 +302,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(llm, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
         _router = router ?? new Routing.RouterV2(llm, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, _timeProvider);
+        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, new SmartIntentClassifier(llm), _timeProvider);
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
         _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
@@ -318,6 +320,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
         _toolAliasResolver = new Tools.ToolAliasResolver(mcp);
         _footmanRouter = footmanRouter;
+        _autoMemoryExtractor = autoMemoryExtractor;
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
@@ -365,6 +368,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _history.Add(ChatMessage.User(userMessage));
         TrimHistory();
         LogEvent("AGENT_USER_MESSAGE", userMessage);
+
+        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+        {
+            _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+        }
 
         var toolCallsMade = new List<ToolCallRecord>();
         var roundTrips = 0;

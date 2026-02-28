@@ -22,6 +22,7 @@ public enum RelevanceDecision { Allow, AllowSilent, Block }
 public sealed record MemoryFact
 {
     public required string MemoryId   { get; init; }
+    public string          Id         => MemoryId;
 
     /// <summary>
     /// Optional link to the profile_cards row that owns this fact.
@@ -37,7 +38,19 @@ public sealed record MemoryFact
     public required string Object     { get; init; }
 
     public double          Confidence  { get; init; } = 1.0;
+    public double          Weight      { get; init; } = 0.65;
     public Sensitivity     Sensitivity { get; init; } = Sensitivity.Public;
+    
+    // Metadata / Safety Contracts
+    public string?         SourceTurnId { get; init; }
+    public string?         SourceHash   { get; init; }
+    public string?         DedupeKey    { get; init; }
+    public string?         Origin       { get; init; }
+    
+    public float[]?        Embedding    { get; init; }
+    public string?         EmbeddingModel{ get; init; }
+    public int?            EmbeddingDims{ get; init; }
+    
     public DateTimeOffset  CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset  UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
     public string?         SourceRef   { get; init; }
@@ -49,6 +62,7 @@ public sealed record MemoryFact
 public sealed record MemoryEvent
 {
     public required string  EventId     { get; init; }
+    public string           Id          => EventId;
 
     /// <summary>
     /// Optional link to the profile_cards row that owns this event.
@@ -61,7 +75,21 @@ public sealed record MemoryEvent
     public string?          Summary     { get; init; }
     public DateTimeOffset?  WhenIso     { get; init; }
     public double           Confidence  { get; init; } = 1.0;
+    public double           Weight      { get; init; } = 0.65;
     public Sensitivity      Sensitivity { get; init; } = Sensitivity.Public;
+    
+    // Metadata / Safety Contracts
+    public string?          SourceTurnId { get; init; }
+    public string?          SourceHash   { get; init; }
+    public string?          DedupeKey    { get; init; }
+    public string?          Origin       { get; init; }
+    
+    public float[]?         Embedding    { get; init; }
+    public string?          EmbeddingModel{ get; init; }
+    public int?             EmbeddingDims{ get; init; }
+    
+    public DateTimeOffset   CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset   UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
     public string?          SourceRef   { get; init; }
 }
 
@@ -78,6 +106,8 @@ public sealed record MemoryChunk
     public DateTimeOffset?  WhenIso     { get; init; }
     public Sensitivity      Sensitivity { get; init; } = Sensitivity.Public;
     public float[]?         Embedding   { get; init; }
+    public string?          EmbeddingModel{ get; init; }
+    public int?             EmbeddingDims{ get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -118,14 +148,29 @@ public sealed record ProfileCard
 public sealed record MemoryNugget
 {
     public required string  NuggetId    { get; init; }
+    public string           Id          => NuggetId;
+    
     public required string  Text        { get; init; }
     public string?          Tags        { get; init; }     // ;identity;preference;
     public double           Weight      { get; init; } = 0.65;
     public int              PinLevel    { get; init; }     // 0=normal, 1=pinned, 2=system
     public string           Sensitivity { get; init; } = "low";  // low|med|high
+    
+    // Metadata / Safety Contracts
+    public string?          SourceTurnId { get; init; }
+    public string?          SourceHash   { get; init; }
+    public string?          DedupeKey    { get; init; }
+    public string?          Origin       { get; init; }
+    public string?          ChunkCitation{ get; init; }
+
+    public float[]?         Embedding    { get; init; }
+    public string?          EmbeddingModel{ get; init; }
+    public int?             EmbeddingDims{ get; init; }
+
     public int              UseCount    { get; init; }
     public DateTimeOffset?  LastUsedAt  { get; init; }
     public DateTimeOffset   CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset   UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -206,7 +251,7 @@ public sealed record RetrievalContext
 /// A candidate returned from the data store with its raw lexical/BM25 score.
 /// The retrieval engine computes the final composite score from this.
 /// </summary>
-public sealed record StoreCandidate<T>(T Item, double LexicalScore);
+public sealed record StoreCandidate<T>(T Item, double LexicalScore, double SimilarityScore = 0.0);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared Parsing Utilities

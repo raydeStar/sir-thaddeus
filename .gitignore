@@ -99,3 +99,17 @@ apps/voice-backend/data/youtube/
 .cursor/rules/oss-comments.mdc
 apps/voice-backend/output.log
 apps/voice-backend/output_utf8.log
+
+# WPF temp project files (generated during hot-reload builds)
+*_wpftmp.csproj
+
+# Loose build logs at repo root
+build.txt
+build.log
+build_errors*.txt
+desktop_build.txt
+full_build.txt
+msbuild.log
+
+# Scratch / temp directory
+tmp/

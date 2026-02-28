@@ -40,19 +40,19 @@ public sealed class MemoryRetriever
         // ── Step 0: Classify intent ──────────────────────────────────
         var intent = IntentClassifier.Classify(query);
 
-        // ── Step 1: Retrieve candidates ──────────────────────────────
-        // Fetch more than we inject so the gate has room to filter.
-        var factCandidates  = await _store.SearchFactsAsync(
-            query, Thresholds.FactsInject * 3, ct);
-        var eventCandidates = await _store.SearchEventsAsync(
-            query, Thresholds.EventsInject * 3, ct);
-        var chunkCandidates = await _store.SearchChunksAsync(
-            query, Thresholds.ChunksRetrieve, ct);
-
         // ── Optional: embed query for semantic reranking ─────────────
         float[]? queryEmbedding = null;
         if (_embeddings is not null)
             queryEmbedding = await _embeddings.EmbedAsync(query, ct);
+
+        // ── Step 1: Retrieve candidates ──────────────────────────────
+        // Fetch more than we inject so the gate has room to filter.
+        var factCandidates  = await _store.SearchFactsAsync(
+            query, queryEmbedding, Thresholds.FactsInject * 3, ct);
+        var eventCandidates = await _store.SearchEventsAsync(
+            query, queryEmbedding, Thresholds.EventsInject * 3, ct);
+        var chunkCandidates = await _store.SearchChunksAsync(
+            query, queryEmbedding, Thresholds.ChunksRetrieve, ct);
 
         // ── Step 1.5: Score all candidates ───────────────────────────
         var scoredFacts  = ScoreFacts(factCandidates, intent);
