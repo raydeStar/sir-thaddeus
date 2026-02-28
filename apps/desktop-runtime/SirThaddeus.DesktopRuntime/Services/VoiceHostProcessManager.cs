@@ -314,10 +314,9 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             }
 
             // First-run voice setup can require large artifact downloads
-            // (e.g., Kokoro + faster-whisper), so keep a generous minimum
-            // startup window to avoid process restart thrash on fresh machines.
-            var startupTimeout = TimeSpan.FromMilliseconds(
-                Math.Max(300_000, settings.VoiceHostStartupTimeoutMs));
+            // (e.g., Kokoro + faster-whisper). In production, VoiceHostStartupTimeoutMs
+            // should be configured generously to avoid process restart thrash on fresh machines.
+            var startupTimeout = TimeSpan.FromMilliseconds(settings.VoiceHostStartupTimeoutMs);
             var deadline = _timeProvider.GetUtcNow() + startupTimeout;
             var lastHealth = preferredHealth;
             var lastStartError = "";
