@@ -195,7 +195,7 @@ public sealed class CompletionCheckerTests
         };
 
         var report = _checker.Check(
-            contract, 
+            contract,
             [Ok("web_search", """{"url": "https://nyt.com/article"}""")],
             assistantText: "According to the New York Times, the event was held on Friday.");
 

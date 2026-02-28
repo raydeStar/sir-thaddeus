@@ -26,7 +26,7 @@ public static class TimeTools
     public static string TimeNow()
     {
         var now = DateTimeOffset.Now;
-        var tz  = TimeZoneInfo.Local.Id;
+        var tz = TimeZoneInfo.Local.Id;
         return TimeHelper.BuildTimePayload(now, tz);
     }
 }

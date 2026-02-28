@@ -72,17 +72,17 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
                 .Take(options.MaxResults)
                 .Select(r => new SearchResult
                 {
-                    Title   = r.Title ?? "(untitled)",
-                    Url     = r.Url ?? "",
+                    Title = r.Title ?? "(untitled)",
+                    Url = r.Url ?? "",
                     Snippet = r.Content ?? "",
-                    Source  = ExtractDomain(r.Url)
+                    Source = ExtractDomain(r.Url)
                 })
                 .Where(r => !string.IsNullOrEmpty(r.Url))
                 .ToList();
 
             return new SearchResults
             {
-                Results  = results,
+                Results = results,
                 Provider = Name
             };
         }
@@ -122,10 +122,10 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
     /// </summary>
     private static string? MapRecencyToSearxng(string recency) => recency switch
     {
-        "day"   => "day",
-        "week"  => "week",
+        "day" => "day",
+        "week" => "week",
         "month" => "month",
-        _       => null
+        _ => null
     };
 
     private static string ExtractDomain(string? url)
@@ -148,8 +148,8 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
 
     private sealed record SearxngResult
     {
-        public string? Title   { get; init; }
-        public string? Url     { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
         public string? Content { get; init; }
     }
 }

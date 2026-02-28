@@ -155,7 +155,7 @@ public static class ToolManifest
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        WriteIndented       = true,
+        WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };

@@ -33,16 +33,16 @@ public sealed class OpenAiEmbeddingClient : IEmbeddingClient, IDisposable
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        PropertyNamingPolicy   = JsonNamingPolicy.CamelCase,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true
     };
 
     public OpenAiEmbeddingClient(
         string baseUrl, string model, HttpClient? httpClient = null)
     {
-        _model      = model ?? "local-model";
+        _model = model ?? "local-model";
         _ownsClient = httpClient is null;
-        _http       = httpClient ?? new HttpClient();
+        _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(baseUrl.TrimEnd('/'));
         _http.Timeout = RequestTimeout;
     }
@@ -91,7 +91,7 @@ public sealed class OpenAiEmbeddingClient : IEmbeddingClient, IDisposable
                 embeddingEl.ValueKind != JsonValueKind.Array)
                 return null;
 
-            var length    = embeddingEl.GetArrayLength();
+            var length = embeddingEl.GetArrayLength();
             var embedding = new float[length];
 
             for (var i = 0; i < length; i++)

@@ -21,7 +21,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
     public JsonLineAuditLogger(string filePath)
     {
         _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
-        
+
         // Ensure the directory exists
         var directory = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -58,7 +58,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
 
         var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
         var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
-        
+
         lock (_writeLock)
         {
             File.AppendAllText(_filePath, json + Environment.NewLine, Encoding.UTF8);
@@ -73,7 +73,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
 
         var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
         var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
-        
+
         // Use a semaphore for async locking in a production scenario;
         // for V0, we'll just await the sync write on a background thread
         await Task.Run(() =>
@@ -89,7 +89,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
     public IReadOnlyList<AuditEvent> ReadTail(int maxEvents)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         if (maxEvents <= 0)
             return [];
 
@@ -131,11 +131,11 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<AuditEvent>> ReadTailAsync(
-        int maxEvents, 
+        int maxEvents,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         return await Task.Run(() => ReadTail(maxEvents), cancellationToken);
     }
 

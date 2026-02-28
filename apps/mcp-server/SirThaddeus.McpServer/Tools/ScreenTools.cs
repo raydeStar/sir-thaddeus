@@ -32,7 +32,7 @@ namespace SirThaddeus.McpServer.Tools;
 [McpServerToolType]
 public static class ScreenTools
 {
-    private const int MaxOcrChars  = 8_000;
+    private const int MaxOcrChars = 8_000;
     private const int MaxPageChars = 6_000;
 
     private static readonly HashSet<string> BrowserProcessNames = new(StringComparer.OrdinalIgnoreCase)

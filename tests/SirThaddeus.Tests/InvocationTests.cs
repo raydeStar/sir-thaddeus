@@ -20,9 +20,9 @@ public class InvocationTests
     public void Plan_OpenUrl_ParsesCorrectly()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("open https://example.com");
-        
+
         Assert.True(result.Success);
         Assert.NotNull(result.Plan);
         Assert.Single(result.Plan.Steps);
@@ -35,9 +35,9 @@ public class InvocationTests
     public void Plan_OpenUrl_AddsHttpsPrefix()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("open example.com");
-        
+
         Assert.True(result.Success);
         Assert.Equal("https://example.com/", result.Plan!.Steps[0].Arguments?["url"]?.ToString());
     }
@@ -46,9 +46,9 @@ public class InvocationTests
     public void Plan_OpenUrl_InvalidUrl_ReturnsFail()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("open not a valid url ::: broken");
-        
+
         Assert.False(result.Success);
         Assert.Contains("Invalid URL", result.Error);
     }
@@ -57,9 +57,9 @@ public class InvocationTests
     public void Plan_SpecNew_ReturnsTemplate()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("spec new");
-        
+
         Assert.True(result.Success);
         Assert.NotNull(result.DirectOutput);
         Assert.Contains("version", result.DirectOutput);
@@ -71,9 +71,9 @@ public class InvocationTests
     public void Plan_CaptureScreen_CreatesToolCall()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("capture screen");
-        
+
         Assert.True(result.Success);
         Assert.NotNull(result.Plan);
         Assert.Single(result.Plan.Steps);
@@ -85,9 +85,9 @@ public class InvocationTests
     public void Plan_UnknownCommand_ReturnsFail()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("unknown command here");
-        
+
         Assert.False(result.Success);
         Assert.Contains("Unknown command", result.Error);
     }
@@ -96,9 +96,9 @@ public class InvocationTests
     public void Plan_EmptyCommand_ReturnsFail()
     {
         var planner = new CommandPlanner();
-        
+
         var result = planner.Plan("   ");
-        
+
         Assert.False(result.Success);
         Assert.Contains("No command", result.Error);
     }
@@ -115,7 +115,7 @@ public class InvocationTests
         var broker = new InMemoryPermissionBroker(auditLogger);
         var runner = new EnforcingToolRunner(broker, auditLogger);
         runner.RegisterTool(new ScreenCaptureTool());
-        
+
         var host = new TestToolExecutionHost();
         var prompter = new AutoApprovePrompter();
         var executor = new ToolPlanExecutor(broker, runner, prompter, host);
@@ -147,7 +147,7 @@ public class InvocationTests
         var broker = new InMemoryPermissionBroker(auditLogger);
         var runner = new EnforcingToolRunner(broker, auditLogger);
         runner.RegisterTool(new ScreenCaptureTool());
-        
+
         var host = new TestToolExecutionHost();
         var prompter = new AutoDenyPrompter("User said no");
         var executor = new ToolPlanExecutor(broker, runner, prompter, host);
@@ -180,7 +180,7 @@ public class InvocationTests
         var broker = new InMemoryPermissionBroker(auditLogger);
         var runner = new EnforcingToolRunner(broker, auditLogger);
         runner.RegisterTool(new ScreenCaptureTool());
-        
+
         var host = new TestToolExecutionHost();
         var prompter = new AutoDenyPrompter("Privacy concern");
         var executor = new ToolPlanExecutor(broker, runner, prompter, host);
@@ -212,7 +212,7 @@ public class InvocationTests
         var broker = new InMemoryPermissionBroker(auditLogger);
         var runner = new EnforcingToolRunner(broker, auditLogger);
         runner.RegisterTool(new ScreenCaptureTool());
-        
+
         var host = new TestToolExecutionHost();
         var prompter = new AutoApprovePrompter();
         var executor = new ToolPlanExecutor(broker, runner, prompter, host);
@@ -391,10 +391,10 @@ public class InvocationTests
     private sealed class TestToolExecutionHost : IToolExecutionHost
     {
         private readonly CancellationTokenSource _cts = new();
-        
+
         public AssistantState CurrentState { get; private set; } = AssistantState.Idle;
         public CancellationToken RuntimeToken => _cts.Token;
-        
+
         public bool SetState(AssistantState state, string? reason = null)
         {
             CurrentState = state;

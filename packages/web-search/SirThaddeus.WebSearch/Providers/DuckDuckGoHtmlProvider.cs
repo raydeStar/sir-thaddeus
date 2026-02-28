@@ -68,7 +68,7 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
             return new SearchResults
             {
-                Results  = results,
+                Results = results,
                 Provider = Name
             };
         }
@@ -191,8 +191,8 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
                 continue;
 
             var title = CleanText(titleNode.InnerText);
-            var href  = titleNode.GetAttributeValue("href", "");
-            var url   = ResolveUrl(href);
+            var href = titleNode.GetAttributeValue("href", "");
+            var url = ResolveUrl(href);
             if (string.IsNullOrEmpty(url))
                 continue;
 
@@ -206,10 +206,10 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
             results.Add(new SearchResult
             {
-                Title   = title,
-                Url     = url,
+                Title = title,
+                Url = url,
                 Snippet = snippet,
-                Source  = ExtractDomain(url)
+                Source = ExtractDomain(url)
             });
         }
 
@@ -240,7 +240,7 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
                 break;
 
             var href = anchor.GetAttributeValue("href", "");
-            var url  = ResolveUrl(href);
+            var url = ResolveUrl(href);
             if (string.IsNullOrEmpty(url) || !seen.Add(url))
                 continue;
 
@@ -261,10 +261,10 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
             results.Add(new SearchResult
             {
-                Title   = title,
-                Url     = url,
+                Title = title,
+                Url = url,
                 Snippet = snippet,
-                Source  = ExtractDomain(url)
+                Source = ExtractDomain(url)
             });
         }
 
@@ -342,10 +342,10 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
     /// </summary>
     private static string? MapRecencyToDdg(string recency) => recency switch
     {
-        "day"   => "d",
-        "week"  => "w",
+        "day" => "d",
+        "week" => "w",
         "month" => "m",
-        _       => null
+        _ => null
     };
 
     public void Dispose()

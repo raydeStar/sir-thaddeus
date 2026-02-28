@@ -34,7 +34,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 {
     private const string DefaultKokoroVoiceId = "bm_lewis";
     private const string DefaultPiperVoiceId = "en_US-john-medium";
-    private readonly IAuditLogger    _audit;
+    private readonly IAuditLogger _audit;
     private readonly SqliteMemoryStore? _store;
     private readonly YouTubeJobsHttpClient _youtubeJobsClient;
     private readonly VoiceHostProcessManager? _voiceHostProcessManager;
@@ -44,35 +44,35 @@ public sealed partial class SettingsViewModel : ViewModelBase
     // ─── Backing fields ──────────────────────────────────────────────
 
     // LLM
-    private string _llmBaseUrl     = "";
-    private string _llmModel       = "";
+    private string _llmBaseUrl = "";
+    private string _llmModel = "";
     private string _gatekeeperBaseUrl = "";
     private string _gatekeeperModelId = "qwen2.5-1.5b-instruct";
-    private int    _llmMaxTokens   = 2048;
+    private int _llmMaxTokens = 2048;
     private double _llmTemperature = 0.7;
-    private bool   _isRefreshingModels;
+    private bool _isRefreshingModels;
     private ProviderPreset? _selectedPrimaryProvider;
     private ProviderPreset? _selectedGatekeeperProvider;
     private bool _llmsTabHasBeenOpened;
 
     // Audio
-    private bool   _ttsEnabled   = true;
-    private string _pttKey       = "F13";
-    private string _pttChord     = "Ctrl+Alt+M";
-    private string _shutupChord  = "Ctrl+Alt+Escape";
-    private bool   _voiceHostEnabled = true;
+    private bool _ttsEnabled = true;
+    private string _pttKey = "F13";
+    private string _pttChord = "Ctrl+Alt+M";
+    private string _shutupChord = "Ctrl+Alt+Escape";
+    private bool _voiceHostEnabled = true;
     private string _voiceHostBaseUrl = "http://127.0.0.1:17845";
-    private int    _voiceHostStartupTimeoutMs = 300_000;
+    private int _voiceHostStartupTimeoutMs = 300_000;
     private string _voiceHostHealthPath = "/health";
     private string _voiceTtsEngine = "piper";
     private string _voiceTtsModelId = "";
     private string _voiceTtsVoiceId = "en_US-john-medium";
     private string _voiceSttEngine = "faster-whisper";
     private string _voiceSttModelId = "base";
-    private bool   _voicePreferLocalTts = true;
-    private int    _voiceAsrTimeoutMs = 45000;
-    private int    _voiceAgentTimeoutMs = 90000;
-    private int    _voiceSpeakingTimeoutMs = 90000;
+    private bool _voicePreferLocalTts = true;
+    private int _voiceAsrTimeoutMs = 45000;
+    private int _voiceAgentTimeoutMs = 90000;
+    private int _voiceSpeakingTimeoutMs = 90000;
     private string _youtubeAsrProvider = "faster-whisper";
     private string _youtubeAsrModelId = "base";
     private string _youtubeLanguageHint = "en-us";
@@ -91,19 +91,19 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private CancellationTokenSource? _youtubeJobPollCts;
 
     // VoiceHost health panel
-    private string _voiceHostStatusText   = "Unknown";
-    private bool   _voiceHostIsReachable;
-    private bool   _voiceHostIsReady;
-    private bool   _voiceHostAsrReady;
-    private bool   _voiceHostTtsReady;
-    private string _voiceHostVersion      = "";
-    private string _voiceHostMessage      = "";
-    private bool   _voiceHostIsBusy;
+    private string _voiceHostStatusText = "Unknown";
+    private bool _voiceHostIsReachable;
+    private bool _voiceHostIsReady;
+    private bool _voiceHostAsrReady;
+    private bool _voiceHostTtsReady;
+    private string _voiceHostVersion = "";
+    private string _voiceHostMessage = "";
+    private bool _voiceHostIsBusy;
     private CancellationTokenSource? _voiceHostHealthPollCts;
 
     // Memory
-    private bool   _memoryEnabled     = true;
-    private bool   _embeddingsEnabled = true;
+    private bool _memoryEnabled = true;
+    private bool _embeddingsEnabled = true;
 
     // Runtime safety + tool budgets
     private bool _runtimePanicMode;
@@ -120,12 +120,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // MCP Permissions
     private string _mcpPermDeveloperOverride = "none";
-    private string _mcpPermScreen            = "ask";
-    private string _mcpPermFiles             = "ask";
-    private string _mcpPermSystem            = "ask";
-    private string _mcpPermWeb               = "ask";
-    private string _mcpPermMemoryRead        = "always";
-    private string _mcpPermMemoryWrite       = "ask";
+    private string _mcpPermScreen = "ask";
+    private string _mcpPermFiles = "ask";
+    private string _mcpPermSystem = "ask";
+    private string _mcpPermWeb = "ask";
+    private string _mcpPermMemoryRead = "always";
+    private string _mcpPermMemoryWrite = "ask";
 
     // Weather
     private string _weatherUserAgent =
@@ -143,12 +143,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // Mic Test
     private readonly object _testGate = new();
-    private WaveInEvent?    _testWaveIn;
-    private MemoryStream?   _testPcmBuffer;
-    private byte[]?         _testRecordingBytes;
-    private double          _micTestLevel;
-    private bool            _isTestingMic;
-    private string          _micTestStatus = "";
+    private WaveInEvent? _testWaveIn;
+    private MemoryStream? _testPcmBuffer;
+    private byte[]? _testRecordingBytes;
+    private double _micTestLevel;
+    private bool _isTestingMic;
+    private string _micTestStatus = "";
     private CancellationTokenSource? _testTimerCts;
 
     // Profile
@@ -156,21 +156,21 @@ public sealed partial class SettingsViewModel : ViewModelBase
     private PersonalityOption? _selectedPersonality;
     private string _personalityProfilesDirectory = "";
     private bool _suppressPersonalitySelectionSave;
-    private string         _statusText = "";
-    private bool            _isSaveSuccess;
+    private string _statusText = "";
+    private bool _isSaveSuccess;
     private System.Threading.Timer? _saveSuccessTimer;
     private readonly PersonalityProfileStore _personalityStore = new();
 
     // ─── Public Properties ───────────────────────────────────────────
 
     // LLM
-    public string LlmBaseUrl     { get => _llmBaseUrl;     set { if (SetProperty(ref _llmBaseUrl, value))     MarkDirty(); } }
-    public string LlmModel       { get => _llmModel;       set { if (SetProperty(ref _llmModel, value))       MarkDirty(); } }
+    public string LlmBaseUrl { get => _llmBaseUrl; set { if (SetProperty(ref _llmBaseUrl, value)) MarkDirty(); } }
+    public string LlmModel { get => _llmModel; set { if (SetProperty(ref _llmModel, value)) MarkDirty(); } }
     public string GatekeeperBaseUrl { get => _gatekeeperBaseUrl; set { if (SetProperty(ref _gatekeeperBaseUrl, value)) MarkDirty(); } }
     public string GatekeeperModelId { get => _gatekeeperModelId; set { if (SetProperty(ref _gatekeeperModelId, value)) MarkDirty(); } }
-    public int    LlmMaxTokens   { get => _llmMaxTokens;   set { if (SetProperty(ref _llmMaxTokens, value))   MarkDirty(); } }
+    public int LlmMaxTokens { get => _llmMaxTokens; set { if (SetProperty(ref _llmMaxTokens, value)) MarkDirty(); } }
     public double LlmTemperature { get => _llmTemperature; set { if (SetProperty(ref _llmTemperature, value)) MarkDirty(); } }
-    public bool   IsRefreshingModels { get => _isRefreshingModels; private set => SetProperty(ref _isRefreshingModels, value); }
+    public bool IsRefreshingModels { get => _isRefreshingModels; private set => SetProperty(ref _isRefreshingModels, value); }
 
     /// <summary>
     /// Well-known local LLM provider presets.
@@ -226,10 +226,10 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public ObservableCollection<string> AvailableGatekeeperModels { get; } = new();
 
     // Audio
-    public bool   TtsEnabled     { get => _ttsEnabled;     set { if (SetProperty(ref _ttsEnabled, value))     MarkDirty(); } }
-    public string PttKey         { get => _pttKey;          set { if (SetProperty(ref _pttKey, value))         MarkDirty(); } }
-    public string PttChord       { get => _pttChord;        set { if (SetProperty(ref _pttChord, value))       MarkDirty(); } }
-    public string ShutupChord    { get => _shutupChord;     set { if (SetProperty(ref _shutupChord, value))    MarkDirty(); } }
+    public bool TtsEnabled { get => _ttsEnabled; set { if (SetProperty(ref _ttsEnabled, value)) MarkDirty(); } }
+    public string PttKey { get => _pttKey; set { if (SetProperty(ref _pttKey, value)) MarkDirty(); } }
+    public string PttChord { get => _pttChord; set { if (SetProperty(ref _pttChord, value)) MarkDirty(); } }
+    public string ShutupChord { get => _shutupChord; set { if (SetProperty(ref _shutupChord, value)) MarkDirty(); } }
     public bool VoiceHostEnabled
     {
         get => _voiceHostEnabled;
@@ -257,18 +257,18 @@ public sealed partial class SettingsViewModel : ViewModelBase
         ? "Select an en_US voice for Piper TTS. Selecting a voice marked (download) will fetch it automatically (~60 MB)."
         : "Windows will use the default system speech synthesizer. No additional voice configuration is needed.";
     public string VoiceTtsModelId { get => _voiceTtsModelId; set { if (SetProperty(ref _voiceTtsModelId, value)) MarkDirty(); } }
-    public string VoiceTtsVoiceId 
-    { 
-        get => _voiceTtsVoiceId; 
-        set 
-        { 
-            if (SetProperty(ref _voiceTtsVoiceId, value)) 
-            { 
-                MarkDirty(); 
-                OnPropertyChanged(nameof(SelectedKokoroVoice)); 
-                OnPropertyChanged(nameof(SelectedPiperVoice)); 
-            } 
-        } 
+    public string VoiceTtsVoiceId
+    {
+        get => _voiceTtsVoiceId;
+        set
+        {
+            if (SetProperty(ref _voiceTtsVoiceId, value))
+            {
+                MarkDirty();
+                OnPropertyChanged(nameof(SelectedKokoroVoice));
+                OnPropertyChanged(nameof(SelectedPiperVoice));
+            }
+        }
     }
     public string VoiceSttEngine { get => _voiceSttEngine; set { if (SetProperty(ref _voiceSttEngine, value)) MarkDirty(); } }
     public string VoiceSttModelId { get => _voiceSttModelId; set { if (SetProperty(ref _voiceSttModelId, value)) MarkDirty(); } }
@@ -301,14 +301,14 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public string YouTubeErrorMessage { get => _youtubeErrorMessage; private set => SetProperty(ref _youtubeErrorMessage, value); }
 
     // ─── VoiceHost Health ───────────────────────────────────────────
-    public string VoiceHostStatusText  { get => _voiceHostStatusText;  private set => SetProperty(ref _voiceHostStatusText, value); }
-    public bool   VoiceHostIsReachable { get => _voiceHostIsReachable; private set => SetProperty(ref _voiceHostIsReachable, value); }
-    public bool   VoiceHostIsReady     { get => _voiceHostIsReady;     private set => SetProperty(ref _voiceHostIsReady, value); }
-    public bool   VoiceHostAsrReady    { get => _voiceHostAsrReady;    private set => SetProperty(ref _voiceHostAsrReady, value); }
-    public bool   VoiceHostTtsReady    { get => _voiceHostTtsReady;    private set => SetProperty(ref _voiceHostTtsReady, value); }
-    public string VoiceHostVersion     { get => _voiceHostVersion;     private set => SetProperty(ref _voiceHostVersion, value); }
-    public string VoiceHostMessage     { get => _voiceHostMessage;     private set => SetProperty(ref _voiceHostMessage, value); }
-    public bool   VoiceHostIsBusy      { get => _voiceHostIsBusy;      private set { if (SetProperty(ref _voiceHostIsBusy, value)) CommandManager.InvalidateRequerySuggested(); } }
+    public string VoiceHostStatusText { get => _voiceHostStatusText; private set => SetProperty(ref _voiceHostStatusText, value); }
+    public bool VoiceHostIsReachable { get => _voiceHostIsReachable; private set => SetProperty(ref _voiceHostIsReachable, value); }
+    public bool VoiceHostIsReady { get => _voiceHostIsReady; private set => SetProperty(ref _voiceHostIsReady, value); }
+    public bool VoiceHostAsrReady { get => _voiceHostAsrReady; private set => SetProperty(ref _voiceHostAsrReady, value); }
+    public bool VoiceHostTtsReady { get => _voiceHostTtsReady; private set => SetProperty(ref _voiceHostTtsReady, value); }
+    public string VoiceHostVersion { get => _voiceHostVersion; private set => SetProperty(ref _voiceHostVersion, value); }
+    public string VoiceHostMessage { get => _voiceHostMessage; private set => SetProperty(ref _voiceHostMessage, value); }
+    public bool VoiceHostIsBusy { get => _voiceHostIsBusy; private set { if (SetProperty(ref _voiceHostIsBusy, value)) CommandManager.InvalidateRequerySuggested(); } }
 
     // Memory
     public bool MemoryEnabled
@@ -325,7 +325,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
             }
         }
     }
-    public bool   EmbeddingsEnabled { get => _embeddingsEnabled; set { if (SetProperty(ref _embeddingsEnabled, value)) MarkDirty(); } }
+    public bool EmbeddingsEnabled { get => _embeddingsEnabled; set { if (SetProperty(ref _embeddingsEnabled, value)) MarkDirty(); } }
 
     // Runtime safety + tool budgets
     public bool RuntimePanicMode { get => _runtimePanicMode; set { if (SetProperty(ref _runtimePanicMode, value)) MarkDirty(); } }
@@ -342,24 +342,24 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // MCP Permissions
     public string McpPermDeveloperOverride { get => _mcpPermDeveloperOverride; set { if (SetProperty(ref _mcpPermDeveloperOverride, value)) MarkDirty(); } }
-    public string McpPermScreen            { get => _mcpPermScreen;            set { if (SetProperty(ref _mcpPermScreen, value))            MarkDirty(); } }
-    public string McpPermFiles             { get => _mcpPermFiles;             set { if (SetProperty(ref _mcpPermFiles, value))             MarkDirty(); } }
-    public string McpPermSystem            { get => _mcpPermSystem;            set { if (SetProperty(ref _mcpPermSystem, value))            MarkDirty(); } }
-    public string McpPermWeb               { get => _mcpPermWeb;               set { if (SetProperty(ref _mcpPermWeb, value))               MarkDirty(); } }
-    public string McpPermMemoryRead        { get => _mcpPermMemoryRead;        set { if (SetProperty(ref _mcpPermMemoryRead, value))        MarkDirty(); } }
-    public string McpPermMemoryWrite       { get => _mcpPermMemoryWrite;       set { if (SetProperty(ref _mcpPermMemoryWrite, value))       MarkDirty(); } }
+    public string McpPermScreen { get => _mcpPermScreen; set { if (SetProperty(ref _mcpPermScreen, value)) MarkDirty(); } }
+    public string McpPermFiles { get => _mcpPermFiles; set { if (SetProperty(ref _mcpPermFiles, value)) MarkDirty(); } }
+    public string McpPermSystem { get => _mcpPermSystem; set { if (SetProperty(ref _mcpPermSystem, value)) MarkDirty(); } }
+    public string McpPermWeb { get => _mcpPermWeb; set { if (SetProperty(ref _mcpPermWeb, value)) MarkDirty(); } }
+    public string McpPermMemoryRead { get => _mcpPermMemoryRead; set { if (SetProperty(ref _mcpPermMemoryRead, value)) MarkDirty(); } }
+    public string McpPermMemoryWrite { get => _mcpPermMemoryWrite; set { if (SetProperty(ref _mcpPermMemoryWrite, value)) MarkDirty(); } }
 
     // Weather
-    public string WeatherUserAgent         { get => _weatherUserAgent;         set { if (SetProperty(ref _weatherUserAgent, value))         MarkDirty(); } }
-    public string WeatherPreferredUnits    { get => _weatherPreferredUnits;    set { if (SetProperty(ref _weatherPreferredUnits, value))    MarkDirty(); } }
-    public bool Use24HourTime              { get => _use24HourTime;            set { if (SetProperty(ref _use24HourTime, value))            MarkDirty(); } }
+    public string WeatherUserAgent { get => _weatherUserAgent; set { if (SetProperty(ref _weatherUserAgent, value)) MarkDirty(); } }
+    public string WeatherPreferredUnits { get => _weatherPreferredUnits; set { if (SetProperty(ref _weatherPreferredUnits, value)) MarkDirty(); } }
+    public bool Use24HourTime { get => _use24HourTime; set { if (SetProperty(ref _use24HourTime, value)) MarkDirty(); } }
 
     // Location (manual city/ZIP)
     public string LocationLabel { get => _locationLabel; set { if (SetProperty(ref _locationLabel, value)) MarkDirty(); } }
 
     // ─── Audio Devices ──────────────────────────────────────────────
 
-    public ObservableCollection<AudioDeviceInfo> AvailableInputDevices  { get; } = new();
+    public ObservableCollection<AudioDeviceInfo> AvailableInputDevices { get; } = new();
     public ObservableCollection<AudioDeviceInfo> AvailableOutputDevices { get; } = new();
     public IReadOnlyList<string> AvailableDraftTones { get; } = new[] { "professional", "playful", "direct" };
 
@@ -531,20 +531,20 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     public bool HasTestRecording => _testRecordingBytes is { Length: > 100 };
 
-    public ICommand TestMicCommand          { get; }
-    public ICommand StopTestMicCommand      { get; }
+    public ICommand TestMicCommand { get; }
+    public ICommand StopTestMicCommand { get; }
     public ICommand PlayTestRecordingCommand { get; }
-    public ICommand RefreshDevicesCommand    { get; }
+    public ICommand RefreshDevicesCommand { get; }
     public ICommand StartYouTubeJobCommand { get; }
     public ICommand CancelYouTubeJobCommand { get; }
-    public ICommand StartVoiceHostCommand    { get; }
-    public ICommand StopVoiceHostCommand     { get; }
-    public ICommand ToggleVoiceHostCommand   { get; }
-    public ICommand RefreshVoiceHostCommand  { get; }
-    public ICommand AddPersonalityCommand    { get; }
-    public ICommand EditPersonalityCommand   { get; }
+    public ICommand StartVoiceHostCommand { get; }
+    public ICommand StopVoiceHostCommand { get; }
+    public ICommand ToggleVoiceHostCommand { get; }
+    public ICommand RefreshVoiceHostCommand { get; }
+    public ICommand AddPersonalityCommand { get; }
+    public ICommand EditPersonalityCommand { get; }
     public ICommand DuplicatePersonalityCommand { get; }
-    public ICommand ResetPersonalityCommand  { get; }
+    public ICommand ResetPersonalityCommand { get; }
 
     // Profile dropdown
     public ObservableCollection<ProfileOption> AvailableProfiles { get; } = new();
@@ -590,7 +590,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     // ─── Commands ────────────────────────────────────────────────────
 
-    public ICommand SaveCommand    { get; }
+    public ICommand SaveCommand { get; }
     public ICommand RefreshCommand { get; }
     public ICommand RefreshModelsCommand { get; }
     public ICommand RefreshGatekeeperModelsCommand { get; }
@@ -624,28 +624,28 @@ public sealed partial class SettingsViewModel : ViewModelBase
         VoiceHostProcessManager? voiceHostProcessManager = null)
     {
         _settings = settings;
-        _store    = store;
-        _audit    = audit;
+        _store = store;
+        _audit = audit;
         _voiceHostProcessManager = voiceHostProcessManager;
         _youtubeJobsClient = youtubeJobsClient ?? new YouTubeJobsHttpClient(
             () => _settings.Voice.GetVoiceHostBaseUrl(),
             _audit);
 
-        SaveCommand    = new RelayCommand(_ => SaveSettings());
+        SaveCommand = new RelayCommand(_ => SaveSettings());
         RefreshCommand = new AsyncRelayCommand(() => LoadAsync());
         RefreshModelsCommand = new AsyncRelayCommand(RefreshPrimaryModelsAsync, () => !IsRefreshingModels);
         RefreshGatekeeperModelsCommand = new AsyncRelayCommand(RefreshGatekeeperModelsAsync, () => !IsRefreshingModels);
 
-        TestMicCommand           = new RelayCommand(_ => StartMicTest(),       _ => !IsTestingMic);
-        StopTestMicCommand       = new RelayCommand(_ => StopMicTest(),        _ => IsTestingMic);
-        PlayTestRecordingCommand = new RelayCommand(_ => PlayTestRecording(),  _ => HasTestRecording && !IsTestingMic);
-        RefreshDevicesCommand    = new RelayCommand(_ => RefreshAudioDevices());
-        StartYouTubeJobCommand   = new AsyncRelayCommand(StartYouTubeJobAsync, () => !YouTubeJobIsRunning);
-        CancelYouTubeJobCommand  = new AsyncRelayCommand(CancelYouTubeJobAsync, () => YouTubeJobIsRunning);
-        StartVoiceHostCommand    = new AsyncRelayCommand(StartVoiceHostAsync,  () => !VoiceHostIsBusy);
-        StopVoiceHostCommand     = new AsyncRelayCommand(StopVoiceHostAsync,   () => !VoiceHostIsBusy);
-        ToggleVoiceHostCommand   = new RelayCommand(_ => VoiceHostEnabled = !VoiceHostEnabled);
-        RefreshVoiceHostCommand  = new AsyncRelayCommand(RefreshVoiceHostHealthAsync, () => !VoiceHostIsBusy);
+        TestMicCommand = new RelayCommand(_ => StartMicTest(), _ => !IsTestingMic);
+        StopTestMicCommand = new RelayCommand(_ => StopMicTest(), _ => IsTestingMic);
+        PlayTestRecordingCommand = new RelayCommand(_ => PlayTestRecording(), _ => HasTestRecording && !IsTestingMic);
+        RefreshDevicesCommand = new RelayCommand(_ => RefreshAudioDevices());
+        StartYouTubeJobCommand = new AsyncRelayCommand(StartYouTubeJobAsync, () => !YouTubeJobIsRunning);
+        CancelYouTubeJobCommand = new AsyncRelayCommand(CancelYouTubeJobAsync, () => YouTubeJobIsRunning);
+        StartVoiceHostCommand = new AsyncRelayCommand(StartVoiceHostAsync, () => !VoiceHostIsBusy);
+        StopVoiceHostCommand = new AsyncRelayCommand(StopVoiceHostAsync, () => !VoiceHostIsBusy);
+        ToggleVoiceHostCommand = new RelayCommand(_ => VoiceHostEnabled = !VoiceHostEnabled);
+        RefreshVoiceHostCommand = new AsyncRelayCommand(RefreshVoiceHostHealthAsync, () => !VoiceHostIsBusy);
         AddPersonalityCommand = new RelayCommand(_ => AddNewPersonality());
         EditPersonalityCommand = new RelayCommand(_ => EditSelectedPersonality());
         DuplicatePersonalityCommand = new RelayCommand(_ => DuplicateSelectedPersonality());
@@ -681,17 +681,17 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     private void LoadFromSettings(AppSettings s)
     {
-        _llmBaseUrl     = s.Llm.BaseUrl;
-        _llmModel       = s.Llm.Model;
+        _llmBaseUrl = s.Llm.BaseUrl;
+        _llmModel = s.Llm.Model;
         _gatekeeperBaseUrl = s.Llm.GatekeeperBaseUrl;
         _gatekeeperModelId = s.Llm.GatekeeperModelId;
-        _llmMaxTokens   = s.Llm.MaxTokens;
+        _llmMaxTokens = s.Llm.MaxTokens;
         _llmTemperature = s.Llm.Temperature;
 
-        _ttsEnabled     = s.Audio.TtsEnabled;
-        _pttKey         = s.Audio.PttKey;
-        _pttChord       = s.Audio.PttChord;
-        _shutupChord    = s.Audio.ShutupChord;
+        _ttsEnabled = s.Audio.TtsEnabled;
+        _pttKey = s.Audio.PttKey;
+        _pttChord = s.Audio.PttChord;
+        _shutupChord = s.Audio.ShutupChord;
         _voiceHostEnabled = s.Voice.VoiceHostEnabled;
         _voiceHostBaseUrl = s.Voice.GetVoiceHostBaseUrl();
         _voiceHostStartupTimeoutMs = s.Voice.VoiceHostStartupTimeoutMs;
@@ -717,7 +717,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _youtubeDraftTone = s.Voice.GetResolvedYouTubeDraftTone();
         _youtubeKeepAudio = s.Voice.YouTubeKeepAudio;
 
-        _memoryEnabled     = s.Memory.Enabled;
+        _memoryEnabled = s.Memory.Enabled;
         _embeddingsEnabled = s.Memory.UseEmbeddings;
         _runtimePanicMode = s.RuntimeSafety.PanicMode;
         _runtimeSafeMode = s.RuntimeSafety.SafeMode;
@@ -734,16 +734,16 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
         // MCP Permissions
         _mcpPermDeveloperOverride = s.Mcp.Permissions.DeveloperOverride;
-        _mcpPermScreen            = s.Mcp.Permissions.Screen;
-        _mcpPermFiles             = s.Mcp.Permissions.Files;
-        _mcpPermSystem            = s.Mcp.Permissions.System;
-        _mcpPermWeb               = s.Mcp.Permissions.Web;
-        _mcpPermMemoryRead        = s.Mcp.Permissions.MemoryRead;
-        _mcpPermMemoryWrite       = s.Mcp.Permissions.MemoryWrite;
-        _weatherUserAgent         = s.Weather.UserAgent;
-        _weatherPreferredUnits    = s.Weather.PreferredUnits;
-        _use24HourTime            = s.Ui.Use24HourTime;
-        _inputGain                = s.Audio.InputGain;
+        _mcpPermScreen = s.Mcp.Permissions.Screen;
+        _mcpPermFiles = s.Mcp.Permissions.Files;
+        _mcpPermSystem = s.Mcp.Permissions.System;
+        _mcpPermWeb = s.Mcp.Permissions.Web;
+        _mcpPermMemoryRead = s.Mcp.Permissions.MemoryRead;
+        _mcpPermMemoryWrite = s.Mcp.Permissions.MemoryWrite;
+        _weatherUserAgent = s.Weather.UserAgent;
+        _weatherPreferredUnits = s.Weather.PreferredUnits;
+        _use24HourTime = s.Ui.Use24HourTime;
+        _inputGain = s.Audio.InputGain;
         LoadLocationForProfile(s.ActiveProfileId);
 
         // Notify all bindings
@@ -1296,10 +1296,10 @@ public sealed partial class SettingsViewModel : ViewModelBase
             var health = await _voiceHostProcessManager.CheckHealthAsync(cts.Token);
 
             VoiceHostIsReachable = health.Reachable;
-            VoiceHostIsReady     = health.Ready;
-            VoiceHostAsrReady    = health.AsrReady;
-            VoiceHostTtsReady    = health.TtsReady;
-            VoiceHostVersion     = health.Version;
+            VoiceHostIsReady = health.Ready;
+            VoiceHostAsrReady = health.AsrReady;
+            VoiceHostTtsReady = health.TtsReady;
+            VoiceHostVersion = health.Version;
 
             if (health.Ready)
             {
@@ -1598,18 +1598,18 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
             _testWaveIn = new WaveInEvent
             {
-                DeviceNumber       = deviceNumber,
-                WaveFormat         = new WaveFormat(16000, 16, 1),
+                DeviceNumber = deviceNumber,
+                WaveFormat = new WaveFormat(16000, 16, 1),
                 BufferMilliseconds = 50,
-                NumberOfBuffers    = 3
+                NumberOfBuffers = 3
             };
-            _testWaveIn.DataAvailable    += OnTestDataAvailable;
+            _testWaveIn.DataAvailable += OnTestDataAvailable;
             _testWaveIn.RecordingStopped += OnTestRecordingStopped;
             _testWaveIn.StartRecording();
 
-            IsTestingMic  = true;
+            IsTestingMic = true;
             MicTestStatus = "Recording — speak now...";
-            MicTestLevel  = 0;
+            MicTestLevel = 0;
 
             // Auto-stop after 30 seconds to prevent orphaned recordings
             _testTimerCts = new CancellationTokenSource();
@@ -1703,7 +1703,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     {
         if (_testWaveIn is not null)
         {
-            _testWaveIn.DataAvailable    -= OnTestDataAvailable;
+            _testWaveIn.DataAvailable -= OnTestDataAvailable;
             _testWaveIn.RecordingStopped -= OnTestRecordingStopped;
             _testWaveIn.Dispose();
             _testWaveIn = null;
@@ -1716,7 +1716,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
             return;
 
         var deviceNumber = _selectedOutputDevice?.DeviceNumber ?? -1;
-        var audioBytes   = _testRecordingBytes;
+        var audioBytes = _testRecordingBytes;
 
         _ = Task.Run(async () =>
         {
@@ -1772,8 +1772,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
             sum += (double)sample * sample;
         }
 
-        double rms        = Math.Sqrt(sum / sampleCount);
-        double normalized  = rms / 32768.0;
+        double rms = Math.Sqrt(sum / sampleCount);
+        double normalized = rms / 32768.0;
         if (normalized < 1e-10) return 0;
 
         double db = 20.0 * Math.Log10(normalized);
@@ -1830,22 +1830,22 @@ public sealed partial class SettingsViewModel : ViewModelBase
         {
             Llm = _settings.Llm with
             {
-                BaseUrl          = _llmBaseUrl,
-                Model            = _llmModel,
+                BaseUrl = _llmBaseUrl,
+                Model = _llmModel,
                 GatekeeperBaseUrl = _gatekeeperBaseUrl,
                 GatekeeperModelId = _gatekeeperModelId,
-                MaxTokens        = _llmMaxTokens,
-                Temperature      = _llmTemperature
+                MaxTokens = _llmMaxTokens,
+                Temperature = _llmTemperature
             },
             Audio = _settings.Audio with
             {
-                TtsEnabled       = _ttsEnabled,
-                PttKey           = _pttKey,
-                PttChord         = _pttChord,
-                ShutupChord      = _shutupChord,
-                InputDeviceName  = _selectedInputDevice?.ProductName ?? "",
+                TtsEnabled = _ttsEnabled,
+                PttKey = _pttKey,
+                PttChord = _pttChord,
+                ShutupChord = _shutupChord,
+                InputDeviceName = _selectedInputDevice?.ProductName ?? "",
                 OutputDeviceName = _selectedOutputDevice?.ProductName ?? "",
-                InputGain        = Math.Clamp(_inputGain, 0.0, 2.0)
+                InputGain = Math.Clamp(_inputGain, 0.0, 2.0)
             },
             Voice = _settings.Voice with
             {
@@ -1884,7 +1884,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
             },
             Memory = _settings.Memory with
             {
-                Enabled       = _memoryEnabled,
+                Enabled = _memoryEnabled,
                 UseEmbeddings = _embeddingsEnabled
             },
             RuntimeSafety = _settings.RuntimeSafety with
@@ -1916,12 +1916,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 Permissions = new Config.McpPermissionsSettings
                 {
                     DeveloperOverride = _mcpPermDeveloperOverride,
-                    Screen            = _mcpPermScreen,
-                    Files             = _mcpPermFiles,
-                    System            = _mcpPermSystem,
-                    Web               = _mcpPermWeb,
-                    MemoryRead        = _mcpPermMemoryRead,
-                    MemoryWrite       = _mcpPermMemoryWrite
+                    Screen = _mcpPermScreen,
+                    Files = _mcpPermFiles,
+                    System = _mcpPermSystem,
+                    Web = _mcpPermWeb,
+                    MemoryRead = _mcpPermMemoryRead,
+                    MemoryWrite = _mcpPermMemoryWrite
                 }
             },
             Weather = _settings.Weather with
@@ -1992,7 +1992,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "SETTINGS_SAVED",
             Result = $"{(_selectedProfile?.ProfileId is not null ? $"activeProfile={_selectedProfile.ProfileId}" : "activeProfile=none")};activePersonality={updated.ActivePersonalityId}"
         });

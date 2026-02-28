@@ -23,7 +23,7 @@ public sealed class ShallowMemoryTests
     {
         var card = new ProfileCard
         {
-            ProfileId   = "test-1",
+            ProfileId = "test-1",
             DisplayName = "Sample User"
         };
 
@@ -39,7 +39,7 @@ public sealed class ShallowMemoryTests
         var nugget = new MemoryNugget
         {
             NuggetId = "nug-1",
-            Text     = "Prefers dark mode."
+            Text = "Prefers dark mode."
         };
 
         Assert.Equal(0.65, nugget.Weight);
@@ -63,15 +63,15 @@ public sealed class ShallowMemoryTests
     // ─────────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("public",   Sensitivity.Public)]
-    [InlineData("Public",   Sensitivity.Public)]
+    [InlineData("public", Sensitivity.Public)]
+    [InlineData("Public", Sensitivity.Public)]
     [InlineData("personal", Sensitivity.Personal)]
     [InlineData("Personal", Sensitivity.Personal)]
-    [InlineData("secret",   Sensitivity.Secret)]
-    [InlineData("SECRET",   Sensitivity.Secret)]
-    [InlineData("unknown",  Sensitivity.Public)]
-    [InlineData("",         Sensitivity.Public)]
-    [InlineData(null,       Sensitivity.Public)]
+    [InlineData("secret", Sensitivity.Secret)]
+    [InlineData("SECRET", Sensitivity.Secret)]
+    [InlineData("unknown", Sensitivity.Public)]
+    [InlineData("", Sensitivity.Public)]
+    [InlineData(null, Sensitivity.Public)]
     public void ParseSensitivity_ResolvesCorrectly(string? input, Sensitivity expected)
     {
         Assert.Equal(expected, MemoryParsing.ParseSensitivity(input));
@@ -89,8 +89,8 @@ public sealed class ShallowMemoryTests
 
         var profile = new ProfileCard
         {
-            ProfileId   = "prof-1",
-            Kind        = "user",
+            ProfileId = "prof-1",
+            Kind = "user",
             DisplayName = "Sample User"
         };
 
@@ -106,16 +106,16 @@ public sealed class ShallowMemoryTests
         var store = new FakeMemoryStore();
         store.Nuggets.Add(new MemoryNugget
         {
-            NuggetId    = "n1",
-            Text        = "User prefers dark mode.",
-            Tags        = ";preference;",
+            NuggetId = "n1",
+            Text = "User prefers dark mode.",
+            Tags = ";preference;",
             Sensitivity = "low"
         });
         store.Nuggets.Add(new MemoryNugget
         {
-            NuggetId    = "n2",
-            Text        = "User likes pizza.",
-            Tags        = ";preference;",
+            NuggetId = "n2",
+            Text = "User likes pizza.",
+            Tags = ";preference;",
             Sensitivity = "low"
         });
 
@@ -130,11 +130,11 @@ public sealed class ShallowMemoryTests
         var store = new FakeMemoryStore();
         store.PersonProfiles.Add(new ProfileCard
         {
-            ProfileId    = "p1",
-            Kind         = "person",
-            DisplayName  = "Dante",
+            ProfileId = "p1",
+            Kind = "person",
+            DisplayName = "Dante",
             Relationship = "son",
-            Aliases      = ";my son;dante;"
+            Aliases = ";my son;dante;"
         });
 
         var hits = await store.SearchPersonProfilesAsync("dante", 1);
@@ -151,13 +151,13 @@ public sealed class ShallowMemoryTests
     // ─────────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("hi",          true)]
-    [InlineData("hello",       true)]
-    [InlineData("hey",         true)]
-    [InlineData("yo",          true)]
+    [InlineData("hi", true)]
+    [InlineData("hello", true)]
+    [InlineData("hey", true)]
+    [InlineData("yo", true)]
     [InlineData("good morning", true)]
-    [InlineData("Hey there!",  true)]
-    [InlineData("hi buddy",   true)]
+    [InlineData("Hey there!", true)]
+    [InlineData("hi buddy", true)]
     [InlineData("What is the meaning of life?", false)]
     [InlineData("hey can you search for the latest news about AI", false)]
     [InlineData("Look at my screen right now", false)]
@@ -185,9 +185,9 @@ public sealed class ShallowMemoryTests
         {
             store.Nuggets.Add(new MemoryNugget
             {
-                NuggetId    = $"n{i}",
-                Text        = $"Fact number {i}",
-                Tags        = ";identity;",
+                NuggetId = $"n{i}",
+                Text = $"Fact number {i}",
+                Tags = ";identity;",
                 Sensitivity = "low"
             });
         }
@@ -205,9 +205,9 @@ public sealed class ShallowMemoryTests
         {
             store.Nuggets.Add(new MemoryNugget
             {
-                NuggetId    = $"n{i}",
-                Text        = $"Keyword fact {i}",
-                Tags        = ";preference;",
+                NuggetId = $"n{i}",
+                Text = $"Keyword fact {i}",
+                Tags = ";preference;",
                 Sensitivity = "low"
             });
         }
@@ -223,16 +223,16 @@ public sealed class ShallowMemoryTests
         var store = new FakeMemoryStore();
         store.Nuggets.Add(new MemoryNugget
         {
-            NuggetId    = "safe",
-            Text        = "A safe fact",
-            Tags        = ";identity;",
+            NuggetId = "safe",
+            Text = "A safe fact",
+            Tags = ";identity;",
             Sensitivity = "low"
         });
         store.Nuggets.Add(new MemoryNugget
         {
-            NuggetId    = "secret",
-            Text        = "A secret fact",
-            Tags        = ";identity;",
+            NuggetId = "secret",
+            Text = "A secret fact",
+            Tags = ";identity;",
             Sensitivity = "high"
         });
 

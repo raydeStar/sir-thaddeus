@@ -257,9 +257,9 @@ public sealed record LlmClientOptions
     {
         var lower = (Model ?? "").ToLowerInvariant();
         return lower.Contains("thinking") ||
-               lower.Contains("-think")   ||
-               lower.Contains("qwq")      ||
-               lower.StartsWith("o1")     ||
+               lower.Contains("-think") ||
+               lower.Contains("qwq") ||
+               lower.StartsWith("o1") ||
                lower.Contains("deepseek-r1");
     }
 

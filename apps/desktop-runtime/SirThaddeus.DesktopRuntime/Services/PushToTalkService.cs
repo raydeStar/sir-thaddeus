@@ -96,7 +96,7 @@ public sealed class PushToTalkService : IDisposable
         _hookProc = HookCallback;
         using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
         using var curModule = curProcess.MainModule!;
-        
+
         _hookId = SetWindowsHookEx(
             WH_KEYBOARD_LL,
             _hookProc,

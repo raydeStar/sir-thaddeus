@@ -25,23 +25,23 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 {
     private readonly IMemoryStore _store;
     private readonly IAuditLogger _audit;
-    private readonly Dispatcher   _dispatcher;
+    private readonly Dispatcher _dispatcher;
 
     private const int NuggetPageSize = 50;
 
     // ── State ────────────────────────────────────────────────────────
-    private string  _activePane      = "Profiles";   // Profiles | Nuggets
-    private bool    _isLoading;
-    private string  _statusText      = "Ready";
+    private string _activePane = "Profiles";   // Profiles | Nuggets
+    private bool _isLoading;
+    private string _statusText = "Ready";
 
     // Profile
     private ProfileCardRow? _selectedProfile;
 
     // Nuggets
-    private string  _nuggetSearchText = "";
-    private int     _nuggetPage       = 1;
-    private int     _nuggetTotalPages = 1;
-    private int     _nuggetTotalItems;
+    private string _nuggetSearchText = "";
+    private int _nuggetPage = 1;
+    private int _nuggetTotalPages = 1;
+    private int _nuggetTotalItems;
     private NuggetRow? _selectedNugget;
 
     private DispatcherTimer? _searchDebounce;
@@ -50,42 +50,47 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     public ProfileBrowserViewModel(IMemoryStore store, IAuditLogger audit)
     {
-        _store      = store ?? throw new ArgumentNullException(nameof(store));
-        _audit      = audit ?? throw new ArgumentNullException(nameof(audit));
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _dispatcher = Application.Current.Dispatcher;
 
-        ShowProfilesCommand    = new RelayCommand(() => SwitchPane("Profiles"));
-        ShowNuggetsCommand     = new RelayCommand(() => SwitchPane("Nuggets"));
-        RefreshCommand         = new AsyncRelayCommand(RefreshAsync);
+        ShowProfilesCommand = new RelayCommand(() => SwitchPane("Profiles"));
+        ShowNuggetsCommand = new RelayCommand(() => SwitchPane("Nuggets"));
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync);
 
         // Profile commands
-        AddProfileCommand      = new AsyncRelayCommand(AddProfileAsync);
-        DeleteProfileCommand   = new AsyncRelayCommand(DeleteProfileAsync, () => _selectedProfile is not null);
-        SaveProfileCommand     = new AsyncRelayCommand(SaveProfileAsync, () => _selectedProfile is not null);
+        AddProfileCommand = new AsyncRelayCommand(AddProfileAsync);
+        DeleteProfileCommand = new AsyncRelayCommand(DeleteProfileAsync, () => _selectedProfile is not null);
+        SaveProfileCommand = new AsyncRelayCommand(SaveProfileAsync, () => _selectedProfile is not null);
 
         // Nugget commands
-        AddNuggetCommand       = new AsyncRelayCommand(AddNuggetAsync);
-        DeleteNuggetCommand    = new AsyncRelayCommand(DeleteNuggetAsync, () => _selectedNugget is not null);
-        SaveNuggetCommand      = new AsyncRelayCommand(SaveNuggetAsync, () => _selectedNugget is not null);
-        NuggetNextPageCommand  = new RelayCommand(NuggetNextPage, () => _nuggetPage < _nuggetTotalPages);
-        NuggetPrevPageCommand  = new RelayCommand(NuggetPrevPage, () => _nuggetPage > 1);
+        AddNuggetCommand = new AsyncRelayCommand(AddNuggetAsync);
+        DeleteNuggetCommand = new AsyncRelayCommand(DeleteNuggetAsync, () => _selectedNugget is not null);
+        SaveNuggetCommand = new AsyncRelayCommand(SaveNuggetAsync, () => _selectedNugget is not null);
+        NuggetNextPageCommand = new RelayCommand(NuggetNextPage, () => _nuggetPage < _nuggetTotalPages);
+        NuggetPrevPageCommand = new RelayCommand(NuggetPrevPage, () => _nuggetPage > 1);
     }
 
     // ── Bindable Properties ─────────────────────────────────────────
 
     public ObservableCollection<ProfileCardRow> Profiles { get; } = [];
-    public ObservableCollection<NuggetRow>      Nuggets  { get; } = [];
+    public ObservableCollection<NuggetRow> Nuggets { get; } = [];
 
     public string ActivePane
     {
         get => _activePane;
-        set { if (SetProperty(ref _activePane, value))
-              { OnPropertyChanged(nameof(IsProfilesPane));
-                OnPropertyChanged(nameof(IsNuggetsPane)); } }
+        set
+        {
+            if (SetProperty(ref _activePane, value))
+            {
+                OnPropertyChanged(nameof(IsProfilesPane));
+                OnPropertyChanged(nameof(IsNuggetsPane));
+            }
+        }
     }
 
     public bool IsProfilesPane => _activePane == "Profiles";
-    public bool IsNuggetsPane  => _activePane == "Nuggets";
+    public bool IsNuggetsPane => _activePane == "Nuggets";
 
     public bool IsLoading
     {
@@ -145,17 +150,17 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     // ── Commands ─────────────────────────────────────────────────────
 
-    public ICommand ShowProfilesCommand   { get; }
-    public ICommand ShowNuggetsCommand    { get; }
-    public ICommand RefreshCommand        { get; }
+    public ICommand ShowProfilesCommand { get; }
+    public ICommand ShowNuggetsCommand { get; }
+    public ICommand RefreshCommand { get; }
 
-    public ICommand AddProfileCommand     { get; }
-    public ICommand DeleteProfileCommand  { get; }
-    public ICommand SaveProfileCommand    { get; }
+    public ICommand AddProfileCommand { get; }
+    public ICommand DeleteProfileCommand { get; }
+    public ICommand SaveProfileCommand { get; }
 
-    public ICommand AddNuggetCommand      { get; }
-    public ICommand DeleteNuggetCommand   { get; }
-    public ICommand SaveNuggetCommand     { get; }
+    public ICommand AddNuggetCommand { get; }
+    public ICommand DeleteNuggetCommand { get; }
+    public ICommand SaveNuggetCommand { get; }
     public ICommand NuggetNextPageCommand { get; }
     public ICommand NuggetPrevPageCommand { get; }
 
@@ -185,7 +190,7 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     private async Task RefreshProfilesAsync()
     {
-        IsLoading  = true;
+        IsLoading = true;
         StatusText = "Loading profiles...";
 
         try
@@ -206,13 +211,13 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     private async Task RefreshNuggetsAsync()
     {
-        IsLoading  = true;
+        IsLoading = true;
         StatusText = "Loading nuggets...";
 
         try
         {
             var filter = string.IsNullOrWhiteSpace(_nuggetSearchText) ? null : _nuggetSearchText.Trim();
-            var skip   = (_nuggetPage - 1) * NuggetPageSize;
+            var skip = (_nuggetPage - 1) * NuggetPageSize;
 
             var (items, total) = await _store.ListNuggetsAsync(filter, skip, NuggetPageSize);
             _dispatcher.Invoke(() =>
@@ -235,7 +240,7 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     private async Task AddProfileAsync()
     {
-        var id  = Guid.NewGuid().ToString("N")[..12];
+        var id = Guid.NewGuid().ToString("N")[..12];
         var now = DateTimeOffset.UtcNow;
 
         // If no user profile exists, the first one is "user"; otherwise "person"
@@ -243,30 +248,30 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
         var card = new ProfileCard
         {
-            ProfileId   = $"prof-{id}",
-            Kind        = kind,
+            ProfileId = $"prof-{id}",
+            Kind = kind,
             DisplayName = kind == "user" ? "(Your Name)" : "(Person Name)",
             Relationship = kind == "person" ? "(relationship)" : null,
             ProfileJson = kind == "user"
                 ? JsonSerializer.Serialize(new
                 {
                     preferred_name = "",
-                    pronouns       = "",
-                    timezone       = "",
-                    style          = ""
+                    pronouns = "",
+                    timezone = "",
+                    style = ""
                 })
                 : JsonSerializer.Serialize(new
                 {
                     highlight = "",
-                    notes     = ""
+                    notes = ""
                 }),
-            UpdatedAt   = now
+            UpdatedAt = now
         };
 
         await _store.StoreProfileAsync(card);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "PROFILE_CREATED",
             Target = "profile_browser",
             Details = new() { ["id"] = card.ProfileId, ["kind"] = kind }
@@ -281,7 +286,7 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
         await _store.DeleteProfileAsync(_selectedProfile.ProfileId);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "PROFILE_DELETED",
             Target = "profile_browser",
             Details = new() { ["id"] = _selectedProfile.ProfileId }
@@ -296,24 +301,24 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
         var updated = new ProfileCard
         {
-            ProfileId    = _selectedProfile.ProfileId,
-            Kind         = _selectedProfile.Kind,
-            DisplayName  = _selectedProfile.DisplayName,
+            ProfileId = _selectedProfile.ProfileId,
+            Kind = _selectedProfile.Kind,
+            DisplayName = _selectedProfile.DisplayName,
             Relationship = _selectedProfile.Relationship,
-            Aliases      = _selectedProfile.Aliases,
-            ProfileJson  = _selectedProfile.ProfileJson,
-            UpdatedAt    = DateTimeOffset.UtcNow
+            Aliases = _selectedProfile.Aliases,
+            ProfileJson = _selectedProfile.ProfileJson,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
 
         await _store.StoreProfileAsync(updated);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "PROFILE_EDITED",
             Target = "profile_browser",
             Details = new()
             {
-                ["id"]   = updated.ProfileId,
+                ["id"] = updated.ProfileId,
                 ["name"] = updated.DisplayName
             }
         });
@@ -325,24 +330,24 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
     private async Task AddNuggetAsync()
     {
-        var id  = Guid.NewGuid().ToString("N")[..12];
+        var id = Guid.NewGuid().ToString("N")[..12];
         var now = DateTimeOffset.UtcNow;
 
         var nugget = new MemoryNugget
         {
-            NuggetId    = $"nug-{id}",
-            Text        = "(edit me)",
-            Tags        = ";preference;",
-            Weight      = 0.65,
-            PinLevel    = 0,
+            NuggetId = $"nug-{id}",
+            Text = "(edit me)",
+            Tags = ";preference;",
+            Weight = 0.65,
+            PinLevel = 0,
             Sensitivity = NuggetSensitivity.Low,
-            CreatedAt   = now
+            CreatedAt = now
         };
 
         await _store.StoreNuggetAsync(nugget);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "NUGGET_CREATED",
             Target = "profile_browser",
             Details = new() { ["id"] = nugget.NuggetId }
@@ -357,7 +362,7 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
         await _store.DeleteNuggetAsync(_selectedNugget.NuggetId);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "NUGGET_DELETED",
             Target = "profile_browser",
             Details = new() { ["id"] = _selectedNugget.NuggetId }
@@ -372,26 +377,26 @@ public sealed class ProfileBrowserViewModel : ViewModelBase
 
         var updated = new MemoryNugget
         {
-            NuggetId    = _selectedNugget.NuggetId,
-            Text        = _selectedNugget.Text,
-            Tags        = _selectedNugget.Tags,
-            Weight      = _selectedNugget.Weight,
-            PinLevel    = _selectedNugget.PinLevel,
+            NuggetId = _selectedNugget.NuggetId,
+            Text = _selectedNugget.Text,
+            Tags = _selectedNugget.Tags,
+            Weight = _selectedNugget.Weight,
+            PinLevel = _selectedNugget.PinLevel,
             Sensitivity = _selectedNugget.Sensitivity,
-            UseCount    = _selectedNugget.UseCount,
-            LastUsedAt  = _selectedNugget.LastUsedAt,
-            CreatedAt   = _selectedNugget.CreatedAt
+            UseCount = _selectedNugget.UseCount,
+            LastUsedAt = _selectedNugget.LastUsedAt,
+            CreatedAt = _selectedNugget.CreatedAt
         };
 
         await _store.StoreNuggetAsync(updated);
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "NUGGET_EDITED",
             Target = "profile_browser",
             Details = new()
             {
-                ["id"]   = updated.NuggetId,
+                ["id"] = updated.NuggetId,
                 ["text"] = updated.Text.Length > 60 ? updated.Text[..60] + "…" : updated.Text
             }
         });
@@ -426,46 +431,46 @@ public sealed class ProfileCardRow : ViewModelBase
 {
     public ProfileCardRow(ProfileCard card)
     {
-        ProfileId    = card.ProfileId;
-        Kind         = card.Kind;
-        DisplayName  = card.DisplayName;
+        ProfileId = card.ProfileId;
+        Kind = card.Kind;
+        DisplayName = card.DisplayName;
         Relationship = card.Relationship;
-        Aliases      = card.Aliases;
-        ProfileJson  = card.ProfileJson;
-        UpdatedAt    = card.UpdatedAt;
+        Aliases = card.Aliases;
+        ProfileJson = card.ProfileJson;
+        UpdatedAt = card.UpdatedAt;
     }
 
-    public string         ProfileId    { get; }
-    public string         Kind         { get; set; }
-    public string         DisplayName  { get; set; }
-    public string?        Relationship { get; set; }
-    public string?        Aliases      { get; set; }
-    public string         ProfileJson  { get; set; }
-    public DateTimeOffset UpdatedAt    { get; }
+    public string ProfileId { get; }
+    public string Kind { get; set; }
+    public string DisplayName { get; set; }
+    public string? Relationship { get; set; }
+    public string? Aliases { get; set; }
+    public string ProfileJson { get; set; }
+    public DateTimeOffset UpdatedAt { get; }
 }
 
 public sealed class NuggetRow : ViewModelBase
 {
     public NuggetRow(MemoryNugget nugget)
     {
-        NuggetId    = nugget.NuggetId;
-        Text        = nugget.Text;
-        Tags        = nugget.Tags;
-        Weight      = nugget.Weight;
-        PinLevel    = nugget.PinLevel;
+        NuggetId = nugget.NuggetId;
+        Text = nugget.Text;
+        Tags = nugget.Tags;
+        Weight = nugget.Weight;
+        PinLevel = nugget.PinLevel;
         Sensitivity = nugget.Sensitivity;
-        UseCount    = nugget.UseCount;
-        LastUsedAt  = nugget.LastUsedAt;
-        CreatedAt   = nugget.CreatedAt;
+        UseCount = nugget.UseCount;
+        LastUsedAt = nugget.LastUsedAt;
+        CreatedAt = nugget.CreatedAt;
     }
 
-    public string          NuggetId    { get; }
-    public string          Text        { get; set; }
-    public string?         Tags        { get; set; }
-    public double          Weight      { get; set; }
-    public int             PinLevel    { get; set; }
-    public string          Sensitivity { get; set; }
-    public int             UseCount    { get; }
-    public DateTimeOffset? LastUsedAt  { get; }
-    public DateTimeOffset  CreatedAt   { get; }
+    public string NuggetId { get; }
+    public string Text { get; set; }
+    public string? Tags { get; set; }
+    public double Weight { get; set; }
+    public int PinLevel { get; set; }
+    public string Sensitivity { get; set; }
+    public int UseCount { get; }
+    public DateTimeOffset? LastUsedAt { get; }
+    public DateTimeOffset CreatedAt { get; }
 }

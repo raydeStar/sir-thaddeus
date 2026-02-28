@@ -16,7 +16,7 @@ Most AI assistants live in the cloud.
 
 Sir Thaddeus runs on your machine.
 
-A local-first, permissioned AI runtime for Windows. Connects to your local models (such as LM Studio) and executes actions only with explicit approval.
+A local‑first, permissioned AI runtime for Windows. Connects to your local models (such as LM Studio) and executes actions only with explicit approval.
 
 No telemetry by default. No background activity without consent. No hidden autonomy.
 
@@ -32,7 +32,7 @@ Say:
 
 > “When is the grocery store open?”
 
-Before doing anything, Thaddeus proposes a plan.
+Before doing anything, Thaddeus proposes what he wants to do next.
 
 You see:
 
@@ -58,28 +58,28 @@ That same interaction pattern applies to everything.
 
 ### Interaction
 
-- 🎙️ **Push-to-talk voice** (release to send)
+- 🎙️ **Push‑to‑talk voice** (release to send)
 - ⌨️ **Command palette** for typed workflows
 - 🛑 **Global STOP kill switch**
 
 ### Local Intelligence
 
 - 🧠 **Local LLM integration** (LM Studio supported)
-- 🔍 **First-principles reasoning** for breaking down problems and reframing logic puzzles
-- 📚 **Lightweight document reading** (text-based files)
+- 🔍 **First‑principles reasoning** for breaking down problems and reframing logic puzzles
+- 📚 **Lightweight document reading** (text‑based files)
 
 ### System Awareness (Permissioned)
 
 - 🖥️ **Screen reading** (active window or full screen)
 - 🌐 **Browser search and page reading**
-- 📂 **File listing and file reading** (size-limited, read-only)
+- 📂 **File listing and file reading** (size‑limited, read‑only)
 - 🧾 **Allowlisted system commands**
 
 ### Trust & Safety
 
-- 🔐 **Explicit, time-boxed permission tokens**
-- 📜 **Local, append-only audit log**
-- 🚨 **Panic mode + safe mode fail-closed gates**
+- 🔐 **Explicit, time‑boxed permission tokens**
+- 📜 **Local, append‑only audit log**
+- 🚨 **Panic mode + safe mode fail‑closed gates**
 - 🧮 **Tool budgets** to prevent runaway automation
 
 ### Optional (if service connected)
@@ -110,7 +110,7 @@ That’s it.
 
 ## The Contract
 
-1. **You are the principal.** He proposes plans; you approve them.
+1. **You are the principal.** He proposes actions; you approve them.
 2. **Nothing runs silently.** If it acts, you see it.
 3. **STOP always works.** The kill switch revokes permissions and halts execution immediately.
 
@@ -118,25 +118,32 @@ Sir Thaddeus is not designed to replace your agency. He is designed to extend it
 
 ---
 
-## Architecture (4 layers)
+## Architecture (Loop‑Driven, Permissioned)
+
+Sir Thaddeus is built as a layered system. The **Agent layer runs a bounded tool loop**:
+
+**propose → validate → execute → observe → verify → (repair) → repeat**
+
+This loop is more reliable for small local models than long, up‑front planning — and it keeps every action auditable and permissioned.
 
 ```mermaid
 flowchart LR
   subgraph frontend [Layer 1: Frontend — apps/desktop-runtime]
     Tray[System Tray]
     Overlay[WPF Overlay — optional]
-    PTT[Push-to-Talk]
-    TTS[Text-to-Speech]
+    PTT[Audio Input]
+    Playback[Audio Playback]
     Palette[Command Palette]
   end
 
   subgraph agent [Layer 2: Agent Orchestrator — packages/agent]
-    Loop[Agent Loop & Repair]
+    Loop[Bounded Agent Loop]
     Context[Run Context & History]
     Router[Intent Router]
     Gate[Policy Gate]
-    Validation[Plan & Completion Validation]
-    Utilities[Deterministic Utility Engine]
+    Validate[Action & Completion Validation]
+    Repair[Targeted Repair]
+    Utilities[Deterministic Utilities]
   end
 
   subgraph llm [Layer 3: LLM Client — packages/llm-client]
@@ -145,7 +152,7 @@ flowchart LR
 
   subgraph memory [Memory — packages/memory + memory-sqlite]
     Store[SQLite Store]
-    Retriever[Retriever — BM25 + embeddings]
+    Retriever[Retriever — keyword/BM25 and/or embeddings]
   end
 
   subgraph mcp [Layer 4: MCP Tool Server — apps/mcp-server]
@@ -153,31 +160,52 @@ flowchart LR
     Tools[Memory / Browser / File / System / Screen / WebSearch / Weather / Utilities]
   end
 
-  PTT -->|audio file| Loop
+  subgraph voice [Layer 5: Voice Services — apps/voice-host + voice-backend]
+    VoiceHost[VoiceHost Proxy]
+    VoiceBackend[Voice Backend — Python]
+    VoiceBackend --> VoiceHost
+  end
+
+  PTT -->|audio buffer| VoiceHost
+  VoiceHost -->|transcribed text| Loop
   Palette -->|typed request| Loop
-  Loop --> Router -->|RouterOutput| Validation
-  Validation -->|Valid/Repair| Gate
-  Gate -->|allowed tools| LmStudio
-  LmStudio -->|tool_calls| Loop
+
+  Loop --> Router -->|RouteDecision| Gate
+  Gate -->|allowed tools + budgets| Loop
+
+  Loop -->|model prompt| LmStudio
+  LmStudio -->|tool_calls / next action| Loop
+
+  Loop --> Validate
+  Validate -->|blocked/ok| Loop
+
   Loop -->|tools/call| Server
-  Server -->|tool result| Validation
-  Validation -->|Complete/Partial| Loop
+  Server -->|tool result| Loop
+
+  Loop -->|progress check| Validate
+  Validate -->|complete/partial/missing| Repair
+  Repair -->|targeted follow-up| Loop
+
   Loop --> Retriever --> Store
   Loop --> Utilities
-  Loop -->|final text| TTS
+
+  Loop -->|final text| VoiceHost
+  VoiceHost -->|audio stream| Playback
+
   Loop -->|events| Overlay
   Tray --> Overlay
 ```
 
 ### Layer responsibilities
 
-| Layer          | Project(s)                                  | Responsibility                                                                  | Talks to                        |
-| -------------- | ------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------- |
-| **Frontend**   | `apps/desktop-runtime`                      | Hotkeys, tray, overlay, PTT capture trigger, TTS output, Chat/Memory/Profile UI | Agent orchestrator (in-process) |
-| **Agent**      | `packages/agent`                            | Routing, policy gates, validation, bounded repair loops, deterministic utilities| LLM client + MCP client         |
-| **LLM client** | `packages/llm-client`                       | OpenAI-style `/v1/chat/completions` + `/v1/embeddings` calls                    | LM Studio HTTP server           |
-| **Memory**     | `packages/memory`, `packages/memory-sqlite` | Retrieval engine (BM25 + embeddings), scoring, gating, SQLite store             | —                               |
-| **MCP server** | `apps/mcp-server`                           | Exposes tools over MCP stdio: memory, browser, file, system, screen, web search | Desktop runtime (child process) |
+| Layer              | Project(s)                                  | Responsibility                                                                                           | Talks to                        |
+| ------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **Frontend**       | `apps/desktop-runtime`                      | Hotkeys, tray, overlay, push‑to‑talk capture trigger, audio playback, Chat/Memory UI                    | Agent orchestrator + VoiceHost  |
+| **Agent**          | `packages/agent`                            | Bounded tool loop (propose→validate→execute→observe), routing, policy gates, completion checks, recovery | LLM client + MCP client         |
+| **LLM client**     | `packages/llm-client`                       | OpenAI‑style `/v1/chat/completions` + `/v1/embeddings` calls                                             | LM Studio HTTP server           |
+| **Memory**         | `packages/memory`, `packages/memory-sqlite` | Retrieval + scoring + gating (keyword/BM25 and/or embeddings), SQLite store                              | —                               |
+| **MCP server**     | `apps/mcp-server`                           | Exposes tools over MCP stdio: memory, browser, file, system, screen, web search, utilities              | Desktop runtime (child process) |
+| **Voice Services** | `apps/voice-host`, `apps/voice-backend`     | Local push‑to‑talk transcription (ASR) and streaming synthesis (TTS)                                     | Desktop runtime (caller)        |
 
 ---
 

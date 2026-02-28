@@ -58,7 +58,7 @@ public sealed record ToolExecutionContext
 
         var normalizedPath = Path.GetFullPath(path);
         var normalizedPrefix = Path.GetFullPath(Scope.PathPrefix);
-        
+
         return normalizedPath.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
     }
 

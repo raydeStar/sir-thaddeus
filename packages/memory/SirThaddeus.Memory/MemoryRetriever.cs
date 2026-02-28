@@ -47,7 +47,7 @@ public sealed class MemoryRetriever
 
         // ── Step 1: Retrieve candidates ──────────────────────────────
         // Fetch more than we inject so the gate has room to filter.
-        var factCandidates  = await _store.SearchFactsAsync(
+        var factCandidates = await _store.SearchFactsAsync(
             query, queryEmbedding, Thresholds.FactsInject * 3, ct);
         var eventCandidates = await _store.SearchEventsAsync(
             query, queryEmbedding, Thresholds.EventsInject * 3, ct);
@@ -55,12 +55,12 @@ public sealed class MemoryRetriever
             query, queryEmbedding, Thresholds.ChunksRetrieve, ct);
 
         // ── Step 1.5: Score all candidates ───────────────────────────
-        var scoredFacts  = ScoreFacts(factCandidates, intent);
+        var scoredFacts = ScoreFacts(factCandidates, intent);
         var scoredEvents = ScoreEvents(eventCandidates, intent);
         var scoredChunks = ScoreChunks(chunkCandidates, intent, queryEmbedding);
 
         // ── Step 2: Relevance gate — keep only ALLOW ─────────────────
-        var allowedFacts  = scoredFacts
+        var allowedFacts = scoredFacts
             .Where(c => c.Decision == RelevanceDecision.Allow).ToList();
         var allowedEvents = scoredEvents
             .Where(c => c.Decision == RelevanceDecision.Allow).ToList();
@@ -68,7 +68,7 @@ public sealed class MemoryRetriever
             .Where(c => c.Decision == RelevanceDecision.Allow).ToList();
 
         // ── Step 3: Rank + dedupe + cap ──────────────────────────────
-        var rankedFacts  = DedupeAndCap(
+        var rankedFacts = DedupeAndCap(
             allowedFacts, c => c.Item.SourceRef, Thresholds.FactsInject);
         var rankedEvents = DedupeAndCap(
             allowedEvents, c => c.Item.SourceRef, Thresholds.EventsInject);
@@ -79,9 +79,9 @@ public sealed class MemoryRetriever
         var notes = DetectConflicts(rankedFacts);
 
         // ── Step 4: Assemble MemoryPack ──────────────────────────────
-        var facts    = rankedFacts.Select(c => c.Item).ToList();
-        var events   = rankedEvents.Select(c => c.Item).ToList();
-        var chunks   = rankedChunks.Select(c => c.Item).ToList();
+        var facts = rankedFacts.Select(c => c.Item).ToList();
+        var events = rankedEvents.Select(c => c.Item).ToList();
+        var chunks = rankedChunks.Select(c => c.Item).ToList();
         var citations = CollectCitations(facts, events, chunks);
 
         if (facts.Count == 0 && events.Count == 0 && chunks.Count == 0)
@@ -91,12 +91,12 @@ public sealed class MemoryRetriever
 
         return new MemoryPack
         {
-            Facts     = facts,
-            Events    = events,
-            Chunks    = chunks,
-            Notes     = notes,
+            Facts = facts,
+            Events = events,
+            Chunks = chunks,
+            Notes = notes,
             Citations = citations,
-            PackText  = packText
+            PackText = packText
         };
     }
 
@@ -110,19 +110,19 @@ public sealed class MemoryRetriever
     {
         return candidates.Select(c =>
         {
-            var recency  = Scoring.ComputeRecency(c.Item.UpdatedAt);
-            var score    = Scoring.ScoreFactOrEvent(c.LexicalScore, recency, c.Item.Confidence);
+            var recency = Scoring.ComputeRecency(c.Item.UpdatedAt);
+            var score = Scoring.ScoreFactOrEvent(c.LexicalScore, recency, c.Item.Confidence);
             var decision = RelevanceGate.Evaluate(
                 c.Item.Sensitivity, intent, c.LexicalScore, similarityScore: 0.0);
 
             return new ScoredCandidate<MemoryFact>
             {
-                Item            = c.Item,
-                Score           = score,
-                LexicalScore    = c.LexicalScore,
-                RecencyScore    = recency,
+                Item = c.Item,
+                Score = score,
+                LexicalScore = c.LexicalScore,
+                RecencyScore = recency,
                 SimilarityScore = 0.0,
-                Decision        = decision
+                Decision = decision
             };
         })
         .OrderByDescending(c => c.Score)
@@ -135,19 +135,19 @@ public sealed class MemoryRetriever
     {
         return candidates.Select(c =>
         {
-            var recency  = Scoring.ComputeRecency(c.Item.WhenIso);
-            var score    = Scoring.ScoreFactOrEvent(c.LexicalScore, recency, c.Item.Confidence);
+            var recency = Scoring.ComputeRecency(c.Item.WhenIso);
+            var score = Scoring.ScoreFactOrEvent(c.LexicalScore, recency, c.Item.Confidence);
             var decision = RelevanceGate.Evaluate(
                 c.Item.Sensitivity, intent, c.LexicalScore, similarityScore: 0.0);
 
             return new ScoredCandidate<MemoryEvent>
             {
-                Item            = c.Item,
-                Score           = score,
-                LexicalScore    = c.LexicalScore,
-                RecencyScore    = recency,
+                Item = c.Item,
+                Score = score,
+                LexicalScore = c.LexicalScore,
+                RecencyScore = recency,
                 SimilarityScore = 0.0,
-                Decision        = decision
+                Decision = decision
             };
         })
         .OrderByDescending(c => c.Score)
@@ -164,27 +164,27 @@ public sealed class MemoryRetriever
             var recency = Scoring.ComputeRecency(c.Item.WhenIso);
 
             // If we have embeddings for both query and chunk, use cosine sim
-            double similarity   = 0.0;
+            double similarity = 0.0;
             double primaryScore = c.LexicalScore;
 
             if (queryEmbedding is not null && c.Item.Embedding is not null)
             {
-                similarity   = Scoring.CosineSimilarity(queryEmbedding, c.Item.Embedding);
+                similarity = Scoring.CosineSimilarity(queryEmbedding, c.Item.Embedding);
                 primaryScore = similarity;   // Embeddings take priority over BM25
             }
 
-            var score    = Scoring.ScoreChunk(primaryScore, recency);
+            var score = Scoring.ScoreChunk(primaryScore, recency);
             var decision = RelevanceGate.Evaluate(
                 c.Item.Sensitivity, intent, c.LexicalScore, similarity);
 
             return new ScoredCandidate<MemoryChunk>
             {
-                Item            = c.Item,
-                Score           = score,
-                LexicalScore    = c.LexicalScore,
-                RecencyScore    = recency,
+                Item = c.Item,
+                Score = score,
+                LexicalScore = c.LexicalScore,
+                RecencyScore = recency,
                 SimilarityScore = similarity,
-                Decision        = decision
+                Decision = decision
             };
         })
         .OrderByDescending(c => c.Score)
@@ -204,7 +204,7 @@ public sealed class MemoryRetriever
         Func<ScoredCandidate<T>, string?> sourceRefSelector,
         int maxItems)
     {
-        var seen   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<ScoredCandidate<T>>();
 
         foreach (var c in candidates)
@@ -297,7 +297,7 @@ public sealed class MemoryRetriever
             sb.AppendLine("EVENTS:");
             foreach (var e in events)
             {
-                var when    = e.WhenIso?.ToString("yyyy-MM-dd") ?? "unknown";
+                var when = e.WhenIso?.ToString("yyyy-MM-dd") ?? "unknown";
                 var summary = string.IsNullOrEmpty(e.Summary) ? "" : $" — {e.Summary}";
                 sb.AppendLine($"  - {e.Type}: {e.Title}{summary} ({when})");
             }
@@ -331,7 +331,7 @@ public sealed class MemoryRetriever
 
     private static MemoryPack EmptyPack(string notes) => new()
     {
-        Notes    = notes,
+        Notes = notes,
         PackText = ""
     };
 }

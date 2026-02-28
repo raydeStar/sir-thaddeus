@@ -370,7 +370,8 @@ public enum AsrTimingStage
     Start,
     FirstToken,
     Final
-}public sealed record AsrTimingEventArgs(
+}
+public sealed record AsrTimingEventArgs(
     string SessionId,
     string RequestId,
     AsrTimingStage Stage,

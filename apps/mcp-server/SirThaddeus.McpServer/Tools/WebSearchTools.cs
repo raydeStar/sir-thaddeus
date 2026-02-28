@@ -33,10 +33,10 @@ public static class WebSearchTools
 {
     private const int DefaultSearchTimeoutMs = 8_000;
     private const int DefaultMaxResults = 5;
-    private const int AutoReadCount     = 5;
-    private const int ExcerptMaxChars   = 1000;
-    private const int CardExcerptChars  = 250;
-    private const int PageTimeoutSecs   = 10;
+    private const int AutoReadCount = 5;
+    private const int ExcerptMaxChars = 1000;
+    private const int CardExcerptChars = 250;
+    private const int PageTimeoutSecs = 10;
     private const int MinUsefulNonArticleWords = 120;
     private const int RelevanceExtractionChars = 800;
     internal const string SourcesDelimiter = "<!-- SOURCES_JSON -->";
@@ -111,8 +111,8 @@ public static class WebSearchTools
             new WebSearchOptions
             {
                 MaxResults = fetchCount,
-                TimeoutMs  = searchTimeoutMs,
-                Recency    = recency
+                TimeoutMs = searchTimeoutMs,
+                Recency = recency
             },
             cancellationToken);
 
@@ -165,7 +165,7 @@ public static class WebSearchTools
     /// </summary>
     private static List<SearchResult> DeduplicateByDomain(IReadOnlyList<SearchResult> results)
     {
-        var seen    = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var deduped = new List<SearchResult>();
 
         foreach (var r in results)
@@ -394,7 +394,7 @@ public static class WebSearchTools
             if (strictNewsMode && !hasExtraction)
                 continue;
 
-            var title  = !string.IsNullOrWhiteSpace(r.Title)
+            var title = !string.IsNullOrWhiteSpace(r.Title)
                 ? r.Title
                 : (hasExtraction ? ext!.Title : "(untitled)");
             var source = hasExtraction ? ext!.Domain : r.Source;
@@ -431,7 +431,7 @@ public static class WebSearchTools
             for (var i = 0; i < results.Count; i++)
             {
                 var r = results[i];
-                var title  = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : "(untitled)";
+                var title = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : "(untitled)";
                 var source = r.Source;
                 var publishedSuffix = r.PublishedAt.HasValue
                     ? $" (published {r.PublishedAt.Value.UtcDateTime:yyyy-MM-dd HH:mm} UTC)"
@@ -457,22 +457,22 @@ public static class WebSearchTools
             var r = results[i];
             var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && IsUsefulExtraction(ext, strictNewsMode);
 
-            var title     = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : (hasExtraction ? ext!.Title : "(untitled)");
-            var excerpt   = hasExtraction
+            var title = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : (hasExtraction ? ext!.Title : "(untitled)");
+            var excerpt = hasExtraction
                 ? CleanExcerpt(ContentExtractor.Truncate(ext!.TextContent.Trim(), CardExcerptChars))
                 : CleanExcerpt(r.Snippet);
-            var favicon   = hasExtraction ? ext!.FaviconBase64 : null;
+            var favicon = hasExtraction ? ext!.FaviconBase64 : null;
             var thumbnail = hasExtraction ? GetArticleThumbnail(ext!) : null;
-            var url       = hasExtraction ? ext!.Url           : r.Url;
-            var domain    = hasExtraction ? ext!.Domain         : r.Source;
+            var url = hasExtraction ? ext!.Url : r.Url;
+            var domain = hasExtraction ? ext!.Domain : r.Source;
 
             sources.Add(new
             {
                 title,
                 url,
                 domain,
-                excerpt   = excerpt ?? "",
-                favicon   = favicon ?? "",
+                excerpt = excerpt ?? "",
+                favicon = favicon ?? "",
                 thumbnail = thumbnail ?? "",
                 publishedAt = r.PublishedAt?.ToString("o")
             });

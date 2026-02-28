@@ -53,7 +53,7 @@ public static class MemoryTools
         if (string.IsNullOrWhiteSpace(query))
             return Respond(error: "Query is required.");
 
-        var store     = Backend.Value.Store;
+        var store = Backend.Value.Store;
         var retriever = Backend.Value.Retriever;
         if (store is null || retriever is null)
             return Respond(error: "Memory system not configured.");
@@ -107,17 +107,17 @@ public static class MemoryTools
                 var context = new RetrievalContext
                 {
                     ConversationId = conversationId,
-                    Mode           = mode
+                    Mode = mode
                 };
 
                 var pack = await retriever.BuildMemoryPackAsync(
                     query, context, cancellationToken);
 
                 deepPackText = pack.PackText;
-                deepFacts    = pack.Facts.Count;
-                deepEvents   = pack.Events.Count;
-                deepChunks   = pack.Chunks.Count;
-                citations    = pack.Citations;
+                deepFacts = pack.Facts.Count;
+                deepEvents = pack.Events.Count;
+                deepChunks = pack.Chunks.Count;
+                citations = pack.Citations;
             }
 
             // ── Combine: shallow block FIRST, then deep ──────────────
@@ -136,15 +136,15 @@ public static class MemoryTools
 
             return JsonSerializer.Serialize(new
             {
-                facts      = deepFacts,
-                events     = deepEvents,
-                chunks     = deepChunks,
-                nuggets    = nuggets.Count,
+                facts = deepFacts,
+                events = deepEvents,
+                chunks = deepChunks,
+                nuggets = nuggets.Count,
                 hasProfile = userProfile is not null,
                 onboardingNeeded,
-                notes      = "",
+                notes = "",
                 citations,
-                packText   = fullText,
+                packText = fullText,
                 hasContent
             }, SerializerOpts);
         }
@@ -190,11 +190,11 @@ public static class MemoryTools
                 return JsonResponse(new { error = "No facts provided.", stored = 0 });
 
             // Cap at 10 facts per call to prevent abuse
-            var toStore   = facts.Take(10).ToList();
-            var now       = DateTimeOffset.UtcNow;
-            var stored      = 0;
-            var skipped     = 0;
-            var replaced    = 0; // Auto-resolved updates + antonym replacements
+            var toStore = facts.Take(10).ToList();
+            var now = DateTimeOffset.UtcNow;
+            var stored = 0;
+            var skipped = 0;
+            var replaced = 0; // Auto-resolved updates + antonym replacements
 
             foreach (var f in toStore)
             {
@@ -205,7 +205,7 @@ public static class MemoryTools
 
                 var subj = f.Subject.Trim();
                 var pred = f.Predicate.Trim();
-                var obj  = f.Object.Trim();
+                var obj = f.Object.Trim();
 
                 // ── Check for existing facts with same (subject, predicate)
                 var existing = await store.FindMatchingFactsAsync(subj, pred, cancellationToken);
@@ -232,16 +232,16 @@ public static class MemoryTools
                         var outdated = existing[0];
                         await store.StoreFactAsync(new MemoryFact
                         {
-                            MemoryId    = outdated.MemoryId,
-                            ProfileId   = outdated.ProfileId,
-                            Subject     = subj,
-                            Predicate   = pred,
-                            Object      = obj,
-                            Confidence  = 0.95,
+                            MemoryId = outdated.MemoryId,
+                            ProfileId = outdated.ProfileId,
+                            Subject = subj,
+                            Predicate = pred,
+                            Object = obj,
+                            Confidence = 0.95,
                             Sensitivity = ParseSensitivity(f.Sensitivity),
-                            CreatedAt   = outdated.CreatedAt,
-                            UpdatedAt   = now,
-                            SourceRef   = sourceRef ?? outdated.SourceRef
+                            CreatedAt = outdated.CreatedAt,
+                            UpdatedAt = now,
+                            SourceRef = sourceRef ?? outdated.SourceRef
                         }, cancellationToken);
 
                         replaced++;
@@ -275,16 +275,16 @@ public static class MemoryTools
 
                 await store.StoreFactAsync(new MemoryFact
                 {
-                    MemoryId    = $"f-{Guid.NewGuid():N}",
-                    ProfileId   = string.IsNullOrWhiteSpace(activeProfileId) ? null : activeProfileId,
-                    Subject     = subj,
-                    Predicate   = pred,
-                    Object      = obj,
-                    Confidence  = superseded > 0 ? 0.95 : 0.90,
+                    MemoryId = $"f-{Guid.NewGuid():N}",
+                    ProfileId = string.IsNullOrWhiteSpace(activeProfileId) ? null : activeProfileId,
+                    Subject = subj,
+                    Predicate = pred,
+                    Object = obj,
+                    Confidence = superseded > 0 ? 0.95 : 0.90,
                     Sensitivity = ParseSensitivity(f.Sensitivity),
-                    CreatedAt   = now,
-                    UpdatedAt   = now,
-                    SourceRef   = sourceRef
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    SourceRef = sourceRef
                 }, cancellationToken);
                 stored++;
                 replaced += superseded;
@@ -303,9 +303,9 @@ public static class MemoryTools
 
             // Build response message
             var parts = new List<string>();
-            if (stored > 0)    parts.Add($"Stored {stored} fact(s).");
-            if (replaced > 0)  parts.Add($"Updated {replaced} existing fact(s).");
-            if (skipped > 0)   parts.Add($"Skipped {skipped} duplicate(s).");
+            if (stored > 0) parts.Add($"Stored {stored} fact(s).");
+            if (replaced > 0) parts.Add($"Updated {replaced} existing fact(s).");
+            if (skipped > 0) parts.Add($"Skipped {skipped} duplicate(s).");
             if (autoCreatedProfileId is not null)
                 parts.Add("Created a new profile card for this user.");
 
@@ -359,16 +359,16 @@ public static class MemoryTools
             var now = DateTimeOffset.UtcNow;
             await store.StoreFactAsync(new MemoryFact
             {
-                MemoryId    = existing.MemoryId,
-                ProfileId   = existing.ProfileId,   // Preserve ownership
-                Subject     = existing.Subject,
-                Predicate   = existing.Predicate,
-                Object      = newObject.Trim(),
-                Confidence  = 0.95, // Higher confidence — user explicitly confirmed
+                MemoryId = existing.MemoryId,
+                ProfileId = existing.ProfileId,   // Preserve ownership
+                Subject = existing.Subject,
+                Predicate = existing.Predicate,
+                Object = newObject.Trim(),
+                Confidence = 0.95, // Higher confidence — user explicitly confirmed
                 Sensitivity = existing.Sensitivity,
-                CreatedAt   = existing.CreatedAt,
-                UpdatedAt   = now,
-                SourceRef   = sourceRef ?? existing.SourceRef
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = now,
+                SourceRef = sourceRef ?? existing.SourceRef
             }, cancellationToken);
 
             return JsonResponse(new
@@ -410,7 +410,7 @@ public static class MemoryTools
             return JsonResponse(new { error = "Memory system not configured." });
 
         // Clamp to safe bounds
-        skip  = Math.Max(0, skip);
+        skip = Math.Max(0, skip);
         limit = Math.Clamp(limit, 1, 50);
 
         try
@@ -420,11 +420,11 @@ public static class MemoryTools
 
             var facts = items.Select(f => new
             {
-                fact_id    = f.MemoryId,
+                fact_id = f.MemoryId,
                 profile_id = f.ProfileId,
-                subject    = f.Subject,
-                predicate  = f.Predicate,
-                @object    = f.Object,
+                subject = f.Subject,
+                predicate = f.Predicate,
+                @object = f.Object,
                 confidence = f.Confidence,
                 updated_at = f.UpdatedAt.ToString("o")
             }).ToList();
@@ -468,7 +468,7 @@ public static class MemoryTools
             if (existing is null)
                 return JsonResponse(new
                 {
-                    ok    = false,
+                    ok = false,
                     error = $"No fact found with id '{factId}'."
                 });
 
@@ -476,7 +476,7 @@ public static class MemoryTools
 
             return JsonResponse(new
             {
-                ok      = true,
+                ok = true,
                 deleted = factId,
                 message = $"Deleted: {existing.Subject} {existing.Predicate} '{existing.Object}'."
             });
@@ -534,9 +534,9 @@ public static class MemoryTools
 
     private sealed record FactInput
     {
-        public string Subject    { get; init; } = "";
-        public string Predicate  { get; init; } = "";
-        public string Object     { get; init; } = "";
+        public string Subject { get; init; } = "";
+        public string Predicate { get; init; } = "";
+        public string Object { get; init; } = "";
         public string? Sensitivity { get; init; }
     }
 
@@ -646,21 +646,21 @@ public static class MemoryTools
         // are listed explicitly for clarity and O(1) lookup.
         return p switch
         {
-            "likes"      => ["dislikes", "hates"],
-            "loves"      => ["dislikes", "hates"],
-            "dislikes"   => ["likes", "loves"],
-            "hates"      => ["likes", "loves"],
+            "likes" => ["dislikes", "hates"],
+            "loves" => ["dislikes", "hates"],
+            "dislikes" => ["likes", "loves"],
+            "hates" => ["likes", "loves"],
 
-            "prefers"    => ["avoids", "dislikes"],
-            "avoids"     => ["prefers", "likes"],
+            "prefers" => ["avoids", "dislikes"],
+            "avoids" => ["prefers", "likes"],
 
-            "supports"   => ["opposes"],
-            "opposes"    => ["supports"],
+            "supports" => ["opposes"],
+            "opposes" => ["supports"],
 
-            "uses"       => ["avoids", "stopped_using"],
+            "uses" => ["avoids", "stopped_using"],
             "stopped_using" => ["uses"],
 
-            _            => []
+            _ => []
         };
     }
 
@@ -757,11 +757,11 @@ public static class MemoryTools
 
         await store.StoreProfileAsync(new ProfileCard
         {
-            ProfileId   = profileId,
-            Kind        = "user",
+            ProfileId = profileId,
+            Kind = "user",
             DisplayName = displayName,
             ProfileJson = "{}",
-            UpdatedAt   = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow
         }, ct);
 
         return profileId;
@@ -831,7 +831,7 @@ public static class MemoryTools
         JsonSerializer.Serialize(new
         {
             error,
-            packText   = "",
+            packText = "",
             hasContent = false
         }, SerializerOpts);
 

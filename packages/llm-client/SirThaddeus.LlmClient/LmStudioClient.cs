@@ -24,7 +24,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
-        
+
         // ── Sir Thaddeus notes: A butler must exhibit patience! ───
         // Local GPUs require time to sweep their VRAM floors. 
         // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
@@ -134,7 +134,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 return await ParseResponse(response, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            
+
             // If the bare request still fails, it is highly likely the local model 
             // is not properly instructed for tool schemas. We must inform the user elegantly.
             throw new HttpRequestException(
@@ -144,7 +144,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         }
 
         var options = GetOptionsSnapshot();
-        
+
         // Handle LM Studio 500 HTML errors (often means model not loaded or crashed)
         if ((int)response.StatusCode == 500 && errorBody.Contains("<!DOCTYPE html>", StringComparison.OrdinalIgnoreCase))
         {
@@ -265,11 +265,11 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         var options = GetOptionsSnapshot();
         var body = new Dictionary<string, object>
         {
-            ["model"]       = options.Model,
-            ["messages"]    = messages,
-            ["max_tokens"]  = options.EffectiveMaxTokens(maxTokensOverride),
+            ["model"] = options.Model,
+            ["messages"] = messages,
+            ["max_tokens"] = options.EffectiveMaxTokens(maxTokensOverride),
             ["temperature"] = options.Temperature,
-            ["stream"]      = false
+            ["stream"] = false
         };
 
         if (includeExtras)
@@ -286,7 +286,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         if (tools is { Count: > 0 })
         {
-            body["tools"]       = tools;
+            body["tools"] = tools;
             body["tool_choice"] = "auto";
         }
         // When tools is null/empty, intentionally omit both fields.
@@ -312,13 +312,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         {
             return new LlmResponse
             {
-                IsComplete    = true,
-                Content       = "[No response from model]",
-                FinishReason  = "error"
+                IsComplete = true,
+                Content = "[No response from model]",
+                FinishReason = "error"
             };
         }
 
-        var choice  = completion.Choices[0];
+        var choice = completion.Choices[0];
         var message = choice.Message;
 
         var hasToolCalls = message?.ToolCalls is { Count: > 0 };
@@ -334,12 +334,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         return new LlmResponse
         {
-            IsComplete      = !hasToolCalls,
-            Content         = content,
+            IsComplete = !hasToolCalls,
+            Content = content,
             ReasoningContent = message?.ReasoningContent,
-            ToolCalls       = message?.ToolCalls,
-            FinishReason    = choice.FinishReason,
-            Usage           = completion.Usage
+            ToolCalls = message?.ToolCalls,
+            FinishReason = choice.FinishReason,
+            Usage = completion.Usage
         };
     }
 
@@ -405,7 +405,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         if (string.IsNullOrWhiteSpace(content))
             return content;
 
-        const string openTag  = "<think>";
+        const string openTag = "<think>";
         const string closeTag = "</think>";
 
         // Fast-path: no think tags at all → return content unchanged

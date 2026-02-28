@@ -15,7 +15,7 @@ public class AuditLogTests : IDisposable
     {
         // Use a unique temp file for each test run
         _testFilePath = Path.Combine(
-            Path.GetTempPath(), 
+            Path.GetTempPath(),
             $"meaningful_copilot_test_{Guid.NewGuid()}.jsonl");
         _logger = new JsonLineAuditLogger(_testFilePath);
     }
@@ -56,7 +56,7 @@ public class AuditLogTests : IDisposable
         // Assert
         var lines = File.ReadAllLines(_testFilePath);
         Assert.Equal(2, lines.Length);
-        
+
         // Each line should be valid JSON
         foreach (var line in lines)
         {
@@ -85,10 +85,10 @@ public class AuditLogTests : IDisposable
         // Arrange - write 15 events
         for (int i = 1; i <= 15; i++)
         {
-            _logger.Append(new AuditEvent 
-            { 
-                Actor = "test", 
-                Action = $"ACTION_{i}" 
+            _logger.Append(new AuditEvent
+            {
+                Actor = "test",
+                Action = $"ACTION_{i}"
             });
         }
 
@@ -97,7 +97,7 @@ public class AuditLogTests : IDisposable
 
         // Assert
         Assert.Equal(10, events.Count);
-        
+
         // Should be events 6-15 (the newest 10)
         Assert.Equal("ACTION_6", events[0].Action);
         Assert.Equal("ACTION_15", events[9].Action);
@@ -109,10 +109,10 @@ public class AuditLogTests : IDisposable
         // Arrange - write only 3 events
         for (int i = 1; i <= 3; i++)
         {
-            _logger.Append(new AuditEvent 
-            { 
-                Actor = "test", 
-                Action = $"ACTION_{i}" 
+            _logger.Append(new AuditEvent
+            {
+                Actor = "test",
+                Action = $"ACTION_{i}"
             });
         }
 
@@ -128,10 +128,10 @@ public class AuditLogTests : IDisposable
     {
         // Arrange - write valid event, then corrupt the file, then write another
         _logger.Append(new AuditEvent { Actor = "test", Action = "VALID_1" });
-        
+
         // Manually append malformed JSON
         File.AppendAllText(_testFilePath, "{ this is not valid json }\n");
-        
+
         _logger.Append(new AuditEvent { Actor = "test", Action = "VALID_2" });
 
         // Act

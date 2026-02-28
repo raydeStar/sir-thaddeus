@@ -274,7 +274,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
             if (_waveIn is null) return;
 
             var buffer = e.Buffer;
-            var count  = e.BytesRecorded;
+            var count = e.BytesRecorded;
 
             if (count > 0 && Math.Abs(InputGain - 1.0) > 0.01)
             {
@@ -325,9 +325,9 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
         var result = new byte[length];
         for (int i = 0; i + 1 < length; i += 2)
         {
-            short sample   = (short)(source[i] | (source[i + 1] << 8));
-            int   amplified = Math.Clamp((int)(sample * gain), short.MinValue, short.MaxValue);
-            result[i]     = (byte)(amplified & 0xFF);
+            short sample = (short)(source[i] | (source[i + 1] << 8));
+            int amplified = Math.Clamp((int)(sample * gain), short.MinValue, short.MaxValue);
+            result[i] = (byte)(amplified & 0xFF);
             result[i + 1] = (byte)((amplified >> 8) & 0xFF);
         }
         return result;

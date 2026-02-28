@@ -13,9 +13,9 @@ public static class Scoring
     public static double ScoreFactOrEvent(
         double lexicalScore, double recencyScore, double confidence)
     {
-        return Thresholds.FactLexWeight     * Math.Clamp(lexicalScore, 0, 1)
+        return Thresholds.FactLexWeight * Math.Clamp(lexicalScore, 0, 1)
              + Thresholds.FactRecencyWeight * Math.Clamp(recencyScore, 0, 1)
-             + Thresholds.FactConfWeight    * Math.Clamp(confidence, 0, 1);
+             + Thresholds.FactConfWeight * Math.Clamp(confidence, 0, 1);
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public static class Scoring
         double dot = 0, normA = 0, normB = 0;
         for (var i = 0; i < a.Length; i++)
         {
-            dot   += a[i] * (double)b[i];
+            dot += a[i] * (double)b[i];
             normA += a[i] * (double)a[i];
             normB += b[i] * (double)b[i];
         }

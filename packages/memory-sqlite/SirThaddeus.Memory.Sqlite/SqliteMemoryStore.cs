@@ -56,7 +56,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     public async Task<IReadOnlyList<StoreCandidate<MemoryFact>>> SearchFactsAsync(
         string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default)
     {
-        var conn     = await GetConnectionAsync(ct);
+        var conn = await GetConnectionAsync(ct);
         var keywords = TokenizeQuery(query);
         if (keywords.Count == 0)
             return [];
@@ -91,11 +91,11 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         while (await reader.ReadAsync(ct))
         {
-            var fact       = ReadFact(reader);
+            var fact = ReadFact(reader);
             var matchCount = CountKeywordMatches(keywords,
                 fact.Subject, fact.Predicate, fact.Object);
-            var lexScore   = (double)matchCount / keywords.Count;
-            var simScore   = (queryEmbedding is not null && fact.Embedding is not null)
+            var lexScore = (double)matchCount / keywords.Count;
+            var simScore = (queryEmbedding is not null && fact.Embedding is not null)
                 ? DotProduct(queryEmbedding, fact.Embedding)
                 : 0.0;
 
@@ -109,7 +109,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     public async Task<IReadOnlyList<StoreCandidate<MemoryEvent>>> SearchEventsAsync(
         string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default)
     {
-        var conn     = await GetConnectionAsync(ct);
+        var conn = await GetConnectionAsync(ct);
         var keywords = TokenizeQuery(query);
         if (keywords.Count == 0)
             return [];
@@ -143,11 +143,11 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         while (await reader.ReadAsync(ct))
         {
-            var evt        = ReadEvent(reader);
+            var evt = ReadEvent(reader);
             var matchCount = CountKeywordMatches(keywords,
                 evt.Type, evt.Title, evt.Summary ?? "");
-            var lexScore   = (double)matchCount / keywords.Count;
-            var simScore   = (queryEmbedding is not null && evt.Embedding is not null)
+            var lexScore = (double)matchCount / keywords.Count;
+            var simScore = (queryEmbedding is not null && evt.Embedding is not null)
                 ? DotProduct(queryEmbedding, evt.Embedding)
                 : 0.0;
 
@@ -181,8 +181,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             ORDER  BY fts.rank
             LIMIT  @limit
             """;
-        cmd.Parameters.AddWithValue("@query",  ftsQuery);
-        cmd.Parameters.AddWithValue("@limit",  maxResults);
+        cmd.Parameters.AddWithValue("@query", ftsQuery);
+        cmd.Parameters.AddWithValue("@limit", maxResults);
 
         var raw = new List<(MemoryChunk Chunk, double RawBm25)>();
         using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -191,15 +191,15 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         {
             var chunk = new MemoryChunk
             {
-                ChunkId     = reader.GetString(0),
-                SourceType  = reader.GetString(1),
-                SourceRef   = reader.IsDBNull(2) ? null : reader.GetString(2),
-                Text        = reader.GetString(3),
-                WhenIso     = reader.IsDBNull(4) ? null : ParseTimestamp(reader.GetString(4)),
+                ChunkId = reader.GetString(0),
+                SourceType = reader.GetString(1),
+                SourceRef = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Text = reader.GetString(3),
+                WhenIso = reader.IsDBNull(4) ? null : ParseTimestamp(reader.GetString(4)),
                 Sensitivity = ParseSensitivity(reader.GetString(5)),
-                Embedding   = reader.IsDBNull(6) ? null : ParseEmbedding((byte[])reader[6]),
+                Embedding = reader.IsDBNull(6) ? null : ParseEmbedding((byte[])reader[6]),
                 EmbeddingModel = reader.IsDBNull(7) ? null : reader.GetString(7),
-                EmbeddingDims  = reader.IsDBNull(8) ? null : reader.GetInt32(8)
+                EmbeddingDims = reader.IsDBNull(8) ? null : reader.GetInt32(8)
             };
 
             raw.Add((chunk, reader.GetDouble(9)));
@@ -210,7 +210,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         // Normalize BM25 scores to [0, 1].
         // bm25() returns negative values: more negative = better match.
-        var best  = raw.Min(r => r.RawBm25);   // most negative = best
+        var best = raw.Min(r => r.RawBm25);   // most negative = best
         var worst = raw.Max(r => r.RawBm25);    // least negative = worst
         var range = worst - best;
 
@@ -313,24 +313,24 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
                     @dedupe, @origin, @created, @updated,
                     @src, 0, @emb, @embModel, @embDims)
             """;
-        cmd.Parameters.AddWithValue("@id",        targetId);
+        cmd.Parameters.AddWithValue("@id", targetId);
         cmd.Parameters.AddWithValue("@profileId", (object?)fact.ProfileId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@subj",      fact.Subject);
-        cmd.Parameters.AddWithValue("@pred",      fact.Predicate);
-        cmd.Parameters.AddWithValue("@obj",       fact.Object);
-        cmd.Parameters.AddWithValue("@conf",      fact.Confidence);
-        cmd.Parameters.AddWithValue("@weight",    fact.Weight);
-        cmd.Parameters.AddWithValue("@sens",      fact.Sensitivity.ToString().ToLowerInvariant());
-        cmd.Parameters.AddWithValue("@turnId",    (object?)fact.SourceTurnId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@hash",      (object?)fact.SourceHash ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@dedupe",    (object?)fact.DedupeKey ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@origin",    (object?)fact.Origin ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@created",   fact.CreatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@updated",   fact.UpdatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@src",       (object?)fact.SourceRef ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@emb",       fact.Embedding is not null ? SerializeEmbedding(fact.Embedding) : DBNull.Value);
-        cmd.Parameters.AddWithValue("@embModel",  (object?)fact.EmbeddingModel ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@embDims",   (object?)fact.EmbeddingDims ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@subj", fact.Subject);
+        cmd.Parameters.AddWithValue("@pred", fact.Predicate);
+        cmd.Parameters.AddWithValue("@obj", fact.Object);
+        cmd.Parameters.AddWithValue("@conf", fact.Confidence);
+        cmd.Parameters.AddWithValue("@weight", fact.Weight);
+        cmd.Parameters.AddWithValue("@sens", fact.Sensitivity.ToString().ToLowerInvariant());
+        cmd.Parameters.AddWithValue("@turnId", (object?)fact.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash", (object?)fact.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe", (object?)fact.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin", (object?)fact.Origin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@created", fact.CreatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@updated", fact.UpdatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@src", (object?)fact.SourceRef ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@emb", fact.Embedding is not null ? SerializeEmbedding(fact.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel", (object?)fact.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims", (object?)fact.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -361,26 +361,26 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
                     @dedupe, @origin, @created, @updated,
                     @src, 0, @emb, @embModel, @embDims)
             """;
-        cmd.Parameters.AddWithValue("@id",        targetId);
+        cmd.Parameters.AddWithValue("@id", targetId);
         cmd.Parameters.AddWithValue("@profileId", (object?)evt.ProfileId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@type",      evt.Type);
-        cmd.Parameters.AddWithValue("@title",     evt.Title);
-        cmd.Parameters.AddWithValue("@summary",   (object?)evt.Summary ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@when",      evt.WhenIso.HasValue
+        cmd.Parameters.AddWithValue("@type", evt.Type);
+        cmd.Parameters.AddWithValue("@title", evt.Title);
+        cmd.Parameters.AddWithValue("@summary", (object?)evt.Summary ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@when", evt.WhenIso.HasValue
             ? evt.WhenIso.Value.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@conf",      evt.Confidence);
-        cmd.Parameters.AddWithValue("@weight",    evt.Weight);
-        cmd.Parameters.AddWithValue("@sens",      evt.Sensitivity.ToString().ToLowerInvariant());
-        cmd.Parameters.AddWithValue("@turnId",    (object?)evt.SourceTurnId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@hash",      (object?)evt.SourceHash ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@dedupe",    (object?)evt.DedupeKey ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@origin",    (object?)evt.Origin ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@created",   evt.CreatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@updated",   evt.UpdatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@src",       (object?)evt.SourceRef ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@emb",       evt.Embedding is not null ? SerializeEmbedding(evt.Embedding) : DBNull.Value);
-        cmd.Parameters.AddWithValue("@embModel",  (object?)evt.EmbeddingModel ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@embDims",   (object?)evt.EmbeddingDims ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@conf", evt.Confidence);
+        cmd.Parameters.AddWithValue("@weight", evt.Weight);
+        cmd.Parameters.AddWithValue("@sens", evt.Sensitivity.ToString().ToLowerInvariant());
+        cmd.Parameters.AddWithValue("@turnId", (object?)evt.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash", (object?)evt.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe", (object?)evt.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin", (object?)evt.Origin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@created", evt.CreatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@updated", evt.UpdatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@src", (object?)evt.SourceRef ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@emb", evt.Embedding is not null ? SerializeEmbedding(evt.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel", (object?)evt.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims", (object?)evt.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -396,17 +396,17 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             VALUES (@id, @srcType, @srcRef, @text,
                     @when, @sens, 0, @emb, @embModel, @embDims)
             """;
-        cmd.Parameters.AddWithValue("@id",      chunk.ChunkId);
+        cmd.Parameters.AddWithValue("@id", chunk.ChunkId);
         cmd.Parameters.AddWithValue("@srcType", chunk.SourceType);
-        cmd.Parameters.AddWithValue("@srcRef",  (object?)chunk.SourceRef ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@text",    chunk.Text);
-        cmd.Parameters.AddWithValue("@when",    chunk.WhenIso.HasValue
+        cmd.Parameters.AddWithValue("@srcRef", (object?)chunk.SourceRef ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@text", chunk.Text);
+        cmd.Parameters.AddWithValue("@when", chunk.WhenIso.HasValue
             ? chunk.WhenIso.Value.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@sens",    chunk.Sensitivity.ToString().ToLowerInvariant());
-        cmd.Parameters.AddWithValue("@emb",     chunk.Embedding is not null
+        cmd.Parameters.AddWithValue("@sens", chunk.Sensitivity.ToString().ToLowerInvariant());
+        cmd.Parameters.AddWithValue("@emb", chunk.Embedding is not null
             ? SerializeEmbedding(chunk.Embedding) : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@embModel",  (object?)chunk.EmbeddingModel ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@embDims",   (object?)chunk.EmbeddingDims ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel", (object?)chunk.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims", (object?)chunk.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -714,12 +714,12 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             VALUES (@id, @kind, @name, @rel,
                     @aliases, @json, @updated, 0)
             """;
-        cmd.Parameters.AddWithValue("@id",      profile.ProfileId);
-        cmd.Parameters.AddWithValue("@kind",    profile.Kind);
-        cmd.Parameters.AddWithValue("@name",    profile.DisplayName);
-        cmd.Parameters.AddWithValue("@rel",     (object?)profile.Relationship ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@id", profile.ProfileId);
+        cmd.Parameters.AddWithValue("@kind", profile.Kind);
+        cmd.Parameters.AddWithValue("@name", profile.DisplayName);
+        cmd.Parameters.AddWithValue("@rel", (object?)profile.Relationship ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@aliases", (object?)profile.Aliases ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@json",    profile.ProfileJson);
+        cmd.Parameters.AddWithValue("@json", profile.ProfileJson);
         cmd.Parameters.AddWithValue("@updated", profile.UpdatedAt.ToString("o"));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -812,10 +812,10 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         return candidates
             .Select(n =>
             {
-                var text     = $"{n.Text} {n.Tags}".ToLowerInvariant();
+                var text = $"{n.Text} {n.Tags}".ToLowerInvariant();
                 var hitRatio = (double)keywords.Count(kw =>
                     text.Contains(kw, StringComparison.OrdinalIgnoreCase)) / keywords.Count;
-                var score    = hitRatio * 0.4 + ScoreNugget(n) * 0.6;
+                var score = hitRatio * 0.4 + ScoreNugget(n) * 0.6;
                 return (Nugget: n, Score: score);
             })
             .OrderByDescending(x => x.Score)
@@ -909,24 +909,24 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
                     @useCount, @lastUsed, @created, @updated, 0,
                     @emb, @embModel, @embDims, @citation)
             """;
-        cmd.Parameters.AddWithValue("@id",       targetId);
-        cmd.Parameters.AddWithValue("@text",     nugget.Text);
-        cmd.Parameters.AddWithValue("@tags",     (object?)nugget.Tags ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@weight",   nugget.Weight);
-        cmd.Parameters.AddWithValue("@pin",      nugget.PinLevel);
-        cmd.Parameters.AddWithValue("@sens",     nugget.Sensitivity);
-        cmd.Parameters.AddWithValue("@turnId",   (object?)nugget.SourceTurnId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@hash",     (object?)nugget.SourceHash ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@dedupe",   (object?)nugget.DedupeKey ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@origin",   (object?)nugget.Origin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@id", targetId);
+        cmd.Parameters.AddWithValue("@text", nugget.Text);
+        cmd.Parameters.AddWithValue("@tags", (object?)nugget.Tags ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@weight", nugget.Weight);
+        cmd.Parameters.AddWithValue("@pin", nugget.PinLevel);
+        cmd.Parameters.AddWithValue("@sens", nugget.Sensitivity);
+        cmd.Parameters.AddWithValue("@turnId", (object?)nugget.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash", (object?)nugget.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe", (object?)nugget.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin", (object?)nugget.Origin ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@useCount", nugget.UseCount);
         cmd.Parameters.AddWithValue("@lastUsed", nugget.LastUsedAt.HasValue
             ? nugget.LastUsedAt.Value.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@created",  nugget.CreatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@updated",  nugget.UpdatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@emb",      nugget.Embedding is not null ? SerializeEmbedding(nugget.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@created", nugget.CreatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@updated", nugget.UpdatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@emb", nugget.Embedding is not null ? SerializeEmbedding(nugget.Embedding) : DBNull.Value);
         cmd.Parameters.AddWithValue("@embModel", (object?)nugget.EmbeddingModel ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@embDims",  (object?)nugget.EmbeddingDims ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims", (object?)nugget.EmbeddingDims ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@citation", (object?)nugget.ChunkCitation ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -943,7 +943,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             WHERE  nugget_id    = @id
               AND  is_deleted   = 0
             """;
-        cmd.Parameters.AddWithValue("@id",  nuggetId);
+        cmd.Parameters.AddWithValue("@id", nuggetId);
         cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -969,24 +969,24 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     /// </summary>
     private static MemoryFact ReadFact(SqliteDataReader r) => new()
     {
-        MemoryId     = r.GetString(0),
-        ProfileId    = r.IsDBNull(1) ? null : r.GetString(1),
-        Subject      = r.GetString(2),
-        Predicate    = r.GetString(3),
-        Object       = r.GetString(4),
-        Confidence   = r.GetDouble(5),
-        Weight       = r.GetDouble(6),
-        Sensitivity  = ParseSensitivity(r.GetString(7)),
+        MemoryId = r.GetString(0),
+        ProfileId = r.IsDBNull(1) ? null : r.GetString(1),
+        Subject = r.GetString(2),
+        Predicate = r.GetString(3),
+        Object = r.GetString(4),
+        Confidence = r.GetDouble(5),
+        Weight = r.GetDouble(6),
+        Sensitivity = ParseSensitivity(r.GetString(7)),
         SourceTurnId = r.IsDBNull(8) ? null : r.GetString(8),
-        SourceHash   = r.IsDBNull(9) ? null : r.GetString(9),
-        DedupeKey    = r.IsDBNull(10) ? null : r.GetString(10),
-        Origin       = r.IsDBNull(11) ? null : r.GetString(11),
-        CreatedAt    = ParseTimestamp(r.GetString(12)),
-        UpdatedAt    = ParseTimestamp(r.GetString(13)),
-        SourceRef    = r.IsDBNull(14) ? null : r.GetString(14),
-        Embedding    = r.IsDBNull(15) ? null : ParseEmbedding((byte[])r[15]),
-        EmbeddingModel= r.IsDBNull(16) ? null : r.GetString(16),
-        EmbeddingDims= r.IsDBNull(17) ? null : r.GetInt32(17)
+        SourceHash = r.IsDBNull(9) ? null : r.GetString(9),
+        DedupeKey = r.IsDBNull(10) ? null : r.GetString(10),
+        Origin = r.IsDBNull(11) ? null : r.GetString(11),
+        CreatedAt = ParseTimestamp(r.GetString(12)),
+        UpdatedAt = ParseTimestamp(r.GetString(13)),
+        SourceRef = r.IsDBNull(14) ? null : r.GetString(14),
+        Embedding = r.IsDBNull(15) ? null : ParseEmbedding((byte[])r[15]),
+        EmbeddingModel = r.IsDBNull(16) ? null : r.GetString(16),
+        EmbeddingDims = r.IsDBNull(17) ? null : r.GetInt32(17)
     };
 
     /// <summary>
@@ -995,25 +995,25 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     /// </summary>
     private static MemoryEvent ReadEvent(SqliteDataReader r) => new()
     {
-        EventId     = r.GetString(0),
-        ProfileId   = r.IsDBNull(1) ? null : r.GetString(1),
-        Type        = r.GetString(2),
-        Title       = r.GetString(3),
-        Summary     = r.IsDBNull(4) ? null : r.GetString(4),
-        WhenIso     = r.IsDBNull(5) ? null : ParseTimestamp(r.GetString(5)),
-        Confidence  = r.GetDouble(6),
-        Weight      = r.GetDouble(7),
+        EventId = r.GetString(0),
+        ProfileId = r.IsDBNull(1) ? null : r.GetString(1),
+        Type = r.GetString(2),
+        Title = r.GetString(3),
+        Summary = r.IsDBNull(4) ? null : r.GetString(4),
+        WhenIso = r.IsDBNull(5) ? null : ParseTimestamp(r.GetString(5)),
+        Confidence = r.GetDouble(6),
+        Weight = r.GetDouble(7),
         Sensitivity = ParseSensitivity(r.GetString(8)),
-        SourceTurnId= r.IsDBNull(9) ? null : r.GetString(9),
-        SourceHash  = r.IsDBNull(10) ? null : r.GetString(10),
-        DedupeKey   = r.IsDBNull(11) ? null : r.GetString(11),
-        Origin      = r.IsDBNull(12) ? null : r.GetString(12),
-        CreatedAt   = ParseTimestamp(r.GetString(13)),
-        UpdatedAt   = ParseTimestamp(r.GetString(14)),
-        SourceRef   = r.IsDBNull(15) ? null : r.GetString(15),
-        Embedding   = r.IsDBNull(16) ? null : ParseEmbedding((byte[])r[16]),
-        EmbeddingModel= r.IsDBNull(17) ? null : r.GetString(17),
-        EmbeddingDims= r.IsDBNull(18) ? null : r.GetInt32(18)
+        SourceTurnId = r.IsDBNull(9) ? null : r.GetString(9),
+        SourceHash = r.IsDBNull(10) ? null : r.GetString(10),
+        DedupeKey = r.IsDBNull(11) ? null : r.GetString(11),
+        Origin = r.IsDBNull(12) ? null : r.GetString(12),
+        CreatedAt = ParseTimestamp(r.GetString(13)),
+        UpdatedAt = ParseTimestamp(r.GetString(14)),
+        SourceRef = r.IsDBNull(15) ? null : r.GetString(15),
+        Embedding = r.IsDBNull(16) ? null : ParseEmbedding((byte[])r[16]),
+        EmbeddingModel = r.IsDBNull(17) ? null : r.GetString(17),
+        EmbeddingDims = r.IsDBNull(18) ? null : r.GetInt32(18)
     };
 
     /// <summary>
@@ -1023,46 +1023,46 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     /// </summary>
     private static MemoryChunk ReadChunkBrowse(SqliteDataReader r) => new()
     {
-        ChunkId     = r.GetString(0),
-        SourceType  = r.GetString(1),
-        SourceRef   = r.IsDBNull(2) ? null : r.GetString(2),
-        Text        = r.GetString(3),
-        WhenIso     = r.IsDBNull(4) ? null : ParseTimestamp(r.GetString(4)),
+        ChunkId = r.GetString(0),
+        SourceType = r.GetString(1),
+        SourceRef = r.IsDBNull(2) ? null : r.GetString(2),
+        Text = r.GetString(3),
+        WhenIso = r.IsDBNull(4) ? null : ParseTimestamp(r.GetString(4)),
         Sensitivity = ParseSensitivity(r.GetString(5)),
-        Embedding   = null
+        Embedding = null
     };
 
     private static ProfileCard ReadProfileCard(SqliteDataReader r) => new()
     {
-        ProfileId    = r.GetString(0),
-        Kind         = r.GetString(1),
-        DisplayName  = r.GetString(2),
+        ProfileId = r.GetString(0),
+        Kind = r.GetString(1),
+        DisplayName = r.GetString(2),
         Relationship = r.IsDBNull(3) ? null : r.GetString(3),
-        Aliases      = r.IsDBNull(4) ? null : r.GetString(4),
-        ProfileJson  = r.GetString(5),
-        UpdatedAt    = ParseTimestamp(r.GetString(6))
+        Aliases = r.IsDBNull(4) ? null : r.GetString(4),
+        ProfileJson = r.GetString(5),
+        UpdatedAt = ParseTimestamp(r.GetString(6))
     };
 
     private static MemoryNugget ReadNugget(SqliteDataReader r) => new()
     {
-        NuggetId    = r.GetString(0),
-        Text        = r.GetString(1),
-        Tags        = r.IsDBNull(2) ? null : r.GetString(2),
-        Weight      = r.GetDouble(3),
-        PinLevel    = r.GetInt32(4),
+        NuggetId = r.GetString(0),
+        Text = r.GetString(1),
+        Tags = r.IsDBNull(2) ? null : r.GetString(2),
+        Weight = r.GetDouble(3),
+        PinLevel = r.GetInt32(4),
         Sensitivity = r.GetString(5),
-        SourceTurnId= r.IsDBNull(6) ? null : r.GetString(6),
-        SourceHash  = r.IsDBNull(7) ? null : r.GetString(7),
-        DedupeKey   = r.IsDBNull(8) ? null : r.GetString(8),
-        Origin      = r.IsDBNull(9) ? null : r.GetString(9),
-        UseCount    = r.GetInt32(10),
-        LastUsedAt  = r.IsDBNull(11) ? null : ParseTimestamp(r.GetString(11)),
-        CreatedAt   = ParseTimestamp(r.GetString(12)),
-        UpdatedAt   = ParseTimestamp(r.GetString(13)),
-        Embedding   = r.IsDBNull(14) ? null : ParseEmbedding((byte[])r[14]),
-        EmbeddingModel= r.IsDBNull(15) ? null : r.GetString(15),
-        EmbeddingDims= r.IsDBNull(16) ? null : r.GetInt32(16),
-        ChunkCitation= r.IsDBNull(17) ? null : r.GetString(17)
+        SourceTurnId = r.IsDBNull(6) ? null : r.GetString(6),
+        SourceHash = r.IsDBNull(7) ? null : r.GetString(7),
+        DedupeKey = r.IsDBNull(8) ? null : r.GetString(8),
+        Origin = r.IsDBNull(9) ? null : r.GetString(9),
+        UseCount = r.GetInt32(10),
+        LastUsedAt = r.IsDBNull(11) ? null : ParseTimestamp(r.GetString(11)),
+        CreatedAt = ParseTimestamp(r.GetString(12)),
+        UpdatedAt = ParseTimestamp(r.GetString(13)),
+        Embedding = r.IsDBNull(14) ? null : ParseEmbedding((byte[])r[14]),
+        EmbeddingModel = r.IsDBNull(15) ? null : r.GetString(15),
+        EmbeddingDims = r.IsDBNull(16) ? null : r.GetInt32(16),
+        ChunkCitation = r.IsDBNull(17) ? null : r.GetString(17)
     };
 
     /// <summary>
@@ -1071,11 +1071,11 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     /// </summary>
     private static double ScoreNugget(MemoryNugget n)
     {
-        var pinNorm     = Math.Min(n.PinLevel, 2) / 2.0;
-        var recency     = n.LastUsedAt.HasValue
+        var pinNorm = Math.Min(n.PinLevel, 2) / 2.0;
+        var recency = n.LastUsedAt.HasValue
             ? Math.Exp(-(DateTimeOffset.UtcNow - n.LastUsedAt.Value).TotalDays / 14.0)
             : 0.1; // never used → low recency
-        var useBoost    = Math.Log(1 + n.UseCount) / 5.0;
+        var useBoost = Math.Log(1 + n.UseCount) / 5.0;
 
         return 0.55 * pinNorm
              + 0.25 * n.Weight
@@ -1176,7 +1176,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         if (blob.Length == 0 || blob.Length % 4 != 0)
             return null;
 
-        var count  = blob.Length / 4;
+        var count = blob.Length / 4;
         var result = new float[count];
         Buffer.BlockCopy(blob, 0, result, 0, blob.Length);
         return result;

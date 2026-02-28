@@ -30,7 +30,7 @@ public sealed partial class ResponseKindClassifier
     private static bool LooksLikeReasoning(string text)
     {
         var lower = text.ToLowerInvariant();
-        
+
         // New structure with tags
         if (lower.Contains("<think>", StringComparison.Ordinal))
             return true;

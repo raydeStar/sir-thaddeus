@@ -21,7 +21,7 @@ public sealed class ChatHistoryPersistence
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented     = true,
+        WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
@@ -39,7 +39,7 @@ public sealed class ChatHistoryPersistence
         if (!Directory.Exists(dataDirectory))
             Directory.CreateDirectory(dataDirectory);
 
-        _chatHistoryPath     = Path.Combine(dataDirectory, "chat-history.json");
+        _chatHistoryPath = Path.Combine(dataDirectory, "chat-history.json");
         _briefingHistoryPath = Path.Combine(dataDirectory, "briefing-history.json");
         _audit = audit;
     }
@@ -71,11 +71,11 @@ public sealed class ChatHistoryPersistence
     {
         var dtos = entries.Select(e => new BriefingHistoryEntryDto
         {
-            Title      = e.Title,
+            Title = e.Title,
             Confidence = e.Confidence,
             StatusLine = e.StatusLine,
-            Timestamp  = e.Timestamp,
-            Briefing   = e.Briefing
+            Timestamp = e.Timestamp,
+            Briefing = e.Briefing
         }).ToList();
 
         SaveJsonList(_briefingHistoryPath, dtos, "BRIEFING_HISTORY");
@@ -102,7 +102,7 @@ public sealed class ChatHistoryPersistence
         {
             _audit.Append(new AuditEvent
             {
-                Actor  = "runtime",
+                Actor = "runtime",
                 Action = $"{logLabel}_LOAD_FAILED",
                 Result = "error",
                 Details = new Dictionary<string, object> { ["error"] = ex.Message }
@@ -122,7 +122,7 @@ public sealed class ChatHistoryPersistence
         {
             _audit.Append(new AuditEvent
             {
-                Actor  = "runtime",
+                Actor = "runtime",
                 Action = $"{logLabel}_SAVE_FAILED",
                 Result = "error",
                 Details = new Dictionary<string, object> { ["error"] = ex.Message }

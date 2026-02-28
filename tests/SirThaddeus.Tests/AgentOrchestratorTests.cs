@@ -27,9 +27,9 @@ public class IntentClassificationTests
     public IntentClassificationTests(ITestOutputHelper output) => _output = output;
 
     [Theory]
-    [InlineData("chat",   false)]  // Casual → no tool calls
+    [InlineData("chat", false)]  // Casual → no tool calls
     [InlineData("search", true)]   // WebLookup → web_search tool
-    [InlineData("tool",   true)]   // Tooling → tool call loop
+    [InlineData("tool", true)]   // Tooling → tool call loop
     public async Task ClassifiesIntent_BasedOnLlmResponse(string llmReply, bool expectsToolCall)
     {
         using var t = TestTimer.Start(_output, $"ClassifiesIntent({llmReply})");
@@ -268,11 +268,11 @@ public class SearchQueryExtractionTests
     }
 
     [Theory]
-    [InlineData("news today",             "day")]
-    [InlineData("headlines this morning",  "day")]
-    [InlineData("events this week",        "week")]
-    [InlineData("updates past month",      "month")]
-    [InlineData("latest research",         "any")]
+    [InlineData("news today", "day")]
+    [InlineData("headlines this morning", "day")]
+    [InlineData("events this week", "week")]
+    [InlineData("updates past month", "month")]
+    [InlineData("latest research", "any")]
     public async Task RecencyFallback_DetectsKeywords_WhenLlmSkipped(
         string shortQuery, string expectedRecency)
     {
@@ -607,8 +607,8 @@ public class AgentFlowTests
             {
                 return new LlmResponse
                 {
-                    IsComplete   = false,
-                    ToolCalls    = new List<ToolCallRequest>
+                    IsComplete = false,
+                    ToolCalls = new List<ToolCallRequest>
                     {
                         new()
                         {
@@ -627,8 +627,8 @@ public class AgentFlowTests
             // Summary call
             return new LlmResponse
             {
-                IsComplete   = true,
-                Content      = "The stock market saw gains today...",
+                IsComplete = true,
+                Content = "The stock market saw gains today...",
                 FinishReason = "stop"
             };
         });
@@ -1122,7 +1122,7 @@ public class MemoryRetrievalAuditTests
             }
             """;
 
-        var mcp   = new FakeMcpClient(memoryPackJson);
+        var mcp = new FakeMcpClient(memoryPackJson);
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
@@ -1162,7 +1162,7 @@ public class MemoryRetrievalAuditTests
             }
             """;
 
-        var mcp   = new FakeMcpClient(emptyPackJson);
+        var mcp = new FakeMcpClient(emptyPackJson);
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
@@ -1734,7 +1734,7 @@ public class ToolLoopTests
         var mcp = new FakeMcpClient(
             (tool, _) => tool switch
             {
-                "MemoryRetrieve"     => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
                 "memory_store_facts" => """{"stored":1,"replaced":0,"skipped":0,"conflicts":[],"message":"Stored 1 fact(s)."}""",
                 "memory_update_fact" => """{"updated":true}""",
                 _ => "{}"
@@ -1988,7 +1988,7 @@ public class PolicyFilteringTests
         var mcp = new FakeMcpClient(
             (tool, _) => tool switch
             {
-                "MemoryRetrieve"     => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
                 "memory_store_facts" => """{"stored":1,"replaced":0,"skipped":0,"conflicts":[],"message":"Stored 1 fact(s)."}""",
                 _ => "{}"
             },
@@ -2244,7 +2244,7 @@ public class PolicyFilteringTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
+
         };
 
         var result = await agent.ProcessAsync(
@@ -2279,7 +2279,7 @@ public class PolicyFilteringTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
+
         };
 
         var result = await agent.ProcessAsync("Hey there, how are you?");
@@ -2312,7 +2312,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-        
+
         };
 
         var result = await agent.ProcessAsync("what's the Paris Agreement");
@@ -2349,7 +2349,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-        
+
         };
 
         var result = await agent.ProcessAsync("latest news on Nvidia today");
@@ -2371,7 +2371,7 @@ public class PolicyFilteringTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
             MemoryEnabled = false,
-        
+
         };
 
         var result = await agent.ProcessAsync("airspeed velocity of an unladen swallow");
@@ -2502,10 +2502,11 @@ internal sealed class FakeLlmClient : ILlmClient
     public FakeLlmClient(Func<IReadOnlyList<ChatMessage>, string> respond)
         : this((msgs, _) => new LlmResponse
         {
-            IsComplete   = true,
-            Content      = respond(msgs),
+            IsComplete = true,
+            Content = respond(msgs),
             FinishReason = "stop"
-        }) { }
+        })
+    { }
 
     public FakeLlmClient(string fixedResponse)
         : this(_ => fixedResponse) { }
@@ -2559,7 +2560,7 @@ internal sealed class FakeMcpClient : IMcpToolClient
         Func<string, string, string> toolHandler,
         IReadOnlyList<McpToolInfo>? availableTools = null)
     {
-        _toolHandler   = toolHandler;
+        _toolHandler = toolHandler;
         _availableTools = availableTools ?? [];
     }
 

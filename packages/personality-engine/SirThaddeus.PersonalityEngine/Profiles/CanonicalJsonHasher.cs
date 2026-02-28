@@ -53,25 +53,25 @@ public static class CanonicalJsonHasher
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-            {
-                writer.WriteStartObject();
-                foreach (var prop in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
                 {
-                    writer.WritePropertyName(prop.Name);
-                    WriteCanonical(prop.Value, writer);
+                    writer.WriteStartObject();
+                    foreach (var prop in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                    {
+                        writer.WritePropertyName(prop.Name);
+                        WriteCanonical(prop.Value, writer);
+                    }
+                    writer.WriteEndObject();
+                    break;
                 }
-                writer.WriteEndObject();
-                break;
-            }
 
             case JsonValueKind.Array:
-            {
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                    WriteCanonical(item, writer);
-                writer.WriteEndArray();
-                break;
-            }
+                {
+                    writer.WriteStartArray();
+                    foreach (var item in element.EnumerateArray())
+                        WriteCanonical(item, writer);
+                    writer.WriteEndArray();
+                    break;
+                }
 
             case JsonValueKind.String:
                 writer.WriteStringValue(element.GetString());
