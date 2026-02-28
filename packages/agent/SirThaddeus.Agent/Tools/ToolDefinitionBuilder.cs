@@ -10,11 +10,18 @@ namespace SirThaddeus.Agent.Tools;
 public sealed class ToolDefinitionBuilder
 {
     private readonly IMcpToolClient _mcp;
+    private IReadOnlyList<McpToolInfo>? _cachedMcpTools;
 
     public ToolDefinitionBuilder(IMcpToolClient mcp)
     {
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
     }
+
+    /// <summary>
+    /// Clears the cached MCP tool list, forcing a fresh ListToolsAsync on the next build.
+    /// Call after MCP reconnect or tool manifest changes.
+    /// </summary>
+    public void InvalidateCache() => _cachedMcpTools = null;
 
     public async Task<IReadOnlyList<ToolDefinition>> BuildAsync(
         bool memoryEnabled,
@@ -31,7 +38,8 @@ public sealed class ToolDefinitionBuilder
 
         try
         {
-            var mcpTools = await _mcp.ListToolsAsync(cancellationToken);
+            var mcpTools = _cachedMcpTools ?? await _mcp.ListToolsAsync(cancellationToken);
+            _cachedMcpTools = mcpTools;
 
             // When memory is disabled, hide memory_* tools entirely
             // so the model cannot attempt memory writes.

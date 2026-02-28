@@ -54,7 +54,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<StoreCandidate<MemoryFact>>> SearchFactsAsync(
-        string query, int maxResults, CancellationToken ct = default)
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default)
     {
         var conn     = await GetConnectionAsync(ct);
         var keywords = TokenizeQuery(query);
@@ -75,7 +75,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         cmd.CommandText = $"""
             SELECT memory_id, profile_id, subject, predicate, object,
-                   confidence, sensitivity, created_at, updated_at, source_ref
+                   confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref,
+                   embedding, embedding_model, embedding_dims
             FROM   memory_facts
             WHERE  is_deleted = 0
               AND  sensitivity != 'secret'
@@ -93,16 +95,19 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             var matchCount = CountKeywordMatches(keywords,
                 fact.Subject, fact.Predicate, fact.Object);
             var lexScore   = (double)matchCount / keywords.Count;
+            var simScore   = (queryEmbedding is not null && fact.Embedding is not null)
+                ? DotProduct(queryEmbedding, fact.Embedding)
+                : 0.0;
 
-            results.Add(new StoreCandidate<MemoryFact>(fact, lexScore));
+            results.Add(new StoreCandidate<MemoryFact>(fact, lexScore, simScore));
         }
 
-        return results.OrderByDescending(c => c.LexicalScore).ToList();
+        return results.OrderByDescending(c => c.LexicalScore * 0.4 + c.SimilarityScore * 0.6).ToList();
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<StoreCandidate<MemoryEvent>>> SearchEventsAsync(
-        string query, int maxResults, CancellationToken ct = default)
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default)
     {
         var conn     = await GetConnectionAsync(ct);
         var keywords = TokenizeQuery(query);
@@ -122,7 +127,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         cmd.CommandText = $"""
             SELECT event_id, profile_id, type, title, summary, when_iso,
-                   confidence, sensitivity, source_ref
+                   confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref,
+                   embedding, embedding_model, embedding_dims
             FROM   memory_events
             WHERE  is_deleted = 0
               AND  sensitivity != 'secret'
@@ -140,16 +147,19 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             var matchCount = CountKeywordMatches(keywords,
                 evt.Type, evt.Title, evt.Summary ?? "");
             var lexScore   = (double)matchCount / keywords.Count;
+            var simScore   = (queryEmbedding is not null && evt.Embedding is not null)
+                ? DotProduct(queryEmbedding, evt.Embedding)
+                : 0.0;
 
-            results.Add(new StoreCandidate<MemoryEvent>(evt, lexScore));
+            results.Add(new StoreCandidate<MemoryEvent>(evt, lexScore, simScore));
         }
 
-        return results.OrderByDescending(c => c.LexicalScore).ToList();
+        return results.OrderByDescending(c => c.LexicalScore * 0.4 + c.SimilarityScore * 0.6).ToList();
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<StoreCandidate<MemoryChunk>>> SearchChunksAsync(
-        string query, int maxResults, CancellationToken ct = default)
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);
 
@@ -161,7 +171,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT c.chunk_id, c.source_type, c.source_ref, c.text,
-                   c.when_iso, c.sensitivity, c.embedding,
+                   c.when_iso, c.sensitivity, c.embedding, c.embedding_model, c.embedding_dims,
                    fts.rank AS bm25_score
             FROM   memory_chunks_fts fts
             JOIN   memory_chunks c ON c.rowid = fts.rowid
@@ -187,10 +197,12 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
                 Text        = reader.GetString(3),
                 WhenIso     = reader.IsDBNull(4) ? null : ParseTimestamp(reader.GetString(4)),
                 Sensitivity = ParseSensitivity(reader.GetString(5)),
-                Embedding   = reader.IsDBNull(6) ? null : ParseEmbedding((byte[])reader[6])
+                Embedding   = reader.IsDBNull(6) ? null : ParseEmbedding((byte[])reader[6]),
+                EmbeddingModel = reader.IsDBNull(7) ? null : reader.GetString(7),
+                EmbeddingDims  = reader.IsDBNull(8) ? null : reader.GetInt32(8)
             };
 
-            raw.Add((chunk, reader.GetDouble(7)));
+            raw.Add((chunk, reader.GetDouble(9)));
         }
 
         if (raw.Count == 0)
@@ -208,8 +220,14 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
                 ? (worst - r.RawBm25) / range
                 : 1.0;
 
-            return new StoreCandidate<MemoryChunk>(r.Chunk, normalized);
-        }).ToList();
+            var simScore = (queryEmbedding is not null && r.Chunk.Embedding is not null)
+                ? DotProduct(queryEmbedding, r.Chunk.Embedding)
+                : 0.0;
+
+            return new StoreCandidate<MemoryChunk>(r.Chunk, normalized, simScore);
+        })
+        .OrderByDescending(c => c.LexicalScore * 0.4 + c.SimilarityScore * 0.6)
+        .ToList();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -224,7 +242,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT memory_id, profile_id, subject, predicate, object,
-                   confidence, sensitivity, created_at, updated_at, source_ref
+                   confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref,
+                   embedding, embedding_model, embedding_dims
             FROM   memory_facts
             WHERE  is_deleted = 0
               AND  LOWER(subject)   = LOWER(@subj)
@@ -249,7 +269,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT memory_id, profile_id, subject, predicate, object,
-                   confidence, sensitivity, created_at, updated_at, source_ref
+                   confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref,
+                   embedding, embedding_model, embedding_dims
             FROM   memory_facts
             WHERE  is_deleted = 0 AND memory_id = @id
             LIMIT  1
@@ -268,26 +290,47 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     public async Task StoreFactAsync(MemoryFact fact, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);
+        string targetId = fact.MemoryId;
+
+        if (!string.IsNullOrEmpty(fact.DedupeKey))
+        {
+            using var findCmd = conn.CreateCommand();
+            findCmd.CommandText = "SELECT memory_id FROM memory_facts WHERE dedupe_key = @dk LIMIT 1";
+            findCmd.Parameters.AddWithValue("@dk", fact.DedupeKey);
+            var existingId = (string?)await findCmd.ExecuteScalarAsync(ct);
+            if (existingId != null) targetId = existingId;
+        }
+
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO memory_facts
                 (memory_id, profile_id, subject, predicate, object,
-                 confidence, sensitivity, created_at, updated_at,
-                 source_ref, is_deleted)
+                 confidence, weight, sensitivity, source_turn_id, source_hash,
+                 dedupe_key, origin, created_at, updated_at,
+                 source_ref, is_deleted, embedding, embedding_model, embedding_dims)
             VALUES (@id, @profileId, @subj, @pred, @obj,
-                    @conf, @sens, @created, @updated,
-                    @src, 0)
+                    @conf, @weight, @sens, @turnId, @hash,
+                    @dedupe, @origin, @created, @updated,
+                    @src, 0, @emb, @embModel, @embDims)
             """;
-        cmd.Parameters.AddWithValue("@id",        fact.MemoryId);
+        cmd.Parameters.AddWithValue("@id",        targetId);
         cmd.Parameters.AddWithValue("@profileId", (object?)fact.ProfileId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@subj",      fact.Subject);
         cmd.Parameters.AddWithValue("@pred",      fact.Predicate);
         cmd.Parameters.AddWithValue("@obj",       fact.Object);
         cmd.Parameters.AddWithValue("@conf",      fact.Confidence);
+        cmd.Parameters.AddWithValue("@weight",    fact.Weight);
         cmd.Parameters.AddWithValue("@sens",      fact.Sensitivity.ToString().ToLowerInvariant());
+        cmd.Parameters.AddWithValue("@turnId",    (object?)fact.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash",      (object?)fact.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe",    (object?)fact.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin",    (object?)fact.Origin ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@created",   fact.CreatedAt.ToString("o"));
         cmd.Parameters.AddWithValue("@updated",   fact.UpdatedAt.ToString("o"));
         cmd.Parameters.AddWithValue("@src",       (object?)fact.SourceRef ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@emb",       fact.Embedding is not null ? SerializeEmbedding(fact.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel",  (object?)fact.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims",   (object?)fact.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -295,15 +338,30 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     public async Task StoreEventAsync(MemoryEvent evt, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);
+        string targetId = evt.EventId;
+
+        if (!string.IsNullOrEmpty(evt.DedupeKey))
+        {
+            using var findCmd = conn.CreateCommand();
+            findCmd.CommandText = "SELECT event_id FROM memory_events WHERE dedupe_key = @dk LIMIT 1";
+            findCmd.Parameters.AddWithValue("@dk", evt.DedupeKey);
+            var existingId = (string?)await findCmd.ExecuteScalarAsync(ct);
+            if (existingId != null) targetId = existingId;
+        }
+
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO memory_events
                 (event_id, profile_id, type, title, summary, when_iso,
-                 confidence, sensitivity, source_ref, is_deleted)
+                 confidence, weight, sensitivity, source_turn_id, source_hash,
+                 dedupe_key, origin, created_at, updated_at,
+                 source_ref, is_deleted, embedding, embedding_model, embedding_dims)
             VALUES (@id, @profileId, @type, @title, @summary, @when,
-                    @conf, @sens, @src, 0)
+                    @conf, @weight, @sens, @turnId, @hash,
+                    @dedupe, @origin, @created, @updated,
+                    @src, 0, @emb, @embModel, @embDims)
             """;
-        cmd.Parameters.AddWithValue("@id",        evt.EventId);
+        cmd.Parameters.AddWithValue("@id",        targetId);
         cmd.Parameters.AddWithValue("@profileId", (object?)evt.ProfileId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@type",      evt.Type);
         cmd.Parameters.AddWithValue("@title",     evt.Title);
@@ -311,8 +369,18 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.Parameters.AddWithValue("@when",      evt.WhenIso.HasValue
             ? evt.WhenIso.Value.ToString("o") : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@conf",      evt.Confidence);
+        cmd.Parameters.AddWithValue("@weight",    evt.Weight);
         cmd.Parameters.AddWithValue("@sens",      evt.Sensitivity.ToString().ToLowerInvariant());
+        cmd.Parameters.AddWithValue("@turnId",    (object?)evt.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash",      (object?)evt.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe",    (object?)evt.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin",    (object?)evt.Origin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@created",   evt.CreatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@updated",   evt.UpdatedAt.ToString("o"));
         cmd.Parameters.AddWithValue("@src",       (object?)evt.SourceRef ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@emb",       evt.Embedding is not null ? SerializeEmbedding(evt.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel",  (object?)evt.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims",   (object?)evt.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -324,9 +392,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.CommandText = """
             INSERT OR REPLACE INTO memory_chunks
                 (chunk_id, source_type, source_ref, text,
-                 when_iso, sensitivity, is_deleted, embedding)
+                 when_iso, sensitivity, is_deleted, embedding, embedding_model, embedding_dims)
             VALUES (@id, @srcType, @srcRef, @text,
-                    @when, @sens, 0, @emb)
+                    @when, @sens, 0, @emb, @embModel, @embDims)
             """;
         cmd.Parameters.AddWithValue("@id",      chunk.ChunkId);
         cmd.Parameters.AddWithValue("@srcType", chunk.SourceType);
@@ -337,6 +405,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.Parameters.AddWithValue("@sens",    chunk.Sensitivity.ToString().ToLowerInvariant());
         cmd.Parameters.AddWithValue("@emb",     chunk.Embedding is not null
             ? SerializeEmbedding(chunk.Embedding) : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel",  (object?)chunk.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims",   (object?)chunk.EmbeddingDims ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -371,7 +441,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.CommandText = hasFilter
             ? """
               SELECT memory_id, profile_id, subject, predicate, object,
-                     confidence, sensitivity, created_at, updated_at, source_ref
+                     confidence, weight, sensitivity, source_turn_id, source_hash,
+                     dedupe_key, origin, created_at, updated_at, source_ref,
+                     embedding, embedding_model, embedding_dims
               FROM   memory_facts
               WHERE  is_deleted = 0
                 AND  (subject LIKE @f OR predicate LIKE @f OR object LIKE @f)
@@ -380,7 +452,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
               """
             : """
               SELECT memory_id, profile_id, subject, predicate, object,
-                     confidence, sensitivity, created_at, updated_at, source_ref
+                     confidence, weight, sensitivity, source_turn_id, source_hash,
+                     dedupe_key, origin, created_at, updated_at, source_ref,
+                     embedding, embedding_model, embedding_dims
               FROM   memory_facts
               WHERE  is_deleted = 0
               ORDER  BY updated_at DESC
@@ -427,7 +501,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.CommandText = hasFilter
             ? """
               SELECT event_id, profile_id, type, title, summary, when_iso,
-                     confidence, sensitivity, source_ref
+                     confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_events
               WHERE  is_deleted = 0
                 AND  (type LIKE @f OR title LIKE @f OR COALESCE(summary,'') LIKE @f)
@@ -436,7 +511,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
               """
             : """
               SELECT event_id, profile_id, type, title, summary, when_iso,
-                     confidence, sensitivity, source_ref
+                     confidence, weight, sensitivity, source_turn_id, source_hash,
+                   dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_events
               WHERE  is_deleted = 0
               ORDER  BY when_iso DESC
@@ -673,7 +749,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         // Scored in-app rather than SQL (the table is small enough).
         cmd.CommandText = """
             SELECT nugget_id, text, tags, weight, pin_level,
-                   sensitivity, use_count, last_used_at, created_at
+                   sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                   use_count, last_used_at, created_at, updated_at,
+                   embedding, embedding_model, embedding_dims, chunk_citation
             FROM   memory_nuggets
             WHERE  is_deleted = 0
               AND  sensitivity = 'low'
@@ -716,7 +794,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
 
         cmd.CommandText = $"""
             SELECT nugget_id, text, tags, weight, pin_level,
-                   sensitivity, use_count, last_used_at, created_at
+                   sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                   use_count, last_used_at, created_at, updated_at,
+                   embedding, embedding_model, embedding_dims, chunk_citation
             FROM   memory_nuggets
             WHERE  is_deleted = 0
               AND  sensitivity != 'high'
@@ -770,7 +850,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.CommandText = hasFilter
             ? """
               SELECT nugget_id, text, tags, weight, pin_level,
-                     sensitivity, use_count, last_used_at, created_at
+                     sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                     use_count, last_used_at, created_at, updated_at,
+                     embedding, embedding_model, embedding_dims, chunk_citation
               FROM   memory_nuggets
               WHERE  is_deleted = 0
                 AND  (text LIKE @f OR COALESCE(tags,'') LIKE @f)
@@ -779,7 +861,9 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
               """
             : """
               SELECT nugget_id, text, tags, weight, pin_level,
-                     sensitivity, use_count, last_used_at, created_at
+                     sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                     use_count, last_used_at, created_at, updated_at,
+                     embedding, embedding_model, embedding_dims, chunk_citation
               FROM   memory_nuggets
               WHERE  is_deleted = 0
               ORDER  BY created_at DESC
@@ -802,24 +886,48 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     public async Task StoreNuggetAsync(MemoryNugget nugget, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);
+        string targetId = nugget.NuggetId;
+
+        if (!string.IsNullOrEmpty(nugget.DedupeKey))
+        {
+            using var findCmd = conn.CreateCommand();
+            findCmd.CommandText = "SELECT nugget_id FROM memory_nuggets WHERE dedupe_key = @dk LIMIT 1";
+            findCmd.Parameters.AddWithValue("@dk", nugget.DedupeKey);
+            var existingId = (string?)await findCmd.ExecuteScalarAsync(ct);
+            if (existingId != null) targetId = existingId;
+        }
+
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO memory_nuggets
                 (nugget_id, text, tags, weight, pin_level,
-                 sensitivity, use_count, last_used_at, created_at, is_deleted)
+                 sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                 use_count, last_used_at, created_at, updated_at, is_deleted,
+                 embedding, embedding_model, embedding_dims, chunk_citation)
             VALUES (@id, @text, @tags, @weight, @pin,
-                    @sens, @useCount, @lastUsed, @created, 0)
+                    @sens, @turnId, @hash, @dedupe, @origin,
+                    @useCount, @lastUsed, @created, @updated, 0,
+                    @emb, @embModel, @embDims, @citation)
             """;
-        cmd.Parameters.AddWithValue("@id",       nugget.NuggetId);
+        cmd.Parameters.AddWithValue("@id",       targetId);
         cmd.Parameters.AddWithValue("@text",     nugget.Text);
         cmd.Parameters.AddWithValue("@tags",     (object?)nugget.Tags ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@weight",   nugget.Weight);
         cmd.Parameters.AddWithValue("@pin",      nugget.PinLevel);
         cmd.Parameters.AddWithValue("@sens",     nugget.Sensitivity);
+        cmd.Parameters.AddWithValue("@turnId",   (object?)nugget.SourceTurnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@hash",     (object?)nugget.SourceHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@dedupe",   (object?)nugget.DedupeKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@origin",   (object?)nugget.Origin ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@useCount", nugget.UseCount);
         cmd.Parameters.AddWithValue("@lastUsed", nugget.LastUsedAt.HasValue
             ? nugget.LastUsedAt.Value.ToString("o") : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@created",  nugget.CreatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@updated",  nugget.UpdatedAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@emb",      nugget.Embedding is not null ? SerializeEmbedding(nugget.Embedding) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@embModel", (object?)nugget.EmbeddingModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@embDims",  (object?)nugget.EmbeddingDims ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@citation", (object?)nugget.ChunkCitation ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -856,28 +964,34 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
     // ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Reads a <see cref="MemoryFact"/> from the standard 10-column
-    /// SELECT: memory_id, profile_id, subject, predicate, object,
-    /// confidence, sensitivity, created_at, updated_at, source_ref.
+    /// Reads a <see cref="MemoryFact"/> from the standard 15-column
+    /// SELECT for memory_facts.
     /// </summary>
     private static MemoryFact ReadFact(SqliteDataReader r) => new()
     {
-        MemoryId    = r.GetString(0),
-        ProfileId   = r.IsDBNull(1) ? null : r.GetString(1),
-        Subject     = r.GetString(2),
-        Predicate   = r.GetString(3),
-        Object      = r.GetString(4),
-        Confidence  = r.GetDouble(5),
-        Sensitivity = ParseSensitivity(r.GetString(6)),
-        CreatedAt   = ParseTimestamp(r.GetString(7)),
-        UpdatedAt   = ParseTimestamp(r.GetString(8)),
-        SourceRef   = r.IsDBNull(9) ? null : r.GetString(9)
+        MemoryId     = r.GetString(0),
+        ProfileId    = r.IsDBNull(1) ? null : r.GetString(1),
+        Subject      = r.GetString(2),
+        Predicate    = r.GetString(3),
+        Object       = r.GetString(4),
+        Confidence   = r.GetDouble(5),
+        Weight       = r.GetDouble(6),
+        Sensitivity  = ParseSensitivity(r.GetString(7)),
+        SourceTurnId = r.IsDBNull(8) ? null : r.GetString(8),
+        SourceHash   = r.IsDBNull(9) ? null : r.GetString(9),
+        DedupeKey    = r.IsDBNull(10) ? null : r.GetString(10),
+        Origin       = r.IsDBNull(11) ? null : r.GetString(11),
+        CreatedAt    = ParseTimestamp(r.GetString(12)),
+        UpdatedAt    = ParseTimestamp(r.GetString(13)),
+        SourceRef    = r.IsDBNull(14) ? null : r.GetString(14),
+        Embedding    = r.IsDBNull(15) ? null : ParseEmbedding((byte[])r[15]),
+        EmbeddingModel= r.IsDBNull(16) ? null : r.GetString(16),
+        EmbeddingDims= r.IsDBNull(17) ? null : r.GetInt32(17)
     };
 
     /// <summary>
-    /// Reads a <see cref="MemoryEvent"/> from the standard 9-column
-    /// SELECT: event_id, profile_id, type, title, summary, when_iso,
-    /// confidence, sensitivity, source_ref.
+    /// Reads a <see cref="MemoryEvent"/> from the standard 16-column
+    /// SELECT for memory_events.
     /// </summary>
     private static MemoryEvent ReadEvent(SqliteDataReader r) => new()
     {
@@ -888,8 +1002,18 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         Summary     = r.IsDBNull(4) ? null : r.GetString(4),
         WhenIso     = r.IsDBNull(5) ? null : ParseTimestamp(r.GetString(5)),
         Confidence  = r.GetDouble(6),
-        Sensitivity = ParseSensitivity(r.GetString(7)),
-        SourceRef   = r.IsDBNull(8) ? null : r.GetString(8)
+        Weight      = r.GetDouble(7),
+        Sensitivity = ParseSensitivity(r.GetString(8)),
+        SourceTurnId= r.IsDBNull(9) ? null : r.GetString(9),
+        SourceHash  = r.IsDBNull(10) ? null : r.GetString(10),
+        DedupeKey   = r.IsDBNull(11) ? null : r.GetString(11),
+        Origin      = r.IsDBNull(12) ? null : r.GetString(12),
+        CreatedAt   = ParseTimestamp(r.GetString(13)),
+        UpdatedAt   = ParseTimestamp(r.GetString(14)),
+        SourceRef   = r.IsDBNull(15) ? null : r.GetString(15),
+        Embedding   = r.IsDBNull(16) ? null : ParseEmbedding((byte[])r[16]),
+        EmbeddingModel= r.IsDBNull(17) ? null : r.GetString(17),
+        EmbeddingDims= r.IsDBNull(18) ? null : r.GetInt32(18)
     };
 
     /// <summary>
@@ -927,9 +1051,18 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         Weight      = r.GetDouble(3),
         PinLevel    = r.GetInt32(4),
         Sensitivity = r.GetString(5),
-        UseCount    = r.GetInt32(6),
-        LastUsedAt  = r.IsDBNull(7) ? null : ParseTimestamp(r.GetString(7)),
-        CreatedAt   = ParseTimestamp(r.GetString(8))
+        SourceTurnId= r.IsDBNull(6) ? null : r.GetString(6),
+        SourceHash  = r.IsDBNull(7) ? null : r.GetString(7),
+        DedupeKey   = r.IsDBNull(8) ? null : r.GetString(8),
+        Origin      = r.IsDBNull(9) ? null : r.GetString(9),
+        UseCount    = r.GetInt32(10),
+        LastUsedAt  = r.IsDBNull(11) ? null : ParseTimestamp(r.GetString(11)),
+        CreatedAt   = ParseTimestamp(r.GetString(12)),
+        UpdatedAt   = ParseTimestamp(r.GetString(13)),
+        Embedding   = r.IsDBNull(14) ? null : ParseEmbedding((byte[])r[14]),
+        EmbeddingModel= r.IsDBNull(15) ? null : r.GetString(15),
+        EmbeddingDims= r.IsDBNull(16) ? null : r.GetInt32(16),
+        ChunkCitation= r.IsDBNull(17) ? null : r.GetString(17)
     };
 
     /// <summary>
@@ -1049,28 +1182,55 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Computes the dot product of two float arrays.
+    /// Used for cosine similarity (assuming normalized embeddings).
+    /// </summary>
+    private static double DotProduct(float[] a, float[] b)
+    {
+        if (a.Length != b.Length) return 0;
+        double dot = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+        }
+        return dot;
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Connection Management
     // ─────────────────────────────────────────────────────────────────
 
     private async Task<SqliteConnection> GetConnectionAsync(CancellationToken ct)
     {
-        if (_connection is not null)
+        if (_connection is not null && _schemaReady)
             return _connection;
 
         await _lock.WaitAsync(ct);
         try
         {
-            if (_connection is not null)
+            if (_connection is not null && _schemaReady)
                 return _connection;
 
-            _connection = new SqliteConnection(_connectionString);
-            await _connection.OpenAsync(ct);
+            if (_connection is null)
+            {
+                _connection = new SqliteConnection(_connectionString);
+                await _connection.OpenAsync(ct);
 
-            // WAL mode for better concurrent read performance
-            using var pragma = _connection.CreateCommand();
-            pragma.CommandText = "PRAGMA journal_mode=WAL";
-            await pragma.ExecuteNonQueryAsync(ct);
+                // WAL mode for better concurrent read performance
+                using var pragma = _connection.CreateCommand();
+                pragma.CommandText = "PRAGMA journal_mode=WAL";
+                await pragma.ExecuteNonQueryAsync(ct);
+            }
+
+            // Auto-run schema + migrations on first connection to guarantee
+            // all columns exist before any query can execute. This prevents
+            // "no such column" errors when the DB was created by an older version.
+            if (!_schemaReady)
+            {
+                await SchemaInitializer.InitializeAsync(_connection, ct);
+                _schemaReady = true;
+            }
 
             return _connection;
         }

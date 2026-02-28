@@ -1,0 +1,37 @@
+id: thinking_reasoning_no_think_leak
+name: Thinking Model - Reasoning puzzle answer clean (no think tags)
+user_message: "A rooster lays an egg on the peak of a roof. Which way does it roll?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - rooster
+  forbidden_keywords:
+    - "<think>"
+    - "</think>"
+    - "Final Answer:"
+    - "Thinking:"
+    - error
+    - timeout
+  max_response_chars: 800
+min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/llm-client/SirThaddeus.LlmClient/LmStudioClient.cs
+    - packages/agent/SirThaddeus.Agent/OrchestratorMessageHelpers.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

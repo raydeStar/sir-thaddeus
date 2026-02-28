@@ -432,17 +432,17 @@ internal sealed class FakeMemoryStore : IMemoryStore
     public List<StoreCandidate<MemoryChunk>> ChunksToReturn { get; set; } = [];
 
     public Task<IReadOnlyList<StoreCandidate<MemoryFact>>> SearchFactsAsync(
-        string query, int maxResults, CancellationToken ct = default) =>
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoreCandidate<MemoryFact>>>(
             FactsToReturn.Take(maxResults).ToList());
 
     public Task<IReadOnlyList<StoreCandidate<MemoryEvent>>> SearchEventsAsync(
-        string query, int maxResults, CancellationToken ct = default) =>
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoreCandidate<MemoryEvent>>>(
             EventsToReturn.Take(maxResults).ToList());
 
     public Task<IReadOnlyList<StoreCandidate<MemoryChunk>>> SearchChunksAsync(
-        string query, int maxResults, CancellationToken ct = default) =>
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoreCandidate<MemoryChunk>>>(
             ChunksToReturn.Take(maxResults).ToList());
 

@@ -16,14 +16,14 @@ public interface IMemoryStore
     /// Returns candidates ordered by descending lexical relevance.
     /// </summary>
     Task<IReadOnlyList<StoreCandidate<MemoryFact>>> SearchFactsAsync(
-        string query, int maxResults, CancellationToken ct = default);
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default);
 
     /// <summary>
     /// Searches for relevant events using keyword/lexical matching.
     /// Returns candidates ordered by descending lexical relevance.
     /// </summary>
     Task<IReadOnlyList<StoreCandidate<MemoryEvent>>> SearchEventsAsync(
-        string query, int maxResults, CancellationToken ct = default);
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default);
 
     /// <summary>
     /// Searches for relevant chunks using FTS5/BM25 (or equivalent).
@@ -31,7 +31,7 @@ public interface IMemoryStore
     /// normalized BM25 scores in [0, 1].
     /// </summary>
     Task<IReadOnlyList<StoreCandidate<MemoryChunk>>> SearchChunksAsync(
-        string query, int maxResults, CancellationToken ct = default);
+        string query, float[]? queryEmbedding, int maxResults, CancellationToken ct = default);
 
     // ── Lookup operations ────────────────────────────────────────────
     // Point queries for conflict/duplicate detection at storage time.

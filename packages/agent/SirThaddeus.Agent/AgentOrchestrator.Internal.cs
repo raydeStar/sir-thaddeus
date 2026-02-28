@@ -896,473 +896,65 @@ public sealed partial class AgentOrchestrator
         };
     }
 
-    private async Task<(string ToolName, string Result, bool Success)> CallUtilityToolWithAliasAsync(
-        string toolName,
-        string argsJson,
-        CancellationToken cancellationToken)
-    {
-        return toolName.ToLowerInvariant() switch
-        {
-            HolidaysGetToolName => await CallToolWithAliasAsync(
-                HolidaysGetToolName, HolidaysGetToolNameAlt, argsJson, cancellationToken),
-            HolidaysNextToolName => await CallToolWithAliasAsync(
-                HolidaysNextToolName, HolidaysNextToolNameAlt, argsJson, cancellationToken),
-            HolidaysIsTodayToolName => await CallToolWithAliasAsync(
-                HolidaysIsTodayToolName, HolidaysIsTodayToolNameAlt, argsJson, cancellationToken),
-            FeedFetchToolName => await CallToolWithAliasAsync(
-                FeedFetchToolName, FeedFetchToolNameAlt, argsJson, cancellationToken),
-            StatusCheckToolName => await CallToolWithAliasAsync(
-                StatusCheckToolName, StatusCheckToolNameAlt, argsJson, cancellationToken),
-            ResolveTimezoneToolName => await CallToolWithAliasAsync(
-                ResolveTimezoneToolName, ResolveTimezoneToolNameAlt, argsJson, cancellationToken),
-            _ => await CallToolWithAliasAsync(
-                toolName, ToPascalCaseToolAlias(toolName), argsJson, cancellationToken)
-        };
-    }
+    // ── Tool alias resolution — delegates to ToolAliasResolver ──────
 
-    private static string ToPascalCaseToolAlias(string toolName)
-    {
-        if (string.IsNullOrWhiteSpace(toolName))
-            return toolName;
+    private Task<(string ToolName, string Result, bool Success)> CallUtilityToolWithAliasAsync(
+        string toolName, string argsJson, CancellationToken cancellationToken) =>
+        _toolAliasResolver.CallUtilityWithAliasAsync(toolName, argsJson, cancellationToken);
 
-        var parts = toolName.Split('_', StringSplitOptions.RemoveEmptyEntries);
-        var sb = new StringBuilder();
-        foreach (var part in parts)
-        {
-            if (part.Length == 0)
-                continue;
-            sb.Append(char.ToUpperInvariant(part[0]));
-            if (part.Length > 1)
-                sb.Append(part[1..]);
-        }
+    private static string ToPascalCaseToolAlias(string toolName) =>
+        Agent.Tools.ToolAliasResolver.ToPascalCaseAlias(toolName);
 
-        return sb.Length == 0 ? toolName : sb.ToString();
-    }
+    private Task<(string ToolName, string Result, bool Success)> CallToolWithAliasAsync(
+        string primaryToolName, string alternateToolName, string argsJson,
+        CancellationToken cancellationToken) =>
+        _toolAliasResolver.CallWithAliasAsync(primaryToolName, alternateToolName, argsJson, cancellationToken);
 
-    private async Task<(string ToolName, string Result, bool Success)> CallToolWithAliasAsync(
-        string primaryToolName,
-        string alternateToolName,
-        string argsJson,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await _mcp.CallToolAsync(primaryToolName, argsJson, cancellationToken);
-            if (IsUnknownToolError(result, primaryToolName))
-            {
-                try
-                {
-                    var altResult = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                    return (alternateToolName, altResult, !IsErrorResponse(altResult));
-                }
-                catch (Exception alternateError)
-                {
-                    var errorText = $"Error: {result}; fallback failed: {alternateError.Message}";
-                    return (primaryToolName, errorText, false);
-                }
-            }
-
-            return (primaryToolName, result, !IsErrorResponse(result));
-        }
-        catch (Exception primaryError)
-        {
-            try
-            {
-                var result = await _mcp.CallToolAsync(alternateToolName, argsJson, cancellationToken);
-                return (alternateToolName, result, !IsErrorResponse(result));
-            }
-            catch (Exception alternateError)
-            {
-                var errorText = $"Error: {primaryError.Message}; fallback failed: {alternateError.Message}";
-                return (primaryToolName, errorText, false);
-            }
-        }
-    }
+    // ── Utility response building — delegates to UtilityResponseBuilder ──
 
     private static bool TryParseBestGeocodeCandidate(
         string geocodeJson,
-        out (string Name, string CountryCode, string RegionCode, double Latitude, double Longitude) candidate)
-    {
-        candidate = default;
-        if (string.IsNullOrWhiteSpace(geocodeJson))
-            return false;
+        out (string Name, string CountryCode, string RegionCode, double Latitude, double Longitude) candidate) =>
+        Utilities.UtilityResponseBuilder.TryParseBestGeocodeCandidate(geocodeJson, out candidate);
 
-        try
-        {
-            using var doc = JsonDocument.Parse(geocodeJson);
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("results", out var results) ||
-                results.ValueKind != JsonValueKind.Array)
-                return false;
+    // ── Weather response building — delegates to WeatherResponseBuilder ──
 
-            JsonElement? best = null;
-            double bestConfidence = double.NegativeInfinity;
-            foreach (var item in results.EnumerateArray())
-            {
-                if (!item.TryGetProperty("latitude", out var latProbeEl) || !latProbeEl.TryGetDouble(out _))
-                    continue;
-                if (!item.TryGetProperty("longitude", out var lonProbeEl) || !lonProbeEl.TryGetDouble(out _))
-                    continue;
-
-                var confidence = item.TryGetProperty("confidence", out var confEl) &&
-                                 confEl.ValueKind == JsonValueKind.Number &&
-                                 confEl.TryGetDouble(out var conf)
-                    ? conf
-                    : 0.0;
-
-                if (best is null || confidence > bestConfidence)
-                {
-                    best = item;
-                    bestConfidence = confidence;
-                }
-            }
-
-            if (best is null)
-                return false;
-
-            var r = best.Value;
-            if (!r.TryGetProperty("latitude", out var latEl) || !latEl.TryGetDouble(out var lat))
-                return false;
-            if (!r.TryGetProperty("longitude", out var lonEl) || !lonEl.TryGetDouble(out var lon))
-                return false;
-
-            var name = r.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "") : "";
-            var countryCode = r.TryGetProperty("countryCode", out var ccEl) ? (ccEl.GetString() ?? "") : "";
-            var regionCode =
-                r.TryGetProperty("regionCode", out var rcEl) ? (rcEl.GetString() ?? "") :
-                (r.TryGetProperty("region", out var regionEl) ? (regionEl.GetString() ?? "") : "");
-
-            candidate = (name, countryCode, regionCode, lat, lon);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Builds a short deterministic weather response from the normalized
-    /// weather_forecast MCP JSON output.
-    /// </summary>
     private string? TryBuildWeatherBriefFromForecastJson(
-        string forecastJson,
-        string userMessage,
-        string fallbackLocation)
-    {
-        if (string.IsNullOrWhiteSpace(forecastJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(forecastJson);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("error", out var err) &&
-                err.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(err.GetString()))
-            {
-                return null;
-            }
-
-            var location = fallbackLocation;
-            if (root.TryGetProperty("location", out var loc) &&
-                loc.ValueKind == JsonValueKind.Object &&
-                loc.TryGetProperty("name", out var ln) &&
-                !string.IsNullOrWhiteSpace(ln.GetString()))
-            {
-                location = ln.GetString()!;
-            }
-            else
-            {
-                var fromMessage = ExtractLocationFromWeatherMessage(userMessage);
-                if (!string.IsNullOrWhiteSpace(fromMessage))
-                    location = fromMessage!;
-            }
-
-            int? currentTemp = null;
-            string unit = "";
-            string condition = "";
-
-            if (root.TryGetProperty("current", out var current) &&
-                current.ValueKind == JsonValueKind.Object)
-            {
-                if (current.TryGetProperty("temperature", out var t) && t.TryGetInt32(out var ti))
-                    currentTemp = ti;
-                if (current.TryGetProperty("unit", out var u) && u.ValueKind == JsonValueKind.String)
-                    unit = u.GetString() ?? "";
-                if (current.TryGetProperty("condition", out var c) && c.ValueKind == JsonValueKind.String)
-                    condition = c.GetString() ?? "";
-            }
-
-            int? avgTemp = null;
-            if (root.TryGetProperty("daily", out var daily) &&
-                daily.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var day in daily.EnumerateArray())
-                {
-                    if (day.TryGetProperty("avgTemp", out var avg) && avg.TryGetInt32(out var av))
-                    {
-                        avgTemp = av;
-                        break;
-                    }
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(location))
-                location = "there";
-
-            var normalizedUnit = NormalizeTemperatureUnit(unit);
-            var shouldRespectExplicitTempUnit = HasExplicitTemperatureUnitRequest(userMessage);
-            var preferredUnits = NormalizeUnitPreference(PreferredUnits);
-
-            if (!shouldRespectExplicitTempUnit)
-            {
-                if (preferredUnits == "metric" && string.Equals(normalizedUnit, "F", StringComparison.Ordinal))
-                {
-                    currentTemp = ConvertTemperature(currentTemp, "F", "C");
-                    avgTemp = ConvertTemperature(avgTemp, "F", "C");
-                    normalizedUnit = "C";
-                }
-                else if (preferredUnits == "imperial" && string.Equals(normalizedUnit, "C", StringComparison.Ordinal))
-                {
-                    currentTemp = ConvertTemperature(currentTemp, "C", "F");
-                    avgTemp = ConvertTemperature(avgTemp, "C", "F");
-                    normalizedUnit = "F";
-                }
-            }
-
-            var unitSuffix = normalizedUnit;
-            var avgSuffix = string.IsNullOrWhiteSpace(unitSuffix) ? "" : unitSuffix;
-            if (LooksLikeWeatherActivityAdviceRequest(userMessage))
-            {
-                return BuildWeatherActivityAdvice(
-                    location,
-                    currentTemp,
-                    unitSuffix,
-                    condition,
-                    avgTemp,
-                    avgSuffix);
-            }
-
-            if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
-            {
-                var line = $"Today in {location}, it's about **{currentTemp}{unitSuffix}** and **{condition}** right now.";
-                return avgTemp.HasValue
-                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
-                    : line;
-            }
-
-            if (currentTemp.HasValue)
-            {
-                var line = $"Today in {location}, it's about **{currentTemp}{unitSuffix}** right now.";
-                return avgTemp.HasValue
-                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
-                    : line;
-            }
-
-            if (!string.IsNullOrWhiteSpace(condition))
-            {
-                var line = $"Today in {location}, conditions are **{condition}** right now.";
-                return avgTemp.HasValue
-                    ? $"{line} Avg temp: **{avgTemp}{avgSuffix}**."
-                    : line;
-            }
-
-            if (avgTemp.HasValue)
-                return $"In {location}, avg temp is **{avgTemp}{avgSuffix}**.";
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+        string forecastJson, string userMessage, string fallbackLocation) =>
+        Utilities.WeatherResponseBuilder.TryBuildBriefFromForecastJson(
+            forecastJson, userMessage, fallbackLocation, PreferredUnits);
 
     private static string BuildWeatherActivityAdvice(
-        string location,
-        int? currentTemp,
-        string unitSuffix,
-        string? condition,
-        int? avgTemp,
-        string avgSuffix)
-    {
-        var conditionLower = (condition ?? "").ToLowerInvariant();
-        var tempForHeuristic = ToFahrenheit(currentTemp ?? avgTemp, unitSuffix);
-
-        var isWet =
-            conditionLower.Contains("rain", StringComparison.Ordinal) ||
-            conditionLower.Contains("snow", StringComparison.Ordinal) ||
-            conditionLower.Contains("sleet", StringComparison.Ordinal) ||
-            conditionLower.Contains("drizzle", StringComparison.Ordinal) ||
-            conditionLower.Contains("shower", StringComparison.Ordinal) ||
-            conditionLower.Contains("storm", StringComparison.Ordinal);
-
-        var isIcy =
-            conditionLower.Contains("ice", StringComparison.Ordinal) ||
-            conditionLower.Contains("freez", StringComparison.Ordinal);
-
-        var isWindy =
-            conditionLower.Contains("wind", StringComparison.Ordinal) ||
-            conditionLower.Contains("gust", StringComparison.Ordinal);
-
-        var isCold = tempForHeuristic is <= 45;
-        var isHot = tempForHeuristic is >= 85;
-
-        var snapshot = BuildWeatherSnapshot(location, currentTemp, unitSuffix, condition, avgTemp, avgSuffix);
-        var plan = "Good options: a short walk, errands on foot, or light outdoor activity.";
-        var caution = "Bring a layer and check conditions before heading out.";
-
-        if (isWet || isIcy || isCold)
-        {
-            plan = "Best fit right now: mostly indoor plans (gym/rec center, cafe + reading, movie/museum).";
-            caution = "If you go outside, keep it short and use warm waterproof layers plus good traction.";
-        }
-        else if (isHot)
-        {
-            plan = "Best fit right now: early/late outdoor time, shaded spots, or indoor options with AC.";
-            caution = "Bring water and avoid long midday exposure.";
-        }
-        else if (isWindy)
-        {
-            plan = "Good options: low-exposure outdoor plans or indoor activities with easy fallback.";
-            caution = "Avoid long exposed routes if gusts pick up.";
-        }
-
-        return $"{snapshot} {plan} {caution}";
-    }
+        string location, int? currentTemp, string unitSuffix,
+        string? condition, int? avgTemp, string avgSuffix) =>
+        Utilities.WeatherResponseBuilder.BuildActivityAdvice(
+            location, currentTemp, unitSuffix, condition, avgTemp, avgSuffix);
 
     private static string BuildWeatherSnapshot(
-        string location,
-        int? currentTemp,
-        string unitSuffix,
-        string? condition,
-        int? avgTemp,
-        string avgSuffix)
-    {
-        if (currentTemp.HasValue && !string.IsNullOrWhiteSpace(condition))
-            return $"Today in {location}, it's about {currentTemp}{unitSuffix} with {condition.ToLowerInvariant()} right now.";
+        string location, int? currentTemp, string unitSuffix,
+        string? condition, int? avgTemp, string avgSuffix) =>
+        Utilities.WeatherResponseBuilder.BuildSnapshot(
+            location, currentTemp, unitSuffix, condition, avgTemp, avgSuffix);
 
-        if (currentTemp.HasValue)
-            return $"Today in {location}, it's about {currentTemp}{unitSuffix} right now.";
+    private static string NormalizeTemperatureUnit(string? rawUnit) =>
+        Utilities.WeatherResponseBuilder.NormalizeTemperatureUnit(rawUnit);
 
-        if (!string.IsNullOrWhiteSpace(condition))
-            return $"Today in {location}, conditions are {condition.ToLowerInvariant()} right now.";
+    private static int? ConvertTemperature(int? value, string fromUnit, string toUnit) =>
+        Utilities.WeatherResponseBuilder.ConvertTemperature(value, fromUnit, toUnit);
 
-        if (avgTemp.HasValue)
-            return $"In {location}, average temp is around {avgTemp}{avgSuffix}.";
+    private static bool HasExplicitTemperatureUnitRequest(string userMessage) =>
+        Utilities.WeatherResponseBuilder.HasExplicitTemperatureUnitRequest(userMessage);
 
-        return $"In {location}, weather conditions are available.";
-    }
+    private static double? ToFahrenheit(int? temp, string unitSuffix) =>
+        Utilities.WeatherResponseBuilder.ToFahrenheit(temp, unitSuffix);
 
-    private static string NormalizeTemperatureUnit(string? rawUnit)
-    {
-        var lower = (rawUnit ?? "").Trim().ToLowerInvariant();
-        return lower switch
-        {
-            "f" or "fahrenheit" => "F",
-            "c" or "celsius" => "C",
-            _ => ""
-        };
-    }
-
-    private static int? ConvertTemperature(int? value, string fromUnit, string toUnit)
-    {
-        if (!value.HasValue)
-            return null;
-
-        if (string.Equals(fromUnit, toUnit, StringComparison.OrdinalIgnoreCase))
-            return value.Value;
-
-        if (string.Equals(fromUnit, "C", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(toUnit, "F", StringComparison.OrdinalIgnoreCase))
-        {
-            return (int)Math.Round((value.Value * 9.0 / 5.0) + 32.0, MidpointRounding.AwayFromZero);
-        }
-
-        if (string.Equals(fromUnit, "F", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(toUnit, "C", StringComparison.OrdinalIgnoreCase))
-        {
-            return (int)Math.Round((value.Value - 32.0) * 5.0 / 9.0, MidpointRounding.AwayFromZero);
-        }
-
-        return value.Value;
-    }
-
-    private static bool HasExplicitTemperatureUnitRequest(string userMessage)
-    {
-        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(lower))
-            return false;
-
-        if (lower.Contains("celsius", StringComparison.Ordinal) ||
-            lower.Contains("fahrenheit", StringComparison.Ordinal) ||
-            lower.Contains("°c", StringComparison.Ordinal) ||
-            lower.Contains("°f", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return Regex.IsMatch(lower, @"\bin\s+c\b|\bin\s+f\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    }
-
-    private static double? ToFahrenheit(int? temp, string unitSuffix)
-    {
-        if (!temp.HasValue)
-            return null;
-
-        if (string.Equals(unitSuffix, "C", StringComparison.OrdinalIgnoreCase))
-            return (temp.Value * 9.0 / 5.0) + 32.0;
-
-        return temp.Value;
-    }
+    // ── Time response building — delegates to TimeResponseBuilder ──
 
     private string? TryBuildTimeBriefFromTimezoneJson(
-        string timezoneJson,
-        string fallbackLocation,
-        string userMessage)
-    {
-        if (string.IsNullOrWhiteSpace(timezoneJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(timezoneJson);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("error", out var err) &&
-                err.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(err.GetString()))
-            {
-                return null;
-            }
-
-            var timezone = root.TryGetProperty("timezone", out var tzEl)
-                ? (tzEl.GetString() ?? "")
-                : "";
-            if (string.IsNullOrWhiteSpace(timezone))
-                return null;
-
-            var location = fallbackLocation;
-            var fromMessage = ExtractLocationFromWeatherMessage(userMessage);
-            if (!string.IsNullOrWhiteSpace(fromMessage))
-                location = fromMessage!;
-
-            if (TryResolveTimeZoneInfo(timezone, out var tzInfo))
-            {
-                var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
-                var local = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, tzInfo);
-                var formatted = local.ToString("h:mm tt on dddd, MMM d");
-                return $"It's currently **{formatted}** in {location} ({timezone}).\n\nNeed another city checked too?";
-            }
-
-            return $"The timezone for {location} is **{timezone}**.\n\nWant local time there as well?";
-        }
-        catch
-        {
-            return null;
-        }
-    }
+        string timezoneJson, string fallbackLocation, string userMessage) =>
+        Utilities.TimeResponseBuilder.TryBuildBriefFromTimezoneJson(
+            timezoneJson, fallbackLocation, userMessage,
+            _timeProvider.GetUtcNow().UtcDateTime);
 
     private void RememberUtilityContext(UtilityRouter.UtilityResult utilityResult)
     {
@@ -1570,273 +1162,20 @@ public sealed partial class AgentOrchestrator
         };
     }
 
-    private static bool TryResolveTimeZoneInfo(string timezoneId, out TimeZoneInfo tzInfo)
-    {
-        try
-        {
-            tzInfo = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
-            return true;
-        }
-        catch
-        {
-            // Windows often needs a Windows timezone ID; convert if IANA provided.
-            if (TimeZoneInfo.TryConvertIanaIdToWindowsId(timezoneId, out var windowsId))
-            {
-                try
-                {
-                    tzInfo = TimeZoneInfo.FindSystemTimeZoneById(windowsId);
-                    return true;
-                }
-                catch
-                {
-                    // Fall through.
-                }
-            }
-        }
+    private static bool TryResolveTimeZoneInfo(string timezoneId, out TimeZoneInfo tzInfo) =>
+        Utilities.TimeResponseBuilder.TryResolveTimeZoneInfo(timezoneId, out tzInfo);
 
-        tzInfo = TimeZoneInfo.Utc;
-        return false;
-    }
+    private static string BuildHolidayUtilityResponse(string toolName, string toolJson) =>
+        Utilities.UtilityResponseBuilder.BuildHolidayResponse(toolName, toolJson);
 
-    private static string BuildHolidayUtilityResponse(string toolName, string toolJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolJson))
-            return "I couldn't get holiday data from that tool call.";
+    private static string BuildFeedUtilityResponse(string toolJson) =>
+        Utilities.UtilityResponseBuilder.BuildFeedResponse(toolJson);
 
-        try
-        {
-            using var doc = JsonDocument.Parse(toolJson);
-            var root = doc.RootElement;
+    private static string BuildStatusUtilityResponse(string toolJson) =>
+        Utilities.UtilityResponseBuilder.BuildStatusResponse(toolJson);
 
-            if (root.TryGetProperty("error", out var err) &&
-                err.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(err.GetString()))
-            {
-                return $"Holiday lookup failed: {err.GetString()}";
-            }
-
-            var country = root.TryGetProperty("countryCode", out var ccEl)
-                ? (ccEl.GetString() ?? "that country")
-                : "that country";
-            var region = root.TryGetProperty("regionCode", out var rcEl)
-                ? (rcEl.GetString() ?? "")
-                : "";
-            var scope = string.IsNullOrWhiteSpace(region) ? country : region;
-
-            if (toolName.Equals(HolidaysIsTodayToolName, StringComparison.OrdinalIgnoreCase))
-            {
-                var isTodayHoliday = root.TryGetProperty("isPublicHoliday", out var isEl) &&
-                                     isEl.ValueKind is JsonValueKind.True or JsonValueKind.False &&
-                                     isEl.GetBoolean();
-
-                var todayNames = new List<string>();
-                if (root.TryGetProperty("holidaysToday", out var todayArr) &&
-                    todayArr.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in todayArr.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("name", out var nameEl) &&
-                            nameEl.ValueKind == JsonValueKind.String)
-                        {
-                            var name = (nameEl.GetString() ?? "").Trim();
-                            if (!string.IsNullOrWhiteSpace(name))
-                                todayNames.Add(name);
-                        }
-                    }
-                }
-
-                string firstLine;
-                if (isTodayHoliday)
-                {
-                    var names = todayNames.Count > 0
-                        ? string.Join(", ", todayNames.Distinct(StringComparer.OrdinalIgnoreCase))
-                        : "a listed public holiday";
-                    firstLine = $"Yes — today is a public holiday in **{scope}**: **{names}**.";
-                }
-                else
-                {
-                    firstLine = $"No — today is not a public holiday in **{scope}**.";
-                }
-
-                if (root.TryGetProperty("nextHoliday", out var nextHoliday) &&
-                    nextHoliday.ValueKind == JsonValueKind.Object)
-                {
-                    var nextName = nextHoliday.TryGetProperty("name", out var nn) ? (nn.GetString() ?? "") : "";
-                    var nextDate = nextHoliday.TryGetProperty("date", out var nd) ? (nd.GetString() ?? "") : "";
-                    if (!string.IsNullOrWhiteSpace(nextName) && !string.IsNullOrWhiteSpace(nextDate))
-                    {
-                        firstLine += $" Next up: **{nextName}** on **{nextDate}**.";
-                    }
-                }
-
-                return $"{firstLine}\n\nWant the full holiday calendar for the year?";
-            }
-
-            if (toolName.Equals(HolidaysNextToolName, StringComparison.OrdinalIgnoreCase))
-            {
-                if (root.TryGetProperty("holidays", out var holidays) &&
-                    holidays.ValueKind == JsonValueKind.Array &&
-                    holidays.GetArrayLength() > 0)
-                {
-                    var first = holidays.EnumerateArray().First();
-                    var name = first.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "the next holiday") : "the next holiday";
-                    var date = first.TryGetProperty("date", out var dateEl) ? (dateEl.GetString() ?? "an upcoming date") : "an upcoming date";
-                    return $"The next public holiday in **{scope}** is **{name}** on **{date}**.\n\nWant the next few after that?";
-                }
-
-                return $"I couldn't find upcoming public holidays for **{scope}**.";
-            }
-
-            // holidays_get
-            var year = root.TryGetProperty("year", out var yEl) && yEl.TryGetInt32(out var y)
-                ? y
-                : DateTime.UtcNow.Year;
-            var entries = new List<string>();
-            var count = 0;
-            if (root.TryGetProperty("holidays", out var arr) && arr.ValueKind == JsonValueKind.Array)
-            {
-                count = arr.GetArrayLength();
-                foreach (var item in arr.EnumerateArray().Take(4))
-                {
-                    var name = item.TryGetProperty("name", out var nEl) ? (nEl.GetString() ?? "") : "";
-                    var date = item.TryGetProperty("date", out var dEl) ? (dEl.GetString() ?? "") : "";
-                    if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(date))
-                        entries.Add($"{name} ({date})");
-                }
-            }
-
-            if (count == 0)
-                return $"I couldn't find public holidays for **{scope}** in **{year}**.";
-
-            var preview = entries.Count > 0 ? string.Join(", ", entries) : "no preview available";
-            return $"I found **{count}** public holidays in **{scope}** for **{year}**. First entries: {preview}.\n\nWant this narrowed to a specific region?";
-        }
-        catch
-        {
-            return "I fetched holiday data, but couldn't parse a clean answer.";
-        }
-    }
-
-    private static string BuildFeedUtilityResponse(string toolJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolJson))
-            return "I couldn't read any feed data from that request.";
-
-        try
-        {
-            using var doc = JsonDocument.Parse(toolJson);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("error", out var err) &&
-                err.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(err.GetString()))
-            {
-                return $"Feed fetch failed: {err.GetString()}";
-            }
-
-            var title = root.TryGetProperty("feedTitle", out var titleEl) ? (titleEl.GetString() ?? "") : "";
-            var host = root.TryGetProperty("sourceHost", out var hostEl) ? (hostEl.GetString() ?? "") : "";
-            var label = !string.IsNullOrWhiteSpace(title) ? title : host;
-
-            var items = new List<string>();
-            var count = 0;
-            if (root.TryGetProperty("items", out var arr) &&
-                arr.ValueKind == JsonValueKind.Array)
-            {
-                count = arr.GetArrayLength();
-                foreach (var item in arr.EnumerateArray().Take(3))
-                {
-                    if (item.TryGetProperty("title", out var itemTitleEl) &&
-                        itemTitleEl.ValueKind == JsonValueKind.String)
-                    {
-                        var itemTitle = (itemTitleEl.GetString() ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(itemTitle))
-                            items.Add(itemTitle);
-                    }
-                }
-            }
-
-            if (count == 0)
-            {
-                return $"I reached **{label}**, but there were no recent feed items to show.\n\nWant a retry or a different feed URL?";
-            }
-
-            var headlineList = items.Count > 0
-                ? string.Join("; ", items.Select((t, i) => $"{i + 1}) {t}"))
-                : "recent items were returned";
-
-            return $"I fetched **{count}** recent feed item(s) from **{label}**. Latest: {headlineList}\n\nPick one and I'll summarize it.";
-        }
-        catch
-        {
-            return "I fetched feed data, but couldn't parse it into a clean summary.";
-        }
-    }
-
-    private static string BuildStatusUtilityResponse(string toolJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolJson))
-            return "I couldn't get a status payload from that check.";
-
-        try
-        {
-            using var doc = JsonDocument.Parse(toolJson);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("error", out var err) &&
-                err.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(err.GetString()))
-            {
-                return $"Status check failed: {err.GetString()}";
-            }
-
-            var url = root.TryGetProperty("url", out var urlEl) ? (urlEl.GetString() ?? "") : "";
-            var reachable = root.TryGetProperty("reachable", out var reachEl) &&
-                            reachEl.ValueKind is JsonValueKind.True or JsonValueKind.False &&
-                            reachEl.GetBoolean();
-            var code = root.TryGetProperty("httpStatus", out var codeEl) && codeEl.TryGetInt32(out var status)
-                ? status
-                : (int?)null;
-            var method = root.TryGetProperty("method", out var methodEl) ? (methodEl.GetString() ?? "probe") : "probe";
-            var latency = root.TryGetProperty("latencyMs", out var latencyEl) && latencyEl.TryGetInt32(out var ms)
-                ? ms
-                : 0;
-            var error = root.TryGetProperty("error", out var errEl) ? (errEl.GetString() ?? "") : "";
-
-            var hostLabel = url;
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-                hostLabel = uri.Host;
-
-            if (reachable)
-            {
-                var statusText = code.HasValue ? $"HTTP {code.Value}" : "a network response";
-                return $"**{hostLabel}** is reachable ({statusText} via {method} in {latency} ms).\n\nNeed a quick re-check in a few seconds?";
-            }
-
-            var reason = string.IsNullOrWhiteSpace(error) ? "no response" : error;
-            return $"I couldn't reach **{hostLabel}** ({reason}).\n\nWant a retry or a different URL variant?";
-        }
-        catch
-        {
-            return "I ran the status check, but couldn't parse the response cleanly.";
-        }
-    }
-
-    private static string? ExtractLocationFromWeatherMessage(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return null;
-
-        var match = WeatherLocationRegex().Match(message);
-        if (!match.Success)
-            return null;
-
-        var location = match.Groups["location"].Value
-            .Trim()
-            .TrimEnd('?', '.', '!', ',');
-
-        return string.IsNullOrWhiteSpace(location) ? null : location;
-    }
+    private static string? ExtractLocationFromWeatherMessage(string message) =>
+        Utilities.WeatherResponseBuilder.ExtractLocationFromMessage(message);
 
     private void RememberPlaceContext(
         string placeName,
@@ -1961,35 +1300,8 @@ public sealed partial class AgentOrchestrator
                lowerMessage.Contains("snow", StringComparison.Ordinal);
     }
 
-    private static bool LooksLikeWeatherActivityAdviceRequest(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return false;
-
-        var lowerMessage = message.ToLowerInvariant();
-
-        var hasWeatherCue =
-            lowerMessage.Contains("weather", StringComparison.Ordinal) ||
-            lowerMessage.Contains("forecast", StringComparison.Ordinal) ||
-            lowerMessage.Contains("temperature", StringComparison.Ordinal) ||
-            lowerMessage.Contains("temp", StringComparison.Ordinal) ||
-            lowerMessage.Contains("rain", StringComparison.Ordinal) ||
-            lowerMessage.Contains("snow", StringComparison.Ordinal);
-
-        if (!hasWeatherCue)
-            return false;
-
-        return lowerMessage.Contains("activity", StringComparison.Ordinal) ||
-               lowerMessage.Contains("activities", StringComparison.Ordinal) ||
-               lowerMessage.Contains("what can i do", StringComparison.Ordinal) ||
-               lowerMessage.Contains("could i do", StringComparison.Ordinal) ||
-               lowerMessage.Contains("what should i do", StringComparison.Ordinal) ||
-               lowerMessage.Contains("kind of things", StringComparison.Ordinal) ||
-               lowerMessage.Contains("things to do", StringComparison.Ordinal) ||
-               lowerMessage.Contains("ideas", StringComparison.Ordinal) ||
-               lowerMessage.Contains("recommend", StringComparison.Ordinal) ||
-               lowerMessage.Contains("suggest", StringComparison.Ordinal);
-    }
+    private static bool LooksLikeWeatherActivityAdviceRequest(string message) =>
+        Utilities.WeatherResponseBuilder.LooksLikeActivityAdviceRequest(message);
 
     private static bool HasExplicitNonTemporalScope(string lowerMessage)
     {
@@ -3493,33 +2805,11 @@ public sealed partial class AgentOrchestrator
         return copy;
     }
 
-    /// <summary>
-    /// Detects "Error:" prefixed responses from AuditedMcpToolClient
-    /// (permission denied, safe mode, budget exceeded, execution failure).
-    /// </summary>
     private static bool IsErrorResponse(string? result) =>
-        result is not null &&
-        (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
-         result.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase));
+        Agent.Tools.ToolAliasResolver.IsErrorResponse(result);
 
-    private static bool IsUnknownToolError(string payload, string requestedTool)
-    {
-        if (string.IsNullOrWhiteSpace(payload))
-            return false;
-
-        if (!payload.Contains("Unknown tool", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (string.IsNullOrWhiteSpace(requestedTool))
-            return true;
-
-        if (payload.Contains(requestedTool, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        var pascalAlias = ToPascalCaseToolAlias(requestedTool);
-        return !string.IsNullOrWhiteSpace(pascalAlias) &&
-               payload.Contains(pascalAlias, StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsUnknownToolError(string payload, string requestedTool) =>
+        Agent.Tools.ToolAliasResolver.IsUnknownToolError(payload, requestedTool);
 
     // ─────────────────────────────────────────────────────────────────
     // Search Query Extraction via Tool Call
@@ -4571,6 +3861,31 @@ public sealed partial class AgentOrchestrator
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
     /// </summary>
+    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(string userMessage, CancellationToken cancellationToken)
+    {
+        if (!MemoryEnabled)
+            return new MemoryContextResult();
+
+        try
+        {
+            return await _memoryContextProvider.GetContextAsync(
+                new MemoryContextRequest
+                {
+                    UserMessage = userMessage,
+                    MemoryEnabled = MemoryEnabled,
+                    IsColdGreeting = IsColdGreeting(userMessage),
+                    ActiveProfileId = ActiveProfileId,
+                    Timeout = MemoryRetrievalTimeout
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Memory is best-effort; on failure or timeout, return empty
+            return new MemoryContextResult();
+        }
+    }
+
     private static ChatIntent MapRouteToLegacyIntent(RouterOutput route)
     {
         return route.Intent switch

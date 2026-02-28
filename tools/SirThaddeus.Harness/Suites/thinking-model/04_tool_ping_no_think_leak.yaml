@@ -1,0 +1,35 @@
+id: thinking_tool_ping_no_think_leak
+name: Thinking Model - Explicit tool call works, no raw <think> tags
+user_message: "Use tool_ping and report whether MCP tool execution is healthy."
+allowed_tools:
+  - tool_ping
+  - memory_retrieve
+mode: live
+assertions:
+  required_tools:
+    - tool_ping
+  forbidden_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - healthy
+  forbidden_keywords:
+    - "<think>"
+    - "</think>"
+    - "Final Answer:"
+    - "Thinking:"
+    - error
+    - timeout
+  max_response_chars: 600
+min_score: 4.0
+patch_targets:
+  tier1_targets:
+    - packages/llm-client/SirThaddeus.LlmClient/LmStudioClient.cs
+    - packages/agent/SirThaddeus.Agent/OrchestratorMessageHelpers.cs
+    - packages/agent/SirThaddeus.Agent/Routing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

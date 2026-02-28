@@ -45,6 +45,9 @@ public sealed class DefaultRouter : IRouter
             return MakeRoute(Intents.ChatOnly, confidence: 0.92);
         }
 
+        if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.95);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {

@@ -21,11 +21,19 @@ public static class SchemaInitializer
             predicate   TEXT NOT NULL,
             object      TEXT NOT NULL,
             confidence  REAL NOT NULL DEFAULT 1.0,
+            weight      REAL NOT NULL DEFAULT 0.65,
             sensitivity TEXT NOT NULL DEFAULT 'public',
+            source_turn_id TEXT,
+            source_hash    TEXT,
+            dedupe_key     TEXT,
+            origin         TEXT,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL,
             source_ref  TEXT,
-            is_deleted  INTEGER NOT NULL DEFAULT 0
+            is_deleted  INTEGER NOT NULL DEFAULT 0,
+            embedding   BLOB,
+            embedding_model TEXT,
+            embedding_dims INTEGER
         )
         """,
 
@@ -39,9 +47,19 @@ public static class SchemaInitializer
             summary     TEXT,
             when_iso    TEXT,
             confidence  REAL NOT NULL DEFAULT 1.0,
+            weight      REAL NOT NULL DEFAULT 0.65,
             sensitivity TEXT NOT NULL DEFAULT 'public',
+            source_turn_id TEXT,
+            source_hash    TEXT,
+            dedupe_key     TEXT,
+            origin         TEXT,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
             source_ref  TEXT,
-            is_deleted  INTEGER NOT NULL DEFAULT 0
+            is_deleted  INTEGER NOT NULL DEFAULT 0,
+            embedding   BLOB,
+            embedding_model TEXT,
+            embedding_dims INTEGER
         )
         """,
 
@@ -55,7 +73,9 @@ public static class SchemaInitializer
             when_iso    TEXT,
             sensitivity TEXT NOT NULL DEFAULT 'public',
             is_deleted  INTEGER NOT NULL DEFAULT 0,
-            embedding   BLOB
+            embedding   BLOB,
+            embedding_model TEXT,
+            embedding_dims INTEGER
         )
         """,
 
@@ -129,13 +149,31 @@ public static class SchemaInitializer
             weight        REAL NOT NULL DEFAULT 0.65,
             pin_level     INTEGER NOT NULL DEFAULT 0,
             sensitivity   TEXT NOT NULL DEFAULT 'low',
+            source_turn_id TEXT,
+            source_hash    TEXT,
+            dedupe_key     TEXT,
+            origin         TEXT,
             use_count     INTEGER NOT NULL DEFAULT 0,
             last_used_at  TEXT,
             created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
             is_deleted    INTEGER NOT NULL DEFAULT 0,
-            embedding     BLOB
+            embedding     BLOB,
+            embedding_model TEXT,
+            embedding_dims  INTEGER,
+            chunk_citation TEXT
         )
         """
+    ];
+
+    // ── Post-Migration Indexes ────────────────────────────────────────
+    // These depend on columns that may not exist until Migrations run,
+    // so they must execute AFTER the migration loop.
+    private static readonly string[] PostMigrationStatements =
+    [
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_facts_dedupe ON memory_facts(dedupe_key) WHERE dedupe_key IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_events_dedupe ON memory_events(dedupe_key) WHERE dedupe_key IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_nuggets_dedupe ON memory_nuggets(dedupe_key) WHERE dedupe_key IS NOT NULL"
     ];
 
     // ── Migrations ────────────────────────────────────────────────────
@@ -145,7 +183,42 @@ public static class SchemaInitializer
     private static readonly string[] Migrations =
     [
         "ALTER TABLE memory_facts ADD COLUMN profile_id TEXT",
-        "ALTER TABLE memory_events ADD COLUMN profile_id TEXT"
+        "ALTER TABLE memory_events ADD COLUMN profile_id TEXT",
+        "ALTER TABLE memory_facts ADD COLUMN weight REAL NOT NULL DEFAULT 0.65",
+        "ALTER TABLE memory_facts ADD COLUMN source_turn_id TEXT",
+        "ALTER TABLE memory_facts ADD COLUMN source_hash TEXT",
+        "ALTER TABLE memory_facts ADD COLUMN dedupe_key TEXT",
+        "ALTER TABLE memory_facts ADD COLUMN origin TEXT",
+        
+        "ALTER TABLE memory_events ADD COLUMN weight REAL NOT NULL DEFAULT 0.65",
+        "ALTER TABLE memory_events ADD COLUMN source_turn_id TEXT",
+        "ALTER TABLE memory_events ADD COLUMN source_hash TEXT",
+        "ALTER TABLE memory_events ADD COLUMN dedupe_key TEXT",
+        "ALTER TABLE memory_events ADD COLUMN origin TEXT",
+        "ALTER TABLE memory_events ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE memory_events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+        
+        "ALTER TABLE memory_nuggets ADD COLUMN source_turn_id TEXT",
+        "ALTER TABLE memory_nuggets ADD COLUMN source_hash TEXT",
+        "ALTER TABLE memory_nuggets ADD COLUMN dedupe_key TEXT",
+        "ALTER TABLE memory_nuggets ADD COLUMN origin TEXT",
+        "ALTER TABLE memory_nuggets ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE memory_nuggets ADD COLUMN chunk_citation TEXT",
+
+        // Embeddings
+        "ALTER TABLE memory_facts ADD COLUMN embedding BLOB",
+        "ALTER TABLE memory_facts ADD COLUMN embedding_model TEXT",
+        "ALTER TABLE memory_facts ADD COLUMN embedding_dims INTEGER",
+        
+        "ALTER TABLE memory_events ADD COLUMN embedding BLOB",
+        "ALTER TABLE memory_events ADD COLUMN embedding_model TEXT",
+        "ALTER TABLE memory_events ADD COLUMN embedding_dims INTEGER",
+        
+        "ALTER TABLE memory_chunks ADD COLUMN embedding_model TEXT",
+        "ALTER TABLE memory_chunks ADD COLUMN embedding_dims INTEGER",
+        
+        "ALTER TABLE memory_nuggets ADD COLUMN embedding_model TEXT",
+        "ALTER TABLE memory_nuggets ADD COLUMN embedding_dims INTEGER"
     ];
 
     /// <summary>
@@ -176,6 +249,14 @@ public static class SchemaInitializer
             {
                 // Column already exists — expected for repeat startups
             }
+        }
+
+        // Create indexes that depend on migrated columns
+        foreach (var sql in PostMigrationStatements)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync(ct);
         }
     }
 }

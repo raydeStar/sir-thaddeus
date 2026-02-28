@@ -24,6 +24,7 @@
         <conv:UrlToImageConverter     x:Key="UrlToImage"/>
         <conv:MarkdownToFlowDocumentConverter x:Key="MarkdownToFlowDocument"/>
         <conv:StringMatchConverter x:Key="StringMatchConverter"/>
+        <conv:BooleanToStatusTextConverter x:Key="BooleanToStatusTextConverter"/>
 
     </Window.Resources>
 
@@ -2430,6 +2431,26 @@
                                Foreground="{StaticResource Overlay0Brush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,12"/>
+
+                    <!-- Voice Server Toggle Button -->
+                    <Button Content="{Binding VoiceHostEnabled, Converter={StaticResource BooleanToStatusTextConverter}, ConverterParameter='KILL VOICE SERVER|START VOICE SERVER'}"
+                            Command="{Binding ToggleVoiceHostCommand}"
+                            Margin="0,0,0,16"
+                            Padding="12,6"
+                            FontWeight="SemiBold"
+                            HorizontalAlignment="Left">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource MemoryActionButtonStyle}">
+                                <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource CrustBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding VoiceHostEnabled}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource RedBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
 
                     <!-- Input Device -->
                     <Grid Margin="0,0,0,8">

@@ -63,8 +63,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly SegmentExecutionCoordinator _segmentExecutionCoordinator;
     private readonly UnifiedResponseComposer _unifiedResponseComposer;
     private readonly ResponseKindClassifier _responseKindClassifier = new();
-    private readonly IGatekeeperService? _gatekeeper;
+    private readonly Tools.ToolAliasResolver _toolAliasResolver;
     private readonly IFootmanRouter? _footmanRouter;
+    private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -88,60 +89,40 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private static readonly TimeSpan FirstPrinciplesFollowUpTtl = TimeSpan.FromMinutes(15);
 
     // ── Web search tool names ────────────────────────────────────────
-    // MCP stacks may register tools in snake_case or PascalCase.
-    // Try the canonical name first, fall back to the alternate.
-    private const string WebSearchToolName    = "web_search";
-    private const string WebSearchToolNameAlt = "WebSearch";
-    private const string WeatherGeocodeToolName    = "weather_geocode";
-    private const string WeatherGeocodeToolNameAlt = "WeatherGeocode";
-    private const string WeatherForecastToolName    = "weather_forecast";
-    private const string WeatherForecastToolNameAlt = "WeatherForecast";
-    private const string ResolveTimezoneToolName    = "resolve_timezone";
-    private const string ResolveTimezoneToolNameAlt = "ResolveTimezone";
-    private const string HolidaysGetToolName        = "holidays_get";
-    private const string HolidaysGetToolNameAlt     = "HolidaysGet";
-    private const string HolidaysNextToolName       = "holidays_next";
-    private const string HolidaysNextToolNameAlt    = "HolidaysNext";
-    private const string HolidaysIsTodayToolName    = "holidays_is_today";
-    private const string HolidaysIsTodayToolNameAlt = "HolidaysIsToday";
-    private const string FeedFetchToolName          = "feed_fetch";
-    private const string FeedFetchToolNameAlt       = "FeedFetch";
-    private const string StatusCheckToolName        = "status_check_url";
-    private const string StatusCheckToolNameAlt     = "StatusCheckUrl";
-    private const string MemoryRetrieveToolName     = "memory_retrieve";
-    private const string MemoryRetrieveToolNameAlt  = "MemoryRetrieve";
-    private const string MemoryListFactsToolName    = "memory_list_facts";
-    private const string MemoryListFactsToolNameAlt = "MemoryListFacts";
-    private const string MemoryStoreFactsToolName   = "memory_store_facts";
-    private const string MemoryStoreFactsToolNameAlt = "MemoryStoreFacts";
-    private const string ScreenCaptureToolName       = "screen_capture";
-    private const string ScreenCaptureToolNameAlt    = "ScreenCapture";
+    // Canonical tool names live in ToolNames static class.
+    // These aliases keep the internal code unchanged during extraction.
+    private const string WebSearchToolName    = ToolNames.WebSearch;
+    private const string WebSearchToolNameAlt = ToolNames.WebSearchAlt;
+    private const string WeatherGeocodeToolName    = ToolNames.WeatherGeocode;
+    private const string WeatherGeocodeToolNameAlt = ToolNames.WeatherGeocodeAlt;
+    private const string WeatherForecastToolName    = ToolNames.WeatherForecast;
+    private const string WeatherForecastToolNameAlt = ToolNames.WeatherForecastAlt;
+    private const string ResolveTimezoneToolName    = ToolNames.ResolveTimezone;
+    private const string ResolveTimezoneToolNameAlt = ToolNames.ResolveTimezoneAlt;
+    private const string HolidaysGetToolName        = ToolNames.HolidaysGet;
+    private const string HolidaysGetToolNameAlt     = ToolNames.HolidaysGetAlt;
+    private const string HolidaysNextToolName       = ToolNames.HolidaysNext;
+    private const string HolidaysNextToolNameAlt    = ToolNames.HolidaysNextAlt;
+    private const string HolidaysIsTodayToolName    = ToolNames.HolidaysIsToday;
+    private const string HolidaysIsTodayToolNameAlt = ToolNames.HolidaysIsTodayAlt;
+    private const string FeedFetchToolName          = ToolNames.FeedFetch;
+    private const string FeedFetchToolNameAlt       = ToolNames.FeedFetchAlt;
+    private const string StatusCheckToolName        = ToolNames.StatusCheck;
+    private const string StatusCheckToolNameAlt     = ToolNames.StatusCheckAlt;
+    private const string MemoryRetrieveToolName     = ToolNames.MemoryRetrieve;
+    private const string MemoryRetrieveToolNameAlt  = ToolNames.MemoryRetrieveAlt;
+    private const string MemoryListFactsToolName    = ToolNames.MemoryListFacts;
+    private const string MemoryListFactsToolNameAlt = ToolNames.MemoryListFactsAlt;
+    private const string MemoryStoreFactsToolName   = ToolNames.MemoryStoreFacts;
+    private const string MemoryStoreFactsToolNameAlt = ToolNames.MemoryStoreFactsAlt;
+    private const string ScreenCaptureToolName       = ToolNames.ScreenCapture;
+    private const string ScreenCaptureToolNameAlt    = ToolNames.ScreenCaptureAlt;
 
-    // ── Summary instruction injected after search results ────────────
-    private const string WebSummaryInstruction =
-        "\n\nSearch results are in the next message. " +
-        "Synthesize across all sources into a concise, practical answer. " +
-        "Lead with the bottom line in one sentence, then 3-5 short points. " +
-        "No markdown tables. No URLs. " +
-        "ONLY use facts from the provided sources. " +
-        "Do NOT invent or guess details not in the results.";
-
-    // ── Summary instruction injected for follow-up deep dives ───────
-    private const string WebFollowUpInstruction =
-        "\n\nFull article content from prior sources is in the next message. " +
-        "Answer the user's latest question using ONLY the provided content. " +
-        "Be thorough. No markdown tables. No URLs. " +
-        "If a detail is not present in the content, say so.";
-
-    private const string WebFollowUpWithRelatedInstruction =
-        "\n\nYou are answering a follow-up question about a specific news story. " +
-        "Full text from the primary article(s) is included first, followed by " +
-        "related coverage search results.\n" +
-        "Answer the user's question. Lead with the bottom line. Then explain:\n" +
-        "- What the primary article(s) say\n" +
-        "- What related sources add or contradict\n" +
-        "- Whether key details are confirmed or still alleged\n" +
-        "No markdown tables. No URLs. Do not list sources unless you need to explain a disagreement.";
+    // ── Summary instructions ─────────────────────────────────────────
+    // Canonical prompt strings live in OrchestratorPrompts.
+    private const string WebSummaryInstruction = OrchestratorPrompts.WebSummaryInstruction;
+    private const string WebFollowUpInstruction = OrchestratorPrompts.WebFollowUpInstruction;
+    private const string WebFollowUpWithRelatedInstruction = OrchestratorPrompts.WebFollowUpWithRelatedInstruction;
 
     // ── Token budget per intent ──────────────────────────────────────
     // Tight caps reduce filler from small models while still leaving
@@ -154,17 +135,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensUtilityRouting = 120;
 
     // ── Logic puzzle decomposition scaffold ──────────────────────────
-    // For small models, force a minimal first-principles structure so
-    // reasoning prompts stay grounded and reproducible.
-    private const string LogicPuzzleDecompositionModeSuffix =
-        "\n[LOGIC PUZZLE MODE]\n" +
-        "You are Sir Thaddeus, a witty and pragmatic agent.\n" +
-        "Use first-principles logic internally, but keep reasoning private unless asked.\n" +
-        "Give a direct answer first.\n" +
-        "If ALL presented options are factually wrong, say neither is correct and state the actual fact (e.g. the real color, weight, count).\n" +
-        "If the user explicitly asks why or asks for your logic, include a short 'Why:' section after the answer.\n" +
-        "Do not call tools. Do not invent missing facts.\n" +
-        "[/LOGIC PUZZLE MODE]\n";
+    private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
 
     // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
     // optional embeddings don't finish in this window, we skip memory
@@ -172,37 +143,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
 
     // ── Onboarding prompts ────────────────────────────────────────────
-    // Injected when no active profile is loaded for this session.
-    //
-    // Cold prompt: first turn — actively introduce yourself and ask.
-    // Follow-up: subsequent turns — passively capture info if shared.
-    //
-    // The LLM MUST have memory tools available when these are active
-    // (see the policy override in ProcessAsync). Without tools, the
-    // model can't persist anything the user shares.
-
-    private const string OnboardingColdPrompt =
-        "\n\n[ONBOARDING]\n" +
-        "No profile is loaded — you don't know who you're talking to yet.\n" +
-        "Introduce yourself warmly (stay in character) and ask who they are.\n" +
-        "If they share their name, IMMEDIATELY call memory_store_facts to save it:\n" +
-        "  {\"subject\": \"user\", \"predicate\": \"name\", \"object\": \"<their name>\"}\n" +
-        "Then ask 2-3 light questions to get to know them — what they work on, " +
-        "a preference or two, how they like to be addressed.\n" +
-        "Keep it casual and brief. If they say they'd rather not share or " +
-        "want to skip, that is perfectly fine — just say something like " +
-        "'No problem at all' and help them with whatever they need.\n" +
-        "Do NOT ignore their original message — answer it too, " +
-        "just weave the introduction in naturally.\n" +
-        "[/ONBOARDING]\n";
-
-    private const string OnboardingFollowUpPrompt =
-        "\n\n[ONBOARDING]\n" +
-        "You still don't know who this user is.\n" +
-        "If they share personal details (name, preferences, etc.), " +
-        "use memory_store_facts to save them.\n" +
-        "Do NOT keep asking if they clearly want to move on — just help them.\n" +
-        "[/ONBOARDING]\n";
+    private const string OnboardingColdPrompt = OrchestratorPrompts.OnboardingColdPrompt;
+    private const string OnboardingFollowUpPrompt = OrchestratorPrompts.OnboardingFollowUpPrompt;
 
     // ── History sliding window ───────────────────────────────────────
     // Keep the last N user+assistant turns so the context window stays
@@ -325,8 +267,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         IPersonalityRuntime? personalityRuntime = null,
         string? activePersonalityId = null,
         string? personalityProfilesDirectory = null,
-        IGatekeeperService? gatekeeper = null,
-        IFootmanRouter? footmanRouter = null)
+        IFootmanRouter? footmanRouter = null,
+        IAutoMemoryExtractor? autoMemoryExtractor = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -359,8 +301,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _toolPlanner = toolPlanner ?? new ToolPlanner();
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(llm, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
-        _router = router ?? new DefaultRouter(llm, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, _timeProvider);
+        _router = router ?? new Routing.RouterV2(llm, _deterministicUtilityEngine);
+        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, new SmartIntentClassifier(llm), _timeProvider);
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
         _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
@@ -376,8 +318,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
         _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
         _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
-        _gatekeeper = gatekeeper;
+        _toolAliasResolver = new Tools.ToolAliasResolver(mcp);
         _footmanRouter = footmanRouter;
+        _autoMemoryExtractor = autoMemoryExtractor;
 
         // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
@@ -426,6 +369,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         TrimHistory();
         LogEvent("AGENT_USER_MESSAGE", userMessage);
 
+        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+        {
+            _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+        }
+
         var toolCallsMade = new List<ToolCallRecord>();
         var roundTrips = 0;
 
@@ -439,15 +387,31 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(multiIntentResponse, usageBaseline);
         }
 
-        // ── Route: classify intent + determine requirements ──────────
-        var route = await _router.RouteAsync(
-            new RouterRequest
-            {
-                UserMessage = userMessage,
-                HasRecentFirstPrinciplesRationale = HasRecentFirstPrinciplesRationale(),
-                HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
-            },
+        // ── Parallel I/O Setup ───────────────────────────────────────
+        // Kick off independent async tasks simultaneously to minimize
+        // total turn latency.
+        var memoryTask = SafeModeEnabled ? Task.FromResult(new MemoryContextResult()) : GetMemoryContextSafeAsync(
+            userMessage,
             cancellationToken);
+
+        var slotStateBefore = _dialogueStore.Get();
+        var slotTask = _slotExtract.RunAsync(userMessage, slotStateBefore, cancellationToken);
+
+        // Pre-warm tool definitions in the background (MCP IPC).
+        // Many paths short-circuit before needing tools, but if we
+        // reach the tool loop the round-trip is already done.
+        var toolDefsTask = _toolDefinitionBuilder.BuildAsync(
+            MemoryEnabled, PanicModeEnabled, SafeModeEnabled, LogEvent, cancellationToken);
+
+        // ── Route: classify intent + determine requirements ──────────
+        var routeRequest = new RouterRequest
+        {
+            UserMessage = userMessage,
+            HasRecentFirstPrinciplesRationale = HasRecentFirstPrinciplesRationale(),
+            HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
+        };
+        var route = await _router.RouteAsync(routeRequest, cancellationToken);
+
         LogEvent("ROUTER_OUTPUT",
             $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
             $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
@@ -459,8 +423,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // When the tripwire router didn't make a high-confidence
         // deterministic match (< 0.95), invoke the Footman for a
         // second opinion using a small, fast gatekeeper model.
-        // If the Footman returns an authoritative decision, override
-        // the route. On abstain/failure, keep the tripwire result.
         RoutingDecision? footmanDecision = null;
         if (_footmanRouter is not null && route.Confidence < 0.95)
         {
@@ -500,8 +462,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
 
         // ── Apply Footman context policy ─────────────────────────────
-        // If the Footman made an authoritative decision, apply its
-        // context policy to trim history before the primary model sees it.
         if (footmanDecision is { IsAuthoritative: true })
         {
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
@@ -519,76 +479,36 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // Keep the old intent for the WebLookup deterministic path
         var intent = MapRouteToLegacyIntent(route);
 
-        // ── Retrieve memory context (best-effort, hard timeout) ──
-        // Called after classification but before the main LLM call.
-        // The pack text is injected into the system prompt so the
-        // model has relevant facts/events/chunks for its answer.
-        // If retrieval takes longer than the timeout, we skip it
-        // entirely rather than stalling the user's conversation.
-        //
-        // When MemoryEnabled is false (master memory off), skip
-        // retrieval entirely — no MCP call, no timeout wait.
-        var memoryPackText = "";
-        var onboardingNeeded = false;
-        var memoryError = "";
-        if (SafeModeEnabled)
+        // ── Await Memory and Slots ───────────────────────────────────
+        var memoryContext = await memoryTask;
+        var memoryPackText = memoryContext.PackText ?? "";
+        var onboardingNeeded = memoryContext.OnboardingNeeded;
+        var memoryError = memoryContext.Error ?? "";
+
+        if (!SafeModeEnabled)
         {
-            LogEvent("SAFE_MODE_MEMORY_DISABLED", "Safe mode active - skipping memory retrieval.");
-        }
-        else
-        {
-            try
+            if (!MemoryEnabled)
             {
-                var memoryContext = await _memoryContextProvider.GetContextAsync(
-                    new MemoryContextRequest
-                    {
-                        UserMessage = userMessage,
-                        MemoryEnabled = MemoryEnabled,
-                        IsColdGreeting = IsColdGreeting(userMessage),
-                        ActiveProfileId = ActiveProfileId,
-                        Timeout = MemoryRetrievalTimeout
-                    },
-                    cancellationToken);
-
-                memoryPackText = memoryContext.PackText;
-                onboardingNeeded = memoryContext.OnboardingNeeded;
-                memoryError = memoryContext.Error ?? "";
-
-                if (!MemoryEnabled)
-                {
-                    LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
-                }
-                else if (memoryContext.Provenance.TimedOut)
-                {
-                    LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
-                }
-
-                if (MemoryEnabled)
-                {
-                    toolCallsMade.Add(new ToolCallRecord
-                    {
-                        ToolName = "MemoryRetrieve",
-                        Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
-                        Result = memoryContext.Provenance.Summary,
-                        Success = memoryContext.Provenance.Success
-                    });
-                }
+                LogEvent("MEMORY_DISABLED", "Memory is off — skipping retrieval.");
             }
-            catch
+            else if (memoryContext.Provenance.TimedOut)
             {
-                // Swallow — memory is best-effort
+                LogEvent("MEMORY_TIMEOUT", "Memory retrieval exceeded timeout — skipped.");
+            }
+
+            if (MemoryEnabled && memoryContext.Provenance.Success)
+            {
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = "MemoryRetrieve",
+                    Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
+                    Result = memoryContext.Provenance.Summary,
+                    Success = memoryContext.Provenance.Success
+                });
             }
         }
 
         // ── Onboarding injection ──────────────────────────────────────
-        // When no active profile is loaded and this is the first turn,
-        // inject the "get to know you" prompt. On subsequent turns,
-        // inject a lighter reminder that passively captures info.
-        //
-        // Also force the tool loop on so the LLM can call
-        // memory_store_facts when the user shares their name.
-        //
-        // Suppressed when memory is off — the model can't store facts anyway.
         if (onboardingNeeded && MemoryEnabled)
         {
             var isFirstTurn = _history.Count(m => m.Role == "user") <= 1;
@@ -596,15 +516,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 ? OnboardingColdPrompt
                 : OnboardingFollowUpPrompt;
 
-            // Upgrade chat-only → memory_write so the LLM has access
-            // to memory tools. Without this, the model is told to call
-            // memory_store_facts but has no tools available.
-            //
-            // IMPORTANT: only override Casual intent. Do NOT touch
-            // WebLookup, Tooling, or other intents — their routing
-            // takes priority over onboarding. The onboarding prompt
-            // is still injected into the system context regardless,
-            // so the LLM can passively capture info during any flow.
             if (intent == ChatIntent.Casual)
             {
                 route = DefaultRouter.MakeRoute(Intents.MemoryWrite, confidence: 0.9,
@@ -616,12 +527,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             LogEvent("ONBOARDING_INJECTED", isFirstTurn ? "First turn — introducing and asking who the user is." : "Follow-up — passively capturing info.");
         }
 
-        var stateBefore = _dialogueStore.Get();
-        var extractedSlots = await _slotExtract.RunAsync(userMessage, stateBefore, cancellationToken);
-        var mergedSlots = _mergeSlots.Run(stateBefore, extractedSlots, _timeProvider.GetUtcNow());
-        var validatedSlots = _validateSlots.Run(stateBefore, mergedSlots);
+        var extractedSlots = await slotTask;
+        var mergedSlots = _mergeSlots.Run(slotStateBefore, extractedSlots, _timeProvider.GetUtcNow());
+        var validatedSlots = _validateSlots.Run(slotStateBefore, mergedSlots);
         UpdateDialogueStateFromValidatedSlots(validatedSlots);
-        var toolPlan = _toolPlanner.Plan(validatedSlots, stateBefore, UserLocationHint, PreferredUnits);
+        var toolPlan = _toolPlanner.Plan(validatedSlots, slotStateBefore, UserLocationHint, PreferredUnits);
         if (toolPlan.InjectionMitigationApplied)
             LogEvent("PROMPT_INJECTION_FILTER_APPLIED", $"reason={toolPlan.InjectionMitigationReason}");
         var contextualUserMessage = string.IsNullOrWhiteSpace(validatedSlots.NormalizedMessage)
@@ -1009,14 +919,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }
 
             // ── Policy-filtered tool loop ────────────────────────────
-            // Build the full tool set, then filter through the policy
-            // gate. The executor only sees what the policy allows.
-            var allTools = await _toolDefinitionBuilder.BuildAsync(
-                MemoryEnabled,
-                PanicModeEnabled,
-                SafeModeEnabled,
-                LogEvent,
-                cancellationToken);
+            // Await the pre-warmed tool definitions (kicked off early
+            // alongside memory/slots to overlap with routing latency).
+            var allTools = await toolDefsTask;
             var tools = PolicyGate.FilterTools(allTools, policy);
 
             LogEvent("AGENT_TOOLS_POLICY_FILTERED",
@@ -1065,6 +970,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     }
 
     /// <summary>
+    /// Clears the cached MCP tool list so the next turn re-fetches from the server.
+    /// Call after MCP reconnect or tool manifest changes.
+    /// </summary>
+    public void InvalidateToolCache() => _toolDefinitionBuilder.InvalidateCache();
+
+    /// <summary>
     /// Gets the current state of the conversation history.
     /// </summary>
     public IReadOnlyList<ChatMessage> GetCurrentHistory() => _history;
@@ -1094,43 +1005,5 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public void AppendAssistantMessage(string message)
     {
         _history.Add(ChatMessage.Assistant(message));
-    }
-
-    /// <summary>
-    /// Evaluates if the current message requires context and strips history if not.
-    /// Used by the V2 pipeline adapter.
-    /// </summary>
-    public async Task EvaluateGatekeeperContextAsync(string userMessage, CancellationToken cancellationToken)
-    {
-        if (_gatekeeper is null) return;
-
-        try
-        {
-            var isContextDependent = await _gatekeeper.IsContextDependentAsync(
-                userMessage, cancellationToken);
-
-            if (!isContextDependent)
-            {
-                var sysPrompt = _history.FirstOrDefault(m => m.Role == "system");
-                var currentUserMsg = _history.LastOrDefault(m => m.Role == "user");
-                _history.Clear();
-                if (sysPrompt is not null) _history.Add(sysPrompt);
-                if (currentUserMsg is not null) _history.Add(currentUserMsg);
-
-                LogEvent("CONTEXT_DECOUPLER",
-                    "Gatekeeper verdict: INDEPENDENT — prior history stripped.");
-            }
-            else
-            {
-                LogEvent("CONTEXT_DECOUPLER",
-                    "Gatekeeper verdict: DEPENDENT — full history retained.");
-            }
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            LogEvent("CONTEXT_DECOUPLER_ERROR",
-                $"Gatekeeper failed ({ex.Message}) — retaining full history (fail-open).");
-        }
     }
 }
