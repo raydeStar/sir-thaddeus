@@ -186,7 +186,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.title }}
           body: ${{ steps.tag.outputs.body }}
-          prerelease: true
+          prerelease: false
           make_latest: false
           files: |
             release-assets/*.zip

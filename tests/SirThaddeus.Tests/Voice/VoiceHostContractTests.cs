@@ -349,7 +349,6 @@ public sealed class VoiceHostOrchestratorIntegrationTests : IDisposable
                 {
                     _gate = new TaskCompletionSource<bool>(
                         TaskCreationOptions.RunContinuationsAsynchronously);
-                    using var reg = ct.Register(() => _gate.TrySetResult(true));
                     await _gate.Task.WaitAsync(ct);
                 }
             }

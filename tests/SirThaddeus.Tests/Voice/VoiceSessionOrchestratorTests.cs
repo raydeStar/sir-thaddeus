@@ -348,8 +348,7 @@ public sealed class VoiceSessionOrchestratorTests
         {
             _ = clip;
             _ = sessionId;
-            _ = cancellationToken;
-            return _completion.Task;
+            return _completion.Task.WaitAsync(cancellationToken);
         }
 
         public void Release(string transcript) => _completion.TrySetResult(transcript);
