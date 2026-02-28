@@ -1,4 +1,5 @@
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Artifacts;
@@ -120,13 +121,16 @@ public sealed class SingleTestRunner
             ? test.PersonalityId
             : settings.ActivePersonalityId;
 
+        var footmanRouter = BuildFootmanRouter(settings, llmClient);
+
         var orchestrator = new AgentOrchestrator(
             llmClient,
             mcpClient,
             new TestAuditLogger(),
             settings.Llm.SystemPrompt,
             activePersonalityId: effectivePersonalityId,
-            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings));
+            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings),
+            footmanRouter: footmanRouter);
         orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
 
         var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
@@ -193,6 +197,31 @@ public sealed class SingleTestRunner
         var inner = new LmStudioClient(options);
         recordingClient = new RecordingLlmClient(inner, traceRecorder);
         return recordingClient;
+    }
+
+    private static IFootmanRouter? BuildFootmanRouter(AppSettings settings, ILlmClient primaryLlmClient)
+    {
+        var gatekeeperBaseUrl = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperBaseUrl)
+            ? settings.Llm.BaseUrl
+            : settings.Llm.GatekeeperBaseUrl;
+        var gatekeeperModel = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperModelId)
+            ? null
+            : settings.Llm.GatekeeperModelId;
+
+        if (string.IsNullOrWhiteSpace(gatekeeperModel))
+            return null;
+
+        var gatekeeperClient = new LmStudioClient(new LlmClientOptions
+        {
+            BaseUrl = gatekeeperBaseUrl,
+            Model = gatekeeperModel,
+            MaxTokens = 120,
+            Temperature = 0.0
+        });
+
+        return new FastLlmFootmanRouter(
+            gatekeeperClient,
+            logEvent: (_, _) => { });
     }
 
     private static HarnessExecutionMode ResolveMode(HarnessCommandOptions options, HarnessTestCase test)

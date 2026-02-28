@@ -1825,8 +1825,8 @@ public class ToolLoopTests
                         Id = $"call_{Guid.NewGuid():N}",
                         Function = new FunctionCallDetails
                         {
-                            Name = "file_read",
-                            Arguments = """{"path":"C:\\test.txt"}"""
+                            Name = "memory_retrieve",
+                            Arguments = """{"query":"test"}"""
                         }
                     }
                 ]
@@ -1837,7 +1837,7 @@ public class ToolLoopTests
             (tool, _) => tool switch
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                _ => "file contents here"
+                _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
 
@@ -2108,11 +2108,14 @@ public class PolicyFilteringTests
         Assert.DoesNotContain(mcp.Calls, c =>
             c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
 
+        // Under V2 PlanValidator, forbidden tools are rejected during planning
+        // and never added to ToolCallsMade. The agent eventually bails out.
+        // Because the intent is memory_write, the deterministic memory fallback logic
+        // kicks in and overrides the final text with a deterministic success message.
         var blockedCall = result.ToolCallsMade.FirstOrDefault(t =>
             t.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(blockedCall);
-        Assert.False(blockedCall!.Success);
-        Assert.Contains("tool_not_permitted", blockedCall.Result, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(blockedCall);
+        Assert.Contains("remember", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

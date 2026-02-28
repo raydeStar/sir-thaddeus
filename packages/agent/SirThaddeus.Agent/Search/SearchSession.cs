@@ -116,6 +116,14 @@ public sealed class SearchSession
     public string?          PrimarySourceId  { get; set; }
     public string?          SelectedSourceId { get; set; }
 
+    // ── Local business discovery flag ────────────────────────────────
+    /// <summary>
+    /// True when the last search was a local business discovery query
+    /// (e.g. "find bakeries nearby"). Used by the follow-up path to
+    /// redirect "tell me more about X" to the briefing pipeline.
+    /// </summary>
+    public bool LastWasLocalBusinessDiscovery { get; set; }
+
     // ── Story clusters (news pipeline only) ──────────────────────────
     public List<StoryCluster> LastClusters { get; set; } = [];
 
@@ -174,6 +182,7 @@ public sealed class SearchSession
         LastEntityCanonical      = null;
         LastEntityType           = null;
         LastEntityDisambiguation = null;
+        LastWasLocalBusinessDiscovery = false;
         LastResults.Clear();
         LastClusters.Clear();
         PrimarySourceId  = null;

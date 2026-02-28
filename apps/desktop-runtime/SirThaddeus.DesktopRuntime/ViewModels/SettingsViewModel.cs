@@ -15,6 +15,14 @@ using SirThaddeus.PersonalityEngine.Profiles;
 namespace SirThaddeus.DesktopRuntime.ViewModels;
 
 /// <summary>
+/// A well-known local LLM provider endpoint.
+/// </summary>
+public sealed record ProviderPreset(string Name, string Url)
+{
+    public override string ToString() => Name;
+}
+
+/// <summary>
 /// ViewModel for the Settings tab. Surfaces commonly adjusted
 /// configuration values and the active profile dropdown.
 ///
@@ -38,8 +46,14 @@ public sealed partial class SettingsViewModel : ViewModelBase
     // LLM
     private string _llmBaseUrl     = "";
     private string _llmModel       = "";
+    private string _gatekeeperBaseUrl = "";
+    private string _gatekeeperModelId = "qwen2.5-1.5b-instruct";
     private int    _llmMaxTokens   = 2048;
     private double _llmTemperature = 0.7;
+    private bool   _isRefreshingModels;
+    private ProviderPreset? _selectedPrimaryProvider;
+    private ProviderPreset? _selectedGatekeeperProvider;
+    private bool _llmsTabHasBeenOpened;
 
     // Audio
     private bool   _ttsEnabled   = true;
@@ -152,8 +166,64 @@ public sealed partial class SettingsViewModel : ViewModelBase
     // LLM
     public string LlmBaseUrl     { get => _llmBaseUrl;     set { if (SetProperty(ref _llmBaseUrl, value))     MarkDirty(); } }
     public string LlmModel       { get => _llmModel;       set { if (SetProperty(ref _llmModel, value))       MarkDirty(); } }
+    public string GatekeeperBaseUrl { get => _gatekeeperBaseUrl; set { if (SetProperty(ref _gatekeeperBaseUrl, value)) MarkDirty(); } }
+    public string GatekeeperModelId { get => _gatekeeperModelId; set { if (SetProperty(ref _gatekeeperModelId, value)) MarkDirty(); } }
     public int    LlmMaxTokens   { get => _llmMaxTokens;   set { if (SetProperty(ref _llmMaxTokens, value))   MarkDirty(); } }
     public double LlmTemperature { get => _llmTemperature; set { if (SetProperty(ref _llmTemperature, value)) MarkDirty(); } }
+    public bool   IsRefreshingModels { get => _isRefreshingModels; private set => SetProperty(ref _isRefreshingModels, value); }
+
+    /// <summary>
+    /// Well-known local LLM provider presets.
+    /// </summary>
+    public static IReadOnlyList<ProviderPreset> KnownProviders { get; } = new[]
+    {
+        new ProviderPreset("LM Studio",             "http://localhost:1234"),
+        new ProviderPreset("Ollama",                "http://localhost:11434"),
+        new ProviderPreset("text-generation-webui", "http://localhost:5000"),
+        new ProviderPreset("LocalAI",               "http://localhost:8080"),
+        new ProviderPreset("Custom",                "")
+    };
+
+    /// <summary>
+    /// Selected provider preset for the primary engine.
+    /// Selecting a preset auto-fills <see cref="LlmBaseUrl"/>.
+    /// </summary>
+    public ProviderPreset? SelectedPrimaryProvider
+    {
+        get => _selectedPrimaryProvider;
+        set
+        {
+            if (SetProperty(ref _selectedPrimaryProvider, value) && value != null && !string.IsNullOrEmpty(value.Url))
+                LlmBaseUrl = value.Url;
+        }
+    }
+
+    /// <summary>
+    /// Selected provider preset for the gatekeeper engine.
+    /// Selecting a preset auto-fills <see cref="GatekeeperBaseUrl"/>.
+    /// </summary>
+    public ProviderPreset? SelectedGatekeeperProvider
+    {
+        get => _selectedGatekeeperProvider;
+        set
+        {
+            if (SetProperty(ref _selectedGatekeeperProvider, value) && value != null && !string.IsNullOrEmpty(value.Url))
+                GatekeeperBaseUrl = value.Url;
+        }
+    }
+
+    /// <summary>
+    /// Models available from the primary LLM endpoint.
+    /// Populated by querying GET /v1/models against <see cref="LlmBaseUrl"/>.
+    /// </summary>
+    public ObservableCollection<string> AvailablePrimaryModels { get; } = new();
+
+    /// <summary>
+    /// Models available from the gatekeeper LLM endpoint.
+    /// Populated by querying GET /v1/models against <see cref="GatekeeperBaseUrl"/>
+    /// (falls back to <see cref="LlmBaseUrl"/> when blank).
+    /// </summary>
+    public ObservableCollection<string> AvailableGatekeeperModels { get; } = new();
 
     // Audio
     public bool   TtsEnabled     { get => _ttsEnabled;     set { if (SetProperty(ref _ttsEnabled, value))     MarkDirty(); } }
@@ -521,6 +591,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     public ICommand SaveCommand    { get; }
     public ICommand RefreshCommand { get; }
+    public ICommand RefreshModelsCommand { get; }
+    public ICommand RefreshGatekeeperModelsCommand { get; }
 
     // ─── Raised when settings change ──────────────────────────────────
 
@@ -560,6 +632,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
         SaveCommand    = new RelayCommand(_ => SaveSettings());
         RefreshCommand = new AsyncRelayCommand(() => LoadAsync());
+        RefreshModelsCommand = new AsyncRelayCommand(RefreshPrimaryModelsAsync, () => !IsRefreshingModels);
+        RefreshGatekeeperModelsCommand = new AsyncRelayCommand(RefreshGatekeeperModelsAsync, () => !IsRefreshingModels);
 
         TestMicCommand           = new RelayCommand(_ => StartMicTest(),       _ => !IsTestingMic);
         StopTestMicCommand       = new RelayCommand(_ => StopMicTest(),        _ => IsTestingMic);
@@ -607,6 +681,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
     {
         _llmBaseUrl     = s.Llm.BaseUrl;
         _llmModel       = s.Llm.Model;
+        _gatekeeperBaseUrl = s.Llm.GatekeeperBaseUrl;
+        _gatekeeperModelId = s.Llm.GatekeeperModelId;
         _llmMaxTokens   = s.Llm.MaxTokens;
         _llmTemperature = s.Llm.Temperature;
 
@@ -671,6 +747,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
         // Notify all bindings
         OnPropertyChanged(nameof(LlmBaseUrl));
         OnPropertyChanged(nameof(LlmModel));
+        OnPropertyChanged(nameof(GatekeeperBaseUrl));
+        OnPropertyChanged(nameof(GatekeeperModelId));
         OnPropertyChanged(nameof(LlmMaxTokens));
         OnPropertyChanged(nameof(LlmTemperature));
         OnPropertyChanged(nameof(TtsEnabled));
@@ -1290,6 +1368,161 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _voiceHostHealthPollCts = null;
     }
 
+    // ─── OpenAI-Compatible Model Discovery ─────────────────────────
+
+    /// <summary>
+    /// Queries GET /v1/models at the given base URL and returns the
+    /// model IDs. Works with LM Studio, Ollama, and any OpenAI-compatible
+    /// endpoint. The butler inventories whichever wine cellar you point him at.
+    /// </summary>
+    private static async Task<List<string>> FetchModelIdsAsync(string baseUrl)
+    {
+        baseUrl = (baseUrl ?? "http://localhost:1234").TrimEnd('/');
+        using var http = new System.Net.Http.HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+
+        var response = await http.GetAsync($"{baseUrl}/v1/models");
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+        var modelIds = new List<string>();
+        if (doc.RootElement.TryGetProperty("data", out var dataArray) &&
+            dataArray.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in dataArray.EnumerateArray())
+            {
+                if (item.TryGetProperty("id", out var idProp) &&
+                    idProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var id = idProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        modelIds.Add(id!);
+                }
+            }
+        }
+
+        return modelIds;
+    }
+
+    /// <summary>
+    /// Refreshes the primary reasoning engine model list from <see cref="LlmBaseUrl"/>.
+    /// </summary>
+    private async Task RefreshPrimaryModelsAsync()
+    {
+        if (IsRefreshingModels) return;
+        IsRefreshingModels = true;
+
+        try
+        {
+            var baseUrl = (LlmBaseUrl ?? "http://localhost:1234").TrimEnd('/');
+            var modelIds = await FetchModelIdsAsync(baseUrl);
+
+            System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+            {
+                AvailablePrimaryModels.Clear();
+                foreach (var id in modelIds.OrderBy(m => m, StringComparer.OrdinalIgnoreCase))
+                    AvailablePrimaryModels.Add(id);
+            });
+
+            StatusText = $"Primary: found {modelIds.Count} model(s) at {baseUrl}.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Primary endpoint unreachable: {ex.Message}";
+        }
+        finally
+        {
+            IsRefreshingModels = false;
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the gatekeeper model list from <see cref="GatekeeperBaseUrl"/>
+    /// (falls back to <see cref="LlmBaseUrl"/> when blank).
+    /// </summary>
+    private async Task RefreshGatekeeperModelsAsync()
+    {
+        if (IsRefreshingModels) return;
+        IsRefreshingModels = true;
+
+        try
+        {
+            var baseUrl = (string.IsNullOrWhiteSpace(GatekeeperBaseUrl)
+                ? LlmBaseUrl ?? "http://localhost:1234"
+                : GatekeeperBaseUrl).TrimEnd('/');
+            var modelIds = await FetchModelIdsAsync(baseUrl);
+
+            System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+            {
+                AvailableGatekeeperModels.Clear();
+                foreach (var id in modelIds.OrderBy(m => m, StringComparer.OrdinalIgnoreCase))
+                    AvailableGatekeeperModels.Add(id);
+            });
+
+            StatusText = $"Gatekeeper: found {modelIds.Count} model(s) at {baseUrl}.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Gatekeeper endpoint unreachable: {ex.Message}";
+        }
+        finally
+        {
+            IsRefreshingModels = false;
+        }
+    }
+
+    // ─── LLMs Tab Activation ────────────────────────────────────────
+
+    /// <summary>
+    /// Called when the user opens the LLMs settings subtab.
+    /// Auto-refreshes both model lists on first open so the
+    /// dropdowns aren't empty.
+    /// </summary>
+    public async Task OnLlmsTabActivatedAsync()
+    {
+        // Resolve provider presets from current URLs (once)
+        if (!_llmsTabHasBeenOpened)
+        {
+            _selectedPrimaryProvider = ResolvePreset(_llmBaseUrl);
+            OnPropertyChanged(nameof(SelectedPrimaryProvider));
+
+            _selectedGatekeeperProvider = ResolvePreset(_gatekeeperBaseUrl);
+            OnPropertyChanged(nameof(SelectedGatekeeperProvider));
+        }
+
+        // Auto-refresh on first open or when lists are empty
+        if (!_llmsTabHasBeenOpened || AvailablePrimaryModels.Count == 0)
+        {
+            _llmsTabHasBeenOpened = true;
+            await RefreshPrimaryModelsAsync();
+            await RefreshGatekeeperModelsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Reverse-lookup: find the known provider preset whose URL
+    /// matches the given base URL. Falls back to "Custom".
+    /// </summary>
+    private static ProviderPreset ResolvePreset(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return KnownProviders[^1]; // "Custom"
+
+        var trimmed = url.TrimEnd('/');
+        foreach (var p in KnownProviders)
+        {
+            if (!string.IsNullOrEmpty(p.Url) &&
+                string.Equals(p.Url.TrimEnd('/'), trimmed, StringComparison.OrdinalIgnoreCase))
+                return p;
+        }
+
+        return KnownProviders[^1]; // "Custom"
+    }
+
     // ─── Dirty State ────────────────────────────────────────────────
 
     private bool _hasUnsavedChanges;
@@ -1595,10 +1828,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
         {
             Llm = _settings.Llm with
             {
-                BaseUrl     = _llmBaseUrl,
-                Model       = _llmModel,
-                MaxTokens   = _llmMaxTokens,
-                Temperature = _llmTemperature
+                BaseUrl          = _llmBaseUrl,
+                Model            = _llmModel,
+                GatekeeperBaseUrl = _gatekeeperBaseUrl,
+                GatekeeperModelId = _gatekeeperModelId,
+                MaxTokens        = _llmMaxTokens,
+                Temperature      = _llmTemperature
             },
             Audio = _settings.Audio with
             {

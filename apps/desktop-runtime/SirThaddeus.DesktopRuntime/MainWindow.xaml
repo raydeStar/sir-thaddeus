@@ -1561,6 +1561,7 @@
                     BorderThickness="0,0,0,1">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <RadioButton x:Name="SettingsSubGeneral" Content="General" IsChecked="True" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="General" Style="{StaticResource MemorySubTabStyle}"/>
+                    <RadioButton x:Name="SettingsSubLlms" Content="LLMs" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="LLMs" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubPreferences" Content="Preferences" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Preferences" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubMcp" Content="MCP" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="MCP" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
                     <RadioButton x:Name="SettingsSubVoice" Content="Voice" GroupName="SettingsTabs" Click="SettingsSubTab_Click" Tag="Voice" Style="{StaticResource MemorySubTabStyle}" Margin="4,0,0,0"/>
@@ -1884,8 +1885,249 @@
         </Grid>
 
         <!-- ═══════════════════════════════════════════════════════════
-             PREFERENCES SUBTAB
+             LLMs SUBTAB
+             Model selection for Primary Reasoning Engine and
+             Nimble Gatekeeper (Dynamic Context Decoupler).
              ═══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="LlmsSettingsView" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource BaseBrush}">
+                <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+                    <TextBlock Text="LLM ENGINE CONFIGURATION"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource MauveBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="Configure two independent LLM endpoints. Each can point to a different provider — LM Studio, Ollama, or any OpenAI-compatible server."
+                               FontSize="11.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,20"/>
+
+                    <!-- ══════════════════════════════════════════════════
+                         PRIMARY REASONING ENGINE
+                         ══════════════════════════════════════════════════ -->
+                    <TextBlock Text="PRIMARY REASONING ENGINE"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource BlueBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="The main model that handles tool orchestration, web synthesis, and deep conversation. Bigger is better here."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Provider"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding KnownProviders}"
+                                  SelectedItem="{Binding SelectedPrimaryProvider, Mode=TwoWay}"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Endpoint"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmBaseUrl, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Model"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailablePrimaryModels}"
+                                  SelectedItem="{Binding LlmModel, Mode=TwoWay}"
+                                  IsEditable="True"
+                                  Text="{Binding LlmModel, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                        <Button Grid.Column="2"
+                                Content="Refresh"
+                                Command="{Binding RefreshModelsCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                VerticalAlignment="Center"
+                                Margin="8,0,0,0"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Max Tokens"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmMaxTokens, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Temperature"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding LlmTemperature, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6"/>
+                    </Grid>
+
+                    <!-- ── Separator ───────────────────────────────────── -->
+                    <Border Height="1"
+                            Background="{StaticResource Surface0Brush}"
+                            Margin="0,12,0,16"/>
+
+                    <!-- ══════════════════════════════════════════════════
+                         NIMBLE GATEKEEPER ENGINE
+                         ══════════════════════════════════════════════════ -->
+                    <TextBlock Text="NIMBLE GATEKEEPER ENGINE"
+                               FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource GreenBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="A lightning-fast small model (~1B params) that evaluates every query to determine if chat history is needed. Prevents context poisoning from unrelated prior turns. Leave endpoint blank to share the primary endpoint."
+                               FontSize="10.5"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Provider"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding KnownProviders}"
+                                  SelectedItem="{Binding SelectedGatekeeperProvider, Mode=TwoWay}"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Endpoint"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding GatekeeperBaseUrl, UpdateSourceTrigger=LostFocus}"
+                                 Style="{StaticResource ChatInputStyle}"
+                                 FontSize="12" Padding="8,6">
+                            <TextBox.ToolTip>
+                                <TextBlock Text="e.g. http://localhost:11434 for Ollama, or leave blank to use the primary endpoint above."/>
+                            </TextBox.ToolTip>
+                        </TextBox>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Model"
+                                   FontSize="12"
+                                   Foreground="{StaticResource Subtext0Brush}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableGatekeeperModels}"
+                                  SelectedItem="{Binding GatekeeperModelId, Mode=TwoWay}"
+                                  IsEditable="True"
+                                  Text="{Binding GatekeeperModelId, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                  Style="{StaticResource DarkComboBoxStyle}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"/>
+                        <Button Grid.Column="2"
+                                Content="Refresh"
+                                Command="{Binding RefreshGatekeeperModelsCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                VerticalAlignment="Center"
+                                Margin="8,0,0,0"/>
+                    </Grid>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ── Sticky Save Bar ───────────────────────────────── -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="32,10">
+                <Grid MaxWidth="560" HorizontalAlignment="Left">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="●"
+                                   FontSize="10"
+                                   Foreground="{StaticResource YellowBrush}"
+                                   Margin="0,0,6,0"
+                                   Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding StatusText}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource Overlay0Brush}"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal">
+                        <Button Content="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MemoryActionButtonStyle}"
+                                Margin="0,0,8,0"/>
+                        <Button Content="Save Settings"
+                                Command="{Binding SaveCommand}"
+                                Style="{StaticResource SendButtonStyle}"
+                                Padding="14,8"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             PREFERENCES SUBTAB
+             ═══════════════════════════════════════════════════════════ -->
         <Grid Grid.Row="1" x:Name="PreferencesSettingsView" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>

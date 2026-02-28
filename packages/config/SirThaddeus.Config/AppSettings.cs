@@ -136,7 +136,24 @@ public sealed record LlmSettings
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
     [JsonPropertyName("model")]
-    public string Model { get; init; } = "local-model";
+    public string Model { get; init; } = "";
+
+    /// <summary>
+    /// Base URL for the gatekeeper LLM endpoint. When blank or null,
+    /// falls back to <see cref="BaseUrl"/>. This lets the gatekeeper
+    /// run on a completely separate provider (Ollama, another LM Studio
+    /// instance, etc.) from the primary reasoning engine.
+    /// </summary>
+    [JsonPropertyName("gatekeeperBaseUrl")]
+    public string GatekeeperBaseUrl { get; init; } = "";
+
+    /// <summary>
+    /// Model identifier for the lightweight gatekeeper LLM (1–1.5B params).
+    /// Used by the Dynamic Context Decoupler to decide whether chat history
+    /// is linguistically necessary for the current query.
+    /// </summary>
+    [JsonPropertyName("gatekeeperModelId")]
+    public string GatekeeperModelId { get; init; } = "qwen2.5-1.5b-instruct";
 
     [JsonPropertyName("maxTokens")]
     public int MaxTokens { get; init; } = 2048;
@@ -814,6 +831,12 @@ public sealed record DialogueSettings
     /// </summary>
     [JsonPropertyName("persistencePath")]
     public string PersistencePath { get; init; } = "auto";
+
+    /// <summary>
+    /// Feature flag to enable the experimental V2 routing and planning pipeline.
+    /// </summary>
+    [JsonPropertyName("orchestrationV2Enabled")]
+    public bool OrchestrationV2Enabled { get; init; } = false;
 }
 
 /// <summary>

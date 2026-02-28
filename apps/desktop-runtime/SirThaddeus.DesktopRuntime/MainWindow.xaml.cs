@@ -161,6 +161,7 @@ public partial class MainWindow : Window
                 LazyLoadSettings();
                 // If no subview is visible, default to General
                 if (SettingsGeneralView.Visibility != Visibility.Visible &&
+                    LlmsSettingsView.Visibility != Visibility.Visible &&
                     PreferencesSettingsView.Visibility != Visibility.Visible &&
                     McpSettingsView.Visibility != Visibility.Visible &&
                     VoiceSettingsView.Visibility != Visibility.Visible &&
@@ -188,6 +189,7 @@ public partial class MainWindow : Window
         if (!skipMainTabActivation) ActivateTab("Settings");
 
         SettingsSubGeneral.IsChecked = subtab == "General";
+        SettingsSubLlms.IsChecked = subtab == "LLMs";
         SettingsSubPreferences.IsChecked = subtab == "Preferences";
         SettingsSubMcp.IsChecked = subtab == "MCP";
         SettingsSubVoice.IsChecked = subtab == "Voice";
@@ -197,6 +199,7 @@ public partial class MainWindow : Window
         SettingsSubLogs.IsChecked = subtab == "Logs";
 
         SettingsGeneralView.Visibility = subtab == "General" ? Visibility.Visible : Visibility.Collapsed;
+        LlmsSettingsView.Visibility = subtab == "LLMs" ? Visibility.Visible : Visibility.Collapsed;
         PreferencesSettingsView.Visibility = subtab == "Preferences" ? Visibility.Visible : Visibility.Collapsed;
         McpSettingsView.Visibility = subtab == "MCP" ? Visibility.Visible : Visibility.Collapsed;
         VoiceSettingsView.Visibility = subtab == "Voice" ? Visibility.Visible : Visibility.Collapsed;
@@ -213,6 +216,10 @@ public partial class MainWindow : Window
         else if (subtab == "Profile")
         {
             LazyLoadProfile();
+        }
+        else if (subtab == "LLMs")
+        {
+            _ = _settingsVm?.OnLlmsTabActivatedAsync();
         }
     }
 
@@ -363,11 +370,13 @@ public partial class MainWindow : Window
         parentGrid.Children.Remove(TranscribeSettingsView);
         parentGrid.Children.Remove(LogsView);
         parentGrid.Children.Remove(SettingsGeneralView);
+        parentGrid.Children.Remove(LlmsSettingsView);
         parentGrid.Children.Remove(PreferencesSettingsView);
         parentGrid.Children.Remove(McpSettingsView);
         parentGrid.Children.Remove(VoiceSettingsView);
 
         SettingsContentArea.Children.Add(SettingsGeneralView);
+        SettingsContentArea.Children.Add(LlmsSettingsView);
         SettingsContentArea.Children.Add(PreferencesSettingsView);
         SettingsContentArea.Children.Add(McpSettingsView);
         SettingsContentArea.Children.Add(VoiceSettingsView);
@@ -381,6 +390,7 @@ public partial class MainWindow : Window
         Grid.SetRow(TranscribeSettingsView, 0);
         Grid.SetRow(LogsView, 0);
         Grid.SetRow(SettingsGeneralView, 0);
+        Grid.SetRow(LlmsSettingsView, 0);
         Grid.SetRow(PreferencesSettingsView, 0);
         Grid.SetRow(McpSettingsView, 0);
         Grid.SetRow(VoiceSettingsView, 0);
@@ -390,6 +400,7 @@ public partial class MainWindow : Window
         ProfileView.Visibility = Visibility.Collapsed;
         TranscribeSettingsView.Visibility = Visibility.Collapsed;
         LogsView.Visibility = Visibility.Collapsed;
+        LlmsSettingsView.Visibility = Visibility.Collapsed;
         PreferencesSettingsView.Visibility = Visibility.Collapsed;
         McpSettingsView.Visibility = Visibility.Collapsed;
         VoiceSettingsView.Visibility = Visibility.Collapsed;

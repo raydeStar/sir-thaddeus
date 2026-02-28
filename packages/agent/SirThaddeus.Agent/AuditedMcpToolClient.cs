@@ -214,6 +214,21 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         return output;
     }
 
+    /// <summary>
+    /// Resets per-turn budget counters. Call this at the start of each
+    /// user message to prevent budget from carrying over between turns
+    /// when no segment ID is set.
+    /// </summary>
+    public void NotifyNewTurn()
+    {
+        lock (_budgetGate)
+        {
+            _activeTurnKey = $"turn:{Guid.NewGuid():N}";
+            _turnToolCalls = 0;
+            _turnWebCalls = 0;
+        }
+    }
+
     /// <inheritdoc />
     public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
     {
