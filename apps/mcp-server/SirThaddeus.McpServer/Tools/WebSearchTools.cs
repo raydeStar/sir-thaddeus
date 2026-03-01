@@ -538,7 +538,8 @@ public static class WebSearchTools
             evidence = result.Evidence.Select(e => new { e.Url, e.Domain, e.Title }).ToArray()
         };
 
-        Console.WriteLine($"[web_search][existence_gate] {JsonSerializer.Serialize(payload, JsonLogOptions)}");
+        // Suppressed: MCP stdio requires pure JSON-RPC. Logging text here corrupts the stream.
+        // It can be correctly audited if tracked by the orchestrator or an IMcpLogger implementation.
     }
 
     private static string FormatDoesNotExistResponse(string query, ExistenceGateResult gate)

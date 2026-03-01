@@ -35,9 +35,9 @@ public sealed record BudgetPolicy
     /// <summary>Default budget constants — matches current hardcoded values.</summary>
     public static class Defaults
     {
-        public const int MaxToolCalls = 15;
+        public const int MaxToolCalls = 20;
         public const int MaxLlmRoundTrips = 10;
-        public const int MaxToolCallsPerResponse = 5;
+        public const int MaxToolCallsPerResponse = 8;
         public const int MaxRepairs = 2;
     }
 
@@ -62,9 +62,9 @@ public sealed record BudgetPolicy
     /// </summary>
     public static readonly BudgetPolicy Research = new()
     {
-        MaxToolCalls = 20,
+        MaxToolCalls = 30,
         MaxLlmRoundTrips = 12,
-        MaxToolCallsPerResponse = 8,
+        MaxToolCallsPerResponse = 10,
         MaxRepairs = 3
     };
 }

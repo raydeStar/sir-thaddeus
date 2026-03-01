@@ -104,7 +104,7 @@ public sealed class RunContextTests
     public void RunContext_DefaultBudgets()
     {
         var ctx = RunContext.New();
-        Assert.Equal(15, ctx.MaxToolCalls);
+        Assert.Equal(20, ctx.MaxToolCalls);
         Assert.Equal(10, ctx.MaxLlmRoundTrips);
         Assert.Equal(2, ctx.MaxRepairs);
     }
@@ -210,6 +210,6 @@ public sealed class RunContextTests
         var s = ctx.ToString();
         Assert.Contains("test00000000", s);
         Assert.Contains("ChatOnly", s);
-        Assert.Contains("tools=0/15", s);
+        Assert.Contains("tools=0/20", s);
     }
 }

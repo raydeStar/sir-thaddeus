@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SirThaddeus.Agent.Policy;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Orchestration;
@@ -25,12 +26,13 @@ public sealed class PlanValidator : IPlanValidator
             return new ValidationResult(true);
         }
 
-        if (proposedCalls.Count > 5)
+        var maxToolCallsPerResponse = BudgetPolicy.Default.MaxToolCallsPerResponse;
+        if (proposedCalls.Count > maxToolCallsPerResponse)
         {
             return new ValidationResult(
                 false, 
                 "budget_exceeded", 
-                $"You requested {proposedCalls.Count} tool calls, but the maximum allowed in a single turn is 5. Please select the most important tools and try again.");
+                $"You requested {proposedCalls.Count} tool calls, but the maximum allowed in a single response is {maxToolCallsPerResponse}. Please select the most important tools and try again.");
         }
 
         foreach (var call in proposedCalls)

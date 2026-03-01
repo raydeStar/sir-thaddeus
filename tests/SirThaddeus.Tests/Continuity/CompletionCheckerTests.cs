@@ -457,4 +457,37 @@ public sealed class CompletionCheckerTests
         var report = _checker.Check(contract, results);
         Assert.True(report.IsComplete);
     }
+
+    [Fact]
+    public void IncompleteReport_ComputesConfidenceBelowOne()
+    {
+        var contract = new CompletionContract
+        {
+            Intent = "test",
+            Fields =
+            [
+                new FieldRequirement { FieldName = "name", Necessity = FieldNecessity.Required },
+                new FieldRequirement { FieldName = "address", Necessity = FieldNecessity.Required }
+            ]
+        };
+
+        var report = _checker.Check(contract, [Ok("places_lookup", """{"name":"Joe's"}""")]);
+
+        Assert.False(report.IsComplete);
+        Assert.True(report.Confidence >= 0.0 && report.Confidence < 1.0);
+        Assert.Equal("missing_required_fields", report.StopReason);
+    }
+
+    [Fact]
+    public void CompleteReport_HasFullConfidence()
+    {
+        var contract = CompletionContractRegistry.For(Intents.LookupNews);
+        var report = _checker.Check(
+            contract,
+            [Ok("web_search", """{"answer":"A","source_url":"https://example.com"}""")]);
+
+        Assert.True(report.IsComplete);
+        Assert.Equal(1.0, report.Confidence);
+        Assert.Equal("complete", report.StopReason);
+    }
 }
