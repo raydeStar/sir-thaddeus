@@ -40,4 +40,58 @@ public class ExistenceGateTests
         Assert.True(result.Score <= -30);
         Assert.NotEmpty(result.Evidence);
     }
+
+    [Fact]
+    public void ExistenceGate_FlagsDiscontinuedProductAsDoesNotExist()
+    {
+        var evidence = new List<SearchResult>
+        {
+            new()
+            {
+                Title = "Product X2 canceled before release",
+                Url = "https://example.com/news/product-x2-canceled",
+                Snippet = "The vendor confirmed Product X2 was canceled and never released.",
+                Source = "example.com"
+            },
+            new()
+            {
+                Title = "No official release page for Product X2",
+                Url = "https://docs.vendor.com/roadmap",
+                Snippet = "Product X2 was removed from the roadmap and no release was announced.",
+                Source = "docs.vendor.com"
+            }
+        };
+
+        var result = ExistenceGate.Evaluate("Is Product X2 available yet?", evidence);
+
+        Assert.Equal(ExistenceVerdict.DoesNotExist, result.Verdict);
+        Assert.True(result.Score <= -18);
+    }
+
+    [Fact]
+    public void ExistenceGate_FlagsConfirmedReleaseAsExists()
+    {
+        var evidence = new List<SearchResult>
+        {
+            new()
+            {
+                Title = "Vendor announces Product Z1 release",
+                Url = "https://vendor.com/product-z1",
+                Snippet = "Official product page confirms Product Z1 is available now.",
+                Source = "vendor.com"
+            },
+            new()
+            {
+                Title = "Product Z1 specifications",
+                Url = "https://docs.vendor.com/product-z1/specifications",
+                Snippet = "Documentation and release notes are published.",
+                Source = "docs.vendor.com"
+            }
+        };
+
+        var result = ExistenceGate.Evaluate("Does Product Z1 exist?", evidence);
+
+        Assert.Equal(ExistenceVerdict.Exists, result.Verdict);
+        Assert.True(result.Score >= 18);
+    }
 }

@@ -81,7 +81,7 @@ public sealed class DefaultRouter : IRouter
             return MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
-            return MakeRoute(Intents.LookupFact, confidence: 0.9, needsWeb: true, needsSearch: true);
+            return MakeRoute(Intents.LookupFact, confidence: 0.96, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower))
             return MakeRoute(Intents.GeneralTool, confidence: 0.96);
@@ -341,4 +341,3 @@ public sealed class DefaultRouter : IRouter
         return capabilities.ToList();
     }
 }
-

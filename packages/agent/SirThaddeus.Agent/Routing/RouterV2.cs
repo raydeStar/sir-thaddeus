@@ -67,7 +67,7 @@ public sealed class RouterV2 : IRouter
             return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
-            return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.90, needsWeb: true, needsSearch: true);
+            return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.96, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower))
             return DefaultRouter.MakeRoute(Intents.GeneralTool, confidence: 0.96);

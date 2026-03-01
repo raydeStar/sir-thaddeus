@@ -1,0 +1,37 @@
+id: web_stargate_universe_s3e1_nonexistent
+name: Web Search - Stargate Universe S3E1 Does Not Exist
+user_message: "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?"
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - does not exist
+    - season 3
+    - canceled
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1200
+min_score: 9.5
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+    - packages/web-search/SirThaddeus.WebSearch/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

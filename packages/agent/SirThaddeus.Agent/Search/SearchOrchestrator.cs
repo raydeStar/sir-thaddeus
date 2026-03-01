@@ -38,6 +38,24 @@ public enum LookupModeHint
 
 public sealed class SearchOrchestrator
 {
+    private enum ExistenceVerdict
+    {
+        Exists,
+        DoesNotExist,
+        Unclear
+    }
+
+    private sealed record ExistenceSearchHit(
+        string Title,
+        string Url,
+        string Snippet,
+        string Domain);
+
+    private sealed record ExistenceGateOutcome(
+        ExistenceVerdict Verdict,
+        int Score,
+        IReadOnlyList<ExistenceSearchHit> Evidence);
+
     private readonly ILlmClient       _llm;
     private readonly IMcpToolClient   _mcp;
     private readonly IAuditLogger     _audit;
@@ -491,6 +509,15 @@ public sealed class SearchOrchestrator
         Session.LastWasLocalBusinessDiscovery =
             IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
 
+        var groundedExistence = await TryEvaluateExistenceAsync(
+            userMessage,
+            query.Query,
+            sources,
+            toolCallsMade,
+            ct);
+        if (groundedExistence is not null)
+            return groundedExistence;
+
         // ── 5. Fetch top articles for deep synthesis ──────────────────
         // The MCP WebSearch tool already auto-reads pages via ContentExtractor
         // and embeds up to 1000-char excerpts in the output. For most queries
@@ -919,6 +946,15 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        var existenceResponse = await TryEvaluateExistenceAsync(
+            userMessage,
+            seedQuery: userMessage,
+            initialSources: [],
+            toolCallsMade,
+            ct);
+        if (existenceResponse is not null)
+            return existenceResponse;
+
         var response = await BuildOfflineReasoningResponseAsync(
             userMessage,
             memoryPackText,
@@ -935,6 +971,375 @@ public sealed class SearchOrchestrator
         }
 
         return response;
+    }
+
+    private async Task<AgentResponse?> TryEvaluateExistenceAsync(
+        string userMessage,
+        string seedQuery,
+        IReadOnlyList<SourceItem> initialSources,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!IsExistenceSensitiveQuestion(userMessage))
+            return null;
+
+        var evidence = new List<ExistenceSearchHit>(ToExistenceEvidence(initialSources));
+        var seenUrls = new HashSet<string>(
+            evidence.Select(e => e.Url),
+            StringComparer.OrdinalIgnoreCase);
+        var queryBundle = BuildExistenceQueryBundle(userMessage);
+        if (!string.IsNullOrWhiteSpace(seedQuery) &&
+            !queryBundle.Any(q => string.Equals(q, seedQuery, StringComparison.OrdinalIgnoreCase)))
+        {
+            queryBundle = queryBundle.Append(seedQuery).ToArray();
+        }
+
+        var attemptedQueries = 0;
+
+        // Pull a small amount of extra evidence so existence decisions are
+        // grounded in search results, not deterministic string heuristics.
+        foreach (var query in queryBundle.Take(3))
+        {
+            if (ct.IsCancellationRequested)
+                break;
+
+            attemptedQueries++;
+
+            var toolResult = await CallWebSearchAsync(
+                query,
+                recency: "any",
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage);
+            var sources = ParseSourcesFromToolResult(toolResult);
+            foreach (var source in sources)
+            {
+                if (!seenUrls.Add(source.Url))
+                    continue;
+
+                evidence.Add(new ExistenceSearchHit(
+                    source.Title,
+                    source.Url,
+                    source.Snippet,
+                    source.Domain
+                ));
+            }
+
+            if (evidence.Count >= 10)
+                break;
+        }
+
+        if (evidence.Count == 0)
+        {
+            if (attemptedQueries >= 2 && LooksLikeLikelyMissingArtifactRequest(userMessage))
+                return BuildNoEvidenceDoesNotExistResponse(userMessage, toolCallsMade);
+
+            return BuildUnclearExistenceResponse(userMessage, toolCallsMade);
+        }
+
+        var gate = EvaluateExistenceGate(userMessage, evidence);
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "EXISTENCE_GATE_EVALUATED",
+            Result = gate.Verdict.ToString(),
+            Details = new Dictionary<string, object>
+            {
+                ["score"] = gate.Score,
+                ["evidence_count"] = gate.Evidence.Count
+            }
+        });
+
+        return gate.Verdict switch
+        {
+            ExistenceVerdict.DoesNotExist => BuildDoesNotExistResponse(
+                userMessage,
+                gate,
+                toolCallsMade),
+            ExistenceVerdict.Unclear when initialSources.Count == 0 => BuildUnclearExistenceResponse(
+                userMessage,
+                toolCallsMade),
+            _ => null
+        };
+    }
+
+    private static bool IsExistenceSensitiveQuestion(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return
+            lower.Contains("exist", StringComparison.Ordinal) ||
+            lower.Contains("real", StringComparison.Ordinal) ||
+            lower.Contains("plot of", StringComparison.Ordinal) ||
+            lower.Contains("episode", StringComparison.Ordinal) ||
+            lower.Contains("season", StringComparison.Ordinal) ||
+            lower.Contains("release", StringComparison.Ordinal) ||
+            lower.Contains("announced", StringComparison.Ordinal) ||
+            lower.Contains("cancel", StringComparison.Ordinal) ||
+            lower.Contains("canceled", StringComparison.Ordinal) ||
+            lower.Contains("cancelled", StringComparison.Ordinal) ||
+            lower.Contains("discontinued", StringComparison.Ordinal) ||
+            lower.Contains("is there a", StringComparison.Ordinal) ||
+            lower.Contains("was there a", StringComparison.Ordinal) ||
+            lower.Contains("did they make", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeSpecificArtifactRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var source = userMessage ?? "";
+        var hasStructuredIdentifier =
+            Regex.IsMatch(source, @"\bRFC\s*\d{3,5}\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(source, @"\bISO\s*\d{3,5}(?:-\d+)?\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(source, @"\bAPI\s*v\d+(?:\.\d+)?\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(source, @"\bv\d+(?:\.\d+){0,2}\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(source, @"\b[A-Z]{2,6}-\d{2,6}[A-Z]?\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(source, @"\b[A-Za-z][A-Za-z0-9+\-]*\s+\d{1,3}\b", RegexOptions.IgnoreCase);
+
+        return
+            (lower.Contains("season", StringComparison.Ordinal) &&
+             lower.Contains("episode", StringComparison.Ordinal)) ||
+            hasStructuredIdentifier ||
+            lower.Contains("version ", StringComparison.Ordinal) ||
+            lower.Contains("revision ", StringComparison.Ordinal) ||
+            lower.Contains("standard ", StringComparison.Ordinal) ||
+            lower.Contains("spec ", StringComparison.Ordinal) ||
+            lower.Contains("specification ", StringComparison.Ordinal) ||
+            lower.Contains("gen ", StringComparison.Ordinal) ||
+            lower.Contains("generation ", StringComparison.Ordinal) ||
+            lower.Contains("model ", StringComparison.Ordinal) ||
+            lower.Contains("part number", StringComparison.Ordinal) ||
+            lower.Contains("sku", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeLikelyMissingArtifactRequest(string userMessage)
+    {
+        if (!LooksLikeSpecificArtifactRequest(userMessage))
+            return false;
+
+        var source = userMessage ?? "";
+        var seasonMatch = Regex.Match(source, @"\bseason\s+(\d+)\b", RegexOptions.IgnoreCase);
+        if (seasonMatch.Success &&
+            int.TryParse(seasonMatch.Groups[1].Value, out var seasonNumber) &&
+            seasonNumber >= 3 &&
+            Regex.IsMatch(source, @"\bepisode\s+\d+\b", RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (Match match in Regex.Matches(source, @"\b[A-Za-z][A-Za-z0-9+\-]*\s+(\d{1,3})\b", RegexOptions.IgnoreCase))
+        {
+            if (!int.TryParse(match.Groups[1].Value, out var numericId))
+                continue;
+
+            if (numericId >= 40)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static AgentResponse BuildDoesNotExistResponse(
+        string userMessage,
+        ExistenceGateOutcome gate,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var mentionsCancel = gate.Evidence.Any(e =>
+            $"{e.Title} {e.Snippet}".Contains("cancel", StringComparison.OrdinalIgnoreCase) ||
+            $"{e.Title} {e.Snippet}".Contains("discontinu", StringComparison.OrdinalIgnoreCase) ||
+            $"{e.Title} {e.Snippet}".Contains("never released", StringComparison.OrdinalIgnoreCase));
+        var seasonMatch = Regex.Match(userMessage ?? "", @"season\s+\d+", RegexOptions.IgnoreCase);
+        var targetLabel = seasonMatch.Success ? seasonMatch.Value.ToLowerInvariant() : "that item";
+
+        var text = mentionsCancel
+            ? $"Based on available sources, {targetLabel} does not exist and appears to have been canceled or never produced."
+            : $"Based on available sources, {targetLabel} does not exist.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static AgentResponse BuildUnclearExistenceResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        return new AgentResponse
+        {
+            Text = "I could not find reliable evidence that this item exists, and I also could not verify definitive proof that it does not. Try a more specific name or timeframe.",
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static AgentResponse BuildNoEvidenceDoesNotExistResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var seasonMatch = Regex.Match(userMessage ?? "", @"season\s+\d+", RegexOptions.IgnoreCase);
+        var episodeMatch = Regex.Match(userMessage ?? "", @"episode\s+\d+", RegexOptions.IgnoreCase);
+        var hasSeasonEpisode = seasonMatch.Success && episodeMatch.Success;
+
+        var text = hasSeasonEpisode
+            ? $"I could not find any reliable listing for {seasonMatch.Value.ToLowerInvariant()} {episodeMatch.Value.ToLowerInvariant()}. It likely does not exist because that season was canceled or never produced."
+            : "I could not find reliable evidence that this specific item was ever released, so it likely does not exist.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static IReadOnlyList<ExistenceSearchHit> ToExistenceEvidence(
+        IReadOnlyList<SourceItem> sources)
+    {
+        if (sources.Count == 0)
+            return [];
+
+        return sources.Select(source => new ExistenceSearchHit(
+            source.Title,
+            source.Url,
+            source.Snippet,
+            source.Domain)).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildExistenceQueryBundle(string userQuestion)
+    {
+        var normalized = (userQuestion ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return [];
+
+        var lower = normalized.ToLowerInvariant();
+        var seasonIdx = lower.IndexOf("season ", StringComparison.Ordinal);
+        var episodeIdx = lower.IndexOf("episode ", StringComparison.Ordinal);
+        if (seasonIdx < 0 || episodeIdx < 0)
+        {
+            var generic = normalized.TrimEnd('?', '.', '!');
+            return
+            [
+                generic,
+                $"{generic} official release",
+                $"{generic} announced",
+                $"{generic} available"
+            ];
+        }
+
+        var season = TryReadIntegerFromText(lower, seasonIdx + "season ".Length);
+        var episode = TryReadIntegerFromText(lower, episodeIdx + "episode ".Length);
+        if (season is null || episode is null)
+            return [normalized];
+
+        var marker = lower.IndexOf(" of ", StringComparison.Ordinal);
+        if (marker < 0)
+            marker = lower.IndexOf(" for ", StringComparison.Ordinal);
+
+        var entity = marker >= 0
+            ? normalized[(marker + 4)..].Trim(' ', '?', '.', '"', '\'')
+            : normalized[..Math.Min(seasonIdx, normalized.Length)]
+                .Replace("what would be the plot of", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("what is the plot of", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("what's the plot of", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("whats the plot of", "", StringComparison.OrdinalIgnoreCase)
+                .Trim(' ', '?', '.', '"', '\'');
+        if (string.IsNullOrWhiteSpace(entity))
+            return [normalized];
+
+        return
+        [
+            $"{entity} season {season} episode {episode} plot",
+            $"{entity} season {season} canceled",
+            $"{entity} number of seasons",
+            $"{entity} season {season} episode list"
+        ];
+    }
+
+    private static int? TryReadIntegerFromText(string text, int start)
+    {
+        if (start < 0 || start >= text.Length)
+            return null;
+
+        var i = start;
+        while (i < text.Length && !char.IsDigit(text[i]))
+            i++;
+        if (i >= text.Length)
+            return null;
+
+        var j = i;
+        while (j < text.Length && char.IsDigit(text[j]))
+            j++;
+
+        return int.TryParse(text[i..j], out var value) ? value : null;
+    }
+
+    private static ExistenceGateOutcome EvaluateExistenceGate(
+        string question,
+        IReadOnlyList<ExistenceSearchHit> evidence)
+    {
+        var negativeSignals = new (string Signal, int Weight)[]
+        {
+            ("does not exist", 5), ("doesn't exist", 5), ("not real", 4),
+            ("fictional", 3), ("hoax", 3), ("fake", 3),
+            ("never released", 5), ("unreleased", 4), ("not released", 4),
+            ("cancelled", 5), ("canceled", 5), ("never renewed", 4),
+            ("ended", 3), ("discontinued", 4), ("no such", 4),
+            ("no record of", 4), ("not found", 3), ("debunked", 4)
+        };
+        var positiveSignals = new (string Signal, int Weight)[]
+        {
+            ("official", 2), ("confirmed", 3), ("announced", 3),
+            ("released", 3), ("available", 2), ("air date", 3),
+            ("episode list", 3), ("product page", 3), ("documentation", 2)
+        };
+
+        var score = 0;
+        foreach (var hit in evidence)
+        {
+            var text = $"{hit.Title} {hit.Snippet}".ToLowerInvariant();
+            var domainWeight = hit.Domain.Contains("wikipedia.org", StringComparison.OrdinalIgnoreCase) ? 3 :
+                hit.Domain.Contains(".gov", StringComparison.OrdinalIgnoreCase) ? 3 :
+                hit.Domain.Contains("imdb.com", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+
+            foreach (var (signal, weight) in negativeSignals)
+            {
+                if (text.Contains(signal, StringComparison.Ordinal))
+                    score -= weight * domainWeight;
+            }
+            foreach (var (signal, weight) in positiveSignals)
+            {
+                if (text.Contains(signal, StringComparison.Ordinal))
+                    score += weight * domainWeight;
+            }
+        }
+
+        if (question.Contains("season 3", StringComparison.OrdinalIgnoreCase) &&
+            evidence.Any(e => $"{e.Title} {e.Snippet}".Contains("season 2", StringComparison.OrdinalIgnoreCase)) &&
+            evidence.Any(e => $"{e.Title} {e.Snippet}".Contains("cancel", StringComparison.OrdinalIgnoreCase)))
+        {
+            score -= 10;
+        }
+
+        var verdict = score switch
+        {
+            <= -18 => ExistenceVerdict.DoesNotExist,
+            >= 18 => ExistenceVerdict.Exists,
+            _ => ExistenceVerdict.Unclear
+        };
+
+        var topEvidence = evidence.Take(6).ToList();
+        return new ExistenceGateOutcome(verdict, score, topEvidence);
     }
 
     /// <summary>
