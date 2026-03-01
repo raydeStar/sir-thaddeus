@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using SirThaddeus.WebSearch;
 
@@ -40,6 +41,10 @@ public static class WebSearchTools
     private const int MinUsefulNonArticleWords = 120;
     private const int RelevanceExtractionChars = 800;
     internal const string SourcesDelimiter = "<!-- SOURCES_JSON -->";
+    private static readonly JsonSerializerOptions JsonLogOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     private static readonly HashSet<string> StopTokens =
     [
@@ -106,15 +111,40 @@ public static class WebSearchTools
         var fetchCount = Math.Min(maxResults * 3, 15);
 
         // ── Phase 1: Search ──────────────────────────────────────────
-        var searchResult = await Router.Value.SearchAsync(
-            query,
-            new WebSearchOptions
+        var queryBundle = QueryBundleBuilder.Build(query);
+        var aggregatedResults = new List<SearchResult>();
+        var providerLog = new List<object>();
+        var providersUsed = new List<string>();
+
+        foreach (var bundledQuery in queryBundle)
+        {
+            var bundleResult = await Router.Value.SearchAsync(
+                bundledQuery,
+                new WebSearchOptions
+                {
+                    MaxResults = fetchCount,
+                    TimeoutMs = searchTimeoutMs,
+                    Recency = recency
+                },
+                cancellationToken);
+
+            aggregatedResults.AddRange(bundleResult.Results);
+            providerLog.Add(new
             {
-                MaxResults = fetchCount,
-                TimeoutMs = searchTimeoutMs,
-                Recency = recency
-            },
-            cancellationToken);
+                query = bundledQuery,
+                provider = bundleResult.Provider,
+                resultCount = bundleResult.Results.Count,
+                errors = bundleResult.Errors
+            });
+            providersUsed.Add(bundleResult.Provider);
+        }
+
+        var searchResult = new SearchResults
+        {
+            Provider = string.Join(", ", providersUsed.Distinct(StringComparer.OrdinalIgnoreCase)),
+            Results = aggregatedResults,
+            Errors = []
+        };
 
         if (searchResult.Results.Count == 0)
         {
@@ -133,6 +163,11 @@ public static class WebSearchTools
         var dedupedResults = DeduplicateByDomain(searchResult.Results)
             .Take(maxResults)
             .ToList();
+
+        var existenceGate = ExistenceGate.Evaluate(query, dedupedResults);
+        LogExistenceDecision(query, queryBundle, providerLog, existenceGate);
+        if (existenceGate.Verdict == ExistenceVerdict.DoesNotExist)
+            return FormatDoesNotExistResponse(query, existenceGate);
 
         // ── Phase 2: Auto-read top results ───────────────────────────
         var urlsToRead = dedupedResults
@@ -483,6 +518,57 @@ public static class WebSearchTools
             WriteIndented = false
         }));
 
+        return sb.ToString();
+    }
+
+    private static void LogExistenceDecision(
+        string query,
+        IReadOnlyList<string> queryBundle,
+        IReadOnlyList<object> providerLog,
+        ExistenceGateResult result)
+    {
+        var payload = new
+        {
+            intent = "existence_check",
+            question = query,
+            queryBundle,
+            providers = providerLog,
+            existenceScore = result.Score,
+            verdict = result.Verdict.ToString(),
+            evidence = result.Evidence.Select(e => new { e.Url, e.Domain, e.Title }).ToArray()
+        };
+
+        Console.WriteLine($"[web_search][existence_gate] {JsonSerializer.Serialize(payload, JsonLogOptions)}");
+    }
+
+    private static string FormatDoesNotExistResponse(string query, ExistenceGateResult gate)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("The requested entity does not appear to exist based on current evidence.");
+        sb.AppendLine();
+        sb.AppendLine("Evidence:");
+        foreach (var evidence in gate.Evidence.Take(3))
+            sb.AppendLine($"- {evidence.Title} ({evidence.Domain}): {evidence.Snippet}");
+
+        sb.AppendLine();
+        sb.AppendLine("Helpful alternatives: ask for available seasons/episodes, finale summary, or official cancellation notes.");
+        sb.AppendLine();
+        sb.AppendLine(SourcesDelimiter);
+
+        var sources = gate.Evidence
+            .Select(e => new
+            {
+                title = e.Title,
+                url = e.Url,
+                domain = e.Domain,
+                excerpt = e.Snippet,
+                favicon = "",
+                thumbnail = "",
+                publishedAt = (string?)null
+            })
+            .ToArray();
+
+        sb.AppendLine(JsonSerializer.Serialize(sources));
         return sb.ToString();
     }
 
