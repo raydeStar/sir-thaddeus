@@ -12,15 +12,15 @@
 
 ## A Local‑First AI Copilot
 
-Most AI assistants live in the cloud.
+Sir Thaddeus is a local-first AI runtime for Windows.
+It connects to your own models, executes actions only with approval, and never operates in the background without consent.
 
 Sir Thaddeus runs on your machine.
 
 A local‑first, permissioned AI runtime for Windows. Connects to your local models (such as LM Studio) and executes actions only with explicit approval.
 
 No telemetry by default. No background activity without consent. No hidden autonomy.
-
-If he acts, you see it. If you press STOP, everything stops.
+Every action is visible. Press STOP — and it stops.
 
 ---
 
