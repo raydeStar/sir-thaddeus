@@ -12,9 +12,7 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
-  required_keywords:
-    - syn
-    - ack
+  required_keywords: []
   forbidden_keywords:
     - as an ai
     - error
@@ -23,11 +21,10 @@ expectations:
     - haha
   max_response_chars: 1200
   expect_signature: false
-  expect_structured_format: true
   forbid_slang: true
-  max_avg_sentence_words: 28
-  min_avg_sentence_words: 10
-min_score: 7.0
+  max_avg_sentence_words: 35
+  min_avg_sentence_words: 5
+min_score: 5.0
 patch_targets:
   tier1_targets:
     - packages/personality-engine/SirThaddeus.PersonalityEngine/

@@ -77,10 +77,10 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private Services.AttachedDocumentContext? _attachedDocument;
     private string _attachedFileName = "";
     private bool _hasAttachedFile;
-    
+
     private readonly System.Windows.Threading.DispatcherTimer _auditTimer;
     private DateTimeOffset _lastAuditSync = DateTimeOffset.MinValue;
-    
+
     public bool Use24HourTime { get; set; }
     // Old voice test fields removed — replaced by VoiceStatusText / VoiceTranscriptText / IsVoiceActive.
 
@@ -111,16 +111,16 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         SirThaddeus.DesktopRuntime.Services.VoiceHostProcessManager? voiceManager = null)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _llmClient    = llmClient    ?? throw new ArgumentNullException(nameof(llmClient));
-        _host         = host         ?? throw new ArgumentNullException(nameof(host));
-        _audit        = audit        ?? throw new ArgumentNullException(nameof(audit));
-        _closeWindow  = closeWindow  ?? throw new ArgumentNullException(nameof(closeWindow));
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _closeWindow = closeWindow ?? throw new ArgumentNullException(nameof(closeWindow));
         _dialogueStatePersistence = dialogueStatePersistence;
         _chatHistoryPersistence = chatHistoryPersistence;
         _voiceManager = voiceManager;
 
-        SendCommand   = new AsyncRelayCommand(SendAsync, CanSend);
-        ClearCommand  = new RelayCommand(ClearConversation);
+        SendCommand = new AsyncRelayCommand(SendAsync, CanSend);
+        ClearCommand = new RelayCommand(ClearConversation);
         CancelCommand = new RelayCommand(CancelProcessing, () => _isProcessing);
         RemoveAttachedFileCommand = new RelayCommand(_ => ClearAttachedFile());
         ToggleContextLockCommand = new RelayCommand(_ => ContextLocked = !ContextLocked);
@@ -143,7 +143,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             Interval = TimeSpan.FromSeconds(2)
         };
-        _auditTimer.Tick += (s, e) => 
+        _auditTimer.Tick += (s, e) =>
         {
             SyncAuditLogs();
             _ = CheckVoiceHealthAsync();
@@ -366,7 +366,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// The ViewModel doesn't own the voice orchestrator directly.
     /// </summary>
     public Action? VoiceMicDown { get; set; }
-    public Action? VoiceMicUp  { get; set; }
+    public Action? VoiceMicUp { get; set; }
     public Action? VoiceShutup { get; set; }
 
     /// <summary>
@@ -378,8 +378,8 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     // Commands
     // ─────────────────────────────────────────────────────────────────
 
-    public ICommand SendCommand   { get; }
-    public ICommand ClearCommand  { get; }
+    public ICommand SendCommand { get; }
+    public ICommand ClearCommand { get; }
     public ICommand CancelCommand { get; }
     public ICommand RemoveAttachedFileCommand { get; }
     public ICommand ToggleContextLockCommand { get; }
@@ -584,13 +584,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private async Task CheckVoiceHealthAsync()
     {
         if (_voiceManager == null) return;
-        
+
         try
         {
             var health = await _voiceManager.CheckHealthAsync(default);
             var wasReady = IsVoiceReady;
             IsVoiceReady = health.Ready;
-            
+
             if (IsVoiceReady)
             {
                 VoiceWarmupStatus = "";
@@ -656,7 +656,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "CHAT_MESSAGE_SENT",
             Result = "ok",
             Details = new Dictionary<string, object>
@@ -671,7 +671,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         var thinkingMsg = new ChatMessageViewModel
         {
             Use24HourTime = Use24HourTime,
-            Role    = ChatMessageRole.Status,
+            Role = ChatMessageRole.Status,
             Content = "Thinking\u2026",
             AuthorLabel = "System"
         };
@@ -706,7 +706,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 var assistantMsg = new ChatMessageViewModel
                 {
                     Use24HourTime = Use24HourTime,
-                    Role    = ChatMessageRole.Assistant,
+                    Role = ChatMessageRole.Assistant,
                     Content = displayParts.DisplayText,
                     ThoughtContent = displayParts.ThinkingText,
                     RetryPrompt = userText,
@@ -815,7 +815,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             if (_expectingBriefingPayload)
                 BriefingPanel.SetFailure("Could not complete deep-dive request because the LLM was unreachable.");
 
-            IsLlmConnected  = false;
+            IsLlmConnected = false;
             ConnectionStatus = "Disconnected";
         }
         catch (Exception ex)
@@ -861,7 +861,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         _audit.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "CHAT_CLEARED",
             Result = "ok"
         });
@@ -895,12 +895,12 @@ public sealed class CommandPaletteViewModel : ViewModelBase
 
         var snapshot = new ChatSessionSnapshot
         {
-            Id        = _currentSessionId.Value,
-            Title     = title,
+            Id = _currentSessionId.Value,
+            Title = title,
             Timestamp = DateTime.Now,
-            Messages  = Messages.Select(m => new ChatSessionMessage
+            Messages = Messages.Select(m => new ChatSessionMessage
             {
-                Role    = m.Role.ToString(),
+                Role = m.Role.ToString(),
                 Content = m.Content
             }).ToList()
         };
@@ -929,7 +929,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     public void SaveAllHistory()
     {
         SnapshotCurrentSession();
-        
+
         // Ensure we always save even if empty to clear deleted entries,
         // unless we failed to load earlier and are preventing corruption.
         _chatHistoryPersistence?.SaveChatHistory(ChatHistory);
@@ -965,11 +965,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 if (dto.Briefing is null) continue;
                 BriefingPanel.History.Add(new BriefingHistoryEntry
                 {
-                    Title      = dto.Title,
+                    Title = dto.Title,
                     Confidence = dto.Confidence,
                     StatusLine = dto.StatusLine,
-                    Timestamp  = dto.Timestamp,
-                    Briefing   = dto.Briefing
+                    Timestamp = dto.Timestamp,
+                    Briefing = dto.Briefing
                 });
             }
         }
@@ -996,7 +996,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                 Messages.Add(new ChatMessageViewModel
                 {
                     Use24HourTime = Use24HourTime,
-                    Role    = role,
+                    Role = role,
                     Content = msg.Content,
                     AuthorLabel = role == ChatMessageRole.User ? UserDisplayName : role == ChatMessageRole.Assistant ? "Sir Thaddeus" : "System"
                 });
@@ -1010,7 +1010,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     private void DeleteChatSession(object? parameter)
     {
         if (parameter is not ChatSessionSnapshot session) return;
-        
+
         if (_currentSessionId == session.Id)
             _currentSessionId = null;
 
@@ -1094,13 +1094,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     {
         Messages.Add(new ChatMessageViewModel
         {
-            Role    = role,
+            Role = role,
             Content = content,
             AuthorLabel = role switch
             {
-                ChatMessageRole.User         => UserDisplayName,
-                ChatMessageRole.Assistant    => "Sir Thaddeus",
-                _                            => "System"
+                ChatMessageRole.User => UserDisplayName,
+                ChatMessageRole.Assistant => "Sir Thaddeus",
+                _ => "System"
             }
         });
         OnPropertyChanged(nameof(HasActiveSession));
@@ -1147,7 +1147,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             RetryPrompt = ResolveMostRecentUserPrompt(),
             AuthorLabel = "Sir Thaddeus"
         });
-        
+
         SnapshotCurrentSession();
         MessageAdded?.Invoke();
     }
@@ -1237,7 +1237,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             if (newEvents.Count == 0) return;
 
             _lastAuditSync = System.Linq.Enumerable.Max(newEvents, e => e.Timestamp);
-            
+
             App.Current.Dispatcher.Invoke(() =>
             {
                 foreach (var ev in newEvents)
@@ -1264,7 +1264,7 @@ public sealed class CommandPaletteViewModel : ViewModelBase
                             DrawerLog.RemoveAt(DrawerLog.Count - 1);
                     }
                 }
-                
+
                 while (ActivityLog.Count > 200)
                 {
                     ActivityLog.RemoveAt(ActivityLog.Count - 1);
@@ -1302,23 +1302,23 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         {
             // ── MCP Tool Calls ─────────────────────────────────────────
             case "MCP_TOOL_CALL_END":
-            {
-                var tool = ev.Target ?? "unknown";
-                var ms = DetailStr("duration_ms");
-                var perm = DetailStr("permission");
-                var timing = ms is not null ? $" ({ms}ms)" : "";
-
-                if (ev.Result == "ok")
-                    return ($"Tool: {tool}{timing}", LogEntryKind.ToolOutput);
-                if (ev.Result == "blocked")
                 {
-                    var reason = DetailStr("error_message") ?? perm ?? "denied";
-                    return ($"Tool blocked: {tool} — {reason}", LogEntryKind.Error);
+                    var tool = ev.Target ?? "unknown";
+                    var ms = DetailStr("duration_ms");
+                    var perm = DetailStr("permission");
+                    var timing = ms is not null ? $" ({ms}ms)" : "";
+
+                    if (ev.Result == "ok")
+                        return ($"Tool: {tool}{timing}", LogEntryKind.ToolOutput);
+                    if (ev.Result == "blocked")
+                    {
+                        var reason = DetailStr("error_message") ?? perm ?? "denied";
+                        return ($"Tool blocked: {tool} — {reason}", LogEntryKind.Error);
+                    }
+                    if (ev.Result == "error")
+                        return ($"Tool error: {tool} — {DetailStr("error_message") ?? "failed"}{timing}", LogEntryKind.Error);
+                    return ($"Tool: {tool} — {ev.Result}{timing}", LogEntryKind.ToolOutput);
                 }
-                if (ev.Result == "error")
-                    return ($"Tool error: {tool} — {DetailStr("error_message") ?? "failed"}{timing}", LogEntryKind.Error);
-                return ($"Tool: {tool} — {ev.Result}{timing}", LogEntryKind.ToolOutput);
-            }
 
             case "MCP_TOOL_BUDGET_EXCEEDED":
                 return ($"Budget exceeded: {ev.Target ?? "tool"}", LogEntryKind.Error);
@@ -1347,10 +1347,10 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             case "SETTINGS_SAVED":
                 return ("Settings saved", LogEntryKind.Info);
             case "PERSONALITY_SELECTED":
-            {
-                var name = DetailStr("name") ?? DetailStr("personality_id") ?? "unknown";
-                return ($"Personality switched: {name}", LogEntryKind.Info);
-            }
+                {
+                    var name = DetailStr("name") ?? DetailStr("personality_id") ?? "unknown";
+                    return ($"Personality switched: {name}", LogEntryKind.Info);
+                }
 
             // ── Profiles ───────────────────────────────────────────────
             case "PROFILE_CREATED":
@@ -1866,13 +1866,13 @@ public sealed class CommandPaletteViewModel : ViewModelBase
             {
                 var s = sources[i];
                 message.SourceCards.Add(SourceCardViewModel.Create(
-                    title:     s.Title ?? "(untitled)",
-                    url:       s.Url ?? "",
-                    domain:    s.Domain ?? "",
-                    excerpt:   s.Excerpt ?? "",
-                    favicon:   string.IsNullOrWhiteSpace(s.Favicon) ? null : s.Favicon,
+                    title: s.Title ?? "(untitled)",
+                    url: s.Url ?? "",
+                    domain: s.Domain ?? "",
+                    excerpt: s.Excerpt ?? "",
+                    favicon: string.IsNullOrWhiteSpace(s.Favicon) ? null : s.Favicon,
                     thumbnail: string.IsNullOrWhiteSpace(s.Thumbnail) ? null : s.Thumbnail,
-                    index:     i));
+                    index: i));
             }
         }
         catch
@@ -1895,11 +1895,11 @@ public sealed class CommandPaletteViewModel : ViewModelBase
     /// </summary>
     private sealed record SourceEntry
     {
-        public string? Title     { get; init; }
-        public string? Url       { get; init; }
-        public string? Domain    { get; init; }
-        public string? Excerpt   { get; init; }
-        public string? Favicon   { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
+        public string? Domain { get; init; }
+        public string? Excerpt { get; init; }
+        public string? Favicon { get; init; }
         public string? Thumbnail { get; init; }
     }
 }

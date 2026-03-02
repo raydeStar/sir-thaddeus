@@ -274,6 +274,9 @@ public sealed partial class QueryBuilder
         if (query.Length > 120)
             return false;
 
+        if (LooksLikePlaceholderQuery(query))
+            return false;
+
         // Build the allowed token pool
         var allowed = new HashSet<string>(AllowedGlueWords, StringComparer.OrdinalIgnoreCase);
 
@@ -303,6 +306,27 @@ public sealed partial class QueryBuilder
         // Allow up to 1 unknown token (some flexibility for the LLM to
         // add useful context). Reject if more than 1 are foreign.
         return unknownCount <= 1;
+    }
+
+    private static bool LooksLikePlaceholderQuery(string query)
+    {
+        var lower = query.Trim().ToLowerInvariant();
+
+        // Common low-signal placeholders emitted by weak entity extraction.
+        if (lower == "unknown" || lower == "\"unknown\"")
+            return true;
+
+        if (lower.StartsWith("\"unknown\"", StringComparison.Ordinal))
+            return true;
+
+        if (lower.Contains("plot summary not available", StringComparison.Ordinal) ||
+            lower.Contains("summary not available", StringComparison.Ordinal) ||
+            lower.Contains("details not available", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────

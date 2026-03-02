@@ -110,7 +110,7 @@ public class PermissionBrokerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var grantEvent = events.FirstOrDefault(e => e.Action == "PERMISSION_GRANTED");
-        
+
         Assert.NotNull(grantEvent);
         Assert.Equal(token.Id, grantEvent.PermissionTokenId);
         Assert.Equal("FileAccess", grantEvent.Details?["capability"]?.ToString());
@@ -273,7 +273,7 @@ public class PermissionBrokerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var revokeEvent = events.FirstOrDefault(e => e.Action == "PERMISSION_REVOKED");
-        
+
         Assert.NotNull(revokeEvent);
         Assert.Equal(token.Id, revokeEvent.PermissionTokenId);
         Assert.Equal("User canceled", revokeEvent.Details?["reason"]?.ToString());
@@ -323,7 +323,7 @@ public class PermissionBrokerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var revokeAllEvent = events.FirstOrDefault(e => e.Action == "PERMISSION_REVOKE_ALL");
-        
+
         Assert.NotNull(revokeAllEvent);
         Assert.Equal("Emergency stop", revokeAllEvent.Details?["reason"]?.ToString());
         Assert.Equal("2", revokeAllEvent.Details?["tokensRevoked"]?.ToString());
@@ -413,7 +413,7 @@ public class PermissionBrokerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var denialEvent = events.FirstOrDefault(e => e.Action == "PERMISSION_DENIED");
-        
+
         Assert.NotNull(denialEvent);
         Assert.Equal("denied", denialEvent.Result);
         Assert.Equal("SystemExecute", denialEvent.Details?["capability"]?.ToString());

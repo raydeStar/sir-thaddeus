@@ -179,7 +179,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
 
                     var chunkText = textChunks[i];
                     var currentAudioTask = nextAudioTask ?? _localTtsClient.SynthesizeAsync(chunkText, sessionId, cancellationToken);
-                    
+
                     if (i + 1 < textChunks.Count)
                     {
                         nextAudioTask = _localTtsClient.SynthesizeAsync(textChunks[i + 1], sessionId, cancellationToken);
@@ -479,7 +479,7 @@ public sealed class AudioPlaybackService : IAudioPlaybackService, IDisposable
             // Split line into phrases for finer chunking.
             // Match major punctuation (., !, ?) or minor pauses (, ; : - —) followed by space, or end of line.
             var sentenceMatches = Regex.Matches(line, @"(.+?(?:[\.\!\?\,\;\:\—]+(?=\s+)|$)|\n)");
-            
+
             foreach (Match match in sentenceMatches)
             {
                 var sentence = match.Value.Trim();

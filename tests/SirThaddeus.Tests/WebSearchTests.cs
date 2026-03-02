@@ -24,7 +24,7 @@ public class DuckDuckGoParserTests
     {
         // Arrange: mock HTTP handler returns sample DDG HTML
         var handler = new FakeHttpHandler(SampleDdgHtml);
-        var http    = new HttpClient(handler);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var options = new WebSearchOptions { MaxResults = 3, TimeoutMs = 5_000 };
@@ -58,7 +58,7 @@ public class DuckDuckGoParserTests
     {
         // HTML with no result divs
         var handler = new FakeHttpHandler("<html><body><h1>No results</h1></body></html>");
-        var http    = new HttpClient(handler);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var result = await provider.SearchAsync("xyznonexistent123", new WebSearchOptions());
@@ -71,7 +71,7 @@ public class DuckDuckGoParserTests
     public async Task MaxResults_IsRespected()
     {
         var handler = new FakeHttpHandler(SampleDdgHtml);
-        var http    = new HttpClient(handler);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var result = await provider.SearchAsync("test", new WebSearchOptions { MaxResults = 1 });
@@ -151,8 +151,8 @@ public class SearxngProviderTests
             }
             """;
 
-        var handler  = new FakeHttpHandler(json);
-        var http     = new HttpClient(handler);
+        var handler = new FakeHttpHandler(json);
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var result = await provider.SearchAsync("test", new WebSearchOptions { MaxResults = 5 });
@@ -179,8 +179,8 @@ public class SearxngProviderTests
     [Fact]
     public async Task MalformedJson_ReturnsError()
     {
-        var handler  = new FakeHttpHandler("not json at all");
-        var http     = new HttpClient(handler);
+        var handler = new FakeHttpHandler("not json at all");
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var result = await provider.SearchAsync("test", new WebSearchOptions());
@@ -202,8 +202,8 @@ public class SearxngProviderTests
             }
             """;
 
-        var handler  = new FakeHttpHandler(json);
-        var http     = new HttpClient(handler);
+        var handler = new FakeHttpHandler(json);
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var result = await provider.SearchAsync("test", new WebSearchOptions { MaxResults = 2 });
@@ -357,7 +357,7 @@ public class WebSearchModelTests
         var result = new SearchResult
         {
             Title = "Test Title",
-            Url   = "https://example.com"
+            Url = "https://example.com"
         };
 
         Assert.Equal("Test Title", result.Title);
@@ -405,13 +405,13 @@ public class WebSearchModelTests
 public class DuckDuckGoRecencyTests
 {
     [Theory]
-    [InlineData("day",   "df=d")]
-    [InlineData("week",  "df=w")]
+    [InlineData("day", "df=d")]
+    [InlineData("week", "df=w")]
     [InlineData("month", "df=m")]
     public async Task Recency_IncludesDfParameter(string recency, string expectedParam)
     {
         var handler = new CapturingHttpHandler(SampleDdgHtml);
-        var http     = new HttpClient(handler);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var options = new WebSearchOptions { MaxResults = 1, Recency = recency };
@@ -426,7 +426,7 @@ public class DuckDuckGoRecencyTests
     public async Task Recency_Any_OmitsDfParameter()
     {
         var handler = new CapturingHttpHandler(SampleDdgHtml);
-        var http     = new HttpClient(handler);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var options = new WebSearchOptions { MaxResults = 1, Recency = "any" };
@@ -454,13 +454,13 @@ public class DuckDuckGoRecencyTests
 public class SearxngRecencyTests
 {
     [Theory]
-    [InlineData("day",   "time_range=day")]
-    [InlineData("week",  "time_range=week")]
+    [InlineData("day", "time_range=day")]
+    [InlineData("week", "time_range=week")]
     [InlineData("month", "time_range=month")]
     public async Task Recency_IncludesTimeRangeParameter(string recency, string expectedParam)
     {
-        var handler  = new CapturingHttpHandler(SampleSearxngJson);
-        var http     = new HttpClient(handler);
+        var handler = new CapturingHttpHandler(SampleSearxngJson);
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var options = new WebSearchOptions { MaxResults = 1, Recency = recency };
@@ -474,8 +474,8 @@ public class SearxngRecencyTests
     [Fact]
     public async Task Recency_Any_OmitsTimeRangeParameter()
     {
-        var handler  = new CapturingHttpHandler(SampleSearxngJson);
-        var http     = new HttpClient(handler);
+        var handler = new CapturingHttpHandler(SampleSearxngJson);
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var options = new WebSearchOptions { MaxResults = 1, Recency = "any" };
@@ -539,7 +539,7 @@ public class RetryHelperTests
     [Fact]
     public async Task Does_Not_Retry_When_Caller_Cancels()
     {
-        var cts     = new CancellationTokenSource();
+        var cts = new CancellationTokenSource();
         var attempt = 0;
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
@@ -610,8 +610,8 @@ public class ProviderRetryTests
     [Fact]
     public async Task DuckDuckGo_Retries_On_503_And_Succeeds()
     {
-        var handler  = new FailThenSucceedHandler(SampleDdgHtml);
-        var http     = new HttpClient(handler);
+        var handler = new FailThenSucceedHandler(SampleDdgHtml);
+        var http = new HttpClient(handler);
         var provider = new DuckDuckGoHtmlProvider(http);
 
         var result = await provider.SearchAsync("test",
@@ -629,8 +629,8 @@ public class ProviderRetryTests
             { "results": [{ "title": "Test", "url": "https://example.com", "content": "ok" }] }
             """;
 
-        var handler  = new FailThenSucceedHandler(json);
-        var http     = new HttpClient(handler);
+        var handler = new FailThenSucceedHandler(json);
+        var http = new HttpClient(handler);
         var provider = new SearxngProvider("http://localhost:8080", http);
 
         var result = await provider.SearchAsync("test",
@@ -657,8 +657,8 @@ public class ProviderRetryTests
             </channel></rss>
             """;
 
-        var handler  = new FailThenSucceedHandler(rss);
-        var http     = new HttpClient(handler);
+        var handler = new FailThenSucceedHandler(rss);
+        var http = new HttpClient(handler);
         var provider = new GoogleNewsRssProvider(http);
 
         var result = await provider.SearchAsync("test article",
@@ -735,7 +735,7 @@ public class FakeHttpHandler : HttpMessageHandler
         System.Net.HttpStatusCode statusCode = System.Net.HttpStatusCode.OK)
     {
         _responseBody = responseBody;
-        _statusCode   = statusCode;
+        _statusCode = statusCode;
     }
 
     protected override Task<HttpResponseMessage> SendAsync(
@@ -756,7 +756,7 @@ public class CapturingHttpHandler : HttpMessageHandler
 {
     private readonly string _responseBody;
 
-    public string? LastRequestUrl  { get; private set; }
+    public string? LastRequestUrl { get; private set; }
     public string? LastRequestBody { get; private set; }
 
     public CapturingHttpHandler(string responseBody) => _responseBody = responseBody;

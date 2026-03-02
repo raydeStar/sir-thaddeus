@@ -19,12 +19,12 @@ public class LmStudioClientSelfHealingTests : IDisposable
 {
     private static readonly LlmClientOptions DefaultOptions = new()
     {
-        BaseUrl          = "http://localhost:1234",
-        Model            = "test-model",
-        MaxTokens        = 100,
-        Temperature      = 0.7,
+        BaseUrl = "http://localhost:1234",
+        Model = "test-model",
+        MaxTokens = 100,
+        Temperature = 0.7,
         RepetitionPenalty = 1.1,
-        StopSequences    = ["\nUser:", "\nHuman:"]
+        StopSequences = ["\nUser:", "\nHuman:"]
     };
 
     private static readonly ChatMessage[] SimpleMessages =
@@ -326,7 +326,7 @@ public class LmStudioClientSelfHealingTests : IDisposable
     private static (HttpStatusCode, string) MakeSuccessResponse(string content) =>
         (HttpStatusCode.OK, JsonSerializer.Serialize(new
         {
-            id      = "test-123",
+            id = "test-123",
             choices = new[]
             {
                 new

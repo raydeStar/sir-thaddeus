@@ -76,10 +76,10 @@ public sealed record PlanResult
 
     public static PlanResult Ok(ToolPlan plan) => new() { Success = true, Plan = plan };
     public static PlanResult Fail(string error) => new() { Success = false, Error = error };
-    public static PlanResult Direct(string output) => new() 
-    { 
-        Success = true, 
+    public static PlanResult Direct(string output) => new()
+    {
+        Success = true,
         Plan = ToolPlan.Empty("Direct output"),
-        DirectOutput = output 
+        DirectOutput = output
     };
 }

@@ -65,14 +65,14 @@ public sealed class GlobalHotkeyService : IDisposable
     public GlobalHotkeyService(Window owner)
     {
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
-        
+
         var helper = new WindowInteropHelper(_owner);
         helper.EnsureHandle();
         _hwnd = helper.Handle;
 
         _hwndSource = HwndSource.FromHwnd(_hwnd)
             ?? throw new InvalidOperationException("Could not obtain HwndSource from window handle.");
-        
+
         _hwndSource.AddHook(WndProc);
     }
 

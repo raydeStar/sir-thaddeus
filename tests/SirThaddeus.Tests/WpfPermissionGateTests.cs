@@ -22,27 +22,27 @@ public class ToolGroupResolutionTests
     // ── Alias mapping: PascalCase and snake_case resolve identically ──
 
     [Theory]
-    [InlineData("WebSearch",        "web")]
-    [InlineData("web_search",       "web")]
-    [InlineData("PlacesLookup",     "web")]
-    [InlineData("places_lookup",    "web")]
-    [InlineData("BrowserNavigate",  "web")]
+    [InlineData("WebSearch", "web")]
+    [InlineData("web_search", "web")]
+    [InlineData("PlacesLookup", "web")]
+    [InlineData("places_lookup", "web")]
+    [InlineData("BrowserNavigate", "web")]
     [InlineData("browser_navigate", "web")]
-    [InlineData("WeatherGeocode",   "web")]
-    [InlineData("weather_geocode",  "web")]
-    [InlineData("WeatherForecast",  "web")]
+    [InlineData("WeatherGeocode", "web")]
+    [InlineData("weather_geocode", "web")]
+    [InlineData("WeatherForecast", "web")]
     [InlineData("weather_forecast", "web")]
-    [InlineData("ResolveTimezone",  "web")]
+    [InlineData("ResolveTimezone", "web")]
     [InlineData("resolve_timezone", "web")]
-    [InlineData("HolidaysGet",      "web")]
-    [InlineData("holidays_get",     "web")]
-    [InlineData("HolidaysNext",     "web")]
-    [InlineData("holidays_next",    "web")]
-    [InlineData("HolidaysIsToday",  "web")]
-    [InlineData("holidays_is_today","web")]
-    [InlineData("FeedFetch",        "web")]
-    [InlineData("feed_fetch",       "web")]
-    [InlineData("StatusCheckUrl",   "web")]
+    [InlineData("HolidaysGet", "web")]
+    [InlineData("holidays_get", "web")]
+    [InlineData("HolidaysNext", "web")]
+    [InlineData("holidays_next", "web")]
+    [InlineData("HolidaysIsToday", "web")]
+    [InlineData("holidays_is_today", "web")]
+    [InlineData("FeedFetch", "web")]
+    [InlineData("feed_fetch", "web")]
+    [InlineData("StatusCheckUrl", "web")]
     [InlineData("status_check_url", "web")]
     public void KnownWebTools_MapToWebGroup(string toolName, string expected)
     {
@@ -52,9 +52,9 @@ public class ToolGroupResolutionTests
     }
 
     [Theory]
-    [InlineData("MemoryRetrieve",    "memoryRead")]
-    [InlineData("memory_retrieve",   "memoryRead")]
-    [InlineData("MemoryListFacts",   "memoryRead")]
+    [InlineData("MemoryRetrieve", "memoryRead")]
+    [InlineData("memory_retrieve", "memoryRead")]
+    [InlineData("MemoryListFacts", "memoryRead")]
     [InlineData("memory_list_facts", "memoryRead")]
     public void MemoryReadTools_MapToMemoryReadGroup(string toolName, string expected)
     {
@@ -64,11 +64,11 @@ public class ToolGroupResolutionTests
     }
 
     [Theory]
-    [InlineData("MemoryStoreFacts",   "memoryWrite")]
+    [InlineData("MemoryStoreFacts", "memoryWrite")]
     [InlineData("memory_store_facts", "memoryWrite")]
-    [InlineData("MemoryUpdateFact",   "memoryWrite")]
+    [InlineData("MemoryUpdateFact", "memoryWrite")]
     [InlineData("memory_update_fact", "memoryWrite")]
-    [InlineData("MemoryDeleteFact",   "memoryWrite")]
+    [InlineData("MemoryDeleteFact", "memoryWrite")]
     [InlineData("memory_delete_fact", "memoryWrite")]
     public void MemoryWriteTools_MapToMemoryWriteGroup(string toolName, string expected)
     {
@@ -78,9 +78,9 @@ public class ToolGroupResolutionTests
     }
 
     [Theory]
-    [InlineData("ScreenCapture",     "screen")]
-    [InlineData("screen_capture",    "screen")]
-    [InlineData("GetActiveWindow",   "screen")]
+    [InlineData("ScreenCapture", "screen")]
+    [InlineData("screen_capture", "screen")]
+    [InlineData("GetActiveWindow", "screen")]
     [InlineData("get_active_window", "screen")]
     public void ScreenTools_MapToScreenGroup(string toolName, string expected)
     {
@@ -90,9 +90,9 @@ public class ToolGroupResolutionTests
     }
 
     [Theory]
-    [InlineData("FileRead",  "files")]
+    [InlineData("FileRead", "files")]
     [InlineData("file_read", "files")]
-    [InlineData("FileList",  "files")]
+    [InlineData("FileList", "files")]
     [InlineData("file_list", "files")]
     public void FileTools_MapToFilesGroup(string toolName, string expected)
     {
@@ -127,12 +127,12 @@ public class ToolGroupResolutionTests
     }
 
     [Theory]
-    [InlineData("ToolPing",              "meta")]
-    [InlineData("tool_ping",             "meta")]
-    [InlineData("ToolListCapabilities",  "meta")]
-    [InlineData("tool_list_capabilities","meta")]
-    [InlineData("TimeNow",              "meta")]
-    [InlineData("time_now",             "meta")]
+    [InlineData("ToolPing", "meta")]
+    [InlineData("tool_ping", "meta")]
+    [InlineData("ToolListCapabilities", "meta")]
+    [InlineData("tool_list_capabilities", "meta")]
+    [InlineData("TimeNow", "meta")]
+    [InlineData("time_now", "meta")]
     public void MetaTools_MapToMetaGroup(string toolName, string expected)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
@@ -201,12 +201,12 @@ public class EffectivePolicyResolutionTests
                 Permissions = new McpPermissionsSettings
                 {
                     DeveloperOverride = devOverride,
-                    Screen            = screen,
-                    Files             = files,
-                    System            = system,
-                    Web               = web,
-                    MemoryRead        = memoryRead,
-                    MemoryWrite       = memoryWrite
+                    Screen = screen,
+                    Files = files,
+                    System = system,
+                    Web = web,
+                    MemoryRead = memoryRead,
+                    MemoryWrite = memoryWrite
                 }
             },
             Memory = new MemorySettings { Enabled = memoryEnabled }
@@ -380,13 +380,13 @@ public class McpPermissionsSettingsTests
     {
         var perms = new McpPermissionsSettings();
 
-        Assert.Equal("none",   perms.DeveloperOverride);
-        Assert.Equal("ask",    perms.Screen);
-        Assert.Equal("ask",    perms.Files);
-        Assert.Equal("ask",    perms.System);
-        Assert.Equal("ask",    perms.Web);
+        Assert.Equal("none", perms.DeveloperOverride);
+        Assert.Equal("ask", perms.Screen);
+        Assert.Equal("ask", perms.Files);
+        Assert.Equal("ask", perms.System);
+        Assert.Equal("ask", perms.Web);
         Assert.Equal("always", perms.MemoryRead);
-        Assert.Equal("ask",    perms.MemoryWrite);
+        Assert.Equal("ask", perms.MemoryWrite);
     }
 
     [Fact]

@@ -331,6 +331,9 @@ public static class IntentFeatureExtractor
         if (LooksLikeLogicPuzzlePrompt(lower))
             return false;
 
+        if (LooksLikeSeasonEpisodePlotLookup(lower))
+            return true;
+
         if (lower.Contains("web_search", StringComparison.Ordinal) ||
             lower.Contains("web search", StringComparison.Ordinal))
         {
@@ -878,6 +881,57 @@ public static class IntentFeatureExtractor
                lower.Contains("announcements", StringComparison.Ordinal) ||
                lower.Contains("version", StringComparison.Ordinal) ||
                lower.Contains("release", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Detects episodic TV lookup prompts that should be grounded with web
+    /// evidence rather than answered from model priors (e.g. canceled season
+    /// questions asking for a plot/synopsis).
+    /// </summary>
+    private static bool LooksLikeSeasonEpisodePlotLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasSeasonToken = lower.Contains("season ", StringComparison.Ordinal) ||
+                             lower.Contains("s1", StringComparison.Ordinal) ||
+                             lower.Contains("s2", StringComparison.Ordinal) ||
+                             lower.Contains("s3", StringComparison.Ordinal) ||
+                             lower.Contains("s4", StringComparison.Ordinal) ||
+                             lower.Contains("s5", StringComparison.Ordinal);
+
+        var hasEpisodeToken = lower.Contains("episode ", StringComparison.Ordinal) ||
+                              lower.Contains("ep ", StringComparison.Ordinal) ||
+                              lower.Contains("e1", StringComparison.Ordinal) ||
+                              lower.Contains("e2", StringComparison.Ordinal) ||
+                              lower.Contains("e3", StringComparison.Ordinal) ||
+                              lower.Contains("e4", StringComparison.Ordinal) ||
+                              lower.Contains("e5", StringComparison.Ordinal);
+
+        if (!hasSeasonToken || !hasEpisodeToken)
+            return false;
+
+        var asksForEpisodeContent =
+            lower.Contains("plot", StringComparison.Ordinal) ||
+            lower.Contains("synopsis", StringComparison.Ordinal) ||
+            lower.Contains("what happens", StringComparison.Ordinal) ||
+            lower.StartsWith("what would be", StringComparison.Ordinal) ||
+            lower.StartsWith("what is", StringComparison.Ordinal) ||
+            lower.StartsWith("what's", StringComparison.Ordinal) ||
+            lower.StartsWith("whats", StringComparison.Ordinal);
+
+        if (!asksForEpisodeContent)
+            return false;
+
+        // Creative writing prompts should remain chat-only.
+        var asksForCreativeWriting =
+            lower.Contains("write", StringComparison.Ordinal) ||
+            lower.Contains("fanfic", StringComparison.Ordinal) ||
+            lower.Contains("fan fiction", StringComparison.Ordinal) ||
+            lower.Contains("invent", StringComparison.Ordinal) ||
+            lower.Contains("make up", StringComparison.Ordinal);
+
+        return !asksForCreativeWriting;
     }
 
     private static bool ContainsAny(string lower, ReadOnlySpan<string> tokens)

@@ -32,8 +32,8 @@ internal static class BackendHealthProbe
                 if (TryExtractEngineStatus(root, targetKind, out var engineStatus))
                 {
                     var detail = BuildEngineDetail(engineStatus);
-                    if (!engineStatus.Ready && 
-                        root.TryGetProperty("message", out var msgElement) && 
+                    if (!engineStatus.Ready &&
+                        root.TryGetProperty("message", out var msgElement) &&
                         msgElement.ValueKind == JsonValueKind.String)
                     {
                         var rootMsg = msgElement.GetString();

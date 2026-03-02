@@ -124,7 +124,8 @@ public partial class OnboardingWindow : Window
     {
         var statusDot = new Ellipse
         {
-            Width = 8, Height = 8,
+            Width = 8,
+            Height = 8,
             Fill = provider.IsOnline
                 ? new SolidColorBrush(Color.FromRgb(0x3E, 0xA8, 0x76))
                 : new SolidColorBrush(Color.FromRgb(0x4A, 0x55, 0x6B)),

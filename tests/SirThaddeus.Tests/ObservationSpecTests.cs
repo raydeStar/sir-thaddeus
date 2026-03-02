@@ -15,7 +15,7 @@ public class ObservationSpecTests
     public void CreateTemplate_ProducesValidJson()
     {
         var template = SpecSerializer.CreateTemplateJson();
-        
+
         Assert.Contains("\"version\"", template);
         Assert.Contains("\"target\"", template);
         Assert.Contains("\"check\"", template);

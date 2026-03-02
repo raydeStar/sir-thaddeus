@@ -50,6 +50,14 @@
   <ItemGroup>
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Process.cs"
+             Link="DesktopRuntime\VoiceHostProcessManager.Process.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Session.cs"
+             Link="DesktopRuntime\VoiceHostProcessManager.Session.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Diagnostics.cs"
+             Link="DesktopRuntime\VoiceHostProcessManager.Diagnostics.cs" />
+    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostModels.cs"
+             Link="DesktopRuntime\VoiceHostModels.cs" />
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
              Link="DesktopRuntime\YouTubeJobsHttpClient.cs" />
     <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\DeviceLocationProviders.cs"

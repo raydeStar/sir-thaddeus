@@ -38,7 +38,7 @@ public sealed class ChatMessageViewModel : ViewModelBase
     private string _content = string.Empty;
     private string _thoughtContent = string.Empty;
     private bool _isThoughtExpanded;
-    private int    _carouselPage;
+    private int _carouselPage;
     private string _authorLabel = "User";
 
     /// <summary>How many source cards are visible per carousel page.</summary>
@@ -150,7 +150,7 @@ public sealed class ChatMessageViewModel : ViewModelBase
             ? (int)Math.Ceiling((double)SourceCards.Count / CardsPerPage)
             : 0;
 
-    public bool CanGoLeft  => _carouselPage > 0;
+    public bool CanGoLeft => _carouselPage > 0;
     public bool CanGoRight => _carouselPage < CarouselPageCount - 1;
 
     /// <summary>Page indicator label, e.g. "1 / 3". Empty if only one page.</summary>
@@ -163,10 +163,10 @@ public sealed class ChatMessageViewModel : ViewModelBase
     public ICommand NextPageCommand { get; }
 
     // ── XAML-friendly role checks (avoids enum converters) ───────────
-    public bool IsUser         => Role == ChatMessageRole.User;
-    public bool IsAssistant    => Role == ChatMessageRole.Assistant;
+    public bool IsUser => Role == ChatMessageRole.User;
+    public bool IsAssistant => Role == ChatMessageRole.Assistant;
     public bool IsToolActivity => Role == ChatMessageRole.ToolActivity;
-    public bool IsStatus       => Role == ChatMessageRole.Status;
+    public bool IsStatus => Role == ChatMessageRole.Status;
 
     // ── Ledger header labels ─────────────────────────────────────────
 
@@ -185,11 +185,11 @@ public sealed class ChatMessageViewModel : ViewModelBase
     /// </summary>
     public string RoleLabel => Role switch
     {
-        ChatMessageRole.User         => "COMMAND",
-        ChatMessageRole.Assistant    => "RESULT",
+        ChatMessageRole.User => "COMMAND",
+        ChatMessageRole.Assistant => "RESULT",
         ChatMessageRole.ToolActivity => "TOOL ACTIVITY",
-        ChatMessageRole.Status       => "STATUS",
-        _                            => ""
+        ChatMessageRole.Status => "STATUS",
+        _ => ""
     };
 
     // ── Internals ────────────────────────────────────────────────────
@@ -285,14 +285,14 @@ public sealed class SourceCardViewModel
 
         return new SourceCardViewModel
         {
-            Title         = title.Length > 80 ? title[..77] + "..." : title,
-            Url           = url,
-            Domain        = domain,
-            Excerpt       = excerpt,
+            Title = title.Length > 80 ? title[..77] + "..." : title,
+            Url = url,
+            Domain = domain,
+            Excerpt = excerpt,
             FaviconBase64 = favicon ?? "",
-            ThumbnailUrl  = thumbnail ?? "",
-            AvatarLetter  = letter,
-            AvatarColor   = color
+            ThumbnailUrl = thumbnail ?? "",
+            AvatarLetter = letter,
+            AvatarColor = color
         };
     }
 }
@@ -320,15 +320,15 @@ public enum LogEntryKind
 /// </summary>
 public sealed class LogEntry
 {
-    public required string    Text      { get; init; }
-    public required LogEntryKind Kind   { get; init; }
-    public DateTime           Timestamp { get; init; } = DateTime.Now;
+    public required string Text { get; init; }
+    public required LogEntryKind Kind { get; init; }
+    public DateTime Timestamp { get; init; } = DateTime.Now;
 
     public string TimeDisplay => Timestamp.ToString("HH:mm:ss");
 
     // ── XAML-friendly kind checks ────────────────────────────────────
-    public bool IsInfo       => Kind == LogEntryKind.Info;
-    public bool IsToolInput  => Kind == LogEntryKind.ToolInput;
+    public bool IsInfo => Kind == LogEntryKind.Info;
+    public bool IsToolInput => Kind == LogEntryKind.ToolInput;
     public bool IsToolOutput => Kind == LogEntryKind.ToolOutput;
-    public bool IsError      => Kind == LogEntryKind.Error;
+    public bool IsError => Kind == LogEntryKind.Error;
 }

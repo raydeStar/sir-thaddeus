@@ -22,9 +22,9 @@ namespace SirThaddeus.McpServer.Tools;
 
 public static class ContentExtractor
 {
-    private const int DefaultTimeoutSecs  = 15;
-    private const int FaviconMaxBytes     = 64 * 1024;  // 64 KB cap
-    private const int FaviconTimeoutSecs  = 3;
+    private const int DefaultTimeoutSecs = 15;
+    private const int FaviconMaxBytes = 64 * 1024;  // 64 KB cap
+    private const int FaviconTimeoutSecs = 3;
     private const int GoogleNewsResolveMaxLinks = 40;
 
     /// <summary>
@@ -32,27 +32,27 @@ public static class ContentExtractor
     /// </summary>
     public sealed record ExtractionResult
     {
-        public required string Url     { get; init; }
-        public string Title            { get; init; } = "(untitled)";
-        public string? Author          { get; init; }
+        public required string Url { get; init; }
+        public string Title { get; init; } = "(untitled)";
+        public string? Author { get; init; }
         public DateTime? PublishedDate { get; init; }
-        public string Domain           { get; init; } = "";
-        public string TextContent      { get; init; } = "";
-        public int WordCount           { get; init; }
-        public bool IsArticle          { get; init; }
-        public string? Error           { get; init; }
+        public string Domain { get; init; } = "";
+        public string TextContent { get; init; } = "";
+        public int WordCount { get; init; }
+        public bool IsArticle { get; init; }
+        public string? Error { get; init; }
 
         /// <summary>
         /// Base64-encoded favicon image data (e.g. "data:image/png;base64,...").
         /// Null if not found or extraction failed — UI should use letter avatar fallback.
         /// </summary>
-        public string? FaviconBase64   { get; init; }
+        public string? FaviconBase64 { get; init; }
 
         /// <summary>
         /// Open Graph / Twitter Card thumbnail URL (og:image or twitter:image).
         /// Passed as a URL for the UI to load — kept lightweight in the JSON.
         /// </summary>
-        public string? ThumbnailUrl    { get; init; }
+        public string? ThumbnailUrl { get; init; }
 
         public bool Succeeded => Error is null && TextContent.Length > 0;
     }
@@ -77,7 +77,7 @@ public static class ContentExtractor
         try
         {
             using var http = CreateHttpClient(timeoutSecs);
-            using var cts  = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSecs));
 
             // Use GetAsync (not GetStringAsync) so we can capture the final
@@ -101,7 +101,7 @@ public static class ContentExtractor
                         if (!string.IsNullOrWhiteSpace(resolved.Html))
                         {
                             finalUri = resolved.FinalUri;
-                            html     = resolved.Html;
+                            html = resolved.Html;
                         }
                     }
                     catch
@@ -111,14 +111,14 @@ public static class ContentExtractor
                 }
             }
 
-            url    = finalUri.ToString();
+            url = finalUri.ToString();
             domain = finalUri.Host.Replace("www.", "");
 
             if (string.IsNullOrWhiteSpace(html))
                 return new ExtractionResult { Url = url, Domain = domain, Error = "Empty response" };
 
             // Favicon + thumbnail extraction runs alongside content parsing
-            var faviconTask  = ExtractFaviconAsync(html, finalUri, http, cts.Token);
+            var faviconTask = ExtractFaviconAsync(html, finalUri, http, cts.Token);
             var thumbnailUrl = ExtractOgImage(html, finalUri);
 
             // ── SmartReader first ────────────────────────────────────
@@ -131,16 +131,16 @@ public static class ContentExtractor
                     var favicon = await SafeAwaitFavicon(faviconTask);
                     return new ExtractionResult
                     {
-                        Url           = url,
-                        Title         = article.Title ?? "(untitled)",
-                        Author        = article.Author,
+                        Url = url,
+                        Title = article.Title ?? "(untitled)",
+                        Author = article.Author,
                         PublishedDate = article.PublicationDate,
-                        Domain        = domain,
-                        TextContent   = article.TextContent,
-                        WordCount     = CountWords(article.TextContent),
-                        IsArticle     = true,
+                        Domain = domain,
+                        TextContent = article.TextContent,
+                        WordCount = CountWords(article.TextContent),
+                        IsArticle = true,
                         FaviconBase64 = favicon,
-                        ThumbnailUrl  = thumbnailUrl
+                        ThumbnailUrl = thumbnailUrl
                     };
                 }
             }
@@ -150,20 +150,20 @@ public static class ContentExtractor
             }
 
             // ── HtmlAgilityPack fallback ─────────────────────────────
-            var text  = StripHtmlToText(html);
+            var text = StripHtmlToText(html);
             var title = ExtractTitle(html);
             var fallbackFavicon = await SafeAwaitFavicon(faviconTask);
 
             return new ExtractionResult
             {
-                Url           = url,
-                Title         = title,
-                Domain        = domain,
-                TextContent   = text,
-                WordCount     = CountWords(text),
-                IsArticle     = false,
+                Url = url,
+                Title = title,
+                Domain = domain,
+                TextContent = text,
+                WordCount = CountWords(text),
+                IsArticle = false,
                 FaviconBase64 = fallbackFavicon,
-                ThumbnailUrl  = thumbnailUrl
+                ThumbnailUrl = thumbnailUrl
             };
         }
         catch (TaskCanceledException)
@@ -377,7 +377,7 @@ public static class ContentExtractor
         {
             using var resp = await http.GetAsync(uri, ct);
             resp.EnsureSuccessStatusCode();
-            var body     = await resp.Content.ReadAsStringAsync(ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
             var resolved = resp.RequestMessage?.RequestUri ?? uri;
             return (resolved, body);
         }, ct);
@@ -497,7 +497,7 @@ public static class ContentExtractor
             return null;
 
         var content = html[(quoteIdx + 1)..endIdx];
-        var urlIdx  = content.IndexOf("url=", StringComparison.OrdinalIgnoreCase);
+        var urlIdx = content.IndexOf("url=", StringComparison.OrdinalIgnoreCase);
         if (urlIdx < 0)
             return null;
 
@@ -605,7 +605,7 @@ public static class ContentExtractor
         var rawText = doc.DocumentNode.InnerText;
         var decoded = WebUtility.HtmlDecode(rawText);
         var cleaned = Regex.Replace(decoded, @"[ \t]+", " ");
-        var lines   = cleaned.Split('\n')
+        var lines = cleaned.Split('\n')
             .Select(l => l.Trim())
             .Where(l => l.Length > 0);
 

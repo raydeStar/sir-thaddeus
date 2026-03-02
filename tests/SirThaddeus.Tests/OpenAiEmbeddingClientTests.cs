@@ -124,7 +124,7 @@ public class OpenAiEmbeddingClientTests
         public SingleResponseHandler(HttpStatusCode status, string body)
         {
             _status = status;
-            _body   = body;
+            _body = body;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(

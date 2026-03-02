@@ -38,6 +38,17 @@ public sealed record CompletionReport
     public int ItemCount { get; init; }
 
     /// <summary>
+    /// Deterministic confidence score in range [0, 1] derived from
+    /// required-field coverage, evidence coverage, and item coverage.
+    /// </summary>
+    public double Confidence { get; init; }
+
+    /// <summary>
+    /// Short reason for finalization state (for diagnostics/audit).
+    /// </summary>
+    public string StopReason { get; init; } = "unknown";
+
+    /// <summary>
     /// The contract that was evaluated against.
     /// </summary>
     public required CompletionContract Contract { get; init; }
@@ -49,7 +60,9 @@ public sealed record CompletionReport
     {
         IsComplete = true,
         Contract = contract,
-        ItemCount = itemCount
+        ItemCount = itemCount,
+        Confidence = 1.0,
+        StopReason = "complete"
     };
 
     /// <summary>

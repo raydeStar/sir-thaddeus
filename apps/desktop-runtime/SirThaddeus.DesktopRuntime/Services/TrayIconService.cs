@@ -44,11 +44,11 @@ public sealed class TrayIconService : IDisposable
 
         var openItem = new ToolStripMenuItem("Open Sir Thaddeus");
         openItem.Click += (_, _) => InvokeOnUiThread(_openSirThaddeus);
-        
+
         var pauseServiceItem = new ToolStripMenuItem("Pause Service Jobs");
         pauseServiceItem.Click += (_, _) => InvokeOnUiThread(_pauseServiceJobs);
         pauseServiceItem.Enabled = false; // Stubbed for V0
-        
+
         var stopAllItem = new ToolStripMenuItem("STOP ALL");
         stopAllItem.Click += (_, _) => InvokeOnUiThread(_stopAll);
 
@@ -140,7 +140,7 @@ public sealed class TrayIconService : IDisposable
         _disposed = true;
 
         _stateStore.StateChanged -= OnStateChanged;
-        
+
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
     }

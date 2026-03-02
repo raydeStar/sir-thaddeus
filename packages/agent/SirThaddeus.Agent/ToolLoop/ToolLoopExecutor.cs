@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Search;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.ToolLoop;
@@ -67,6 +69,14 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             if (response.IsComplete || response.ToolCalls is not { Count: > 0 })
             {
                 var text = request.SanitizeAssistantText(response.Content ?? "[No response]");
+                var existenceGuarded = await TryApplyExistenceGuardAsync(
+                    request,
+                    text,
+                    roundTrips,
+                    cancellationToken);
+                if (existenceGuarded is not null)
+                    return existenceGuarded;
+
                 request.History.Add(ChatMessage.Assistant(text));
                 log("AGENT_RESPONSE", text);
 
@@ -275,6 +285,129 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 };
             }
         }
+    }
+
+    private async Task<AgentResponse?> TryApplyExistenceGuardAsync(
+        ToolLoopExecutionRequest request,
+        string assistantText,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var latestUser = request.History.LastOrDefault(m => m.Role == "user")?.Content ?? "";
+        if (!LooksLikeSeasonEpisodeExistencePrompt(latestUser))
+            return null;
+
+        if (!LooksSpeculativeNarrative(assistantText))
+            return null;
+
+        var evidence = ExtractEvidenceFromToolCalls(request.ToolCallsMade);
+        if (evidence.Count < 2)
+        {
+            var bundle = SearchOrchestrator.BuildExistenceQueryBundle(latestUser);
+            foreach (var query in bundle.Skip(1).Take(3))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var args = JsonSerializer.Serialize(new { query, maxResults = 5, recency = "any" });
+                string result;
+                var success = true;
+                try
+                {
+                    result = await _mcp.CallToolAsync("web_search", args, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    result = $"Tool error: {ex.Message}";
+                    success = false;
+                }
+
+                request.ToolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = args,
+                    Result = result,
+                    Success = success
+                });
+
+                if (!success || string.IsNullOrWhiteSpace(result) || result.StartsWith("No results found for ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                evidence.AddRange(SearchOrchestrator
+                    .ParseSourcesFromToolResult(result)
+                    .Where(s => !string.IsNullOrWhiteSpace(s.Url)));
+            }
+        }
+
+        if (evidence.Count == 0)
+            return null;
+
+        if (!SearchOrchestrator.IsLikelyNonexistent(latestUser, evidence, out _))
+            return null;
+
+        var seasonLabel = TryExtractSeasonLabel(latestUser);
+        var seasonPhrase = seasonLabel is null ? "the requested installment" : seasonLabel;
+        var guardedText =
+            $"Based on available sources, {seasonPhrase} does not exist. " +
+            "The evidence indicates it was canceled or never released, so there is no official plot to summarize.";
+
+        request.History.Add(ChatMessage.Assistant(guardedText));
+
+        return new AgentResponse
+        {
+            Text = guardedText,
+            Success = true,
+            ToolCallsMade = request.ToolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private static bool LooksLikeSeasonEpisodeExistencePrompt(string userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = userText.ToLowerInvariant();
+        var hasSeason = lower.Contains("season ", StringComparison.Ordinal) ||
+                        Regex.IsMatch(lower, @"\bs\d+\b", RegexOptions.IgnoreCase);
+        var hasEpisode = lower.Contains("episode ", StringComparison.Ordinal) ||
+                         Regex.IsMatch(lower, @"\be\d+\b", RegexOptions.IgnoreCase);
+        return hasSeason && hasEpisode;
+    }
+
+    private static bool LooksSpeculativeNarrative(string assistantText)
+    {
+        var lower = (assistantText ?? "").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("would likely", StringComparison.Ordinal) ||
+               lower.Contains("probably", StringComparison.Ordinal) ||
+               lower.Contains("expect", StringComparison.Ordinal) ||
+               lower.Contains("might", StringComparison.Ordinal);
+    }
+
+    private static List<SourceItem> ExtractEvidenceFromToolCalls(IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var evidence = new List<SourceItem>();
+        foreach (var call in toolCallsMade)
+        {
+            if (!call.Success ||
+                !call.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(call.Result))
+            {
+                continue;
+            }
+
+            var parsed = SearchOrchestrator.ParseSourcesFromToolResult(call.Result);
+            evidence.AddRange(parsed.Where(s => !string.IsNullOrWhiteSpace(s.Url)));
+        }
+
+        return evidence;
+    }
+
+    private static string? TryExtractSeasonLabel(string text)
+    {
+        var match = Regex.Match(text ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
+        return match.Success ? match.Value.ToLowerInvariant() : null;
     }
 
     private static bool IsLmStudioRegexFailure(HttpRequestException ex)

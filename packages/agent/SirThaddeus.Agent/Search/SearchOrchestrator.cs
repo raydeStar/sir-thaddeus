@@ -462,8 +462,15 @@ public sealed class SearchOrchestrator
                 ct);
         }
 
-        // ── 4. Parse and record results ──────────────────────────────
+        // Parse and record results.
         var sources = ParseSourcesFromToolResult(toolResult);
+        var existenceGuarded = await TryBuildExistenceGuardedResponseAsync(
+            userMessage,
+            sources,
+            toolCallsMade,
+            ct);
+        if (existenceGuarded is not null)
+            return existenceGuarded;
         var isMarketQuoteRequest =
             MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
             MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
@@ -491,10 +498,6 @@ public sealed class SearchOrchestrator
         Session.LastWasLocalBusinessDiscovery =
             IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
 
-        // ── 5. Fetch top articles for deep synthesis ──────────────────
-        // The MCP WebSearch tool already auto-reads pages via ContentExtractor
-        // and embeds up to 1000-char excerpts in the output. For most queries
-        // this is sufficient. Only re-fetch via browser_navigate when the
         // tool result lacks rich content (snippet-only mode).
         var strippedContent = StripSourcesJson(toolResult);
         var toolResultHasRichContent = strippedContent.Length >= MinRichContentLength;
@@ -1974,6 +1977,215 @@ public sealed class SearchOrchestrator
 
         return lower.Contains("airspeed velocity of an unladen swallow", StringComparison.Ordinal) ||
                lower.Contains("air speed velocity of an unladen swallow", StringComparison.Ordinal);
+    }
+
+    private async Task<AgentResponse?> TryBuildExistenceGuardedResponseAsync(
+        string userMessage,
+        IReadOnlyList<SourceItem> initialSources,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var queryBundle = BuildExistenceQueryBundle(userMessage);
+        if (queryBundle.Count <= 1)
+            return null;
+
+        var evidence = initialSources
+            .Where(s => !string.IsNullOrWhiteSpace(s.Url))
+            .ToList();
+        var addedFollowupEvidence = false;
+
+        foreach (var query in queryBundle.Skip(1).Take(3))
+        {
+            var extraResult = await CallWebSearchAsync(
+                query,
+                recency: "any",
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage);
+
+            if (string.IsNullOrWhiteSpace(extraResult) || LooksLikeNoResultsPayload(extraResult))
+                continue;
+
+            if (WebToolFailureMapper.TryBuildFailureResponse(extraResult, toolCallsMade) is not null)
+                continue;
+
+            var extraSources = ParseSourcesFromToolResult(extraResult);
+            if (extraSources.Count == 0)
+                continue;
+
+            evidence.AddRange(extraSources.Where(s => !string.IsNullOrWhiteSpace(s.Url)));
+            addedFollowupEvidence = true;
+        }
+
+        if (evidence.Count == 0)
+            return null;
+
+        if (!IsLikelyNonexistent(userMessage, evidence, out var nonexistenceScore))
+            return null;
+
+        var seasonLabel = TryExtractSeasonLabel(userMessage);
+        var seasonPhrase = seasonLabel is null ? "the requested installment" : seasonLabel;
+        var text =
+            $"Based on available sources, {seasonPhrase} does not exist. " +
+            "The evidence indicates it was canceled or never released, so there is no official episode plot to summarize.";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "EXISTENCE_GUARD_TRIGGERED",
+            Result = "does_not_exist",
+            Details = new Dictionary<string, object>
+            {
+                ["query_bundle_count"] = queryBundle.Count,
+                ["evidence_count"] = evidence.Count,
+                ["nonexistence_score"] = nonexistenceScore,
+                ["added_followup_evidence"] = addedFollowupEvidence
+            }
+        });
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = 0
+        };
+    }
+
+    internal static IReadOnlyList<string> BuildExistenceQueryBundle(string userQuestion)
+    {
+        if (string.IsNullOrWhiteSpace(userQuestion))
+            return [];
+
+        var normalized = userQuestion.Trim();
+        var lower = normalized.ToLowerInvariant();
+        var hasSeasonEpisode =
+            Regex.IsMatch(lower, @"\bseason\s+\d+\b") &&
+            Regex.IsMatch(lower, @"\bepisode\s+\d+\b");
+        if (!hasSeasonEpisode)
+            return [normalized];
+
+        var parsed = TryParseSeasonEpisode(normalized);
+        if (parsed is null)
+        {
+            return
+            [
+                normalized,
+                $"{normalized} cancelled",
+                $"{normalized} number of seasons",
+                $"{normalized} episode list"
+            ];
+        }
+
+        var (entity, season, episode) = parsed.Value;
+        if (string.IsNullOrWhiteSpace(entity))
+        {
+            return
+            [
+                normalized,
+                $"{normalized} cancelled",
+                $"{normalized} number of seasons",
+                $"{normalized} episode list"
+            ];
+        }
+
+        return
+        [
+            $"{entity} season {season} episode {episode} plot",
+            $"{entity} season {season} cancelled",
+            $"{entity} number of seasons",
+            $"{entity} season {season} episode list"
+        ];
+    }
+
+    internal static bool IsLikelyNonexistent(
+        string question,
+        IReadOnlyList<SourceItem> evidence,
+        out int score)
+    {
+        score = 0;
+        if (string.IsNullOrWhiteSpace(question) || evidence.Count == 0)
+            return false;
+
+        foreach (var source in evidence)
+        {
+            var text = $"{source.Title} {source.Snippet}".ToLowerInvariant();
+
+            if (text.Contains("does not exist", StringComparison.Ordinal) ||
+                text.Contains("doesn't exist", StringComparison.Ordinal) ||
+                text.Contains("never renewed", StringComparison.Ordinal) ||
+                text.Contains("never released", StringComparison.Ordinal) ||
+                text.Contains("no season", StringComparison.Ordinal) ||
+                text.Contains("no episode", StringComparison.Ordinal) ||
+                text.Contains("canceled", StringComparison.Ordinal) ||
+                text.Contains("cancelled", StringComparison.Ordinal) ||
+                text.Contains("ended after season", StringComparison.Ordinal))
+            {
+                score += 6;
+            }
+
+            if (text.Contains("episode list", StringComparison.Ordinal) ||
+                text.Contains("air date", StringComparison.Ordinal) ||
+                text.Contains("released", StringComparison.Ordinal) ||
+                text.Contains("available now", StringComparison.Ordinal))
+            {
+                score -= 3;
+            }
+        }
+
+        var seasonLabel = TryExtractSeasonLabel(question);
+        if (!string.IsNullOrWhiteSpace(seasonLabel))
+        {
+            var seasonNumberMatch = Regex.Match(seasonLabel, @"\d+");
+            if (seasonNumberMatch.Success &&
+                int.TryParse(seasonNumberMatch.Value, out var requestedSeason) &&
+                requestedSeason > 1)
+            {
+                var priorSeasonLabel = $"season {requestedSeason - 1}";
+                var hasPriorSeason = evidence.Any(s =>
+                    ($"{s.Title} {s.Snippet}")
+                    .Contains(priorSeasonLabel, StringComparison.OrdinalIgnoreCase));
+                var hasCancelSignal = evidence.Any(s =>
+                    ($"{s.Title} {s.Snippet}")
+                    .Contains("cancel", StringComparison.OrdinalIgnoreCase));
+
+                if (hasPriorSeason && hasCancelSignal)
+                    score += 10;
+            }
+        }
+
+        return score >= 12;
+    }
+
+    private static string? TryExtractSeasonLabel(string userMessage)
+    {
+        var match = Regex.Match(userMessage ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
+        return match.Success ? match.Value.ToLowerInvariant() : null;
+    }
+
+    private static (string Entity, int Season, int Episode)? TryParseSeasonEpisode(string question)
+    {
+        var lower = question.ToLowerInvariant();
+        var seasonMatch = Regex.Match(lower, @"\bseason\s+(\d+)\b");
+        var episodeMatch = Regex.Match(lower, @"\bepisode\s+(\d+)\b");
+        if (!seasonMatch.Success || !episodeMatch.Success)
+            return null;
+
+        if (!int.TryParse(seasonMatch.Groups[1].Value, out var season) ||
+            !int.TryParse(episodeMatch.Groups[1].Value, out var episode))
+        {
+            return null;
+        }
+
+        var marker = lower.IndexOf(" of ", StringComparison.Ordinal);
+        if (marker < 0)
+            marker = lower.IndexOf(" for ", StringComparison.Ordinal);
+
+        var entity = marker >= 0
+            ? question[(marker + 4)..].Trim(' ', '?', '.', '"', '\'')
+            : question[..Math.Min(seasonMatch.Index, question.Length)].Trim(' ', '?', '.', '"', '\'');
+
+        return (entity, season, episode);
     }
 
     private SearchMode ResolveMode(string userMessage, LookupModeHint modeHint, DateTimeOffset now)

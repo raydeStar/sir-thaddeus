@@ -48,11 +48,11 @@ public static class MetaTools
         {
             protocol_version = McpContract.ProtocolVersion,
             contract_version = McpContract.ServerContractVersion,
-            version    = ServerVersion,
-            uptime_ms  = Uptime.ElapsedMilliseconds,
-            status     = "ok",
-            host       = Environment.MachineName,
-            pid        = Environment.ProcessId,
+            version = ServerVersion,
+            uptime_ms = Uptime.ElapsedMilliseconds,
+            status = "ok",
+            host = Environment.MachineName,
+            pid = Environment.ProcessId,
             tool_count = ToolManifest.All.Count,
             manifest_hash = ToolManifest.ManifestHashSha256
         }, JsonOpts);

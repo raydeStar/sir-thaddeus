@@ -43,9 +43,9 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         string mode = "auto",
         string searxngBaseUrl = "http://localhost:8080")
     {
-        _mode       = mode.ToLowerInvariant();
-        _ddg        = new DuckDuckGoHtmlProvider();
-        _searxng    = new SearxngProvider(searxngBaseUrl);
+        _mode = mode.ToLowerInvariant();
+        _ddg = new DuckDuckGoHtmlProvider();
+        _searxng = new SearxngProvider(searxngBaseUrl);
         _googleNews = new GoogleNewsRssProvider();
     }
 
@@ -58,11 +58,11 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
     {
         return _mode switch
         {
-            "searxng"     => await SearchWithSearxngAsync(query, options, cancellationToken),
-            "ddg_html"    => await SearchWithDdgAsync(query, options, cancellationToken),
+            "searxng" => await SearchWithSearxngAsync(query, options, cancellationToken),
+            "ddg_html" => await SearchWithDdgAsync(query, options, cancellationToken),
             "google_news" => await SearchWithGoogleNewsAsync(query, options, cancellationToken),
-            "manual"      => ManualModeResult(),
-            _             => await SearchAutoAsync(query, options, cancellationToken)
+            "manual" => ManualModeResult(),
+            _ => await SearchAutoAsync(query, options, cancellationToken)
         };
     }
 
@@ -193,7 +193,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         {
             return result with
             {
-                Errors = [..result.Errors, "SearxNG mode is set but the instance may be down."]
+                Errors = [.. result.Errors, "SearxNG mode is set but the instance may be down."]
             };
         }
 
@@ -217,8 +217,8 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         return new SearchResults
         {
             Provider = "Manual",
-            Results  = [],
-            Errors   = ["Search is in manual mode. Paste URLs directly and use BrowserNavigate to read them."]
+            Results = [],
+            Errors = ["Search is in manual mode. Paste URLs directly and use BrowserNavigate to read them."]
         };
     }
 

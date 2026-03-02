@@ -84,11 +84,20 @@ public sealed class CompletionChecker
         // Evaluate field requirements
         var missingRequired = new List<string>();
         var missingOptional = new List<string>();
+        var requiredCount = 0;
+        var requiredFoundCount = 0;
+        var optionalCount = 0;
+        var optionalFoundCount = 0;
 
         foreach (var field in contract.Fields)
         {
             var satisfied = foundFields.Contains(field.FieldName) ||
                             field.Aliases.Any(a => foundFields.Contains(a));
+
+            if (field.Necessity == FieldNecessity.Required)
+                requiredCount++;
+            else
+                optionalCount++;
 
             if (!satisfied)
             {
@@ -96,6 +105,13 @@ public sealed class CompletionChecker
                     missingRequired.Add(field.FieldName);
                 else
                     missingOptional.Add(field.FieldName);
+            }
+            else
+            {
+                if (field.Necessity == FieldNecessity.Required)
+                    requiredFoundCount++;
+                else
+                    optionalFoundCount++;
             }
         }
 
@@ -116,6 +132,24 @@ public sealed class CompletionChecker
             issues.Add($"Expected at least {contract.MinItems} item(s), found {itemCount}");
 
         var isComplete = missingRequired.Count == 0 && issues.Count == 0;
+        var confidence = ComputeConfidence(
+            requiredCount,
+            requiredFoundCount,
+            optionalCount,
+            optionalFoundCount,
+            contract,
+            urlCount,
+            hasNamedSource,
+            itemCount,
+            hasAnySuccessfulResult,
+            isComplete);
+        var stopReason = isComplete
+            ? "complete"
+            : missingRequired.Count > 0
+                ? "missing_required_fields"
+                : issues.Count > 0
+                    ? "evidence_or_count_requirements_unmet"
+                    : "incomplete";
 
         return new CompletionReport
         {
@@ -124,6 +158,8 @@ public sealed class CompletionChecker
             MissingOptionalFields = missingOptional,
             Issues = issues,
             ItemCount = itemCount,
+            Confidence = confidence,
+            StopReason = stopReason,
             Contract = contract
         };
     }
@@ -218,11 +254,16 @@ public sealed class CompletionChecker
             if (name.Equals("answer", StringComparison.OrdinalIgnoreCase) && HasNonEmptyValue(value))
                 foundFields.Add("answer");
 
+            var hasKnownUrlFieldName = IsKnownUrlPropertyName(name);
+
             // Check for URLs in string values
             if (value.ValueKind == JsonValueKind.String)
             {
                 var str = value.GetString() ?? "";
-                if (LooksLikeUrl(str))
+
+                // Avoid double-counting URL values on known URL properties:
+                // they are counted in the dedicated URL-field block below.
+                if (LooksLikeUrl(str) && !hasKnownUrlFieldName)
                     urlCount++;
 
                 if (name.Equals("source", StringComparison.OrdinalIgnoreCase) ||
@@ -235,11 +276,7 @@ public sealed class CompletionChecker
             }
 
             // Track URL-like property names
-            if ((name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("link", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("homepage", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("website", StringComparison.OrdinalIgnoreCase)) &&
+            if (hasKnownUrlFieldName &&
                 value.ValueKind == JsonValueKind.String &&
                 LooksLikeUrl(value.GetString() ?? ""))
             {
@@ -279,6 +316,65 @@ public sealed class CompletionChecker
         text.Contains("source:", StringComparison.OrdinalIgnoreCase) ||
         text.Contains("reported by", StringComparison.OrdinalIgnoreCase) ||
         text.Contains("published by", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsKnownUrlPropertyName(string name) =>
+        name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("link", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("homepage", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("website", StringComparison.OrdinalIgnoreCase);
+
+    private static double ComputeConfidence(
+        int requiredCount,
+        int requiredFoundCount,
+        int optionalCount,
+        int optionalFoundCount,
+        CompletionContract contract,
+        int urlCount,
+        bool hasNamedSource,
+        int itemCount,
+        bool hasAnySuccessfulResult,
+        bool isComplete)
+    {
+        if (isComplete)
+            return 1.0;
+
+        // Coverage model:
+        // - required coverage dominates
+        // - optional coverage contributes lightly
+        // - evidence + min-items reduce confidence when unmet
+        var requiredCoverage = requiredCount == 0
+            ? 1.0
+            : (double)requiredFoundCount / requiredCount;
+        var optionalCoverage = optionalCount == 0
+            ? 1.0
+            : (double)optionalFoundCount / optionalCount;
+
+        var evidenceScore = 1.0;
+        if (contract.Evidence.MinSourceUrls > 0)
+        {
+            evidenceScore = Math.Min(1.0, (double)urlCount / contract.Evidence.MinSourceUrls);
+        }
+        if (contract.Evidence.RequiresNamedSource && !hasNamedSource)
+        {
+            evidenceScore *= 0.5;
+        }
+
+        var itemScore = contract.MinItems <= 0
+            ? 1.0
+            : Math.Min(1.0, (double)itemCount / contract.MinItems);
+
+        var successScore = hasAnySuccessfulResult ? 1.0 : 0.4;
+
+        var weighted =
+            (requiredCoverage * 0.55) +
+            (optionalCoverage * 0.10) +
+            (evidenceScore * 0.20) +
+            (itemScore * 0.10) +
+            (successScore * 0.05);
+
+        return Math.Clamp(weighted, 0.0, 0.99);
+    }
 
     /// <summary>
     /// Detects structured error payloads from tool results.

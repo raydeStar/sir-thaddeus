@@ -74,33 +74,33 @@ public sealed class SingleTestRunner
         switch (mode)
         {
             case HarnessExecutionMode.Live:
-            {
-                llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                baseExecutor = new LiveToolExecutor(settings);
-                break;
-            }
-            case HarnessExecutionMode.Replay:
-            {
-                llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
-                baseExecutor = new ReplayToolExecutor(loadedFixture!);
-                break;
-            }
-            case HarnessExecutionMode.Stub:
-            {
-                if (loadedFixture is not null)
-                {
-                    llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
-                    var replayExecutor = new ReplayToolExecutor(loadedFixture);
-                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
-                }
-                else
                 {
                     llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                    var liveExecutor = new LiveToolExecutor(settings);
-                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
+                    baseExecutor = new LiveToolExecutor(settings);
+                    break;
                 }
-                break;
-            }
+            case HarnessExecutionMode.Replay:
+                {
+                    llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
+                    baseExecutor = new ReplayToolExecutor(loadedFixture!);
+                    break;
+                }
+            case HarnessExecutionMode.Stub:
+                {
+                    if (loadedFixture is not null)
+                    {
+                        llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
+                        var replayExecutor = new ReplayToolExecutor(loadedFixture);
+                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
+                    }
+                    else
+                    {
+                        llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
+                        var liveExecutor = new LiveToolExecutor(settings);
+                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
+                    }
+                    break;
+                }
             default:
                 throw new InvalidOperationException($"Unsupported mode: {mode}");
         }

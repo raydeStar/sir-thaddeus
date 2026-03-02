@@ -34,10 +34,10 @@ public sealed class UrlToImageConverter : IValueConverter
         {
             var image = new BitmapImage();
             image.BeginInit();
-            image.UriSource       = uri;
-            image.CacheOption     = BitmapCacheOption.OnDemand; // Async download
+            image.UriSource = uri;
+            image.CacheOption = BitmapCacheOption.OnDemand; // Async download
             image.DecodePixelWidth = 240;                       // Match card width, save memory
-            image.CreateOptions   = BitmapCreateOptions.IgnoreColorProfile;
+            image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
             image.EndInit();
 
             return image;

@@ -127,24 +127,24 @@ public partial class MainWindow : Window
     // View Tab Switching
     // ─────────────────────────────────────────────────────────────────
 
-    private void ChatTab_Click(object sender, RoutedEventArgs e)     => ActivateTab("Chat");
-    private void BriefingTab_Click(object sender, RoutedEventArgs e)  => ActivateTab("Briefing");
-    private void MemoryTab_Click(object sender, RoutedEventArgs e)   => ActivateTab("Memory");
-    private void ProfileTab_Click(object sender, RoutedEventArgs e)  => ActivateTab("Profile");
-    private void LogsTab_Click(object sender, RoutedEventArgs e)     => ActivateTab("Logs");
+    private void ChatTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Chat");
+    private void BriefingTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Briefing");
+    private void MemoryTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Memory");
+    private void ProfileTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Profile");
+    private void LogsTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Logs");
     private void SettingsTab_Click(object sender, RoutedEventArgs e) => ActivateTab("Settings");
 
     public void ActivateTab(string tab)
     {
-        ChatTabButton.IsChecked     = tab == "Chat";
+        ChatTabButton.IsChecked = tab == "Chat";
         BriefingTabButton.IsChecked = tab == "Briefing";
         SettingsTabButton.IsChecked = tab == "Settings";
 
-        ChatView.Visibility     = tab == "Chat"     ? Visibility.Visible : Visibility.Collapsed;
+        ChatView.Visibility = tab == "Chat" ? Visibility.Visible : Visibility.Collapsed;
         BriefingView.Visibility = tab == "Briefing" ? Visibility.Visible : Visibility.Collapsed;
         SettingsView.Visibility = tab == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        InputArea.Visibility    = tab == "Chat" ? Visibility.Visible : Visibility.Collapsed;
-        NewChatButton.Visibility = tab == "Chat"    ? Visibility.Visible : Visibility.Collapsed;
+        InputArea.Visibility = tab == "Chat" ? Visibility.Visible : Visibility.Collapsed;
+        NewChatButton.Visibility = tab == "Chat" ? Visibility.Visible : Visibility.Collapsed;
 
         // Stop health polling when leaving Settings tab
         if (tab != "Settings")
@@ -273,12 +273,12 @@ public partial class MainWindow : Window
         if (sender is not RadioButton rb || rb.Tag is not string tab) return;
 
         // Show the correct DataGrid
-        FactsGrid.Visibility  = tab == "Facts"  ? Visibility.Visible : Visibility.Collapsed;
+        FactsGrid.Visibility = tab == "Facts" ? Visibility.Visible : Visibility.Collapsed;
         EventsGrid.Visibility = tab == "Events" ? Visibility.Visible : Visibility.Collapsed;
         ChunksGrid.Visibility = tab == "Chunks" ? Visibility.Visible : Visibility.Collapsed;
 
         // Notify the ViewModel to switch tabs (triggers data refresh)
-        if (tab == "Facts")       _memoryBrowserVm?.ShowFactsCommand.Execute(null);
+        if (tab == "Facts") _memoryBrowserVm?.ShowFactsCommand.Execute(null);
         else if (tab == "Events") _memoryBrowserVm?.ShowEventsCommand.Execute(null);
         else if (tab == "Chunks") _memoryBrowserVm?.ShowChunksCommand.Execute(null);
     }
@@ -291,17 +291,17 @@ public partial class MainWindow : Window
     {
         if (sender is not RadioButton rb || rb.Tag is not string tab) return;
 
-        ProfilesGrid.Visibility     = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
-        NuggetsGrid.Visibility      = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+        ProfilesGrid.Visibility = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetsGrid.Visibility = tab == "Nuggets" ? Visibility.Visible : Visibility.Collapsed;
 
         // Toggle footer buttons
-        ProfileAddButton.Visibility      = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
-        NuggetAddButton.Visibility       = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
-        ProfileDeleteButton.Visibility   = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
-        NuggetDeleteButton.Visibility    = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
-        NuggetPaginationPanel.Visibility = tab == "Nuggets"  ? Visibility.Visible : Visibility.Collapsed;
+        ProfileAddButton.Visibility = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetAddButton.Visibility = tab == "Nuggets" ? Visibility.Visible : Visibility.Collapsed;
+        ProfileDeleteButton.Visibility = tab == "Profiles" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetDeleteButton.Visibility = tab == "Nuggets" ? Visibility.Visible : Visibility.Collapsed;
+        NuggetPaginationPanel.Visibility = tab == "Nuggets" ? Visibility.Visible : Visibility.Collapsed;
 
-        if (tab == "Profiles")     _profileBrowserVm?.ShowProfilesCommand.Execute(null);
+        if (tab == "Profiles") _profileBrowserVm?.ShowProfilesCommand.Execute(null);
         else if (tab == "Nuggets") _profileBrowserVm?.ShowNuggetsCommand.Execute(null);
     }
 
@@ -466,15 +466,15 @@ public partial class MainWindow : Window
         // Ctrl+1..6 tab shortcuts
         if (Keyboard.Modifiers == ModifierKeys.Control)
         {
-        switch (e.Key)
-        {
-            case Key.D1: ActivateTab("Chat");     e.Handled = true; return;
-            case Key.D2: ActivateTab("Briefing"); e.Handled = true; return;
-            case Key.D3: ActivateSettingsSubtab("Memory");   e.Handled = true; return;
-            case Key.D4: ActivateSettingsSubtab("Profile");  e.Handled = true; return;
-            case Key.D5: ActivateSettingsSubtab("Logs");     e.Handled = true; return;
-            case Key.D6: ActivateSettingsSubtab("General"); e.Handled = true; return;
-        }
+            switch (e.Key)
+            {
+                case Key.D1: ActivateTab("Chat"); e.Handled = true; return;
+                case Key.D2: ActivateTab("Briefing"); e.Handled = true; return;
+                case Key.D3: ActivateSettingsSubtab("Memory"); e.Handled = true; return;
+                case Key.D4: ActivateSettingsSubtab("Profile"); e.Handled = true; return;
+                case Key.D5: ActivateSettingsSubtab("Logs"); e.Handled = true; return;
+                case Key.D6: ActivateSettingsSubtab("General"); e.Handled = true; return;
+            }
         }
 
         switch (e.Key)
@@ -484,7 +484,7 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            // Enter is handled per-control (ChatInput_PreviewKeyDown), not globally.
+                // Enter is handled per-control (ChatInput_PreviewKeyDown), not globally.
         }
     }
 

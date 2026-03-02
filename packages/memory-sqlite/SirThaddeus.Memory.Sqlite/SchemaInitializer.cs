@@ -189,7 +189,7 @@ public static class SchemaInitializer
         "ALTER TABLE memory_facts ADD COLUMN source_hash TEXT",
         "ALTER TABLE memory_facts ADD COLUMN dedupe_key TEXT",
         "ALTER TABLE memory_facts ADD COLUMN origin TEXT",
-        
+
         "ALTER TABLE memory_events ADD COLUMN weight REAL NOT NULL DEFAULT 0.65",
         "ALTER TABLE memory_events ADD COLUMN source_turn_id TEXT",
         "ALTER TABLE memory_events ADD COLUMN source_hash TEXT",
@@ -197,7 +197,7 @@ public static class SchemaInitializer
         "ALTER TABLE memory_events ADD COLUMN origin TEXT",
         "ALTER TABLE memory_events ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE memory_events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
-        
+
         "ALTER TABLE memory_nuggets ADD COLUMN source_turn_id TEXT",
         "ALTER TABLE memory_nuggets ADD COLUMN source_hash TEXT",
         "ALTER TABLE memory_nuggets ADD COLUMN dedupe_key TEXT",
@@ -209,14 +209,14 @@ public static class SchemaInitializer
         "ALTER TABLE memory_facts ADD COLUMN embedding BLOB",
         "ALTER TABLE memory_facts ADD COLUMN embedding_model TEXT",
         "ALTER TABLE memory_facts ADD COLUMN embedding_dims INTEGER",
-        
+
         "ALTER TABLE memory_events ADD COLUMN embedding BLOB",
         "ALTER TABLE memory_events ADD COLUMN embedding_model TEXT",
         "ALTER TABLE memory_events ADD COLUMN embedding_dims INTEGER",
-        
+
         "ALTER TABLE memory_chunks ADD COLUMN embedding_model TEXT",
         "ALTER TABLE memory_chunks ADD COLUMN embedding_dims INTEGER",
-        
+
         "ALTER TABLE memory_nuggets ADD COLUMN embedding_model TEXT",
         "ALTER TABLE memory_nuggets ADD COLUMN embedding_dims INTEGER"
     ];

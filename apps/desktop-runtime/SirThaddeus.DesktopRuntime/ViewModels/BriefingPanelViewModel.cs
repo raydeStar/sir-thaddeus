@@ -29,8 +29,8 @@ public sealed class BriefingPanelViewModel : ViewModelBase
     };
 
     private BriefingPanelState _state = BriefingPanelState.Idle;
-    private string             _statusMessage = "";
-    private DeepDiveBriefing?  _currentBriefing;
+    private string _statusMessage = "";
+    private DeepDiveBriefing? _currentBriefing;
 
     public BriefingPanelViewModel()
     {
@@ -95,26 +95,26 @@ public sealed class BriefingPanelViewModel : ViewModelBase
     //  Computed properties
     // ────────────────────────────────────────────
 
-    public bool IsIdle     => State == BriefingPanelState.Idle;
-    public bool IsLoading  => State == BriefingPanelState.Loading;
-    public bool IsSuccess  => State == BriefingPanelState.Success;
-    public bool IsPartial  => State == BriefingPanelState.Partial;
-    public bool IsFailure  => State == BriefingPanelState.Failure;
+    public bool IsIdle => State == BriefingPanelState.Idle;
+    public bool IsLoading => State == BriefingPanelState.Loading;
+    public bool IsSuccess => State == BriefingPanelState.Success;
+    public bool IsPartial => State == BriefingPanelState.Partial;
+    public bool IsFailure => State == BriefingPanelState.Failure;
     public bool HasBriefing => CurrentBriefing is not null;
-    public bool HasMap      => CurrentBriefing?.Map is not null;
+    public bool HasMap => CurrentBriefing?.Map is not null;
 
     public string MapTitle => CurrentBriefing?.Map?.Label ?? "Map preview";
     public string MapCoordinates => CurrentBriefing?.Map is null
         ? "No coordinates available."
         : $"{CurrentBriefing.Map.Latitude:F5}, {CurrentBriefing.Map.Longitude:F5}";
 
-    public bool   HasWebsite    => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Website);
-    public bool   HasDirections => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.DirectionsUrl);
-    public bool   HasPhone      => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Phone);
-    public bool   HasAddress    => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Address);
-    public string WebsiteUrl    => CurrentBriefing?.Hero?.Website ?? "";
+    public bool HasWebsite => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Website);
+    public bool HasDirections => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.DirectionsUrl);
+    public bool HasPhone => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Phone);
+    public bool HasAddress => !string.IsNullOrWhiteSpace(CurrentBriefing?.Hero?.Address);
+    public string WebsiteUrl => CurrentBriefing?.Hero?.Website ?? "";
     public string DirectionsUrl => CurrentBriefing?.Hero?.DirectionsUrl ?? "";
-    public string PhoneText     => CurrentBriefing?.Hero?.Phone ?? "";
+    public string PhoneText => CurrentBriefing?.Hero?.Phone ?? "";
 
     // ────────────────────────────────────────────
     //  Sidebar: aggregated sources + review snippets
@@ -302,11 +302,11 @@ public sealed class BriefingPanelViewModel : ViewModelBase
 
         History.Insert(0, new BriefingHistoryEntry
         {
-            Title      = briefing.Hero.Title,
+            Title = briefing.Hero.Title,
             Confidence = briefing.Hero.Confidence,
             StatusLine = briefing.Hero.StatusLine,
-            Timestamp  = DateTime.Now,
-            Briefing   = briefing
+            Timestamp = DateTime.Now,
+            Briefing = briefing
         });
 
         // Keep a reasonable cap.

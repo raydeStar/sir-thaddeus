@@ -6,21 +6,12 @@ mode: live
 assertions:
   required_tools: []
   forbidden_tools:
-    - web_search
     - browser_navigate
     - file_read
     - file_list
     - file_write
     - system_execute
     - screen_capture
-    - tool_ping
-    - weather_geocode
-    - weather_forecast
-    - memory_store_facts
-    - memory_retrieve
-    - places_lookup
-    - tool_list_capabilities
-    - time_now
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: true

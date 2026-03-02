@@ -23,7 +23,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private readonly Action _requestShutdown;
     private readonly Func<string>? _getActivePersonalityId;
     private readonly Func<string>? _getActivePersonalityHash;
-    
+
     private bool _isDrawerOpen;
     private string _stateLabel = "";
     private string _stateIcon = "";
@@ -35,7 +35,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private string _activePersonalityHash = "";
 
     public OverlayViewModel(
-        RuntimeController controller, 
+        RuntimeController controller,
         IAuditLogger auditLogger,
         IPermissionBroker permissionBroker,
         IToolRunner toolRunner,
@@ -63,7 +63,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
         // Subscribe to state changes
         _stateStore.StateChanged += OnStateChanged;
-        
+
         // Initialize state
         UpdateStateDisplay();
         UpdateActiveTokenCount();
@@ -204,7 +204,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
     private void RefreshAuditFeed()
     {
         var events = _auditLogger.ReadTail(10);
-        
+
         AuditFeed.Clear();
         foreach (var evt in events.Reverse()) // Show newest first
         {
@@ -217,7 +217,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
         var states = Enum.GetValues<AssistantState>();
         var nextState = states[_simulatedStateIndex % states.Length];
         _simulatedStateIndex++;
-        
+
         // Skip Off state in simulation
         if (nextState == AssistantState.Off)
         {
@@ -295,7 +295,7 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
 
             // Step 2: Execute a tool using the token
             await Task.Delay(500); // Brief visual pause
-            
+
             var toolCall = new ToolCall
             {
                 Id = ToolCall.GenerateId(),
@@ -331,11 +331,11 @@ public sealed class OverlayViewModel : ViewModelBase, IDisposable
             var result2 = await _toolRunner.ExecuteAsync(
                 toolCall with { Id = ToolCall.GenerateId() },
                 token.Id);
-            
-            PermissionDemoStatus = result2.Success 
-                ? "Second execution succeeded (token still valid)" 
+
+            PermissionDemoStatus = result2.Success
+                ? "Second execution succeeded (token still valid)"
                 : $"Second execution failed: {result2.Error}";
-            
+
             RefreshAuditFeed();
             UpdateActiveTokenCount();
         }

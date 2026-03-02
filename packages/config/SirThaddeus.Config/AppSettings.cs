@@ -773,9 +773,9 @@ public sealed record WeatherSettings
         var lower = (PreferredUnits ?? "").Trim().ToLowerInvariant();
         return lower switch
         {
-            "metric"   => "metric",
+            "metric" => "metric",
             "imperial" => "imperial",
-            _          => "auto"
+            _ => "auto"
         };
     }
 }

@@ -17,14 +17,14 @@ public class IntentClassifierTests
 {
     [Theory]
     [InlineData("How do I fix this null reference exception?", MemoryIntent.Technical)]
-    [InlineData("debug the build error in pipeline",          MemoryIntent.Technical)]
-    [InlineData("I feel so anxious about tomorrow",           MemoryIntent.Personal)]
-    [InlineData("my relationship with my family",             MemoryIntent.Personal)]
-    [InlineData("schedule a meeting for next week",           MemoryIntent.Planning)]
-    [InlineData("remind me to buy groceries tomorrow",        MemoryIntent.Planning)]
-    [InlineData("hello how are you",                          MemoryIntent.General)]
-    [InlineData("tell me something interesting",              MemoryIntent.General)]
-    [InlineData("",                                           MemoryIntent.General)]
+    [InlineData("debug the build error in pipeline", MemoryIntent.Technical)]
+    [InlineData("I feel so anxious about tomorrow", MemoryIntent.Personal)]
+    [InlineData("my relationship with my family", MemoryIntent.Personal)]
+    [InlineData("schedule a meeting for next week", MemoryIntent.Planning)]
+    [InlineData("remind me to buy groceries tomorrow", MemoryIntent.Planning)]
+    [InlineData("hello how are you", MemoryIntent.General)]
+    [InlineData("tell me something interesting", MemoryIntent.General)]
+    [InlineData("", MemoryIntent.General)]
     public void ClassifiesIntent_FromKeywords(string query, MemoryIntent expected)
     {
         var result = IntentClassifier.Classify(query);
@@ -119,14 +119,14 @@ public class ScoringTests
     public void RecencyScore_FullForRecentItems()
     {
         var recent = DateTimeOffset.UtcNow.AddDays(-2);
-        var score  = Scoring.ComputeRecency(recent);
+        var score = Scoring.ComputeRecency(recent);
         Assert.Equal(1.0, score);
     }
 
     [Fact]
     public void RecencyScore_ZeroForOldItems()
     {
-        var old   = DateTimeOffset.UtcNow.AddDays(-100);
+        var old = DateTimeOffset.UtcNow.AddDays(-100);
         var score = Scoring.ComputeRecency(old);
         Assert.Equal(0.0, score);
     }
@@ -135,7 +135,7 @@ public class ScoringTests
     public void RecencyScore_DecaysBetween()
     {
         var midAge = DateTimeOffset.UtcNow.AddDays(-48);
-        var score  = Scoring.ComputeRecency(midAge);
+        var score = Scoring.ComputeRecency(midAge);
         Assert.InRange(score, 0.01, 0.99);
     }
 
@@ -201,7 +201,7 @@ public class MemoryRetrieverTests
     [Fact]
     public async Task EmptyQuery_ReturnsEmptyPack()
     {
-        var store     = new FakeMemoryStore();
+        var store = new FakeMemoryStore();
         var retriever = new MemoryRetriever(store);
 
         var pack = await retriever.BuildMemoryPackAsync("   ");
@@ -214,7 +214,7 @@ public class MemoryRetrieverTests
     [Fact]
     public async Task NoCandidates_ReturnsEmptyPack()
     {
-        var store     = new FakeMemoryStore();
+        var store = new FakeMemoryStore();
         var retriever = new MemoryRetriever(store);
 
         var pack = await retriever.BuildMemoryPackAsync("something with no matches");
@@ -233,10 +233,10 @@ public class MemoryRetrieverTests
                 new StoreCandidate<MemoryFact>(
                     new MemoryFact
                     {
-                        MemoryId  = $"f{i}",
-                        Subject   = "user",
+                        MemoryId = $"f{i}",
+                        Subject = "user",
                         Predicate = "knows",
-                        Object    = $"fact-{i}",
+                        Object = $"fact-{i}",
                         Sensitivity = Sensitivity.Public
                     }, 0.8))
                 .ToList()
@@ -258,8 +258,8 @@ public class MemoryRetrieverTests
                     new MemoryEvent
                     {
                         EventId = $"e{i}",
-                        Type    = "meeting",
-                        Title   = $"meeting-{i}",
+                        Type = "meeting",
+                        Title = $"meeting-{i}",
                         Sensitivity = Sensitivity.Public
                     }, 0.8))
                 .ToList()
@@ -280,9 +280,9 @@ public class MemoryRetrieverTests
                 new StoreCandidate<MemoryChunk>(
                     new MemoryChunk
                     {
-                        ChunkId    = $"c{i}",
+                        ChunkId = $"c{i}",
                         SourceType = "doc",
-                        Text       = $"chunk text {i}",
+                        Text = $"chunk text {i}",
                         Sensitivity = Sensitivity.Public
                     }, 0.8))
                 .ToList()
@@ -427,7 +427,7 @@ public class MemoryRetrieverTests
 /// </summary>
 internal sealed class FakeMemoryStore : IMemoryStore
 {
-    public List<StoreCandidate<MemoryFact>>  FactsToReturn  { get; set; } = [];
+    public List<StoreCandidate<MemoryFact>> FactsToReturn { get; set; } = [];
     public List<StoreCandidate<MemoryEvent>> EventsToReturn { get; set; } = [];
     public List<StoreCandidate<MemoryChunk>> ChunksToReturn { get; set; } = [];
 
@@ -446,7 +446,7 @@ internal sealed class FakeMemoryStore : IMemoryStore
         Task.FromResult<IReadOnlyList<StoreCandidate<MemoryChunk>>>(
             ChunksToReturn.Take(maxResults).ToList());
 
-    public List<MemoryFact>  StoredFacts  { get; } = [];
+    public List<MemoryFact> StoredFacts { get; } = [];
     public List<MemoryEvent> StoredEvents { get; } = [];
     public List<MemoryChunk> StoredChunks { get; } = [];
 
@@ -486,7 +486,7 @@ internal sealed class FakeMemoryStore : IMemoryStore
         Task.FromResult<(IReadOnlyList<MemoryChunk>, int)>(([], 0));
 
     // ── Delete stubs ───────────────────────────────────────────────
-    public List<string> DeletedFactIds  { get; } = [];
+    public List<string> DeletedFactIds { get; } = [];
     public List<string> DeletedEventIds { get; } = [];
     public List<string> DeletedChunkIds { get; } = [];
 

@@ -19,10 +19,10 @@ public static class RecencyHelper
         var r = (recency ?? "any").Trim().ToLowerInvariant();
         return r switch
         {
-            "day" or "today" or "24h" or "1d"  => "day",
-            "week" or "7d" or "this week"      => "week",
-            "month" or "30d" or "this month"   => "month",
-            "any" or "all" or "none" or ""     => "any",
+            "day" or "today" or "24h" or "1d" => "day",
+            "week" or "7d" or "this week" => "week",
+            "month" or "30d" or "this month" => "month",
+            "any" or "all" or "none" or "" => "any",
             _ => "any"
         };
     }
@@ -36,10 +36,10 @@ public static class RecencyHelper
         var r = Normalize(recency);
         return r switch
         {
-            "day"   => nowUtc.AddDays(-1),
-            "week"  => nowUtc.AddDays(-7),
+            "day" => nowUtc.AddDays(-1),
+            "week" => nowUtc.AddDays(-7),
             "month" => nowUtc.AddDays(-31),
-            _       => null
+            _ => null
         };
     }
 
@@ -49,9 +49,9 @@ public static class RecencyHelper
     public static string ToLabel(string recency) =>
         Normalize(recency) switch
         {
-            "day"   => "past 24 hours",
-            "week"  => "past 7 days",
+            "day" => "past 24 hours",
+            "week" => "past 7 days",
             "month" => "past 31 days",
-            _       => "any time"
+            _ => "any time"
         };
 }
