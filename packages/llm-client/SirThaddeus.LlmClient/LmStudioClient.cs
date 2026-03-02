@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -18,6 +19,8 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     private long _promptTokensTotal;
     private long _completionTokensTotal;
     private long _totalTokensTotal;
+    private readonly HashSet<string> _confirmedLoadedModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _autoLoadEnabled;
 
     public LmStudioClient(LlmClientOptions options, HttpClient? httpClient = null)
     {
@@ -29,6 +32,10 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         // Local GPUs require time to sweep their VRAM floors. 
         // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
         _http.Timeout = TimeSpan.FromSeconds(300);
+
+        // Only auto-load models when using the internal HttpClient.
+        // External clients (e.g. test mocks) don't support /v1/models/load.
+        _autoLoadEnabled = httpClient is null;
 
         _json = new JsonSerializerOptions
         {
@@ -104,6 +111,10 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(messages);
+
+        // Ensure the configured model is loaded in LM Studio before
+        // sending the request. This is a no-op after the first call.
+        await EnsureModelLoadedAsync(cancellationToken);
 
         var requestMessages = tools is { Count: > 0 }
             ? messages
@@ -393,6 +404,105 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Auto-Model Loading
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ensures the configured model is loaded in LM Studio before
+    /// the first request. Uses <c>GET /v1/models</c> to check and
+    /// <c>POST /v1/models/load</c> to load if missing. Results are
+    /// cached per model ID so the HTTP round-trip only happens once.
+    /// <para>
+    /// IMPORTANT: Only loads via POST when zero models are present.
+    /// If other models are already loaded, we skip — sending a load
+    /// request could displace an active model, causing regressions
+    /// when multiple LLM clients share the same LM Studio endpoint.
+    /// </para>
+    /// </summary>
+    private async Task EnsureModelLoadedAsync(CancellationToken cancellationToken)
+    {
+        var options = GetOptionsSnapshot();
+        var modelId = options.Model;
+        if (string.IsNullOrWhiteSpace(modelId))
+            return;
+
+        // Fast path: already confirmed loaded this session,
+        // or auto-loading is disabled (e.g. test/external HttpClient).
+        if (!_autoLoadEnabled || _confirmedLoadedModels.Contains(modelId))
+            return;
+
+        try
+        {
+            // Check what's currently loaded.
+            var modelsResponse = await _http.GetAsync("/v1/models", cancellationToken);
+            if (!modelsResponse.IsSuccessStatusCode)
+            {
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            var raw = await modelsResponse.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Array)
+            {
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            var loadedCount = data.GetArrayLength();
+            var foundOurModel = false;
+
+            foreach (var item in data.EnumerateArray())
+            {
+                if (!item.TryGetProperty("id", out var idEl) ||
+                    idEl.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var loadedId = idEl.GetString();
+                if (string.Equals(loadedId, modelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundOurModel = true;
+                    break;
+                }
+            }
+
+            if (foundOurModel)
+            {
+                // Our model is already loaded — nothing to do.
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            if (loadedCount > 0)
+            {
+                // Other models are loaded but ours isn't. Do NOT force-
+                // load because that could displace them. The request will
+                // go through to whichever model is active; LM Studio may
+                // route it if multi-model is enabled.
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            // No models loaded at all — safe to load ours.
+            var loadPayload = new StringContent(
+                JsonSerializer.Serialize(new { model = modelId }),
+                Encoding.UTF8,
+                "application/json");
+
+            await _http.PostAsync("/v1/models/load", loadPayload, cancellationToken);
+            _confirmedLoadedModels.Add(modelId);
+        }
+        catch
+        {
+            // Non-fatal: if the models API is unavailable (e.g. older
+            // LM Studio or non-LM Studio backend), skip gracefully.
+            // Mark as "confirmed" so we don't retry every request.
+            _confirmedLoadedModels.Add(modelId);
+        }
     }
 
     /// <summary>

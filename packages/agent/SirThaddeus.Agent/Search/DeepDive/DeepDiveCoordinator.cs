@@ -198,6 +198,34 @@ public sealed partial class DeepDiveCoordinator
         }
 
         var extractedChunks = new List<string>();
+
+        // ── Last-resort fallback: browse a search engine directly ─────
+        // When all web_search providers returned 0 results (SearxNG not
+        // running, DDG blocked, Google News RSS doesn't index businesses),
+        // browse a Google search URL directly to extract structured data.
+        if (sources.Count == 0)
+        {
+            AddAuditStep(auditSteps, "search", "web_search returned 0 results — browsing Google search directly.");
+            var googleUrl = $"https://www.google.com/search?q={Uri.EscapeDataString(cleanedQuery + webLocationSuffix + " hours address phone")}";
+            var browseArgs = JsonSerializer.Serialize(new { url = googleUrl });
+            var browseContent = await CallToolBoundedAsync(
+                BrowseTool,
+                BrowseToolAlt,
+                browseArgs,
+                "open_page",
+                $"Browsed Google search: {googleUrl}");
+            if (!string.IsNullOrWhiteSpace(browseContent) && !browseContent.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !browseContent.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
+            {
+                extractedChunks.Add(browseContent!);
+                sourceRefs.Add(new SourceRef
+                {
+                    Name = "Google Search",
+                    Url = googleUrl,
+                    FetchedIso = now.ToString("O")
+                });
+            }
+        }
+
         foreach (var source in sources.Take(2))
         {
             var args = JsonSerializer.Serialize(new { url = source.Url });
@@ -207,11 +235,11 @@ public sealed partial class DeepDiveCoordinator
                 args,
                 "open_page",
                 $"Opened fallback page: {source.Url}");
-            if (!string.IsNullOrWhiteSpace(content))
+            if (!string.IsNullOrWhiteSpace(content) && !content.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !content.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
                 extractedChunks.Add(content!);
         }
 
-        if (!string.IsNullOrWhiteSpace(webResult))
+        if (!string.IsNullOrWhiteSpace(webResult) && !webResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !webResult.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
             extractedChunks.Add(webResult!);
 
         // Source snippets often contain hours, address, phone, and ratings
@@ -881,9 +909,10 @@ public sealed partial class DeepDiveCoordinator
     private static partial System.Text.RegularExpressions.Regex CleanDanglingCopulaRegex();
 
     /// <summary>
-    /// Uses configured user location only for ambiguous place queries.
-    /// If the user named a specific place (2+ cleaned tokens), avoid biasing
-    /// lookup with home location and trust the explicit place string.
+    /// Uses configured user location for place queries unless the query
+    /// already contains a city/state reference from the location hint.
+    /// "William's Flowers" → appends "Olympia, WA"
+    /// "Trader Joe's Portland OR" → already contains a city, skips hint
     /// </summary>
     private static string? ResolveLocationHintForQuery(
         string rawQuery,
@@ -893,6 +922,7 @@ public sealed partial class DeepDiveCoordinator
         if (string.IsNullOrWhiteSpace(userLocationHint))
             return null;
 
+        // Explicit proximity cues always use the hint.
         var lower = rawQuery.ToLowerInvariant();
         if (lower.Contains("near me", StringComparison.Ordinal) ||
             lower.Contains("nearby", StringComparison.Ordinal) ||
@@ -901,11 +931,22 @@ public sealed partial class DeepDiveCoordinator
             return userLocationHint;
         }
 
-        var tokenCount = cleanedQuery
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Length;
+        // Check if the query already mentions the configured location
+        // (city or state). Split the hint into tokens and check for any
+        // significant word (skip short tokens like "WA" → 2 chars is OK).
+        // Examples:
+        //   hint="Olympia, WA"  → ["olympia", "wa"]
+        //   query="Trader Joe's Olympia" → contains "olympia" → skip
+        //   query="William's Flowers"    → no match → include hint
+        var hintTokens = userLocationHint
+            .ToLowerInvariant()
+            .Split([' ', ',', '.'], StringSplitOptions.RemoveEmptyEntries);
 
-        return tokenCount >= 2 ? null : userLocationHint;
+        var queryLower = cleanedQuery.ToLowerInvariant();
+        var queryAlreadyHasLocation = hintTokens.Any(token =>
+            token.Length >= 2 && queryLower.Contains(token, StringComparison.Ordinal));
+
+        return queryAlreadyHasLocation ? null : userLocationHint;
     }
 
     private static int ParseIntEnv(string key, int fallback, int min, int max)

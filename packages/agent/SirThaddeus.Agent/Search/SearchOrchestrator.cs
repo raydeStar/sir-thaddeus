@@ -432,34 +432,44 @@ public sealed class SearchOrchestrator
             query.Query, query.Recency, toolCallsMade, ct,
             originalUserMessage: userMessage);
 
-        if (string.IsNullOrWhiteSpace(toolResult))
+        var isNoResults = string.IsNullOrWhiteSpace(toolResult) || 
+                          LooksLikeNoResultsPayload(toolResult) || 
+                          WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null;
+
+        if (!isNoResults)
         {
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                "Web search returned no results.",
-                ct);
+            var rawSources = ParseSourcesFromToolResult(toolResult);
+            if (rawSources.Count == 0)
+                isNoResults = true;
         }
-        if (LooksLikeNoResultsPayload(toolResult))
+
+        if (isNoResults && isLocalBusinessQuery)
         {
-            return await BuildNoResultsFallbackAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
+            _audit.Append(new AuditEvent { Actor = "search", Action = "SEARCH_FALLBACK", Result = "browser_navigate_local_business" });
+            var fallback = await CallBrowserSearchFallbackAsync(query.Query, toolCallsMade, ct);
+            if (!string.IsNullOrWhiteSpace(fallback))
+            {
+                toolResult = fallback!;
+                isNoResults = false;
+            }
         }
-        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
+
+        if (isNoResults)
         {
+            if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
+            {
+                return await BuildOfflineReasoningResponseAsync(
+                    userMessage, memoryPackText, history, toolCallsMade, factFailure.Text, ct);
+            }
+
+            if (LooksLikeNoResultsPayload(toolResult))
+            {
+                return await BuildNoResultsFallbackAsync(
+                    userMessage, memoryPackText, history, toolCallsMade, ct);
+            }
+
             return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                factFailure.Text,
-                ct);
+                userMessage, memoryPackText, history, toolCallsMade, "Web search returned no results.", ct);
         }
 
         // Parse and record results.
@@ -583,6 +593,11 @@ public sealed class SearchOrchestrator
             : hasArticleContent
                 ? memoryPackText + FactFindSummaryInstruction
                 : memoryPackText + FactFindSnippetOnlyInstruction;
+
+        if (isLocalBizDiscovery)
+        {
+            instruction += "\nCRITICAL: The user's location has ALREADY been applied to the search results below. DO NOT claim you lack real-time geolocation data, and DO NOT apologize for not knowing their location. Confidently present the local results provided.";
+        }
 
         return await SummarizeAndRespond(
             sb.ToString(), instruction,
@@ -998,6 +1013,45 @@ public sealed class SearchOrchestrator
         });
 
         return toolResult;
+    }
+
+    private async Task<string?> CallBrowserSearchFallbackAsync(string query, List<ToolCallRecord> toolCallsMade, CancellationToken ct)
+    {
+        var googleUrl = $"https://www.google.com/search?q={Uri.EscapeDataString(query)}";
+        var args = JsonSerializer.Serialize(new { url = googleUrl });
+        var toolName = "browser_navigate";
+        string toolResult;
+        try
+        {
+            var content = await _mcp.CallToolAsync(toolName, args, ct);
+            if (string.IsNullOrWhiteSpace(content))
+                return null;
+
+            toolResult = "[Web fallback — search engine results]\n" + 
+                         content + 
+                         "\n<!-- SOURCES_JSON -->\n" + 
+                         "[{\"url\":\"" + googleUrl + "\",\"title\":\"Google Search\"}]";
+                         
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName = toolName,
+                Arguments = args,
+                Result = "Fetched Google Search via browser fallback",
+                Success = true
+            });
+            return toolResult;
+        }
+        catch (Exception ex)
+        {
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName = toolName,
+                Arguments = args,
+                Result = $"Browser fallback error: {ex.Message}",
+                Success = false
+            });
+            return null;
+        }
     }
 
     // ── Proximity signal patterns ──────────────────────────────────────
@@ -2228,3 +2282,4 @@ public sealed class SearchOrchestrator
         };
     }
 }
+
