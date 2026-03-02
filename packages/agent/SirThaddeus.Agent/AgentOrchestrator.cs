@@ -268,7 +268,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         string? activePersonalityId = null,
         string? personalityProfilesDirectory = null,
         IFootmanRouter? footmanRouter = null,
-        IAutoMemoryExtractor? autoMemoryExtractor = null)
+        IAutoMemoryExtractor? autoMemoryExtractor = null,
+        ILlmClient? gatekeeperLlm = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -299,10 +300,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             GeocodeMismatchMode = geocodeMismatchMode
         });
         _toolPlanner = toolPlanner ?? new ToolPlanner();
-        _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(llm, audit);
+        
+        var effectiveGatekeeper = gatekeeperLlm ?? llm;
+        _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
-        _router = router ?? new Routing.RouterV2(llm, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, new SmartIntentClassifier(llm), _timeProvider);
+        _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
+        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, new SmartIntentClassifier(effectiveGatekeeper), _timeProvider);
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
         _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);

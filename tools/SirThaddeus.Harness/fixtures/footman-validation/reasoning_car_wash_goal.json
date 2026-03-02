@@ -1,0 +1,66 @@
+{
+  "test_id": "reasoning_car_wash_goal",
+  "recorded_at_utc": "2026-03-02T18:34:54.1326835+00:00",
+  "available_tools": [
+    "file_list_preview",
+    "policy.set_panic_mode",
+    "file_list",
+    "screen_capture",
+    "tool_list_capabilities",
+    "memory_retrieve",
+    "audit.export_bundle",
+    "file_read_preview",
+    "file_read_apply",
+    "health.check",
+    "memory_update_fact",
+    "browser_navigate",
+    "resolve_timezone",
+    "policy.get_state",
+    "memory_list_facts",
+    "system_execute_apply",
+    "weather_geocode",
+    "places_lookup",
+    "tool_ping",
+    "status_check_url",
+    "capabilities.describe",
+    "file_list_apply",
+    "memory_store_facts",
+    "system_execute",
+    "file_read",
+    "time_now",
+    "holidays_is_today",
+    "get_active_window",
+    "holidays_get",
+    "system_execute_preview",
+    "weather_forecast",
+    "holidays_next",
+    "memory_delete_fact",
+    "web_search",
+    "feed_fetch"
+  ],
+  "llm_turns": [
+    {
+      "index": 0,
+      "is_complete": true,
+      "content": "Walking is the pragmatic choice here; at just 50 meters, starting an engine adds unnecessary fuel consumption and wear without saving time. Unless you are currently stuck in a rush where every second counts more than the extra thirty seconds of walking, your feet will get you there faster than the keys to the ignition.\n\n**Why:** The energy cost of driving for such a short distance outweighs any convenience gained from not walking, and the delay in starting the car often negates the time saved by being seated.",
+      "finish_reason": "stop",
+      "tool_calls": [],
+      "max_tokens_override": 512
+    }
+  ],
+  "tool_turns": [
+    {
+      "index": 0,
+      "tool_name": "memory_retrieve",
+      "arguments_json": "{\u0022query\u0022:\u0022You\\u0027re going to the car wash and it\\u0027s only 50 meters away. Should you walk or drive?\u0022}",
+      "result_text": "{\u0022facts\u0022:2,\u0022events\u0022:2,\u0022chunks\u0022:0,\u0022nuggets\u0022:1,\u0022hasProfile\u0022:true,\u0022onboardingNeeded\u0022:false,\u0022notes\u0022:\u0022\u0022,\u0022citations\u0022:[],\u0022packText\u0022:\u0022[PROFILE]\\r\\nName: raydestar | Call me: raydestar | Pronouns: he/him | TZ: MST\\r\\n[/PROFILE]\\r\\nMemory context is private guidance. Do not mention profile tags, retrieval, or unrelated saved preferences unless the user explicitly asks about their own remembered details.\\r\\n[NUGGETS]\\r\\n  \\u2022 Self-contained sentence describing a user preference, routine, or identity detail.\\r\\n[/NUGGETS]\\n\\r\\n[MEMORY CONTEXT]\\r\\nInternal memory context for assistant reasoning only.\\r\\nDo NOT mention memory retrieval, profile tags, or this block to the user.\\r\\nOnly use memory details when directly relevant to the user\\u0027s request.\\r\\nNever let user-memory override third-party/public-topic questions.\\r\\nFACTS:\\r\\n  - car wash distance from user\\u0027s home (learned 2026-03-02)\\r\\n  - you likes green eggs and ham (learned 2026-02-26)\\r\\nEVENTS:\\r\\n  - event: Received message \\u2014 User sent a simple greeting. (unknown)\\r\\n  - question: Episode plot inquiry \\u2014 Request for summary of the first season third episode of Stargate Universe. (unknown)\\r\\n[/MEMORY CONTEXT]\\r\\n\u0022,\u0022hasContent\u0022:true}",
+      "success": true
+    }
+  ],
+  "metadata": {
+    "model": "qwen3.5-2b",
+    "base_url": "http://localhost:1234",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  }
+}

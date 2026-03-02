@@ -494,7 +494,8 @@ public partial class App : System.Windows.Application
             activePersonalityId: _settings.ActivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings),
             footmanRouter: _footmanRouter,
-            autoMemoryExtractor: autoMemoryExtractor);
+            autoMemoryExtractor: autoMemoryExtractor,
+            gatekeeperLlm: _gatekeeperLlmClient);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
