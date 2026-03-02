@@ -326,15 +326,18 @@ public partial class App : System.Windows.Application
         // ── 3c. Create Footman router (fast LLM-based routing) ──────────
         // Uses the gatekeeper model for sub-200ms routing decisions.
         // Falls back gracefully if the gatekeeper is unavailable.
-        _footmanRouter = new Agent.Routing.FastLlmFootmanRouter(
-            _gatekeeperLlmClient,
-            logEvent: (action, details) => _auditLogger.Append(new AuditEvent
-            {
-                Actor = "footman",
-                Action = action,
-                Result = "ok",
-                Details = new Dictionary<string, object> { ["detail"] = details }
-            }));
+        if (_gatekeeperLlmClient is not null)
+        {
+            _footmanRouter = new Agent.Routing.FastLlmFootmanRouter(
+                _gatekeeperLlmClient,
+                logEvent: (action, details) => _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "footman",
+                    Action = action,
+                    Result = "ok",
+                    Details = new Dictionary<string, object> { ["detail"] = details }
+                }));
+        }
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
         _splash?.SetStatus("Starting MCP server…");
