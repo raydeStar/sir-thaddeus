@@ -13,16 +13,22 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
 
     private readonly IMcpToolClient _mcp;
     private readonly IAuditLogger _audit;
+    private readonly ISmartIntentClassifier _classifier;
     private readonly TimeProvider _timeProvider;
+    private readonly MemoryTelemetry? _telemetry;
 
     public MemoryContextProvider(
         IMcpToolClient mcp,
         IAuditLogger audit,
-        TimeProvider? timeProvider = null)
+        ISmartIntentClassifier classifier,
+        TimeProvider? timeProvider = null,
+        MemoryTelemetry? telemetry = null)
     {
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _telemetry = telemetry;
     }
 
     public async Task<MemoryContextResult> GetContextAsync(
@@ -42,9 +48,26 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             };
         }
 
+        _telemetry?.RecordRetrievalAttempt();
         var start = _timeProvider.GetTimestamp();
         try
         {
+            var decision = await _classifier.ClassifyAsync(request.UserMessage, cancellationToken);
+            if (decision == MemoryIntentDecision.Suppress && !request.IsColdGreeting)
+            {
+                _telemetry?.RecordRetrievalSuppressed();
+                return new MemoryContextResult
+                {
+                    Provenance = new MemoryContextProvenance
+                    {
+                        Skipped = true,
+                        Success = false,
+                        DurationMs = ElapsedMs(start),
+                        Summary = "Memory retrieve explicitly suppressed by intent classifier."
+                    }
+                };
+            }
+
             var argsObj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["query"] = request.UserMessage
@@ -68,6 +91,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
 
             if (!ReferenceEquals(completed, callTask))
             {
+                _telemetry?.RecordRetrievalTimeout();
                 return new MemoryContextResult
                 {
                     Error = "Memory retrieval timed out.",
@@ -145,7 +169,12 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
                            packTextEl.ValueKind == JsonValueKind.String
                 ? (packTextEl.GetString() ?? "")
                 : "";
-            packText = SanitizePackTextForRequest(packText, request.UserMessage, request.IsColdGreeting);
+            
+            if (decision == MemoryIntentDecision.Unsure && !request.IsColdGreeting)
+            {
+                // Unsure fallback: fallback to original heuristic to prevent creepiness leaks
+                packText = SanitizePackTextForRequest(packText, request.UserMessage, request.IsColdGreeting);
+            }
 
             var facts = TryReadInt(root, "facts");
             var events = TryReadInt(root, "events");
@@ -165,6 +194,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
                 ? "No relevant memories found."
                 : Truncate(packText.Replace("\n", " ", StringComparison.Ordinal).Trim(), 200);
 
+            _telemetry?.RecordRetrievalSuccess();
             return new MemoryContextResult
             {
                 PackText = packText,

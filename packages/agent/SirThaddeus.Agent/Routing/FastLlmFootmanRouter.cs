@@ -131,6 +131,7 @@ Rules:
 - If the message asks to recall stored information → MemoryRead
 - If the message contains a URL or asks to browse/navigate → BrowseOnce
 - If the message is a math problem, conversion, time query, or logic puzzle → Chat (no tools needed)
+- If the user supplies all necessary facts and asks for an opinion, advice, or judgment (e.g. 'X is 50m away, should I walk or drive?') → Chat (no lookup needed; reason from what was given)
 - If uncertain, set abstain=true and nextState=Fallback
 - Set confidence honestly. Below 0.60 triggers automatic fallback.
 

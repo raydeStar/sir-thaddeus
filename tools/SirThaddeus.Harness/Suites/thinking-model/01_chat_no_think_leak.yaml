@@ -1,0 +1,34 @@
+id: thinking_chat_no_think_leak
+name: Thinking Model - Chat response has no raw <think> tags
+user_message: "What is the capital of France?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - file_read
+    - file_list
+    - system_execute
+    - screen_capture
+  allowed_tools_only: false
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - Paris
+  forbidden_keywords:
+    - "<think>"
+    - "</think>"
+    - "Final Answer:"
+    - "Thinking:"
+    - "Reasoning:"
+  max_response_chars: 1200
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/llm-client/SirThaddeus.LlmClient/LmStudioClient.cs
+    - packages/agent/SirThaddeus.Agent/OrchestratorMessageHelpers.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

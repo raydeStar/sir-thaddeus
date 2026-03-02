@@ -189,8 +189,8 @@ public sealed class VoiceHostProcessManagerTests
                 ephemeralPortProvider: () => null);
 
             var first = await manager.EnsureRunningAsync(CancellationToken.None);
-            Assert.True(first.Success, first.UserMessage);
-            Assert.Equal("http://127.0.0.1:17845", first.BaseUrl);
+            Assert.False(first.Success);
+            Assert.Equal("voicehost_warming_up", first.ErrorCode);
             Assert.Equal(1, starterCalls);
 
             await Task.Delay(2_500);

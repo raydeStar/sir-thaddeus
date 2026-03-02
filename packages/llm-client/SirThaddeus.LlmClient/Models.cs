@@ -134,6 +134,14 @@ public sealed record LlmResponse
     public IReadOnlyList<ToolCallRequest>? ToolCalls { get; init; }
 
     /// <summary>
+    /// Chain-of-thought / reasoning content when the model surfaces it in
+    /// a dedicated field (e.g. LM Studio <c>reasoning_content</c>).
+    /// Always null for non-thinking models.
+    /// Never shown to the user — for diagnostics/logging only.
+    /// </summary>
+    public string? ReasoningContent { get; init; }
+
+    /// <summary>
     /// The raw finish reason from the API.
     /// </summary>
     public string? FinishReason { get; init; }
@@ -237,4 +245,35 @@ public sealed record LlmClientOptions
         "\n### User",
         "\n### Human"
     ];
+
+    /// <summary>
+    /// Returns true when the configured model name indicates a thinking /
+    /// chain-of-thought model (e.g. "lfm2.5-1.2b-thinking", "qwq",
+    /// "deepseek-r1", "o1"). Used to automatically boost
+    /// <see cref="MaxTokens"/> so the think-block budget is not eaten
+    /// by the token cap before the actual answer is produced.
+    /// </summary>
+    public bool IsThinkingModel()
+    {
+        var lower = (Model ?? "").ToLowerInvariant();
+        return lower.Contains("thinking") ||
+               lower.Contains("-think")   ||
+               lower.Contains("qwq")      ||
+               lower.StartsWith("o1")     ||
+               lower.Contains("deepseek-r1");
+    }
+
+    /// <summary>
+    /// Effective max_tokens to send to the API. For thinking models the
+    /// value is boosted to ensure the chain-of-thought budget doesn't
+    /// truncate the actual answer.  The minimum boost is 4096; the
+    /// configured value is always respected when it is already larger.
+    /// </summary>
+    public int EffectiveMaxTokens(int? explicitOverride = null)
+    {
+        var requested = explicitOverride ?? MaxTokens;
+        if (!IsThinkingModel()) return requested;
+        const int ThinkingMinTokens = 4096;
+        return Math.Max(requested, ThinkingMinTokens);
+    }
 }

@@ -128,18 +128,48 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Kills the managed VoiceHost process if one is alive.
-    /// Clears session state so health checks reflect the stopped state.
+    /// Kills the managed VoiceHost process if one is alive, as well as any orphaned
+    /// VoiceHost processes by name. Clears session state so health checks reflect the stopped state.
     /// </summary>
     public void Stop()
     {
         StopManagedProcessIfAny();
+        KillOrphanedVoiceHostProcesses();
         _currentBaseUrl = null;
         _currentPort = null;
         WriteAudit("VOICEHOST_MANUAL_STOP", "ok", new Dictionary<string, object>
         {
             ["reason"] = "user_requested"
         });
+    }
+
+    private void KillOrphanedVoiceHostProcesses()
+    {
+        try
+        {
+            foreach (var process in Process.GetProcessesByName("SirThaddeus.VoiceHost"))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            var pid = process.Id;
+                            process.Kill(entireProcessTree: true);
+                            process.WaitForExit(2_000);
+                            WriteAudit("VOICEHOST_ORPHAN_KILLED", "ok", new Dictionary<string, object>
+                            {
+                                ["pid"] = pid,
+                                ["source"] = "manual_stop"
+                            });
+                        }
+                    }
+                    catch { /* best effort */ }
+                }
+            }
+        }
+        catch { /* best effort */ }
     }
 
     public void UpdateSettings(VoiceSettings settings)
@@ -284,10 +314,9 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             }
 
             // First-run voice setup can require large artifact downloads
-            // (e.g., Kokoro + faster-whisper), so keep a generous minimum
-            // startup window to avoid process restart thrash on fresh machines.
-            var startupTimeout = TimeSpan.FromMilliseconds(
-                Math.Max(300_000, settings.VoiceHostStartupTimeoutMs));
+            // (e.g., Kokoro + faster-whisper). In production, VoiceHostStartupTimeoutMs
+            // should be configured generously to avoid process restart thrash on fresh machines.
+            var startupTimeout = TimeSpan.FromMilliseconds(settings.VoiceHostStartupTimeoutMs);
             var deadline = _timeProvider.GetUtcNow() + startupTimeout;
             var lastHealth = preferredHealth;
             var lastStartError = "";

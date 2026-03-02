@@ -48,6 +48,12 @@ internal static partial class OrchestratorMessageHelpers
         return false;
     }
 
+    /// <summary>
+    /// Strips all <c>&lt;think&gt;...&lt;/think&gt;</c> blocks from a response,
+    /// handling multiple blocks, unclosed/partial tags, and LFM-style thinking
+    /// sections. When <paramref name="preserveRationale"/> is true the text is
+    /// returned unchanged.
+    /// </summary>
     internal static string StripThinkingScaffold(string text, bool preserveRationale = false)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -58,26 +64,49 @@ internal static partial class OrchestratorMessageHelpers
 
         var cleaned = text.Trim();
 
-        const string openThinkTag = "<think>";
-        const string closeThinkTag = "</think>";
+        const string openTag  = "<think>";
+        const string closeTag = "</think>";
 
-        var closeIdx = cleaned.LastIndexOf(closeThinkTag, StringComparison.OrdinalIgnoreCase);
-        if (closeIdx >= 0)
+        // ── Pass 1: remove all complete <think>...</think> blocks ─────
+        while (true)
         {
-            cleaned = cleaned[(closeIdx + closeThinkTag.Length)..].Trim();
-        }
-        else
-        {
-            var openIdx = cleaned.IndexOf(openThinkTag, StringComparison.OrdinalIgnoreCase);
-            if (openIdx >= 0)
+            var openIdx  = cleaned.IndexOf(openTag,  StringComparison.OrdinalIgnoreCase);
+            if (openIdx < 0) break;
+
+            var closeIdx = cleaned.IndexOf(closeTag, openIdx, StringComparison.OrdinalIgnoreCase);
+            if (closeIdx < 0)
+            {
+                // No closing tag — discard everything from <think> onward
+                // (thinking block was cut off by max_tokens).
                 cleaned = cleaned[..openIdx].Trim();
+                break;
+            }
+
+            cleaned = (cleaned[..openIdx] + cleaned[(closeIdx + closeTag.Length)..]).Trim();
         }
 
+        // ── Pass 2: "Thinking:\n...\n\nAnswer:" prefix style ──────────
+        // Some models (e.g. older LFM variants) emit a labelled section
+        // instead of XML tags.  Strip everything up to and including the
+        // "Answer:" / "Response:" label.
+        if (cleaned.StartsWith("thinking:", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.StartsWith("reasoning:", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var answerLabel in new[] { "\n\nAnswer:", "\n\nResponse:", "\nAnswer:", "\nResponse:" })
+            {
+                var labelIdx = cleaned.IndexOf(answerLabel, StringComparison.OrdinalIgnoreCase);
+                if (labelIdx >= 0)
+                {
+                    cleaned = cleaned[(labelIdx + answerLabel.Length)..].Trim();
+                    break;
+                }
+            }
+        }
+
+        // ── Pass 3: "Final Answer:" anywhere in the text ─────────────
         var finalAnswerIdx = cleaned.LastIndexOf("final answer:", StringComparison.OrdinalIgnoreCase);
         if (finalAnswerIdx >= 0)
-        {
             cleaned = cleaned[(finalAnswerIdx + "final answer:".Length)..].Trim();
-        }
 
         return cleaned;
     }

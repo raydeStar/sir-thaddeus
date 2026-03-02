@@ -539,6 +539,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public ICommand CancelYouTubeJobCommand { get; }
     public ICommand StartVoiceHostCommand    { get; }
     public ICommand StopVoiceHostCommand     { get; }
+    public ICommand ToggleVoiceHostCommand   { get; }
     public ICommand RefreshVoiceHostCommand  { get; }
     public ICommand AddPersonalityCommand    { get; }
     public ICommand EditPersonalityCommand   { get; }
@@ -643,6 +644,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         CancelYouTubeJobCommand  = new AsyncRelayCommand(CancelYouTubeJobAsync, () => YouTubeJobIsRunning);
         StartVoiceHostCommand    = new AsyncRelayCommand(StartVoiceHostAsync,  () => !VoiceHostIsBusy);
         StopVoiceHostCommand     = new AsyncRelayCommand(StopVoiceHostAsync,   () => !VoiceHostIsBusy);
+        ToggleVoiceHostCommand   = new RelayCommand(_ => VoiceHostEnabled = !VoiceHostEnabled);
         RefreshVoiceHostCommand  = new AsyncRelayCommand(RefreshVoiceHostHealthAsync, () => !VoiceHostIsBusy);
         AddPersonalityCommand = new RelayCommand(_ => AddNewPersonality());
         EditPersonalityCommand = new RelayCommand(_ => EditSelectedPersonality());

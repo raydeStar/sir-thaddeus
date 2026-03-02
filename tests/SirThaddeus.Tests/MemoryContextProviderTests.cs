@@ -27,7 +27,7 @@ public class MemoryContextProviderTests
             _ => throw new InvalidOperationException("unexpected tool")
         });
         var audit = new TestAuditLogger();
-        var provider = new MemoryContextProvider(mcp, audit, TimeProvider.System);
+        var provider = new MemoryContextProvider(mcp, audit, new FakeSmartIntentClassifier(), TimeProvider.System);
 
         var result = await provider.GetContextAsync(new MemoryContextRequest
         {
@@ -59,7 +59,7 @@ public class MemoryContextProviderTests
     {
         var mcp = new SlowMcpClient(delayMs: 250);
         var audit = new TestAuditLogger();
-        var provider = new MemoryContextProvider(mcp, audit, TimeProvider.System);
+        var provider = new MemoryContextProvider(mcp, audit, new FakeSmartIntentClassifier(), TimeProvider.System);
 
         var result = await provider.GetContextAsync(new MemoryContextRequest
         {
@@ -79,7 +79,7 @@ public class MemoryContextProviderTests
     {
         var mcp = new FakeMcpClient("should-not-run");
         var audit = new TestAuditLogger();
-        var provider = new MemoryContextProvider(mcp, audit, TimeProvider.System);
+        var provider = new MemoryContextProvider(mcp, audit, new FakeSmartIntentClassifier(), TimeProvider.System);
 
         var result = await provider.GetContextAsync(new MemoryContextRequest
         {
@@ -113,6 +113,13 @@ public class MemoryContextProviderTests
 
         public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
+    }
+
+    private sealed class FakeSmartIntentClassifier : ISmartIntentClassifier
+    {
+        private readonly MemoryIntentDecision _decision;
+        public FakeSmartIntentClassifier(MemoryIntentDecision decision = MemoryIntentDecision.Unsure) => _decision = decision;
+        public Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default) => Task.FromResult(_decision);
     }
 }
 

@@ -1,3 +1,4 @@
+using SirThaddeus.Agent.Orchestration.Correlation;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.ToolLoop;
@@ -16,6 +17,14 @@ public sealed record ToolLoopExecutionRequest
     public required Func<string, string> SanitizeAssistantText { get; init; }
     public Action<string, string>? LogEvent { get; init; }
     public IReadOnlyList<PersonalityEngine.Profiles.PersonalityFewShotExample>? FewShotExamples { get; init; }
+
+    /// <summary>
+    /// Optional run context for completion-aware execution.
+    /// When set, <see cref="CompletionAwareToolLoopExecutor"/> will check
+    /// tool results against completion contracts and attempt bounded repair.
+    /// When null, completion checking is skipped (backward-compatible).
+    /// </summary>
+    public RunContext? RunContext { get; init; }
 }
 
 /// <summary>

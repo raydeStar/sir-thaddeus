@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Context;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -47,7 +48,6 @@ public partial class App : System.Windows.Application
 
     private LmStudioClient? _llmClient;
     private LmStudioClient? _gatekeeperLlmClient;
-    private IGatekeeperService? _gatekeeperService;
     private Agent.Routing.IFootmanRouter? _footmanRouter;
     private McpProcessClient? _mcpClient;
     private AuditedMcpToolClient? _auditedMcpClient;
@@ -304,11 +304,24 @@ public partial class App : System.Windows.Application
         });
 
         // ── 3b. Create gatekeeper LLM client (Dynamic Context Decoupler) ──
-        // A separate LmStudioClient instance configured for the lightweight
-        // gatekeeper model. Same endpoint, different model + deterministic params.
-        var gatekeeperOptions = BuildGatekeeperLlmClientOptions(_settings);
-        _gatekeeperLlmClient = new LmStudioClient(gatekeeperOptions);
-        _gatekeeperService = new FastLlmGatekeeperService(_gatekeeperLlmClient);
+        if (!string.IsNullOrWhiteSpace(_settings.Llm.GatekeeperModelId))
+        {
+            var gatekeeperOptions = BuildGatekeeperLlmClientOptions(_settings);
+            _gatekeeperLlmClient = new LmStudioClient(gatekeeperOptions);
+
+            _auditLogger.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "GATEKEEPER_CLIENT_CREATED",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["baseUrl"] = gatekeeperOptions.BaseUrl,
+                    ["gatekeeperModel"] = _settings.Llm.GatekeeperModelId,
+                    ["separateEndpoint"] = !string.IsNullOrWhiteSpace(_settings.Llm.GatekeeperBaseUrl)
+                }
+            });
+        }
 
         // ── 3c. Create Footman router (fast LLM-based routing) ──────────
         // Uses the gatekeeper model for sub-200ms routing decisions.
@@ -322,19 +335,6 @@ public partial class App : System.Windows.Application
                 Result = "ok",
                 Details = new Dictionary<string, object> { ["detail"] = details }
             }));
-
-        _auditLogger.Append(new AuditEvent
-        {
-            Actor = "runtime",
-            Action = "GATEKEEPER_CLIENT_CREATED",
-            Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["baseUrl"] = gatekeeperOptions.BaseUrl,
-                ["gatekeeperModel"] = _settings.Llm.GatekeeperModelId,
-                ["separateEndpoint"] = !string.IsNullOrWhiteSpace(_settings.Llm.GatekeeperBaseUrl)
-            }
-        });
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
         _splash?.SetStatus("Starting MCP server…");
@@ -468,6 +468,23 @@ public partial class App : System.Windows.Application
             "SirThaddeus");
         _chatHistoryPersistence = new Services.ChatHistoryPersistence(chatDataDir, _auditLogger);
 
+        IAutoMemoryExtractor? autoMemoryExtractor = null;
+        if (_settings.Memory.Enabled)
+        {
+            var memDbPath = ResolveMemoryDbPath(_settings);
+            var memStore = new SqliteMemoryStore(memDbPath);
+            autoMemoryExtractor = new AutoMemoryExtractor(
+                _llmClient,
+                memStore,
+                log: (action, message) => _auditLogger?.Append(new AuditEvent
+                {
+                    Actor = "auto_memory",
+                    Action = action,
+                    Result = "info",
+                    Details = new Dictionary<string, object> { ["message"] = message }
+                }));
+        }
+
         _orchestrator = new AgentOrchestrator(
             _llmClient,
             _auditedMcpClient,
@@ -476,37 +493,8 @@ public partial class App : System.Windows.Application
             geocodeMismatchMode: _settings.Dialogue.GeocodeMismatchMode,
             activePersonalityId: _settings.ActivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings),
-            gatekeeper: _gatekeeperService,
-            footmanRouter: _footmanRouter);
-
-        IAgentOrchestrator baseOrchestrator = _orchestrator;
-
-        if (_settings.Dialogue.OrchestrationV2Enabled)
-        {
-            var embedder = new DummyEmbedderForV2Stub();
-            var nnClassifier = new SirThaddeus.Agent.Orchestration.NnIntentClassifier(embedder);
-            var llmClassifier = new SirThaddeus.Agent.Orchestration.LlmIntentClassifier(_gatekeeperLlmClient ?? _llmClient);
-            var router = new SirThaddeus.Agent.Orchestration.RouterV2(nnClassifier, llmClassifier);
-            var clarificationGate = new SirThaddeus.Agent.Orchestration.ClarificationGate();
-            var toolRetriever = new SirThaddeus.Agent.Orchestration.ToolRetriever(embedder);
-            var toolLoop = new SirThaddeus.Agent.ToolLoop.ToolLoopExecutor(_llmClient, _auditedMcpClient);
-            var toolBuilder = new SirThaddeus.Agent.Tools.ToolDefinitionBuilder(_auditedMcpClient);
-
-            baseOrchestrator = new SirThaddeus.Agent.Orchestration.V2AgentOrchestratorAdapter(
-                _orchestrator,
-                toolBuilder,
-                _auditLogger,
-                _settings.Llm.SystemPrompt,
-                deterministicExecutor => new SirThaddeus.Agent.Orchestration.TurnPipeline(
-                    router,
-                    clarificationGate,
-                    toolRetriever,
-                    toolLoop,
-                    deterministicExecutor)
-            );
-
-            _auditLogger.Append(new AuditEvent { Actor = "runtime", Action = "V2_ORCHESTRATOR_ENABLED", Result = "ok" });
-        }
+            footmanRouter: _footmanRouter,
+            autoMemoryExtractor: autoMemoryExtractor);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
@@ -540,7 +528,7 @@ public partial class App : System.Windows.Application
         });
 
         _agentEntryPoint = new LocationAwareAgentOrchestrator(
-            baseOrchestrator,
+            _orchestrator,
             getSettings: () => _settings,
             getActiveProfileId: () => _orchestrator?.ActiveProfileId,
             saveManualLocation: SaveManualLocationFromConversation,
@@ -2603,6 +2591,7 @@ public partial class App : System.Windows.Application
         {
             _mcpClient.UpdateEnvironmentVariables(BuildMcpEnvironmentVariables(current));
             await _mcpClient.RestartAsync();
+            _orchestrator?.InvalidateToolCache();
 
             _auditLogger?.Append(new AuditEvent
             {
@@ -3127,59 +3116,6 @@ public partial class App : System.Windows.Application
         _auditLogger?.Dispose();
 
         base.OnExit(e);
-    }
-
-    class DummyEmbedderForV2Stub : SirThaddeus.Agent.Orchestration.ITextEmbedder
-    {
-        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken)
-        {
-            const int vectorSize = 128;
-            var vector = new float[vectorSize];
-
-            if (string.IsNullOrWhiteSpace(text))
-                return Task.FromResult(vector);
-
-            var tokens = text
-                .Split([' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(t => t.ToLowerInvariant());
-
-            foreach (var token in tokens)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var idx = (int)(StableHash(token) % vectorSize);
-                vector[idx] += 1f;
-            }
-
-            // L2 normalize so cosine similarity is meaningful.
-            var norm = 0f;
-            for (var i = 0; i < vector.Length; i++)
-                norm += vector[i] * vector[i];
-
-            if (norm > 0f)
-            {
-                var inv = 1f / (float)Math.Sqrt(norm);
-                for (var i = 0; i < vector.Length; i++)
-                    vector[i] *= inv;
-            }
-
-            return Task.FromResult(vector);
-        }
-
-        private static uint StableHash(string value)
-        {
-            // FNV-1a 32-bit for deterministic lightweight hashing.
-            const uint offset = 2166136261;
-            const uint prime = 16777619;
-
-            var hash = offset;
-            foreach (var ch in value)
-            {
-                hash ^= ch;
-                hash *= prime;
-            }
-
-            return hash;
-        }
     }
 
     private void RequestShutdown()
