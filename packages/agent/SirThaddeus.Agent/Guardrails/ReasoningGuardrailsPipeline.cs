@@ -372,7 +372,7 @@ public sealed class ReasoningGuardrailsPipeline
             ChatMessage.System(
                 "Break this into first principles. " +
                 "Consider what must physically be present at the destination for the service to succeed. " +
-                "Return strict JSON only with keys: need, pieces, assembly."),
+                "Return strict JSON only with schema: {\"need\":\"...\",\"pieces\":[\"...\"],\"assembly\":\"...\"}"),
             ChatMessage.User(
                 "Question:\n" + userMessage + "\n\n" +
                 "Answer these internal questions:\n" +
@@ -385,7 +385,7 @@ public sealed class ReasoningGuardrailsPipeline
                 $"Constraints: {string.Join("; ", constraints.Constraints)}")
         };
 
-        var response = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 220, cancellationToken);
+        var response = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 500, cancellationToken);
         if (string.IsNullOrWhiteSpace(response.Content))
             return null;
 
@@ -397,8 +397,8 @@ public sealed class ReasoningGuardrailsPipeline
             var need = root.TryGetProperty("need", out var needEl) ? needEl.GetString() : null;
             var pieces = root.TryGetProperty("pieces", out var piecesEl)
                 ? piecesEl.ValueKind == JsonValueKind.Array
-                    ? string.Join(", ", piecesEl.EnumerateArray().Select(e => e.GetString() ?? ""))
-                    : piecesEl.GetString()
+                    ? string.Join(", ", piecesEl.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.String ? (e.GetString() ?? "") : e.GetRawText()))
+                    : (piecesEl.ValueKind == JsonValueKind.String ? piecesEl.GetString() : piecesEl.GetRawText())
                 : null;
             var assembly = root.TryGetProperty("assembly", out var assemblyEl) ? assemblyEl.GetString() : null;
 
@@ -730,7 +730,7 @@ internal sealed class GoalInferencer
 
         try
         {
-            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 140, cancellationToken);
+            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 400, cancellationToken);
             var parsed = ParseGoalInference(llm.Content);
             if (parsed is not null)
                 return parsed with { LlmRoundTrips = 1 };
@@ -1059,7 +1059,7 @@ internal sealed class EntityExtractor
 
         try
         {
-            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 220, cancellationToken);
+            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 500, cancellationToken);
             var parsed = ParseExtraction(llm.Content);
             if (parsed is not null && parsed.Options.Count >= 2)
                 return parsed with { LlmRoundTrips = 1 };
@@ -1337,7 +1337,7 @@ internal sealed class ConstraintBuilder
 
         try
         {
-            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 160, cancellationToken);
+            var llm = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: 500, cancellationToken);
             var parsed = ParseConstraintSet(llm.Content);
             if (parsed is not null && parsed.Constraints.Count > 0)
                 return parsed with { LlmRoundTrips = 1 };
