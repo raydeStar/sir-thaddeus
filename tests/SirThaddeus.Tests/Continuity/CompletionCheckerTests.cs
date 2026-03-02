@@ -170,6 +170,23 @@ public sealed class CompletionCheckerTests
     }
 
     [Fact]
+    public void Evidence_MinTwoUrls_SingleUrlField_IsIncomplete()
+    {
+        var contract = new CompletionContract
+        {
+            Intent = "test",
+            Fields = [],
+            Evidence = new EvidenceRequirement { MinSourceUrls = 2 }
+        };
+
+        var results = new[] { Ok("web_search", """{"source_url": "https://example.com"}""") };
+        var report = _checker.Check(contract, results);
+
+        Assert.False(report.IsComplete);
+        Assert.Contains(report.Issues, i => i.Contains("Expected at least 2 source URL", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Evidence_UrlFoundInAssistantText_IsComplete()
     {
         var contract = new CompletionContract

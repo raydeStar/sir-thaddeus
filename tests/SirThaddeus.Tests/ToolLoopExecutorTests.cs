@@ -197,6 +197,80 @@ public class ToolLoopExecutorTests
         Assert.True(systemErrorInHistory, "Expected PlanValidator to inject a System Error for the unpermitted web_search tool.");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ExistenceGuard_RewritesSpeculativeSeasonEpisodeAnswer()
+    {
+        var turn = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            turn++;
+            if (turn == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web_1",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"\"Unknown\" Plot summary not available","maxResults":3,"recency":"any"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Episode 1 of Season 3 would likely introduce new threats and probably focus on character growth.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase))
+                return "{}";
+
+            if (args.Contains("Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                return "1. Irrelevant\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://example.com/unknown\",\"title\":\"Unknown item\",\"domain\":\"example.com\",\"excerpt\":\"No season data\"}]";
+            }
+
+            return "1. Stargate Universe cancelled after two seasons\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://en.wikipedia.org/wiki/Stargate_Universe\",\"title\":\"Stargate Universe cancelled after two seasons\",\"domain\":\"wikipedia.org\",\"excerpt\":\"The series ended after season 2 and was never renewed for season 3.\"}]";
+        }, FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("What would be the plot of Episode 1 of Season 3 of Stargate Universe about?")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 6,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "LookupFact" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Contains("does not exist", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("canceled", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("season 3", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(response.ToolCallsMade.Count >= 2);
+    }
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

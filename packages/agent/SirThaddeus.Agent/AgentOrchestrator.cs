@@ -774,6 +774,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     toolCallsMade,
                     lookupModeHint,
                     cancellationToken);
+                searchResponse = ApplySeasonEpisodeExistenceSanityGate(
+                    contextualUserMessage,
+                    searchResponse,
+                    toolCallsMade);
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
@@ -1005,5 +1009,57 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public void AppendAssistantMessage(string message)
     {
         _history.Add(ChatMessage.Assistant(message));
+    }
+
+    private static AgentResponse ApplySeasonEpisodeExistenceSanityGate(
+        string userMessage,
+        AgentResponse response,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (!LooksLikeSeasonEpisodePrompt(userMessage))
+            return response;
+
+        if (!LooksSpeculativeNarrative(response.Text))
+            return response;
+
+        var sawNoResults = toolCallsMade.Any(c =>
+            !string.IsNullOrWhiteSpace(c.Result) &&
+            c.Result.StartsWith("No results found for ", StringComparison.OrdinalIgnoreCase));
+        var sawCancelSignal = toolCallsMade.Any(c =>
+            !string.IsNullOrWhiteSpace(c.Result) &&
+            c.Result.Contains("cancel", StringComparison.OrdinalIgnoreCase));
+
+        if (!sawNoResults && !sawCancelSignal)
+            return response;
+
+        var seasonLabel = TryExtractSeasonLabel(userMessage);
+        var seasonPhrase = seasonLabel is null ? "that requested season" : seasonLabel;
+        var corrected =
+            $"Based on the available evidence, {seasonPhrase} does not exist. " +
+            "It appears the show was canceled or never produced for that season, so there is no official episode plot to summarize.";
+
+        return response with { Text = corrected };
+    }
+
+    private static bool LooksLikeSeasonEpisodePrompt(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+        return Regex.IsMatch(lower, @"\bseason\s+\d+\b", RegexOptions.IgnoreCase) &&
+               Regex.IsMatch(lower, @"\bepisode\s+\d+\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool LooksSpeculativeNarrative(string text)
+    {
+        var lower = (text ?? "").ToLowerInvariant();
+        return lower.Contains("would likely", StringComparison.Ordinal) ||
+               lower.Contains("probably", StringComparison.Ordinal) ||
+               lower.Contains("might", StringComparison.Ordinal) ||
+               lower.Contains("expect", StringComparison.Ordinal);
+    }
+
+    private static string? TryExtractSeasonLabel(string text)
+    {
+        var match = Regex.Match(text ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
+        return match.Success ? match.Value.ToLowerInvariant() : null;
     }
 }

@@ -1721,6 +1721,35 @@ public class SearchPipelineGoldenTests
     }
 
     [Fact]
+    public async Task FactLookup_StargateUniverseSeason3_ReturnsNonExistenceInsteadOfSpeculation()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"Unknown","type":"Episode","hint":"Plot summary not available"}""",
+            queryJson: """{"query":"\"Unknown\" Plot summary not available","recency":"any"}""",
+            summaryText: "speculative answer should not be used");
+
+        var searchResult =
+            "1. Irrelevant result\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/irrelevant\",\"title\":\"Irrelevant\",\"domain\":\"example.com\",\"excerpt\":\"No episode data\"}]";
+
+        var mcp = new FakeMcpClient(returnValue: searchResult);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.True(result.Success);
+        Assert.Contains("does not exist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("season 3", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("canceled", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task NewsToFollowUp_DeepDive_BrowsesPriorSource()
     {
         // Two-turn: news → follow-up deep dive

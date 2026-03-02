@@ -254,11 +254,16 @@ public sealed class CompletionChecker
             if (name.Equals("answer", StringComparison.OrdinalIgnoreCase) && HasNonEmptyValue(value))
                 foundFields.Add("answer");
 
+            var hasKnownUrlFieldName = IsKnownUrlPropertyName(name);
+
             // Check for URLs in string values
             if (value.ValueKind == JsonValueKind.String)
             {
                 var str = value.GetString() ?? "";
-                if (LooksLikeUrl(str))
+
+                // Avoid double-counting URL values on known URL properties:
+                // they are counted in the dedicated URL-field block below.
+                if (LooksLikeUrl(str) && !hasKnownUrlFieldName)
                     urlCount++;
 
                 if (name.Equals("source", StringComparison.OrdinalIgnoreCase) ||
@@ -271,11 +276,7 @@ public sealed class CompletionChecker
             }
 
             // Track URL-like property names
-            if ((name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("link", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("homepage", StringComparison.OrdinalIgnoreCase) ||
-                 name.Equals("website", StringComparison.OrdinalIgnoreCase)) &&
+            if (hasKnownUrlFieldName &&
                 value.ValueKind == JsonValueKind.String &&
                 LooksLikeUrl(value.GetString() ?? ""))
             {
@@ -315,6 +316,13 @@ public sealed class CompletionChecker
         text.Contains("source:", StringComparison.OrdinalIgnoreCase) ||
         text.Contains("reported by", StringComparison.OrdinalIgnoreCase) ||
         text.Contains("published by", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsKnownUrlPropertyName(string name) =>
+        name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("link", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("homepage", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("website", StringComparison.OrdinalIgnoreCase);
 
     private static double ComputeConfidence(
         int requiredCount,
