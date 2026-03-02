@@ -19,6 +19,8 @@ public sealed partial class VoiceHostProcessManager
         /// </summary>
         internal static string? CheckVcRedistInstalled()
         {
+            if (!OperatingSystem.IsWindows()) return null;
+
             try
             {
                 // The VC++ 2015-2022 x64 redist registers under this key.

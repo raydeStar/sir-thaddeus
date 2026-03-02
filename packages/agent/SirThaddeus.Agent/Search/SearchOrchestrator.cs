@@ -411,7 +411,7 @@ public sealed class SearchOrchestrator
         if (!isLocalBusinessQuery)
         {
             entity = await _entityResolver.ResolveAsync(
-                userMessage, Session, toolCallsMade, ct);
+                userMessage ?? "", Session, toolCallsMade, ct);
         }
         else
         {
@@ -425,7 +425,7 @@ public sealed class SearchOrchestrator
 
         // ── 2. Query construction (factfind-mode) ────────────────────
         var query = await _queryBuilder.BuildAsync(
-            SearchMode.WebFactFind, userMessage, entity, Session, history, ct);
+            SearchMode.WebFactFind, userMessage ?? "", entity, Session, history, ct);
 
         // ── 3. web_search via MCP ────────────────────────────────────
         var toolResult = await CallWebSearchAsync(
@@ -459,33 +459,33 @@ public sealed class SearchOrchestrator
             if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
             {
                 return await BuildOfflineReasoningResponseAsync(
-                    userMessage, memoryPackText, history, toolCallsMade, factFailure.Text, ct);
+                    userMessage ?? "", memoryPackText, history, toolCallsMade, factFailure.Text, ct);
             }
 
             if (LooksLikeNoResultsPayload(toolResult))
             {
                 return await BuildNoResultsFallbackAsync(
-                    userMessage, memoryPackText, history, toolCallsMade, ct);
+                    userMessage ?? "", memoryPackText, history, toolCallsMade, ct);
             }
 
             return await BuildOfflineReasoningResponseAsync(
-                userMessage, memoryPackText, history, toolCallsMade, "Web search returned no results.", ct);
+                userMessage ?? "", memoryPackText, history, toolCallsMade, "Web search returned no results.", ct);
         }
 
         // Parse and record results.
         var sources = ParseSourcesFromToolResult(toolResult);
         var existenceGuarded = await TryBuildExistenceGuardedResponseAsync(
-            userMessage,
+            userMessage ?? "",
             sources,
             toolCallsMade,
             ct);
         if (existenceGuarded is not null)
             return existenceGuarded;
         var isMarketQuoteRequest =
-            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage ?? "") ||
             MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
         var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
-            userMessage,
+            userMessage ?? "",
             query.Query,
             sources,
             toolCallsMade);
@@ -495,7 +495,7 @@ public sealed class SearchOrchestrator
         if (sources.Count == 0)
         {
             return await BuildNoResultsFallbackAsync(
-                userMessage,
+                userMessage ?? "",
                 memoryPackText,
                 history,
                 toolCallsMade,
