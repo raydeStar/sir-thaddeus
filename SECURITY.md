@@ -2,33 +2,69 @@
 
 ## Supported Versions
 
-Security fixes are applied to the current `master` branch.
+Security fixes are applied to:
 
-## Reporting a Vulnerability
+- The current `master` branch
+- The most recent packaged release
 
-Please do not post unpatched vulnerabilities in public issues.
+Older tags/branches may not receive backported fixes.
 
-Report security issues by opening a private security report in GitHub (Security tab) if available. If private reporting is unavailable in your environment, open an issue with minimal details and mark it as `security` so maintainers can move discussion to a private channel.
+## Reporting A Vulnerability
 
-When reporting, include:
+Do not disclose unpatched vulnerabilities in public issues.
 
-- Affected component and version/commit
-- Reproduction steps (minimal and deterministic)
+Preferred path:
+
+1. Open a private GitHub security advisory/report (Security tab).
+
+Fallback path (if private reporting is not available):
+
+1. Open a public issue with minimal detail.
+2. Mark it with `security`.
+3. Include only non-exploit details so maintainers can move discussion private.
+
+Please include:
+
+- Affected component(s) and commit/version
+- Reproduction steps (minimal, deterministic)
 - Expected vs actual behavior
-- Potential impact
-- Any suggested mitigation
+- Security impact and likely attack surface
+- Logs, traces, or proof-of-concept (sanitized)
+- Any mitigation or patch suggestion
 
 ## Response Expectations
 
 - Initial triage target: within 3 business days
-- Confirmed issues receive a remediation plan and severity classification
-- Fixes are released with a short public advisory once a patch is available
+- Confirmed issues get severity + remediation plan
+- Fixes are disclosed publicly after a patch is available
 
-## Scope Notes
+## Security Scope
 
-This repository is local-first and designed to run on user-owned machines. Security-sensitive areas include:
+Sir Thaddeus is local-first and permissioned. Priority security areas:
 
-- MCP tool execution boundaries
-- Permission enforcement
-- Audit logging and redaction
-- Local data storage paths and file access
+- Layer 1 (Loop): policy gating, tool budget enforcement, action validation/repair
+- Layer 2 (Interface): explicit user approvals and STOP behavior
+- Layer 4 (Tools): MCP tool boundaries, allowlists, command execution controls
+- Layer 5 (Voice): local voice host/backend process boundaries and local endpoints
+- Audit trail: append-only logging, redaction, and operator-visible actions
+- Local data: memory/database paths, file access scope, and profile isolation
+
+## Out Of Scope
+
+The following are generally out of scope unless they create a clear security bypass:
+
+- Requests for unsupported/legacy branch fixes
+- Local misconfiguration that does not bypass permissions
+- Issues requiring physical access to an unlocked machine
+- Third-party model quality/safety behavior not caused by this runtime
+
+## Disclosure And Credit
+
+When possible, advisories include:
+
+- Affected versions
+- Severity
+- Mitigation guidance
+- Fix commit or release reference
+
+Reporter credit is included unless anonymity is requested.
