@@ -118,51 +118,46 @@ Sir Thaddeus is not designed to replace your agency. He is designed to extend it
 
 ---
 
-## Architecture (Loop‑Driven, Permissioned)
+## Architecture (Five Layers)
 
-Sir Thaddeus is built as a layered system. The **Agent layer runs a bounded tool loop**:
+Sir Thaddeus runs as a five-layer stack:
 
-**propose → validate → execute → observe → verify → (repair) → repeat**
+**propose -> validate -> execute -> observe -> verify -> (repair) -> repeat**
 
-This loop is more reliable for small local models than long, up‑front planning — and it keeps every action auditable and permissioned.
+Every permissioned action flows through Layer 1.
 
 ```mermaid
 flowchart LR
-  subgraph frontend [Layer 1: Frontend — apps/desktop-runtime]
+  subgraph loop [Layer 1: Loop - packages/agent]
+    Loop[Bounded Agent Loop]
+    Context[Run Context and History]
+    Router[Intent Router]
+    Gate[Policy Gate]
+    Validate[Action and Completion Validation]
+    Repair[Targeted Repair]
+  end
+
+  subgraph frontend [Layer 2: Interface - apps/desktop-runtime]
     Tray[System Tray]
-    Overlay[WPF Overlay — optional]
+    Overlay[WPF Overlay]
     PTT[Audio Input]
     Playback[Audio Playback]
     Palette[Command Palette]
   end
 
-  subgraph agent [Layer 2: Agent Orchestrator — packages/agent]
-    Loop[Bounded Agent Loop]
-    Context[Run Context & History]
-    Router[Intent Router]
-    Gate[Policy Gate]
-    Validate[Action & Completion Validation]
-    Repair[Targeted Repair]
-    Utilities[Deterministic Utilities]
-  end
-
-  subgraph llm [Layer 3: LLM Client — packages/llm-client]
+  subgraph model [Layer 3: Model - packages/llm-client]
     LmStudio[LM Studio / OpenAI-compatible]
   end
 
-  subgraph memory [Memory — packages/memory + memory-sqlite]
-    Store[SQLite Store]
-    Retriever[Retriever — keyword/BM25 and/or embeddings]
+  subgraph tools [Layer 4: Tools - apps/mcp-server + packages/memory + memory-sqlite]
+    Server[MCP Server - stdio]
+    Toolset[Browser / File / System / Screen / WebSearch / Weather / Utilities]
+    Memory[SQLite Memory and Retrieval]
   end
 
-  subgraph mcp [Layer 4: MCP Tool Server — apps/mcp-server]
-    Server[MCP Server — stdio]
-    Tools[Memory / Browser / File / System / Screen / WebSearch / Weather / Utilities]
-  end
-
-  subgraph voice [Layer 5: Voice Services — apps/voice-host + voice-backend]
+  subgraph voice [Layer 5: Voice - apps/voice-host + voice-backend]
     VoiceHost[VoiceHost Proxy]
-    VoiceBackend[Voice Backend — Python]
+    VoiceBackend[Voice Backend - Python]
     VoiceBackend --> VoiceHost
   end
 
@@ -170,7 +165,7 @@ flowchart LR
   VoiceHost -->|transcribed text| Loop
   Palette -->|typed request| Loop
 
-  Loop --> Router -->|RouteDecision| Gate
+  Loop --> Router --> Gate
   Gate -->|allowed tools + budgets| Loop
 
   Loop -->|model prompt| LmStudio
@@ -178,16 +173,13 @@ flowchart LR
 
   Loop --> Validate
   Validate -->|blocked/ok| Loop
-
-  Loop -->|tools/call| Server
-  Server -->|tool result| Loop
-
-  Loop -->|progress check| Validate
   Validate -->|complete/partial/missing| Repair
   Repair -->|targeted follow-up| Loop
 
-  Loop --> Retriever --> Store
-  Loop --> Utilities
+  Loop -->|tools/call| Server
+  Server --> Toolset
+  Server --> Memory
+  Server -->|tool result| Loop
 
   Loop -->|final text| VoiceHost
   VoiceHost -->|audio stream| Playback
@@ -198,14 +190,13 @@ flowchart LR
 
 ### Layer responsibilities
 
-| Layer              | Project(s)                                  | Responsibility                                                                                           | Talks to                        |
-| ------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Frontend**       | `apps/desktop-runtime`                      | Hotkeys, tray, overlay, push‑to‑talk capture trigger, audio playback, Chat/Memory UI                    | Agent orchestrator + VoiceHost  |
-| **Agent**          | `packages/agent`                            | Bounded tool loop (propose→validate→execute→observe), routing, policy gates, completion checks, recovery | LLM client + MCP client         |
-| **LLM client**     | `packages/llm-client`                       | OpenAI‑style `/v1/chat/completions` + `/v1/embeddings` calls                                             | LM Studio HTTP server           |
-| **Memory**         | `packages/memory`, `packages/memory-sqlite` | Retrieval + scoring + gating (keyword/BM25 and/or embeddings), SQLite store                              | —                               |
-| **MCP server**     | `apps/mcp-server`                           | Exposes tools over MCP stdio: memory, browser, file, system, screen, web search, utilities              | Desktop runtime (child process) |
-| **Voice Services** | `apps/voice-host`, `apps/voice-backend`     | Local push‑to‑talk transcription (ASR) and streaming synthesis (TTS)                                     | Desktop runtime (caller)        |
+| Layer | Project(s) | Responsibility | Talks to |
+| --- | --- | --- | --- |
+| **Layer 1: Loop** | `packages/agent` | Turn control plane: route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
+| **Layer 2: Interface** | `apps/desktop-runtime` | Tray, overlay, hotkeys, command palette, push-to-talk UX | Loop, Voice |
+| **Layer 3: Model** | `packages/llm-client` | OpenAI-style model calls (`/v1/chat/completions`, `/v1/embeddings`) | LM Studio, Loop |
+| **Layer 4: Tools** | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
+| **Layer 5: Voice** | `apps/voice-host`, `apps/voice-backend` | Local ASR/TTS transport and runtime | Interface, Loop |
 
 ---
 

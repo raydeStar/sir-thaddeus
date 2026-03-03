@@ -52,6 +52,7 @@ public sealed class VoiceSessionOrchestrator :
     private long _sessionCounter;
     private string? _currentSessionId;
     private CancellationTokenSource? _currentSessionCts;
+    private DateTimeOffset? _currentSessionStartedAtUtc;
     private VoiceEndReason? _pendingCancelReason;
     private string _realtimeTranscriptHint = "";
     private DateTimeOffset? _realtimeTranscriptHintAtUtc;
@@ -230,10 +231,10 @@ public sealed class VoiceSessionOrchestrator :
                 switch (evt.Type)
                 {
                     case VoiceEventType.MicDown:
-                        await HandleMicDownAsync(loopToken);
+                        await HandleMicDownAsync(evt, loopToken);
                         break;
                     case VoiceEventType.MicUp:
-                        await HandleMicUpAsync(loopToken);
+                        await HandleMicUpAsync(evt, loopToken);
                         break;
                     case VoiceEventType.Shutup:
                         await HandleShutupAsync(loopToken);
@@ -255,7 +256,7 @@ public sealed class VoiceSessionOrchestrator :
         }
     }
 
-    private async Task HandleMicDownAsync(CancellationToken loopToken)
+    private async Task HandleMicDownAsync(VoiceEvent evt, CancellationToken loopToken)
     {
         if (CurrentState == VoiceState.Listening)
         {
@@ -268,7 +269,7 @@ public sealed class VoiceSessionOrchestrator :
 
         await SafeEndSessionAsync(VoiceEndReason.Interrupt, loopToken, "micdown");
 
-        var sessionId = BeginNewSession();
+        var sessionId = BeginNewSession(evt.AtUtc);
         SetState(VoiceState.Listening, "MicDown");
 
         try
@@ -295,7 +296,7 @@ public sealed class VoiceSessionOrchestrator :
         }
     }
 
-    private async Task HandleMicUpAsync(CancellationToken loopToken)
+    private async Task HandleMicUpAsync(VoiceEvent evt, CancellationToken loopToken)
     {
         if (CurrentState != VoiceState.Listening)
         {
@@ -352,6 +353,20 @@ public sealed class VoiceSessionOrchestrator :
                 ["sessionId"] = sessionId
             });
             await SafeEndSessionAsync(VoiceEndReason.Complete, loopToken, "empty_clip");
+            return;
+        }
+
+        if (TryGetSessionHoldDuration(sessionId, evt.AtUtc, out var holdDuration) &&
+            holdDuration < _options.MinPttHoldDuration)
+        {
+            WriteAudit("VOICE_SHORT_TAP_IGNORED", "ok", new Dictionary<string, object>
+            {
+                ["sessionId"] = sessionId,
+                ["holdMs"] = (long)Math.Round(holdDuration.TotalMilliseconds),
+                ["minHoldMs"] = (long)Math.Round(_options.MinPttHoldDuration.TotalMilliseconds),
+                ["clipBytes"] = clip.AudioBytes.Length
+            });
+            await SafeEndSessionAsync(VoiceEndReason.Complete, loopToken, "short_tap");
             return;
         }
 
@@ -572,7 +587,7 @@ public sealed class VoiceSessionOrchestrator :
         await SafeEndSessionAsync(VoiceEndReason.Fault, loopToken, "external_fault");
     }
 
-    private string BeginNewSession()
+    private string BeginNewSession(DateTimeOffset startedAtUtc)
     {
         lock (_sessionGate)
         {
@@ -580,6 +595,7 @@ public sealed class VoiceSessionOrchestrator :
             _currentSessionId = $"voice-{next:D6}";
             _currentSessionCts?.Dispose();
             _currentSessionCts = new CancellationTokenSource();
+            _currentSessionStartedAtUtc = startedAtUtc;
             _pendingCancelReason = null;
             _realtimeTranscriptHint = "";
             _realtimeTranscriptHintAtUtc = null;
@@ -618,6 +634,31 @@ public sealed class VoiceSessionOrchestrator :
     {
         lock (_sessionGate)
             return string.Equals(_currentSessionId, sessionId, StringComparison.Ordinal);
+    }
+
+    private bool TryGetSessionHoldDuration(
+        string sessionId,
+        DateTimeOffset micUpAtUtc,
+        out TimeSpan holdDuration)
+    {
+        holdDuration = TimeSpan.Zero;
+        DateTimeOffset? startedAt;
+        lock (_sessionGate)
+        {
+            if (!string.Equals(_currentSessionId, sessionId, StringComparison.Ordinal))
+                return false;
+
+            startedAt = _currentSessionStartedAtUtc;
+        }
+
+        if (startedAt is null)
+            return false;
+
+        holdDuration = micUpAtUtc - startedAt.Value;
+        if (holdDuration < TimeSpan.Zero)
+            holdDuration = TimeSpan.Zero;
+
+        return true;
     }
 
     private bool TryTakeRealtimeTranscriptHint(
@@ -780,6 +821,7 @@ public sealed class VoiceSessionOrchestrator :
             cts = _currentSessionCts;
             _currentSessionId = null;
             _currentSessionCts = null;
+            _currentSessionStartedAtUtc = null;
             _pendingCancelReason = null;
             _realtimeTranscriptHint = "";
             _realtimeTranscriptHintAtUtc = null;

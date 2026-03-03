@@ -547,6 +547,26 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             LogEvent("PLACE_CONTEXT_INFERRED", $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
         }
 
+        if (SafeModeEnabled &&
+            (route.NeedsWeb || route.NeedsSearch || IsLookupIntent(route.Intent)))
+        {
+            const string safeModeWebBlockMessage =
+                "Web search is currently blocked because Safe Mode is enabled. " +
+                "Disable Safe Mode in Runtime Safety to run web lookups.";
+            LogEvent("WEB_LOOKUP_BLOCKED_SAFE_MODE", safeModeWebBlockMessage);
+            _history.Add(ChatMessage.Assistant(safeModeWebBlockMessage));
+
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = safeModeWebBlockMessage,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips,
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
+            }, usageBaseline);
+        }
+
         var hasLoadedProfileContext =
             !string.IsNullOrWhiteSpace(ActiveProfileId) ||
             memoryPackText.Contains("[PROFILE]", StringComparison.OrdinalIgnoreCase);

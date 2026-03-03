@@ -2363,6 +2363,34 @@ public class PolicyFilteringTests
     }
 
     [Fact]
+    public async Task SafeMode_WebLookup_ReturnsDeterministicBlockedMessage_WithoutToolCalls()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+            new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" });
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            throw new InvalidOperationException($"Unexpected MCP call in safe mode: {tool}");
+        });
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            MemoryEnabled = false,
+            SafeModeEnabled = true
+        };
+
+        var result = await agent.ProcessAsync("latest news on Nvidia today");
+
+        Assert.True(result.Success);
+        Assert.Contains("Safe Mode", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Web search", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.True(result.SuppressSourceCardsUi);
+        Assert.True(result.SuppressToolActivityUi);
+    }
+
+    [Fact]
     public async Task LookupFact_MontySwallowShortcut_ReturnsDeterministicGagWithoutSearch()
     {
         var llm = new FakeLlmClient("This should not be needed.");

@@ -730,15 +730,22 @@ public partial class App : System.Windows.Application
         // Cancel any in-flight read-aloud playback
         CancelReadAloud();
 
-        if (_audioPlaybackService?.IsPlaying != true)
-            return;
+        // Always cancel the active voice turn, even if we're currently
+        // transcribing/thinking and not yet speaking.
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
+        _voiceOrchestrator?.EnqueueShutup();
 
-        // Stop playback immediately so it doesn't keep speaking
-        try { _ = _audioPlaybackService.StopAsync(CancellationToken.None); } catch { }
+        // Stop playback immediately if currently speaking.
+        try
+        {
+            var playback = _audioPlaybackService;
+            if (playback is not null)
+                _ = playback.StopAsync(CancellationToken.None);
+        }
+        catch { }
 
         _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
         PublishVoiceStatus("Canceled.");
-        _voiceOrchestrator?.EnqueueShutup();
         AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
     }
 
@@ -751,10 +758,15 @@ public partial class App : System.Windows.Application
 
     private async Task TryHandleMicUpAsync()
     {
-        // Never gate mic release on readiness checks: stop capture first.
+        // Preview transcripts are partial by design. Keep them for live UI only;
+        // always run final ASR on the full captured clip after mic-up.
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
+
         _voiceOrchestrator?.EnqueueMicUp();
         PublishVoiceStatus("Transcribing...");
-        await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
+
+        // Preview is best-effort diagnostics. Never block mic-up on preview drain.
+        await StopLiveAsrPreviewLoopAsync(waitForDrain: false);
     }
 
     private string GetVoiceHostBaseUrlForRequests()
