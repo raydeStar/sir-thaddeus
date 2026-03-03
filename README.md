@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus local-first AI copilot logo" width="180" />
+  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus local AI copilot logo" width="180" />
 
   <h1>Sir Thaddeus</h1>
 
@@ -23,11 +23,26 @@
 
 **Sir Thaddeus runs on your machine.**
 
-Sir Thaddeus is a **local-first AI copilot for Windows** built for people who want useful AI without giving up control. It connects to **local language models** such as **LM Studio**, uses **permission-based tool access**, and keeps execution visible to the user.
+Sir Thaddeus is a **local AI assistant for Windows** built for people who want useful AI without giving up control. It connects to **local language models** (for example, **LM Studio**), uses **permission-based tool access**, and keeps execution visible to the operator.
 
 No telemetry by default. No silent background autonomy. No hidden actions.
 
 If it acts, you see it. If you press **STOP**, it stops.
+
+---
+
+## Documentation
+
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+
+---
+
+## Suggested GitHub Topics
+
+Use these in your repository "About" settings:
+
+`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `desktop-runtime`, `tool-orchestration`, `permissioned-ai`
 
 ---
 
@@ -36,13 +51,14 @@ If it acts, you see it. If you press **STOP**, it stops.
 Most everyday AI tasks do not need a massive cloud model.
 
 They need something that is:
+
 - **Private**
 - **Reliable**
 - **Fast enough on modest hardware**
 - **Simple to run**
 - **Respectful of user boundaries**
 
-Sir Thaddeus was built to lower the barrier to entry for **local AI on Windows** while keeping the user in charge.
+Sir Thaddeus lowers the barrier to entry for **local AI on Windows** while keeping the user in charge.
 
 ---
 
@@ -50,16 +66,18 @@ Sir Thaddeus was built to lower the barrier to entry for **local AI on Windows**
 
 Hold the push-to-talk hotkey and say:
 
-> “When is the local grocery store open?”
+> "When is the local grocery store open?"
 
 Before doing anything, Sir Thaddeus proposes the next step. You can see:
+
 - **What access is requested**
 - **Why it is needed**
 - **How long the permission lasts**
 
-You approve the action. It performs the task, returns the result, and the permission expires automatically.
+You approve. It runs. You get the result. Permission expires.
 
 That same interaction model applies throughout the runtime:
+
 - Nothing runs silently
 - Nothing lingers in the background without approval
 - Every important action is recorded locally
@@ -73,18 +91,21 @@ That same interaction model applies throughout the runtime:
 ## Features
 
 ### Voice and Interface
+
 - **Push-to-talk voice input** with release-to-send behavior
-- **Command palette** for fast keyboard-driven workflows
+- **Command palette** for keyboard-first workflows
 - **Global STOP kill switch** to halt active execution
 - **Tray-first Windows experience** with local desktop controls
 
 ### Local AI Runtime
+
 - **Local LLM integration** through LM Studio and OpenAI-compatible endpoints
 - **Reasoning pipeline** for breaking down logic questions step by step
 - **Small-model support** with routing assistance for better tool use
 - **Lightweight document reading** for text-based context
 
 ### Permissioned Tooling via MCP
+
 - **Web search and browser actions**
 - **Screen reading** and active-window context
 - **Read-only file listing and reading** with limits
@@ -92,6 +113,7 @@ That same interaction model applies throughout the runtime:
 - **Built-in utilities** for math, conversions, and structured lookups
 
 ### Trust and Safety
+
 - **Explicit permission prompts** before tool execution
 - **Time-boxed permission tokens**
 - **Local audit logging**
@@ -99,6 +121,7 @@ That same interaction model applies throughout the runtime:
 - **Tool budgets** to prevent runaway loops and token burn
 
 ### Optional Connected Services
+
 - **Background watchers** for website changes
 - **Local notifications** for monitored events
 
@@ -112,10 +135,10 @@ No cloud account required.
 2. Download the latest release ZIP
 3. Unzip the archive
 4. Run `SirThaddeus.exe`  
-   *Windows SmartScreen may appear. If so, choose **More Info → Run Anyway***
+   *Windows SmartScreen may appear. If so, choose **More Info -> Run Anyway***
 5. Start your local model runner  
    *Tested primarily with [LM Studio](https://lmstudio.ai/)*
-6. Complete the first-run setup inside the app
+6. Complete first-run setup inside the app
 
 That is it.
 
@@ -124,12 +147,15 @@ That is it.
 ## Core Principles
 
 ### 1. You are in control
+
 Sir Thaddeus proposes actions. You approve them.
 
 ### 2. Nothing runs silently
+
 If it acts, you can see it.
 
 ### 3. STOP always works
+
 The kill switch revokes permissions and halts execution immediately.
 
 Sir Thaddeus is not designed to replace your judgment. It is designed to extend your capability without taking away your agency.
@@ -138,7 +164,7 @@ Sir Thaddeus is not designed to replace your judgment. It is designed to extend 
 
 ## Architecture
 
-Sir Thaddeus uses a five-layer architecture that separates interface, orchestration, model access, tools, and voice runtime.
+Sir Thaddeus uses a five-layer architecture that separates loop control, interface, model access, tools, and voice runtime.
 
 **Execution loop:** `propose -> validate -> execute -> observe -> verify -> repair -> repeat`
 
@@ -207,11 +233,11 @@ flowchart LR
 ### Layer Responsibilities
 
 | Layer | Project(s) | Responsibility | Talks to |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Layer 1: Loop | `packages/agent` | Route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
 | Layer 2: Interface | `apps/desktop-runtime` | Tray, overlay, hotkeys, command palette, push-to-talk UX | Loop, Voice |
 | Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
-| Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval and storage | Loop |
+| Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
 | Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
 
 ---
@@ -220,16 +246,16 @@ flowchart LR
 
 ```text
 sir-thaddeus/
-├── apps/
-│   ├── desktop-runtime/
-│   ├── voice-host/
-│   ├── voice-backend/
-│   └── mcp-server/
-├── assets/
-├── packages/
-├── tests/
-├── tools/
-└── project-notes/
+|-- apps/
+|   |-- desktop-runtime/
+|   |-- voice-host/
+|   |-- voice-backend/
+|   `-- mcp-server/
+|-- assets/
+|-- packages/
+|-- tests/
+|-- tools/
+`-- project-notes/
 ```
 
 ---
@@ -238,24 +264,24 @@ sir-thaddeus/
 
 - Tested primarily with **LM Studio** and smaller local models
 - Other local runtimes may work, but support may vary
-- Smaller reasoning models can take longer to respond, especially when using deeper thinking modes
-- The runtime is designed around **permissioned execution**, **local visibility**, and **practical reliability** rather than autonomous free-for-all behavior
+- Smaller reasoning models can take longer to respond, especially in deeper thinking modes
+- The runtime is designed around **permissioned execution**, **local visibility**, and **practical reliability**
 
 ---
 
 ## Who This Is For
 
 Sir Thaddeus is for:
+
 - Developers exploring **local AI tooling**
 - Privacy-conscious users who want **AI on Windows without telemetry**
 - Builders interested in **MCP architecture**, **tool routing**, and **permissioned agents**
 - Anyone who wants an AI copilot they can actually control
 
-It is **not** intended to be an autonomous coding agent or an unbounded CLI bot that runs wild on your machine like a caffeinated raccoon with sudo.
+It is not intended to be an unbounded autonomous agent that runs freely on your machine.
 
 ---
 
 ## License
 
 Licensed under **Apache 2.0**. See [LICENSE](LICENSE) for details.
-
