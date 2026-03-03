@@ -38,14 +38,6 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 ---
 
-## Suggested GitHub Topics
-
-Use these in your repository "About" settings:
-
-`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `desktop-runtime`, `tool-orchestration`, `permissioned-ai`
-
----
-
 ## Why Sir Thaddeus?
 
 Most everyday AI tasks do not need a massive cloud model.
