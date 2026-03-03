@@ -46,6 +46,40 @@ public sealed class VoiceSessionOrchestratorTests
     }
 
     [Fact]
+    public async Task MicUpBeforeMinimumHold_DoesNotTranscribeOrInvokeAgent()
+    {
+        var capture = new FakeCaptureService();
+        var playback = new FakePlaybackService();
+        var asr = new CountingAsrService("fallback transcript");
+        var agent = new FakeAgentService("world");
+        var audit = new TestAuditLogger();
+
+        await using var orchestrator = new VoiceSessionOrchestrator(
+            capture,
+            playback,
+            asr,
+            agent,
+            audit,
+            new VoiceSessionOrchestratorOptions
+            {
+                MinPttHoldDuration = TimeSpan.FromMilliseconds(500)
+            });
+        await orchestrator.StartAsync();
+
+        orchestrator.EnqueueMicDown();
+        await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(2));
+
+        await Task.Delay(75);
+        orchestrator.EnqueueMicUp();
+
+        await WaitForStateAsync(orchestrator, VoiceState.Idle, TimeSpan.FromSeconds(2));
+
+        Assert.Equal(0, asr.CallCount);
+        Assert.Equal(0, agent.CallCount);
+        Assert.Equal(0, playback.PlayCalls);
+    }
+
+    [Fact]
     public async Task MicUpWithFreshRealtimeHint_SkipsFinalAsrPass()
     {
         var capture = new FakeCaptureService();

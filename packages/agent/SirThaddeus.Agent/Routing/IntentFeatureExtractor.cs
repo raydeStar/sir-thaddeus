@@ -266,6 +266,40 @@ public static class IntentFeatureExtractor
         return true;
     }
 
+    /// <summary>
+    /// Detects short microphone check / dictation test phrases that should
+    /// stay in chat mode and never trigger web lookup.
+    /// </summary>
+    public static bool LooksLikeVoiceMicCheck(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        if (normalized.Length == 0 || normalized.Length > 80)
+            return false;
+
+        ReadOnlySpan<string> phrases =
+        [
+            "testing testing",
+            "testing one two three",
+            "testing testing one two three",
+            "test test",
+            "mic check",
+            "check one two",
+            "check one two three",
+            "one two three"
+        ];
+
+        foreach (var phrase in phrases)
+        {
+            if (normalized.Contains(phrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     public static bool LooksLikeMemoryWriteRequest(string lower)
     {
         var normalized = NormalizeLoosePhraseInput(lower);
@@ -328,6 +362,9 @@ public static class IntentFeatureExtractor
 
     public static bool LooksLikeWebSearchRequest(string lower)
     {
+        if (LooksLikeVoiceMicCheck(lower))
+            return false;
+
         if (LooksLikeLogicPuzzlePrompt(lower))
             return false;
 

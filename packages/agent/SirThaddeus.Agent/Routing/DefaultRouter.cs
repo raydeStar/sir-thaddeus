@@ -48,6 +48,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return MakeRoute(Intents.ChatOnly, confidence: 0.95);
 
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.98);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {
@@ -151,6 +154,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
 
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
+            return ChatIntent.Casual;
+
         if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
             return ChatIntent.DeepDive;
 
@@ -198,6 +204,8 @@ public sealed class DefaultRouter : IRouter
     private static ChatIntent InferFallbackIntent(string lower)
     {
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
+            return ChatIntent.Casual;
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
             return ChatIntent.Casual;
         if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
             return ChatIntent.DeepDive;

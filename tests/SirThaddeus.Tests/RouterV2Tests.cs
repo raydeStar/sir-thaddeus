@@ -67,6 +67,20 @@ public class RouterV2Tests
         Assert.Equal(0, getLlmCalls());
     }
 
+    [Theory]
+    [InlineData("testing, testing, one two three")]
+    [InlineData("mic check one two")]
+    public async Task RouteAsync_MicCheckPhrases_StayChatAndAvoidLlm(string message)
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest { UserMessage = message });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
     [Fact]
     public async Task RouteAsync_WhenTier1DoesNotMatch_FallsBackToLlmClassification()
     {

@@ -70,11 +70,15 @@ public sealed class AssetManager
         if (File.Exists(markerPath))
         {
             var markerContent = await File.ReadAllTextAsync(markerPath, ct);
-            if (markerContent.Trim() == asset.Sha256)
+            if (markerContent.Trim() == asset.Sha256 && HasInstalledPayload(extractDir))
             {
                 _log?.Invoke($"Asset '{asset.Id}' already installed (sha256 matches).");
                 progress?.Report(new AssetProgress(asset.Id, asset.Description, index, total, AssetProgressPhase.AlreadyInstalled));
                 return;
+            }
+            else if (markerContent.Trim() == asset.Sha256)
+            {
+                _log?.Invoke($"Asset '{asset.Id}' marker is present but payload files are missing; reinstalling.");
             }
         }
 
@@ -168,7 +172,19 @@ public sealed class AssetManager
         if (!File.Exists(markerPath)) return false;
 
         var content = File.ReadAllText(markerPath).Trim();
-        return string.Equals(content, asset.Sha256, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(content, asset.Sha256, StringComparison.OrdinalIgnoreCase) &&
+               HasInstalledPayload(extractDir);
+    }
+
+    private static bool HasInstalledPayload(string extractDir)
+    {
+        if (!Directory.Exists(extractDir))
+            return false;
+
+        // A marker-only directory is a broken install (observed with interrupted
+        // downloads/extracts). Require at least one additional file.
+        return Directory.EnumerateFiles(extractDir, "*", SearchOption.AllDirectories)
+            .Any(path => !string.Equals(Path.GetFileName(path), ".installed.marker", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task DownloadFileAsync(string url, string destPath, long expectedSize, Action<int>? onPercent, CancellationToken ct)

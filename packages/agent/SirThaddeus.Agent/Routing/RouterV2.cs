@@ -48,6 +48,9 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.95);
 
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.98);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {

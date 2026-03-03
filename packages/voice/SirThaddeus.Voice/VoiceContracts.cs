@@ -149,6 +149,7 @@ public sealed record VoiceSessionOrchestratorOptions
     public TimeSpan AgentTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan SpeakingTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan QueueDrainTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan MinPttHoldDuration { get; init; } = TimeSpan.Zero;
     public TimeSpan RealtimeHintMaxAge { get; init; } = TimeSpan.FromSeconds(2);
     public int RealtimeHintMinChars { get; init; } = 8;
 }
