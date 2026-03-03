@@ -17,31 +17,48 @@ function Ensure-LocalVoiceAssets {
 
     $voiceBackendDir = Join-Path $RepoRootPath "apps/voice-backend"
     $fetchScript = Join-Path $RepoRootPath "dev/fetch-assets.ps1"
-    $sttRoot = Join-Path $voiceBackendDir "stt-models\base"
-    $sttMarker = Join-Path $sttRoot ".installed.marker"
-    $sttModelBin = Join-Path $sttRoot "model.bin"
 
-    if ((Test-Path $sttMarker) -and -not (Test-Path $sttModelBin)) {
-        Write-Host "      Detected stale STT marker without model.bin; clearing marker..." -ForegroundColor DarkGray
-        try {
-            attrib -r $sttMarker 2>$null
-            Remove-Item -Force $sttMarker -ErrorAction SilentlyContinue
-        }
-        catch {
-            # best effort
-        }
+    if (-not (Test-Path $fetchScript)) {
+        Write-Host "      WARN: missing $fetchScript; cannot self-heal voice assets." -ForegroundColor Yellow
+        return
     }
 
-    if (-not (Test-Path $sttModelBin)) {
-        if (-not (Test-Path $fetchScript)) {
-            Write-Host "      WARN: missing $fetchScript; cannot self-heal STT assets." -ForegroundColor Yellow
-            return
+    $assetChecks = @(
+        @{ AssetId = "voice-runtime-win-x64"; MarkerDir = $voiceBackendDir; Marker = ".installed.marker"; Required = @((Join-Path $voiceBackendDir "runtime\python\python.exe"), (Join-Path $voiceBackendDir "bin\uv.exe")) },
+        @{ AssetId = "voice-deps-win-x64"; MarkerDir = Join-Path $voiceBackendDir "deps\wheels"; Marker = ".installed.marker"; Required = @(Join-Path $voiceBackendDir "deps\wheels\faster_whisper-1.2.1-py3-none-any.whl") },
+        @{ AssetId = "piper-win-x64"; MarkerDir = Join-Path $voiceBackendDir "piper"; Marker = ".installed.marker"; Required = @(Join-Path $voiceBackendDir "piper\piper.exe") },
+        @{ AssetId = "piper-voice-en_US-john-medium"; MarkerDir = Join-Path $voiceBackendDir "piper-voices\en_US-john-medium"; Marker = ".installed.marker"; Required = @(Join-Path $voiceBackendDir "piper-voices\en_US-john-medium\en_US-john-medium.onnx") },
+        @{ AssetId = "stt-model-whisper-base"; MarkerDir = Join-Path $voiceBackendDir "stt-models\base"; Marker = ".installed.marker"; Required = @(Join-Path $voiceBackendDir "stt-models\base\model.bin") }
+    )
+
+    foreach ($entry in $assetChecks) {
+        $markerPath = Join-Path $entry.MarkerDir $entry.Marker
+        $hasMissingPayload = $false
+
+        foreach ($requiredPath in $entry.Required) {
+            if (-not (Test-Path $requiredPath)) {
+                $hasMissingPayload = $true
+                break
+            }
         }
 
-        Write-Host "      STT model missing. Fetching stt-model-whisper-base..." -ForegroundColor Cyan
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $fetchScript -AssetId "stt-model-whisper-base"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "      WARN: failed to fetch STT model asset (exit $LASTEXITCODE)." -ForegroundColor Yellow
+        if ((Test-Path $markerPath) -and $hasMissingPayload) {
+            Write-Host "      Detected stale marker for $($entry.AssetId); clearing marker..." -ForegroundColor DarkGray
+            try {
+                attrib -r $markerPath 2>$null
+                Remove-Item -Force $markerPath -ErrorAction SilentlyContinue
+            }
+            catch {
+                # best effort
+            }
+        }
+
+        if ($hasMissingPayload) {
+            Write-Host "      Missing voice asset payload for $($entry.AssetId). Fetching..." -ForegroundColor Cyan
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $fetchScript -AssetId $entry.AssetId
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "      WARN: failed to fetch $($entry.AssetId) (exit $LASTEXITCODE)." -ForegroundColor Yellow
+            }
         }
     }
 }
@@ -144,8 +161,8 @@ else {
 }
 
 $ProjectPath = Join-Path $RepoRoot "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
-# Force a non-incremental build so XAML/code-behind edits are always picked up.
-& dotnet build $ProjectPath --no-incremental -v q
+# Keep startup snappy: rely on normal incremental build.
+& dotnet build $ProjectPath -v q
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nERROR: DesktopRuntime build failed." -ForegroundColor Red
     exit $LASTEXITCODE

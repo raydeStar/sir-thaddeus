@@ -1,8 +1,8 @@
 ---
-name: Issue report
-about: Report a bug, regression, UX issue, or architecture/documentation gap
-title: "[Issue] "
-labels: ["triage"]
+name: Bug report
+about: Report a bug, regression, performance issue, or unexpected behavior
+title: "[Bug] "
+labels: ["bug", "triage"]
 assignees: []
 ---
 
@@ -10,22 +10,11 @@ assignees: []
 
 Describe the issue in 1-3 sentences.
 
-## Type
-
-Select one:
-
-- Bug
-- Regression
-- Feature request
-- Documentation
-- Architecture/design
-- Performance
-
 ## Reproduction Steps
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## Expected Behavior
 

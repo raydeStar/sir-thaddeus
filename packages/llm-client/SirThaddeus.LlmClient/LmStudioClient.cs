@@ -12,6 +12,9 @@ namespace SirThaddeus.LlmClient;
 /// </summary>
 public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
+    private static readonly TimeSpan ModelDiscoveryTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ModelLoadTimeout = TimeSpan.FromSeconds(10);
+
     private HttpClient _http;
     private readonly object _optionsGate = new();
     private LlmClientOptions _options;
@@ -437,14 +440,16 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         try
         {
             // Check what's currently loaded.
-            var modelsResponse = await _http.GetAsync("/v1/models", cancellationToken);
+            using var discoverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            discoverCts.CancelAfter(ModelDiscoveryTimeout);
+            var modelsResponse = await _http.GetAsync("/v1/models", discoverCts.Token);
             if (!modelsResponse.IsSuccessStatusCode)
             {
                 _confirmedLoadedModels.Add(modelId);
                 return;
             }
 
-            var raw = await modelsResponse.Content.ReadAsStringAsync(cancellationToken);
+            var raw = await modelsResponse.Content.ReadAsStringAsync(discoverCts.Token);
             using var doc = JsonDocument.Parse(raw);
             if (!doc.RootElement.TryGetProperty("data", out var data) ||
                 data.ValueKind != JsonValueKind.Array)
@@ -493,7 +498,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 Encoding.UTF8,
                 "application/json");
 
-            await _http.PostAsync("/v1/models/load", loadPayload, cancellationToken);
+            using var loadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            loadCts.CancelAfter(ModelLoadTimeout);
+            await _http.PostAsync("/v1/models/load", loadPayload, loadCts.Token);
             _confirmedLoadedModels.Add(modelId);
         }
         catch

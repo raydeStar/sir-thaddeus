@@ -110,6 +110,21 @@ public sealed partial class VoiceHostProcessManager
                     catch { }
                 }
 
+                static bool ShouldMirrorLineToAudit(string level, string line)
+                {
+                    if (string.Equals(level, "ERR", StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    if (string.Equals(level, "OUT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return line.Contains("[VOICE_TTS_READY]", StringComparison.OrdinalIgnoreCase) ||
+                               line.Contains("Application startup complete", StringComparison.OrdinalIgnoreCase) ||
+                               line.Contains("Uvicorn running", StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    return false;
+                }
+
                 process.EnableRaisingEvents = true;
                 process.OutputDataReceived += (_, e) =>
                 {
@@ -118,11 +133,14 @@ public sealed partial class VoiceHostProcessManager
                         var trimmed = e.Data.Trim();
                         UpdateStartupPhase(trimmed);
                         WriteLog("OUT", trimmed);
-                        WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
+                        if (ShouldMirrorLineToAudit("OUT", trimmed))
                         {
-                            ["pid"] = process.Id,
-                            ["line"] = trimmed
-                        });
+                            WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
+                            {
+                                ["pid"] = process.Id,
+                                ["line"] = trimmed
+                            });
+                        }
                     }
                 };
                 process.ErrorDataReceived += (_, e) =>
@@ -132,11 +150,14 @@ public sealed partial class VoiceHostProcessManager
                         var trimmed = e.Data.Trim();
                         UpdateStartupPhase(trimmed);
                         WriteLog("ERR", trimmed);
-                        WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
+                        if (ShouldMirrorLineToAudit("ERR", trimmed))
                         {
-                            ["pid"] = process.Id,
-                            ["line"] = trimmed
-                        });
+                            WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
+                            {
+                                ["pid"] = process.Id,
+                                ["line"] = trimmed
+                            });
+                        }
                     }
                 };
                 process.Exited += (_, _) =>
@@ -271,6 +292,7 @@ public sealed partial class VoiceHostProcessManager
     private void StopManagedProcessIfAny()
         {
             _lastStartupPhase = "";
+            _lastReadyAtUtc = null;
             lock (_processGate)
             {
                 if (_managedProcess is null)

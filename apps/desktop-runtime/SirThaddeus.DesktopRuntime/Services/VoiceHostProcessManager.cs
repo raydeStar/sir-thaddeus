@@ -16,7 +16,8 @@ namespace SirThaddeus.DesktopRuntime.Services;
 /// </summary>
 public sealed partial class VoiceHostProcessManager : IAsyncDisposable
 {
-    private static readonly TimeSpan HealthProbeTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan HealthProbeTimeout = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan ReadyReuseWindow = TimeSpan.FromSeconds(2);
 
     private readonly IAuditLogger _auditLogger;
     private readonly HttpClient _httpClient;
@@ -37,6 +38,7 @@ public sealed partial class VoiceHostProcessManager : IAsyncDisposable
     private int _warmupScheduled;
     private int _staleSessionReaped;
     private bool _disposed;
+    private DateTimeOffset? _lastReadyAtUtc;
     private volatile string _lastStartupPhase = "";
     private string? _vcRedistWarning;
     private bool _vcRedistChecked;
@@ -137,6 +139,7 @@ public sealed partial class VoiceHostProcessManager : IAsyncDisposable
         KillOrphanedVoiceHostProcesses();
         _currentBaseUrl = null;
         _currentPort = null;
+        _lastReadyAtUtc = null;
         WriteAudit("VOICEHOST_MANUAL_STOP", "ok", new Dictionary<string, object>
         {
             ["reason"] = "user_requested"
@@ -263,9 +266,20 @@ public sealed partial class VoiceHostProcessManager : IAsyncDisposable
             // Fast path: if current base is already ready, no process action needed.
             if (!string.IsNullOrWhiteSpace(_currentBaseUrl))
             {
+                var now = _timeProvider.GetUtcNow();
+                if (HasManagedProcessAlive() &&
+                    _lastReadyAtUtc is not null &&
+                    now - _lastReadyAtUtc.Value <= ReadyReuseWindow)
+                {
+                    return VoiceHostEnsureResult.Ok(_currentBaseUrl);
+                }
+
                 var currentHealth = await ProbeHealthAsync(_currentBaseUrl, healthPath, cancellationToken);
                 if (currentHealth.Ready)
+                {
+                    _lastReadyAtUtc = now;
                     return VoiceHostEnsureResult.Ok(_currentBaseUrl);
+                }
             }
 
             // Next quick path: preferred port already has a ready VoiceHost.
@@ -589,6 +603,7 @@ public sealed partial class VoiceHostProcessManager : IAsyncDisposable
     {
         _currentBaseUrl = baseUrl.TrimEnd('/');
         _currentPort = port;
+        _lastReadyAtUtc = _timeProvider.GetUtcNow();
         PersistSessionState(_currentBaseUrl, port, processId);
         WriteAudit("VOICEHOST_READY", "ok", new Dictionary<string, object>
         {

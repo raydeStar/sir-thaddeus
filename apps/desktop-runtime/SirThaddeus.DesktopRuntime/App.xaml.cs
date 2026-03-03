@@ -598,6 +598,7 @@ public partial class App : System.Windows.Application
                 AsrTimeout = TimeSpan.FromMilliseconds(Math.Max(5_000, _settings.Voice.AsrTimeoutMs)),
                 AgentTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.AgentTimeoutMs)),
                 SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs)),
+                MinPttHoldDuration = TimeSpan.FromMilliseconds(500),
                 // Preview transcript can shave final ASR latency when the operator releases PTT.
                 // A slightly more permissive freshness/length gate avoids unnecessary fallback ASR calls
                 // without bypassing ASR entirely.
@@ -762,11 +763,11 @@ public partial class App : System.Windows.Application
         // always run final ASR on the full captured clip after mic-up.
         _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
 
-        _voiceOrchestrator?.EnqueueMicUp();
-        PublishVoiceStatus("Transcribing...");
-
         // Preview is best-effort diagnostics. Never block mic-up on preview drain.
         await StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+
+        _voiceOrchestrator?.EnqueueMicUp();
+        PublishVoiceStatus("Transcribing...");
     }
 
     private string GetVoiceHostBaseUrlForRequests()
@@ -1118,7 +1119,7 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                await Task.Delay(180, token);
+                await Task.Delay(350, token);
                 while (!token.IsCancellationRequested)
                 {
                     try
@@ -1129,7 +1130,7 @@ public partial class App : System.Windows.Application
                             continue;
                         }
 
-                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_000);
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 1_200);
                         if (clip is null || clip.AudioBytes.Length < 2_400)
                         {
                             await Task.Delay(120, token);
@@ -1150,7 +1151,7 @@ public partial class App : System.Windows.Application
                         // Preview is diagnostics-only and must not interrupt voice orchestration.
                     }
 
-                    await Task.Delay(300, token);
+                    await Task.Delay(650, token);
                 }
             }
             catch (OperationCanceledException)

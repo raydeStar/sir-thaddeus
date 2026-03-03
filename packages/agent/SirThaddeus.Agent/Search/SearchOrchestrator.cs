@@ -474,11 +474,10 @@ public sealed class SearchOrchestrator
 
         // Parse and record results.
         var sources = ParseSourcesFromToolResult(toolResult);
-        var existenceGuarded = await TryBuildExistenceGuardedResponseAsync(
+        var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
             sources,
-            toolCallsMade,
-            ct);
+            toolCallsMade);
         if (existenceGuarded is not null)
             return existenceGuarded;
         var isMarketQuoteRequest =
@@ -2033,11 +2032,10 @@ public sealed class SearchOrchestrator
                lower.Contains("air speed velocity of an unladen swallow", StringComparison.Ordinal);
     }
 
-    private async Task<AgentResponse?> TryBuildExistenceGuardedResponseAsync(
+    private AgentResponse? TryBuildExistenceGuardedResponse(
         string userMessage,
         IReadOnlyList<SourceItem> initialSources,
-        List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
+        List<ToolCallRecord> toolCallsMade)
     {
         var queryBundle = BuildExistenceQueryBundle(userMessage);
         if (queryBundle.Count <= 1)
@@ -2046,30 +2044,7 @@ public sealed class SearchOrchestrator
         var evidence = initialSources
             .Where(s => !string.IsNullOrWhiteSpace(s.Url))
             .ToList();
-        var addedFollowupEvidence = false;
-
-        foreach (var query in queryBundle.Skip(1).Take(3))
-        {
-            var extraResult = await CallWebSearchAsync(
-                query,
-                recency: "any",
-                toolCallsMade,
-                ct,
-                originalUserMessage: userMessage);
-
-            if (string.IsNullOrWhiteSpace(extraResult) || LooksLikeNoResultsPayload(extraResult))
-                continue;
-
-            if (WebToolFailureMapper.TryBuildFailureResponse(extraResult, toolCallsMade) is not null)
-                continue;
-
-            var extraSources = ParseSourcesFromToolResult(extraResult);
-            if (extraSources.Count == 0)
-                continue;
-
-            evidence.AddRange(extraSources.Where(s => !string.IsNullOrWhiteSpace(s.Url)));
-            addedFollowupEvidence = true;
-        }
+        const bool addedFollowupEvidence = false;
 
         if (evidence.Count == 0)
             return null;

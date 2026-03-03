@@ -15,7 +15,7 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
 {
     // Voice capture is interactive: keep startup retries short so the UI
     // does not appear hung in "Transcribing..." when the backend is down.
-    private static readonly TimeSpan MaxInteractiveStartupRetryBudget = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan MaxInteractiveStartupRetryBudget = TimeSpan.FromSeconds(12);
 
     private readonly HttpClient _httpClient;
     private readonly Func<string> _baseUrlProvider;

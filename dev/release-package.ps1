@@ -28,6 +28,18 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
+function Assert-OrWarn([bool]$Condition, [string]$ErrorMessage, [string]$WarnMessage, [bool]$Required) {
+    if ($Condition) {
+        return
+    }
+
+    if ($Required) {
+        Fail $ErrorMessage
+    }
+
+    Write-Host "  WARN: $WarnMessage" -ForegroundColor Yellow
+}
+
 function Get-VersionLabel([string]$RawVersion) {
     if ([string]::IsNullOrWhiteSpace($RawVersion)) {
         return ""
@@ -106,6 +118,8 @@ if (-not $SkipPreflight) {
     }
 }
 
+$strictVoiceAssetGate = $Configuration -eq "Release"
+
 # -- Verify Piper TTS assets ---------------------------------------------------
 # Assets are fetched from GitHub Releases via dev/fetch-assets.ps1 (CI)
 # or downloaded at runtime by AssetManager. Verify they are present.
@@ -120,7 +134,11 @@ if (Test-Path $piperExe) {
     Write-Host "  piper.exe present"
 }
 else {
-    Write-Host "  WARN: piper.exe not found at $piperExe" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "piper.exe not found at $piperExe" `
+        -WarnMessage "piper.exe not found at $piperExe" `
+        -Required $strictVoiceAssetGate
 }
 
 if (Test-Path $piperVoiceModel) {
@@ -128,7 +146,11 @@ if (Test-Path $piperVoiceModel) {
     Write-Host "  Default voice model present (${voiceSize} MB)"
 }
 else {
-    Write-Host "  WARN: Default voice model not found at $piperVoiceModel" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "Default voice model not found at $piperVoiceModel" `
+        -WarnMessage "Default voice model not found at $piperVoiceModel" `
+        -Required $strictVoiceAssetGate
 }
 
 Write-Section "Publish Artifacts"
@@ -228,7 +250,11 @@ if (Test-Path $piperSource) {
     Write-Host "  Staged: piper/ ($piperCount files)"
 }
 else {
-    Write-Host "  WARN: piper/ directory not found; TTS will be unavailable" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "piper/ directory not found; TTS will be unavailable" `
+        -WarnMessage "piper/ directory not found; TTS will be unavailable" `
+        -Required $strictVoiceAssetGate
 }
 
 # Piper voice models (default: en_US-john-medium)
@@ -240,7 +266,11 @@ if (Test-Path $piperVoicesSource) {
     Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
 }
 else {
-    Write-Host "  WARN: piper-voices/ directory not found; no bundled voices" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "piper-voices/ directory not found; no bundled voices" `
+        -WarnMessage "piper-voices/ directory not found; no bundled voices" `
+        -Required $strictVoiceAssetGate
 }
 
 # uv.exe — Python environment manager
@@ -252,7 +282,11 @@ if (Test-Path $uvSource) {
     Write-Host "  Staged: bin/uv.exe"
 }
 else {
-    Write-Host "  WARN: bundled uv.exe not found; offline venv creation may fail" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "bundled uv.exe not found; offline venv creation may fail" `
+        -WarnMessage "bundled uv.exe not found; offline venv creation may fail" `
+        -Required $strictVoiceAssetGate
 }
 
 # Bundled Python 3.11 runtime
@@ -264,7 +298,11 @@ if (Test-Path $runtimeSource) {
     Write-Host "  Staged: runtime/python ($runtimeCount files)"
 }
 else {
-    Write-Host "  WARN: bundled Python runtime not found; will download at first run" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "bundled Python runtime not found; will download at first run" `
+        -WarnMessage "bundled Python runtime not found; will download at first run" `
+        -Required $strictVoiceAssetGate
 }
 
 # Python wheel dependencies (offline pip install)
@@ -278,7 +316,11 @@ if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*
     Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
 }
 else {
-    Write-Host "  WARN: bundled Python wheels not found; will download at first run" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "bundled Python wheels not found; will download at first run" `
+        -WarnMessage "bundled Python wheels not found; will download at first run" `
+        -Required $strictVoiceAssetGate
 }
 
 # Faster-Whisper base STT model
@@ -289,7 +331,11 @@ if (Test-Path $sttSource) {
     Write-Host "  Staged: stt-models/base"
 }
 else {
-    Write-Host "  WARN: bundled STT model not found; will download at first run" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "bundled STT model not found; will download at first run" `
+        -WarnMessage "bundled STT model not found; will download at first run" `
+        -Required $strictVoiceAssetGate
 }
 
 # Stage asset manifest so the app can self-heal (download missing assets at runtime)
@@ -301,7 +347,11 @@ if (Test-Path $manifestSource) {
     Write-Host "  Staged: assets/manifest.json"
 }
 else {
-    Write-Host "  WARN: assets/manifest.json not found; runtime asset download will be unavailable" -ForegroundColor Yellow
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "assets/manifest.json not found; runtime asset download will be unavailable" `
+        -WarnMessage "assets/manifest.json not found; runtime asset download will be unavailable" `
+        -Required $strictVoiceAssetGate
 }
 
 if (-not (Test-Path $firstRunReadmeSource)) {

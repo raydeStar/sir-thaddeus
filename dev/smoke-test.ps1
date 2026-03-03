@@ -28,7 +28,8 @@ param(
     [string]$ZipPath = "",
     [string]$StageDir = "",
     [switch]$SkipLaunch,
-    [switch]$SkipChecksum
+    [switch]$SkipChecksum,
+    [switch]$AllowRuntimeAssetDownload
 )
 
 Set-StrictMode -Version Latest
@@ -178,11 +179,14 @@ else {
     Fail "bin/ directory missing"
 }
 
-# Voice backend assets (warn-only since they can be fetched at runtime)
+# Voice backend assets.
+# By default, this gate requires bundled assets to avoid shipping packages
+# that only work after runtime downloads.
+$voiceAssetsRequired = -not $AllowRuntimeAssetDownload
 $voiceAssets = @(
-    @{ Path = "bin/voice/piper/piper.exe";              Required = $false; Label = "Piper TTS binary" },
-    @{ Path = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $false; Label = "Default Piper voice model" },
-    @{ Path = "bin/voice/stt-models/base";              Required = $false; Label = "Whisper STT model" }
+    @{ Path = "bin/voice/piper/piper.exe";              Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
+    @{ Path = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
+    @{ Path = "bin/voice/stt-models/base";              Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
 
 foreach ($asset in $voiceAssets) {
@@ -191,7 +195,12 @@ foreach ($asset in $voiceAssets) {
         Pass "$($asset.Label) present"
     }
     else {
-        Warn "$($asset.Label) not bundled (will download at runtime)"
+        if ($asset.Required) {
+            Fail "$($asset.Label) not bundled"
+        }
+        else {
+            Warn "$($asset.Label) not bundled (will download at runtime)"
+        }
     }
 }
 
