@@ -52,6 +52,10 @@ internal static class LocationContextHeuristics
         "you", "i", "he", "she", "we", "they", "it",
         "my", "your", "his", "her", "our", "their",
         "hello", "hi", "hey", "please", "tell", "give",
+        // Temporal/freshness words are commonly hallucinated into locationText.
+        "latest", "recent", "current", "breaking",
+        "today", "tonight", "tomorrow", "yesterday",
+        "now", "currently",
         "if", "but", "and", "or", "so", "because", "since"
     ];
 

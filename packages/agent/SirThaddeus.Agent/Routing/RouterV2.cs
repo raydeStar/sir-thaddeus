@@ -70,11 +70,35 @@ public sealed class RouterV2 : IRouter
             return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
-            return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.96, needsWeb: true, needsSearch: true);
+            return DefaultRouter.MakeRoute(
+                Intents.LookupFact,
+                confidence: ComputeFactLookupConfidence(lower),
+                needsWeb: true,
+                needsSearch: true);
 
-        if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower))
-            return DefaultRouter.MakeRoute(Intents.GeneralTool, confidence: 0.96);
+        var explicitToolIntent = IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower);
+        if (!string.IsNullOrWhiteSpace(explicitToolIntent))
+        {
+            return explicitToolIntent switch
+            {
+                Intents.FileTask => DefaultRouter.MakeRoute(Intents.FileTask, confidence: 0.97, needsFile: true),
+                Intents.ScreenObserve => DefaultRouter.MakeRoute(Intents.ScreenObserve, confidence: 0.97, needsScreen: true),
+                Intents.SystemTask => DefaultRouter.MakeRoute(Intents.SystemTask, confidence: 0.97, needsSystem: true, risk: "medium"),
+                Intents.LookupSearch => DefaultRouter.MakeRoute(Intents.LookupSearch, confidence: 0.97, needsWeb: true, needsSearch: true, needsBrowser: true),
+                Intents.MemoryWrite => DefaultRouter.MakeRoute(Intents.MemoryWrite, confidence: 0.97, needsMemoryWrite: true),
+                _ => DefaultRouter.MakeRoute(Intents.GeneralTool, confidence: 0.96)
+            };
+        }
 
         return null;
+    }
+
+    private static double ComputeFactLookupConfidence(string lower)
+    {
+        var evidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+        if (evidence.ShouldLookup)
+            return Math.Clamp(Math.Max(0.88, evidence.Confidence), 0.88, 0.96);
+
+        return 0.96;
     }
 }

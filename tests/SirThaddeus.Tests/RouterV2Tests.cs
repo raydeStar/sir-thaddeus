@@ -55,6 +55,7 @@ public class RouterV2Tests
 
     [Theory]
     [InlineData("what's on my screen right now?")]
+    [InlineData("can you tell me what is on my screen?")]
     [InlineData("take a screenshot")]
     [InlineData("summarize this page")]
     [InlineData("what can you see")]
@@ -96,6 +97,72 @@ public class RouterV2Tests
 
         Assert.Equal(Intents.ChatOnly, route.Intent);
         Assert.True(llmCalls > 0);
+    }
+
+    [Fact]
+    public async Task RouteAsync_ConversationalTellMe_DoesNotDeterministicallyForceWebLookup()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "tell me a short joke about databases"
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.True(getLlmCalls() > 0);
+    }
+
+    [Fact]
+    public async Task RouteAsync_ExplicitSearchPhrase_UsesEvidenceWeightedConfidence()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "search for nvidia stock news"
+        });
+
+        Assert.Equal(Intents.LookupFact, route.Intent);
+        Assert.InRange(route.Confidence, 0.88, 0.96);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_MovieComparisonWordForWord_RoutesToLookupFact()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?"
+        });
+
+        Assert.Equal(Intents.LookupFact, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_ExplicitFileReadInvocation_RoutesToFileTask()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = @"Use file_read on C:\Users\Public\Documents\readme.txt"
+        });
+
+        Assert.Equal(Intents.FileTask, route.Intent);
+        Assert.True(route.NeedsFileAccess);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public void RoutingFeatures_IncludeWebEvidenceScoreAndReason()
+    {
+        var features = RoutingFeatures.Extract("search for weather updates today");
+        var summary = features.ToPromptSummary();
+
+        Assert.Contains("web_score=", summary);
+        Assert.Contains("web_reason=", summary);
     }
 
     private static (RouterV2 Router, Func<int> GetLlmCalls) CreateRouterWithCallCounter()

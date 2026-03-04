@@ -169,6 +169,24 @@ public static class PolicyGate
         {
             AllowedCapabilities = [ToolCapability.FileRead],
             ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.WebSearch],
+            AllowedTools =
+            [
+                "file_read",
+                "file_list",
+                "FileRead",
+                "FileList"
+            ],
+            ForbiddenTools =
+            [
+                "file_read_preview",
+                "file_read_apply",
+                "file_list_preview",
+                "file_list_apply",
+                "FileReadPreview",
+                "FileReadApply",
+                "FileListPreview",
+                "FileListApply"
+            ],
             RequiredPermissions = ["FileAccess"]
         },
 

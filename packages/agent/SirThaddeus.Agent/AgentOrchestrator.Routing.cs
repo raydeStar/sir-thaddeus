@@ -84,6 +84,125 @@ public sealed partial class AgentOrchestrator
         intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
 
+    private static bool ShouldRunFootmanForRoute(
+        RouterOutput route,
+        string lowerIncoming,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (route.Confidence < 0.95)
+            return true;
+
+        // Strong deterministic lookup intents should bypass Footman to
+        // avoid stochastic downgrades into chat-only paths.
+        if (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            return false;
+        }
+
+        if (route.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        {
+            return false;
+        }
+
+        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
+            webEvidence.ShouldLookup &&
+            webEvidence.Score >= 2.8)
+        {
+            return false;
+        }
+
+        if (IsLookupIntent(route.Intent))
+            return true;
+
+        return route.NeedsWeb || route.NeedsSearch || route.NeedsBrowserAutomation;
+    }
+
+    private static bool ShouldBlockFootmanLookupDowngrade(
+        string lowerIncoming,
+        RouterOutput baseRoute,
+        RouterOutput footmanRoute,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (!IsLookupIntent(baseRoute.Intent))
+            return false;
+
+        if (IsLookupIntent(footmanRoute.Intent))
+            return false;
+
+        if (baseRoute.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            return true;
+        }
+
+        if (baseRoute.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        {
+            return true;
+        }
+
+        if (baseRoute.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
+            IsLookupFloorEligiblePrompt(lowerIncoming) &&
+            webEvidence.ShouldLookup &&
+            webEvidence.Score >= 2.8)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? GetLookupFloorIntent(
+        string lowerIncoming,
+        RouterOutput finalRoute,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (IsLookupIntent(finalRoute.Intent))
+            return null;
+
+        if (!IsLookupFloorEligiblePrompt(lowerIncoming))
+            return null;
+
+        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+            return Intents.LookupDeepDive;
+
+        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+            return Intents.LookupNews;
+
+        if (webEvidence.ShouldLookup && webEvidence.Score >= 2.8)
+            return Intents.LookupFact;
+
+        return null;
+    }
+
+    private static bool IsLookupFloorEligiblePrompt(string lowerIncoming)
+    {
+        if (string.IsNullOrWhiteSpace(lowerIncoming))
+            return false;
+
+        if (IntentFeatureExtractor.LooksLikeGreeting(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeConversationalCheckIn(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeVoiceMicCheck(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeSystemCommand(lowerIncoming) ||
+            lowerIncoming.Contains("tell me about yourself", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("about your favorite", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("favorite thing", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what do you think", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what's your opinion", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("whats your opinion", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what's your take", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("whats your take", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
     {
         if (string.IsNullOrWhiteSpace(processedDraft))
@@ -109,13 +228,7 @@ public sealed partial class AgentOrchestrator
             "i couldn't find",
             "i could not find",
             "i wasn't able to",
-            "i was not able to",
-            "depends",
-            "it depends",
-            "might",
-            "could",
-            "possibly",
-            "perhaps"
+            "i was not able to"
         ];
 
         foreach (var marker in markers)

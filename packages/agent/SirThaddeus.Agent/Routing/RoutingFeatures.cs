@@ -25,6 +25,8 @@ public sealed record RoutingFeatures
     public bool LooksLikeBrowseRequest { get; init; }
     public bool LooksLikeMemoryWrite { get; init; }
     public bool LooksLikeWebSearch { get; init; }
+    public double WebLookupScore { get; init; }
+    public string WebLookupReasonCode { get; init; } = "";
 
     // ── Contextual state from the orchestrator ────────────────────────
 
@@ -56,6 +58,8 @@ public sealed record RoutingFeatures
     {
         var lower = (userMessage ?? "").Trim().ToLowerInvariant();
 
+        var webEvidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+
         return new RoutingFeatures
         {
             IsGreeting              = IntentFeatureExtractor.LooksLikeGreeting(lower),
@@ -71,7 +75,9 @@ public sealed record RoutingFeatures
             LooksLikeSystemCommand  = IntentFeatureExtractor.LooksLikeSystemCommand(lower),
             LooksLikeBrowseRequest  = IntentFeatureExtractor.LooksLikeBrowseRequest(lower),
             LooksLikeMemoryWrite    = IntentFeatureExtractor.LooksLikeMemoryWriteRequest(lower),
-            LooksLikeWebSearch      = IntentFeatureExtractor.LooksLikeWebSearchRequest(lower),
+            LooksLikeWebSearch      = webEvidence.ShouldLookup,
+            WebLookupScore          = webEvidence.Score,
+            WebLookupReasonCode     = webEvidence.ReasonCode,
             HasRecentRationale      = hasRecentRationale,
             HasRecentSearchResults  = hasRecentSearchResults,
             WordCount               = CountWords(userMessage),
@@ -103,6 +109,13 @@ public sealed record RoutingFeatures
         if (LooksLikeBrowseRequest) signals.Add("browse_request");
         if (LooksLikeMemoryWrite)   signals.Add("memory_write");
         if (LooksLikeWebSearch)     signals.Add("web_search");
+        if (WebLookupScore > 0.0)
+            signals.Add($"web_score={WebLookupScore:0.0}");
+        if (!string.IsNullOrWhiteSpace(WebLookupReasonCode) &&
+            !WebLookupReasonCode.Equals("none", StringComparison.Ordinal))
+        {
+            signals.Add($"web_reason={WebLookupReasonCode}");
+        }
         if (HasRecentRationale)     signals.Add("has_recent_rationale");
         if (HasRecentSearchResults) signals.Add("has_recent_search");
         if (HasQuestionMark)        signals.Add("has_question_mark");
