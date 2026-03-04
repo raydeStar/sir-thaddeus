@@ -90,6 +90,9 @@ public sealed class RouterV2 : IRouter
             };
         }
 
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.94);
+
         return null;
     }
 

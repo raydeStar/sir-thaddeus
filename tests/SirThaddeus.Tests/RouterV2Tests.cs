@@ -126,6 +126,36 @@ public class RouterV2Tests
         Assert.Equal(0, getLlmCalls());
     }
 
+    [Theory]
+    [InlineData("hello world")]
+    [InlineData("hello there")]
+    [InlineData("hi")]
+    public async Task RouteAsync_GreetingOnly_StaysChatAndAvoidsLlm(string message)
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest { UserMessage = message });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_GreetingPlusActionableQuery_StillRoutesToLookup()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "hello, what's the weather in Seattle?"
+        });
+
+        Assert.Equal(Intents.LookupFact, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
     [Fact]
     public async Task RouteAsync_MovieComparisonWordForWord_RoutesToLookupFact()
     {

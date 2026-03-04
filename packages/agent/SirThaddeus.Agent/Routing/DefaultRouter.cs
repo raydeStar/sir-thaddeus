@@ -104,6 +104,9 @@ public sealed class DefaultRouter : IRouter
             };
         }
 
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.94);
+
         var intent = await ClassifyIntentAsync(userMessage, cancellationToken);
 
         return intent switch

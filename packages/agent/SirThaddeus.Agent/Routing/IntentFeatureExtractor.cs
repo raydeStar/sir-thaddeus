@@ -259,6 +259,45 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    /// <summary>
+    /// True for pure greeting/small-talk messages that should stay chat-only.
+    /// This intentionally excludes greeting + actionable requests
+    /// (e.g. "hello, what's the weather in Seattle?").
+    /// </summary>
+    public static bool LooksLikeGreetingOnlyOrSmallTalk(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var conversational = LooksLikeConversationalCheckIn(lower);
+        var greeting = LooksLikeGreeting(lower);
+        if (!conversational && !greeting)
+            return false;
+
+        if (LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower))
+        {
+            return false;
+        }
+
+        if (TryGetExplicitToolInvocationIntent(lower) is not null)
+            return false;
+
+        if (LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     public static bool LooksLikeReasoningFollowUp(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower) || lower.Length > 220)
