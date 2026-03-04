@@ -186,7 +186,7 @@ $voiceAssetsRequired = -not $AllowRuntimeAssetDownload
 $voiceAssets = @(
     @{ Path = "bin/voice/piper/piper.exe";              Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
     @{ Path = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
-    @{ Path = "bin/voice/stt-models/base";              Required = $voiceAssetsRequired; Label = "Whisper STT model" }
+    @{ Path = "bin/voice/stt-models/base/model.bin";    Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
 
 foreach ($asset in $voiceAssets) {
