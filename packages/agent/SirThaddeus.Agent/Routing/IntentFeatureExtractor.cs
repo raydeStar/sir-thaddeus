@@ -298,6 +298,50 @@ public static class IntentFeatureExtractor
         return true;
     }
 
+    /// <summary>
+    /// Detects short, non-actionable transcript fragments that are common
+    /// when push-to-talk clipping drops leading words (e.g. "world.").
+    /// These should default to chat instead of forcing lookup/search.
+    /// </summary>
+    public static bool LooksLikeStrayTranscriptFragment(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        // If explicit intent/tool/search signals exist, do not suppress.
+        if (TryGetExplicitToolInvocationIntent(lower) is not null ||
+            LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower) ||
+            LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
+
+        if (normalized.Contains(' '))
+            return false;
+
+        // Single-token fragments that frequently appear from clipped STT.
+        return normalized.Equals("world", StringComparison.Ordinal) ||
+               normalized.Equals("stuff", StringComparison.Ordinal) ||
+               normalized.Equals("things", StringComparison.Ordinal) ||
+               normalized.Equals("okay", StringComparison.Ordinal) ||
+               normalized.Equals("ok", StringComparison.Ordinal) ||
+               normalized.Equals("hmm", StringComparison.Ordinal) ||
+               normalized.Equals("uh", StringComparison.Ordinal) ||
+               normalized.Equals("huh", StringComparison.Ordinal);
+    }
+
     public static bool LooksLikeReasoningFollowUp(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower) || lower.Length > 220)

@@ -141,6 +141,20 @@ public class RouterV2Tests
         Assert.Equal(0, getLlmCalls());
     }
 
+    [Theory]
+    [InlineData("world.")]
+    [InlineData("world")]
+    public async Task RouteAsync_StrayTranscriptFragment_StaysChatAndAvoidsLlm(string message)
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest { UserMessage = message });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
     [Fact]
     public async Task RouteAsync_GreetingPlusActionableQuery_StillRoutesToLookup()
     {

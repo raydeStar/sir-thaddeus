@@ -100,6 +100,32 @@ public class RouterTests
     }
 
     [Theory]
+    [InlineData("world.")]
+    [InlineData("world")]
+    public async Task RouteAsync_StrayTranscriptFragment_BypassesLlmAndStaysChatOnly(string message)
+    {
+        var llmCalls = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCalls++;
+            return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+        });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = message,
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, llmCalls);
+    }
+
+    [Theory]
     [InlineData("latest news on Nvidia today")]
     [InlineData("show me articles about Nvidia this week")]
     public async Task RouteAsync_ExplicitNewsSignals_RouteToLookupNews(string message)
