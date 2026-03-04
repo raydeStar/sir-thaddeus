@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
     <ProjectReference Include="..\..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
     <ProjectReference Include="..\..\..\packages\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
+    <ProjectReference Include="..\..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

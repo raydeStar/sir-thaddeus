@@ -158,6 +158,8 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             var timeoutErrorCount = 0;
             var unavailableErrorCount = 0;
             var budgetExceededCount = 0;
+            var permissionDeniedCount = 0;
+            var deniedToolNames = new List<string>();
 
             foreach (var toolCall in conflictResolution.Winners)
             {
@@ -192,6 +194,11 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                     unavailableErrorCount++;
                 if (IsBudgetExceededResult(result))
                     budgetExceededCount++;
+                if (IsPermissionDeniedResult(result))
+                {
+                    permissionDeniedCount++;
+                    deniedToolNames.Add(toolCall.Function.Name);
+                }
 
                 request.ToolCallsMade.Add(new ToolCallRecord
                 {
@@ -258,6 +265,70 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                         ToolCallsMade = request.ToolCallsMade,
                         LlmRoundTrips = roundTrips
                     };
+                }
+
+                if (permissionDeniedCount > 0)
+                {
+                    if (deniedToolNames.Any(IsWeatherToolName))
+                    {
+                        const string weatherDeniedMsg =
+                            "I don't have permission to look up the weather right now.";
+                        request.History.Add(ChatMessage.Assistant(weatherDeniedMsg));
+                        log("AGENT_PERMISSION_WEATHER_FALLBACK", weatherDeniedMsg);
+                        return new AgentResponse
+                        {
+                            Text = weatherDeniedMsg,
+                            Success = true,
+                            ToolCallsMade = request.ToolCallsMade,
+                            LlmRoundTrips = roundTrips
+                        };
+                    }
+
+                    if (deniedToolNames.Any(IsWebFamilyToolName))
+                    {
+                        var fallbackMessages = request.History
+                            .Where(m => m.Role is "system" or "user" or "assistant")
+                            .ToList();
+                        fallbackMessages.Insert(0, ChatMessage.System(
+                            "Answer with best effort from your existing non-real-time knowledge.\n" +
+                            "Do not mention permissions, tools, network, or internet access.\n" +
+                            "If the request depends on real-time/current events and certainty is low, say exactly: " +
+                            "\"I do not know about real-time events right now.\""));
+
+                        LlmResponse fallbackResponse;
+                        try
+                        {
+                            fallbackResponse = await _llm.ChatAsync(fallbackMessages, tools: null, cancellationToken);
+                        }
+                        catch
+                        {
+                            const string realTimeFallbackMsg = "I do not know about real-time events right now.";
+                            request.History.Add(ChatMessage.Assistant(realTimeFallbackMsg));
+                            log("AGENT_PERMISSION_WEB_FALLBACK_STATIC", realTimeFallbackMsg);
+                            return new AgentResponse
+                            {
+                                Text = realTimeFallbackMsg,
+                                Success = true,
+                                ToolCallsMade = request.ToolCallsMade,
+                                LlmRoundTrips = roundTrips
+                            };
+                        }
+
+                        var text = request.SanitizeAssistantText(
+                            fallbackResponse.Content ?? "I do not know about real-time events right now.");
+                        if (string.IsNullOrWhiteSpace(text))
+                            text = "I do not know about real-time events right now.";
+
+                        request.History.Add(ChatMessage.Assistant(text));
+                        log("AGENT_PERMISSION_WEB_FALLBACK_LLM", text);
+                        return new AgentResponse
+                        {
+                            Text = text,
+                            Success = true,
+                            ToolCallsMade = request.ToolCallsMade,
+                            LlmRoundTrips = roundTrips + 1
+                        };
+                    }
                 }
             }
 
@@ -405,6 +476,35 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         {
             return payload.Contains("tool_budget_exceeded", StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    private static bool IsPermissionDeniedResult(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var lower = payload.ToLowerInvariant();
+        return lower.Contains("tool call blocked") ||
+               lower.Contains("denied by user") ||
+               lower.Contains("permission prompt cancelled") ||
+               lower.Contains("disabled in settings");
+    }
+
+    private static bool IsWeatherToolName(string name)
+    {
+        var normalized = (name ?? "").Trim().ToLowerInvariant();
+        return normalized.Contains("weather_forecast", StringComparison.Ordinal) ||
+               normalized.Contains("weather_geocode", StringComparison.Ordinal);
+    }
+
+    private static bool IsWebFamilyToolName(string name)
+    {
+        var normalized = (name ?? "").Trim().ToLowerInvariant();
+        return normalized.Contains("web_search", StringComparison.Ordinal) ||
+               normalized.Contains("browser_navigate", StringComparison.Ordinal) ||
+               normalized.Contains("places_lookup", StringComparison.Ordinal) ||
+               normalized.Contains("feed_fetch", StringComparison.Ordinal) ||
+               normalized.Contains("status_check_url", StringComparison.Ordinal);
     }
 }
 

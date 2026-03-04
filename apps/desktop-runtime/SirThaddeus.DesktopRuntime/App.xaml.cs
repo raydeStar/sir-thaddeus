@@ -17,6 +17,7 @@ using SirThaddeus.LocalTools.Playwright;
 using SirThaddeus.McpShared;
 using SirThaddeus.PermissionBroker;
 using SirThaddeus.Memory.Sqlite;
+using SirThaddeus.RuntimeHost;
 using SirThaddeus.ToolRunner;
 using SirThaddeus.ToolRunner.Tools;
 using SirThaddeus.Voice;
@@ -2411,83 +2412,12 @@ public partial class App : System.Windows.Application
     /// </summary>
     private static string ResolveMcpServerPath(string configured)
     {
-        if (!string.Equals(configured, "auto", StringComparison.OrdinalIgnoreCase))
-            return configured;
-
-        const string exeName = "SirThaddeus.McpServer.exe";
-        var baseDir = AppContext.BaseDirectory;
-
-        // 1. Adjacent to the running desktop runtime (publish / single-dir output)
-        var adjacent = Path.Combine(baseDir, exeName);
-        if (File.Exists(adjacent))
-            return adjacent;
-
-        // 2. Scan the MCP server's build output.
-        //    Walk up the tree until we find the "apps" directory, dodging TFM/RID variations.
-        var dir = baseDir;
-        var dirName = Path.GetFileName(dir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        while (dir != null && !string.Equals(dirName, "apps", StringComparison.OrdinalIgnoreCase))
-        {
-            dir = Path.GetDirectoryName(dir);
-            dirName = Path.GetFileName(dir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        }
-
-        var mcpBinDebug = dir != null
-            ? Path.GetFullPath(Path.Combine(dir, "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"))
-            : Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"));
-
-        if (Directory.Exists(mcpBinDebug))
-        {
-            string? newest = null;
-            var newestTime = DateTime.MinValue;
-
-            foreach (var tfmDir in Directory.GetDirectories(mcpBinDebug))
-            {
-                // Check TFM root (e.g. net8.0-windows10.0.19041.0/McpServer.exe)
-                var candidate = Path.Combine(tfmDir, exeName);
-                if (File.Exists(candidate))
-                {
-                    var writeTime = File.GetLastWriteTimeUtc(candidate);
-                    if (writeTime > newestTime)
-                    {
-                        newest = candidate;
-                        newestTime = writeTime;
-                    }
-                }
-
-                // Check RID subdirectories (e.g. net8.0-windows10.0.19041.0/win-x64/McpServer.exe)
-                foreach (var ridDir in Directory.GetDirectories(tfmDir))
-                {
-                    candidate = Path.Combine(ridDir, exeName);
-                    if (!File.Exists(candidate)) continue;
-
-                    var writeTime = File.GetLastWriteTimeUtc(candidate);
-                    if (writeTime > newestTime)
-                    {
-                        newest = candidate;
-                        newestTime = writeTime;
-                    }
-                }
-            }
-
-            if (newest != null)
-                return newest;
-        }
-
-        // 3. Fallback: return the expected path so the error message is actionable
-        return Path.GetFullPath(Path.Combine(mcpBinDebug, "net8.0", exeName));
+        return RuntimePathResolver.ResolveMcpServerPath(configured, AppContext.BaseDirectory);
     }
 
     private static LlmClientOptions BuildLlmClientOptions(AppSettings settings)
     {
-        return new LlmClientOptions
-        {
-            BaseUrl = settings.Llm.BaseUrl,
-            Model = settings.Llm.Model,
-            MaxTokens = settings.Llm.MaxTokens,
-            ContextWindowTokens = settings.Llm.ContextWindowTokens,
-            Temperature = settings.Llm.Temperature
-        };
+        return RuntimeLlmOptionsFactory.BuildPrimary(settings);
     }
 
     /// <summary>
@@ -2499,18 +2429,7 @@ public partial class App : System.Windows.Application
     /// </summary>
     private static LlmClientOptions BuildGatekeeperLlmClientOptions(AppSettings settings)
     {
-        var gatekeeperUrl = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperBaseUrl)
-            ? settings.Llm.BaseUrl
-            : settings.Llm.GatekeeperBaseUrl;
-
-        return new LlmClientOptions
-        {
-            BaseUrl = gatekeeperUrl,
-            Model = settings.Llm.GatekeeperModelId,
-            MaxTokens = 5,
-            ContextWindowTokens = 2048,
-            Temperature = 0.0
-        };
+        return RuntimeLlmOptionsFactory.BuildGatekeeper(settings);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -2523,76 +2442,7 @@ public partial class App : System.Windows.Application
     /// </summary>
     private static Dictionary<string, string> BuildMcpEnvironmentVariables(AppSettings settings)
     {
-        var env = new Dictionary<string, string>();
-
-        // Active profile: always set so the MCP server can distinguish
-        // "not configured" (env var absent) from "no profile selected"
-        // (env var present but empty). Empty = don't load any profile.
-        env["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "";
-        env["ST_ACTIVE_PERSONALITY_ID"] = settings.ActivePersonalityId ?? "";
-        env["ST_SETTINGS_PATH"] = SettingsManager.GetSettingsPath();
-        env["ST_AUDIT_PATH"] = JsonLineAuditLogger.GetDefaultPath();
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var appDataDir = Path.Combine(localAppData, "SirThaddeus");
-        env["ST_CHAT_HISTORY_PATH"] = Path.Combine(appDataDir, "chat-history.json");
-        env["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(appDataDir, "briefing-history.json");
-
-        // Memory env vars are only needed when memory is enabled.
-        if (settings.Memory.Enabled)
-        {
-            env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings);
-            env["ST_LLM_BASEURL"] = settings.Llm.BaseUrl;
-
-            // Embeddings model: use explicit setting, fall back to the chat model
-            if (settings.Memory.UseEmbeddings)
-            {
-                var embModel = string.IsNullOrWhiteSpace(settings.Memory.EmbeddingsModel)
-                    ? settings.Llm.Model
-                    : settings.Memory.EmbeddingsModel;
-                env["ST_LLM_EMBEDDINGS_MODEL"] = embModel;
-            }
-        }
-
-        // Weather stack settings
-        env["ST_WEATHER_PROVIDER_MODE"] = settings.Weather.ProviderMode;
-        env["ST_WEATHER_FORECAST_CACHE_MINUTES"] =
-            Math.Clamp(settings.Weather.ForecastCacheMinutes, 10, 30).ToString();
-        env["ST_WEATHER_GEOCODE_CACHE_MINUTES"] =
-            Math.Max(60, settings.Weather.GeocodeCacheMinutes).ToString();
-        env["ST_WEATHER_PLACE_MEMORY_ENABLED"] =
-            settings.Weather.PlaceMemoryEnabled ? "true" : "false";
-        env["ST_WEATHER_PLACE_MEMORY_PATH"] =
-            ResolveWeatherPlaceMemoryPath(settings);
-        env["ST_WEATHER_USER_AGENT"] =
-            string.IsNullOrWhiteSpace(settings.Weather.UserAgent)
-                ? "SirThaddeusCopilot/1.0 (contact: local-runtime@localhost)"
-                : settings.Weather.UserAgent.Trim();
-
-        // Web search provider settings
-        var webModeRaw = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
-        var webMode = webModeRaw is "auto" or "searxng" or "ddg_html" or "google_news" or "manual"
-            ? webModeRaw
-            : "auto";
-        env["WEBSEARCH_MODE"] = webMode;
-        env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(settings.WebSearch.SearxngBaseUrl)
-            ? "http://localhost:8080"
-            : settings.WebSearch.SearxngBaseUrl.Trim();
-        env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
-        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
-
-        // Deep-dive provider settings (Places + budgets)
-        if (!string.IsNullOrWhiteSpace(settings.DeepDive.PlacesApiKey))
-            env["ST_DEEPDIVE_PLACES_API_KEY"] = settings.DeepDive.PlacesApiKey.Trim();
-        env["ST_DEEPDIVE_PLACES_TIMEOUT_MS"] = Math.Clamp(settings.DeepDive.PlacesTimeoutMs, 2_000, 20_000).ToString();
-        env["ST_DEEPDIVE_MAX_TOOL_CALLS"] = Math.Clamp(settings.DeepDive.MaxToolCalls, 1, 20).ToString();
-        env["ST_DEEPDIVE_MAX_SOURCES"] = Math.Clamp(settings.DeepDive.MaxSources, 1, 10).ToString();
-        env["ST_DEEPDIVE_REVIEW_SNIPPETS_MAX"] = Math.Clamp(settings.DeepDive.MaxReviewSnippets, 1, 5).ToString();
-        env["ST_DEEPDIVE_DEFAULT_LOCALE"] = string.IsNullOrWhiteSpace(settings.DeepDive.DefaultLocale)
-            ? "en-US"
-            : settings.DeepDive.DefaultLocale.Trim();
-
-        return env;
+        return RuntimeMcpEnvironmentBuilder.Build(settings);
     }
 
     private async Task RefreshMcpRuntimeFromSettingsAsync(AppSettings? previous, AppSettings current)
@@ -2643,24 +2493,7 @@ public partial class App : System.Windows.Application
 
     private static bool McpEnvironmentChanged(AppSettings? previous, AppSettings current)
     {
-        if (previous is null)
-            return true;
-
-        var before = BuildMcpEnvironmentVariables(previous);
-        var after = BuildMcpEnvironmentVariables(current);
-
-        if (before.Count != after.Count)
-            return true;
-
-        foreach (var (key, value) in before)
-        {
-            if (!after.TryGetValue(key, out var nextValue))
-                return true;
-            if (!string.Equals(value, nextValue, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
+        return RuntimeMcpEnvironmentBuilder.HasChanged(previous, current);
     }
 
     // ─────────────────────────────────────────────────────────────────────

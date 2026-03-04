@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using SirThaddeus.AuditLog;
 using SirThaddeus.DesktopRuntime.Converters;
 
 using RadioButton = System.Windows.Controls.RadioButton;
@@ -613,6 +615,44 @@ public partial class MainWindow : Window
             {
                 // If the browser can't be launched, just ignore
             }
+        }
+    }
+
+    private void OpenAuditLogFile_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = JsonLineAuditLogger.GetDefaultPath();
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            if (!File.Exists(path))
+                File.WriteAllText(path, string.Empty);
+
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Best effort only.
+        }
+    }
+
+    private void OpenAuditLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = JsonLineAuditLogger.GetDefaultPath();
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrWhiteSpace(directory))
+                return;
+
+            Directory.CreateDirectory(directory);
+            Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Best effort only.
         }
     }
 

@@ -9,7 +9,12 @@ namespace SirThaddeus.AuditLog;
 /// </summary>
 public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
 {
+    private const long DefaultMaxFileBytes = 10 * 1024 * 1024; // 10 MB
+    private const int DefaultMaxArchiveFiles = 5;
+
     private readonly string _filePath;
+    private readonly long _maxFileBytes;
+    private readonly int _maxArchiveFiles;
     private readonly object _writeLock = new();
     private readonly JsonSerializerOptions _jsonOptions;
     private bool _disposed;
@@ -18,16 +23,18 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
     /// Creates a new JSON Lines audit logger.
     /// </summary>
     /// <param name="filePath">Path to the .jsonl file. Created if it doesn't exist.</param>
-    public JsonLineAuditLogger(string filePath)
+    /// <param name="maxFileBytes">Maximum size of the active log file before rotation.</param>
+    /// <param name="maxArchiveFiles">How many rotated files to keep (audit.jsonl.1..N).</param>
+    public JsonLineAuditLogger(
+        string filePath,
+        long maxFileBytes = DefaultMaxFileBytes,
+        int maxArchiveFiles = DefaultMaxArchiveFiles)
     {
         _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
+        _maxFileBytes = Math.Max(1024, maxFileBytes);
+        _maxArchiveFiles = Math.Clamp(maxArchiveFiles, 1, 20);
 
-        // Ensure the directory exists
-        var directory = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        EnsureLogDirectoryExists();
 
         _jsonOptions = new JsonSerializerOptions
         {
@@ -57,11 +64,12 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         ArgumentNullException.ThrowIfNull(auditEvent);
 
         var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
-        var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
+        var line = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions) + Environment.NewLine;
 
         lock (_writeLock)
         {
-            File.AppendAllText(_filePath, json + Environment.NewLine, Encoding.UTF8);
+            RotateIfNeeded(line);
+            File.AppendAllText(_filePath, line, Encoding.UTF8);
         }
     }
 
@@ -72,7 +80,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         ArgumentNullException.ThrowIfNull(auditEvent);
 
         var scrubbedEvent = AuditSensitiveDataScrubber.Scrub(auditEvent);
-        var json = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions);
+        var line = JsonSerializer.Serialize(scrubbedEvent, _jsonOptions) + Environment.NewLine;
 
         // Use a semaphore for async locking in a production scenario;
         // for V0, we'll just await the sync write on a background thread
@@ -80,7 +88,8 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         {
             lock (_writeLock)
             {
-                File.AppendAllText(_filePath, json + Environment.NewLine, Encoding.UTF8);
+                RotateIfNeeded(line);
+                File.AppendAllText(_filePath, line, Encoding.UTF8);
             }
         }, cancellationToken);
     }
@@ -143,5 +152,56 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
     public void Dispose()
     {
         _disposed = true;
+    }
+
+    private void EnsureLogDirectoryExists()
+    {
+        var directory = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+
+    private void RotateIfNeeded(string lineToAppend)
+    {
+        EnsureLogDirectoryExists();
+
+        long currentSize = 0;
+        if (File.Exists(_filePath))
+        {
+            try
+            {
+                currentSize = new FileInfo(_filePath).Length;
+            }
+            catch
+            {
+                currentSize = 0;
+            }
+        }
+
+        var incomingBytes = Encoding.UTF8.GetByteCount(lineToAppend);
+        if (currentSize + incomingBytes <= _maxFileBytes)
+            return;
+
+        RotateArchives();
+    }
+
+    private void RotateArchives()
+    {
+        var oldestPath = $"{_filePath}.{_maxArchiveFiles}";
+        if (File.Exists(oldestPath))
+            File.Delete(oldestPath);
+
+        for (var i = _maxArchiveFiles - 1; i >= 1; i--)
+        {
+            var from = $"{_filePath}.{i}";
+            var to = $"{_filePath}.{i + 1}";
+            if (File.Exists(from))
+                File.Move(from, to, overwrite: true);
+        }
+
+        if (File.Exists(_filePath))
+            File.Move(_filePath, $"{_filePath}.1", overwrite: true);
     }
 }

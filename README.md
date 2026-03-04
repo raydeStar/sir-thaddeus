@@ -144,6 +144,32 @@ That is it.
 
 ---
 
+## Headless Runtime (MVP)
+
+A terminal entry point now exists for chat-first runs:
+
+```bash
+dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
+```
+
+Commands:
+- `/help`
+- `/reset`
+- `/tools`
+- `/exit`
+
+Tooling in headless mode is optional:
+
+```bash
+dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tools
+```
+
+MCP now has a split tool model:
+- Core tools run cross-platform (`net8.0`)
+- Windows-only tools (screen capture / OCR) load only on Windows
+
+---
+
 ## Core Principles
 
 ### 1. You are in control

@@ -1301,23 +1301,26 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         switch (ev.Action)
         {
             // ── MCP Tool Calls ─────────────────────────────────────────
-            case "MCP_TOOL_CALL_END":
+                        case "MCP_TOOL_CALL_END":
                 {
-                    var tool = ev.Target ?? "unknown";
+                    var tool = ev.Target ?? DetailStr("tool_name_canonical") ?? "unknown";
                     var ms = DetailStr("duration_ms");
                     var perm = DetailStr("permission");
+                    var inputSummary = DetailStr("input_summary");
+                    var outputSummary = DetailStr("output_summary");
                     var timing = ms is not null ? $" ({ms}ms)" : "";
+                    var summary = BuildToolSummary(tool, inputSummary, outputSummary);
 
                     if (ev.Result == "ok")
-                        return ($"Tool: {tool}{timing}", LogEntryKind.ToolOutput);
+                        return ($"{summary}{timing}", LogEntryKind.ToolOutput);
                     if (ev.Result == "blocked")
                     {
                         var reason = DetailStr("error_message") ?? perm ?? "denied";
-                        return ($"Tool blocked: {tool} — {reason}", LogEntryKind.Error);
+                        return ($"{summary}{timing} - blocked ({reason})", LogEntryKind.Error);
                     }
                     if (ev.Result == "error")
-                        return ($"Tool error: {tool} — {DetailStr("error_message") ?? "failed"}{timing}", LogEntryKind.Error);
-                    return ($"Tool: {tool} — {ev.Result}{timing}", LogEntryKind.ToolOutput);
+                        return ($"{summary}{timing} - error ({DetailStr("error_message") ?? "failed"})", LogEntryKind.Error);
+                    return ($"{summary}{timing} - {ev.Result}", LogEntryKind.ToolOutput);
                 }
 
             case "MCP_TOOL_BUDGET_EXCEEDED":
@@ -1420,6 +1423,123 @@ public sealed class CommandPaletteViewModel : ViewModelBase
         }
     }
 
+    private static string BuildToolSummary(string tool, string? inputSummary, string? outputSummary)
+    {
+        var canonical = (tool ?? "").Trim().ToLowerInvariant();
+
+        static string Short(string? value, int max = 110)
+            => string.IsNullOrWhiteSpace(value) ? "" : Truncate(value.Trim(), max);
+
+        static string? JsonField(string? json, string key)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                    return null;
+
+                if (!root.TryGetProperty(key, out var prop))
+                    return null;
+
+                return prop.ValueKind switch
+                {
+                    JsonValueKind.String => prop.GetString(),
+                    JsonValueKind.Number => prop.GetRawText(),
+                    JsonValueKind.True => "true",
+                    JsonValueKind.False => "false",
+                    _ => prop.GetRawText()
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        string WithResult(string label)
+        {
+            var outText = Short(outputSummary, 90);
+            return string.IsNullOrWhiteSpace(outText)
+                ? label
+                : $"{label} -> {outText}";
+        }
+
+        switch (canonical)
+        {
+            case "web_search":
+            case "websearch":
+            {
+                var query = JsonField(inputSummary, "query") ?? inputSummary;
+                var recency = JsonField(inputSummary, "recency");
+                var label = $"Web search: {Short(query)}";
+                if (!string.IsNullOrWhiteSpace(recency))
+                    label += $" [{recency}]";
+                return WithResult(label);
+            }
+
+            case "browser_navigate":
+            case "browsernavigate":
+            {
+                var url = JsonField(inputSummary, "url") ?? inputSummary;
+                return WithResult($"Browser navigate: {Short(url)}");
+            }
+
+            case "places_lookup":
+            case "placeslookup":
+            {
+                var place = JsonField(inputSummary, "query") ?? JsonField(inputSummary, "name") ?? inputSummary;
+                return WithResult($"Places lookup: {Short(place)}");
+            }
+
+            case "weather_geocode":
+            case "weathergeocode":
+            {
+                var place = JsonField(inputSummary, "query") ?? JsonField(inputSummary, "place") ?? inputSummary;
+                return WithResult($"Weather geocode: {Short(place)}");
+            }
+
+            case "weather_forecast":
+            case "weatherforecast":
+            {
+                var lat = JsonField(inputSummary, "lat") ?? JsonField(inputSummary, "latitude");
+                var lon = JsonField(inputSummary, "lon") ?? JsonField(inputSummary, "longitude");
+                var coords = (!string.IsNullOrWhiteSpace(lat) && !string.IsNullOrWhiteSpace(lon))
+                    ? $"{lat},{lon}"
+                    : Short(inputSummary);
+                return WithResult($"Weather forecast: {coords}");
+            }
+
+            case "file_read":
+            case "fileread":
+            {
+                var path = JsonField(inputSummary, "path") ?? inputSummary;
+                return WithResult($"File read: {Short(path)}");
+            }
+
+            case "file_list":
+            case "filelist":
+            {
+                var path = JsonField(inputSummary, "path") ?? inputSummary;
+                return WithResult($"File list: {Short(path)}");
+            }
+
+            case "system_execute":
+            case "systemexecute":
+                return WithResult($"System execute: {Short(inputSummary)}");
+
+            default:
+            {
+                var input = Short(inputSummary, 80);
+                if (string.IsNullOrWhiteSpace(input))
+                    return $"Tool: {tool}";
+                return WithResult($"Tool: {tool} ({input})");
+            }
+        }
+    }
     private string ResolveRetryPrompt(ChatMessageViewModel message)
     {
         if (!string.IsNullOrWhiteSpace(message.RetryPrompt))
@@ -1915,3 +2035,5 @@ public sealed class ContextChipViewModel
     public string Text { get; }
     public bool IsWarning { get; }
 }
+
+

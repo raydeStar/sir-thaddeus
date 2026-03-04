@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />
+    <PackageReference Include="SmartReader" Version="0.11.0" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.72" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
+    <ProjectReference Include="..\..\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
+    <ProjectReference Include="..\..\local-tools\SirThaddeus.LocalTools.Playwright\SirThaddeus.LocalTools.Playwright.csproj" />
+    <ProjectReference Include="..\..\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
+    <ProjectReference Include="..\..\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
+    <ProjectReference Include="..\..\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
+    <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <ProjectReference Include="..\..\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\*.cs"
+             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs"
+             Link="Tools\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

@@ -1510,10 +1510,32 @@
              Full audit log feed and system activity
              ═══════════════════════════════════════════════════════ -->
         <Grid Grid.Row="1" x:Name="LogsView" Visibility="Collapsed" Background="{StaticResource BaseBrush}">
-            <ScrollViewer x:Name="FullLogScroller"
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Open Audit Log File"
+                            Click="OpenAuditLogFile_Click"
+                            Style="{StaticResource MemoryActionButtonStyle}"
+                            Margin="0,0,8,0"/>
+                    <Button Content="Open Audit Log Folder"
+                            Click="OpenAuditLogFolder_Click"
+                            Style="{StaticResource MemoryActionButtonStyle}"/>
+                </StackPanel>
+            </Border>
+
+            <ScrollViewer Grid.Row="1"
+                          x:Name="FullLogScroller"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
-                                <ItemsControl ItemsSource="{Binding DataContext.ActivityLog, RelativeSource={RelativeSource AncestorType=Window}}" Padding="32,24">
+                <ItemsControl ItemsSource="{Binding DataContext.ActivityLog, RelativeSource={RelativeSource AncestorType=Window}}" Padding="32,24">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Grid Margin="0,6,0,10">
