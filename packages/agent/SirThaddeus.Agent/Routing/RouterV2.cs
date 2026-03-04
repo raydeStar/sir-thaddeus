@@ -51,6 +51,9 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.98);
 
+        if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.92);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {
@@ -89,6 +92,9 @@ public sealed class RouterV2 : IRouter
                 _ => DefaultRouter.MakeRoute(Intents.GeneralTool, confidence: 0.96)
             };
         }
+
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.94);
 
         return null;
     }

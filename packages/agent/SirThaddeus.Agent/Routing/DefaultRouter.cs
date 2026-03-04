@@ -51,6 +51,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
             return MakeRoute(Intents.ChatOnly, confidence: 0.98);
 
+        if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.92);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {
@@ -103,6 +106,9 @@ public sealed class DefaultRouter : IRouter
                 _ => MakeRoute(Intents.GeneralTool, confidence: 0.96)
             };
         }
+
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.94);
 
         var intent = await ClassifyIntentAsync(userMessage, cancellationToken);
 

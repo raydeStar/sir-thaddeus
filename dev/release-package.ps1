@@ -227,7 +227,7 @@ foreach ($project in $projects) {
                 New-Item -ItemType Directory -Path $destParent -Force | Out-Null
             }
         }
-        Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
+        Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction Stop
     }
 }
 
@@ -245,7 +245,8 @@ if (-not (Test-Path $voiceStageBinDir)) {
 $piperSource = Join-Path $voiceBackendDir "piper"
 if (Test-Path $piperSource) {
     $piperDest = Join-Path $voiceStageBinDir "piper"
-    Copy-Item -Path $piperSource -Destination $piperDest -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
+    Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
     $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
     Write-Host "  Staged: piper/ ($piperCount files)"
 }
@@ -261,7 +262,8 @@ else {
 $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
 if (Test-Path $piperVoicesSource) {
     $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
-    Copy-Item -Path $piperVoicesSource -Destination $piperVoicesDest -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
+    Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
     $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
     Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
 }
@@ -293,7 +295,8 @@ else {
 $runtimeSource = Join-Path $voiceBackendDir "runtime/python"
 if (Test-Path $runtimeSource) {
     $runtimeDest = Join-Path $voiceStageBinDir "runtime/python"
-    Copy-Item -Path $runtimeSource -Destination $runtimeDest -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
+    Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
     $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
     Write-Host "  Staged: runtime/python ($runtimeCount files)"
 }
@@ -327,8 +330,16 @@ else {
 $sttSource = Join-Path $voiceBackendDir "stt-models/base"
 if (Test-Path $sttSource) {
     $sttDest = Join-Path $voiceStageBinDir "stt-models/base"
-    Copy-Item -Path $sttSource -Destination $sttDest -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
+    Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
     Write-Host "  Staged: stt-models/base"
+
+    $sttModelFile = Join-Path $sttDest "model.bin"
+    Assert-OrWarn `
+        -Condition (Test-Path $sttModelFile) `
+        -ErrorMessage "bundled STT model.bin missing at $sttModelFile" `
+        -WarnMessage "bundled STT model.bin missing at $sttModelFile" `
+        -Required $strictVoiceAssetGate
 }
 else {
     Assert-OrWarn `
