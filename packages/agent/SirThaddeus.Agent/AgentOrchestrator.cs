@@ -414,6 +414,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
         };
         var route = await _router.RouteAsync(routeRequest, cancellationToken);
+        var webEvidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lowerIncoming);
+        var routeIntentBeforeFootman = route.Intent;
+        var routeConfidenceBeforeFootman = route.Confidence;
+
+        LogEvent("ROUTER_WEB_EVIDENCE",
+            $"phase=pre_footman, score={webEvidence.Score:0.0}, " +
+            $"reason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}, " +
+            $"confidence={webEvidence.Confidence:0.00}");
 
         LogEvent("ROUTER_OUTPUT",
             $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
@@ -427,7 +435,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // deterministic match (< 0.95), invoke the Footman for a
         // second opinion using a small, fast gatekeeper model.
         RoutingDecision? footmanDecision = null;
-        if (_footmanRouter is not null && route.Confidence < 0.95)
+        if (_footmanRouter is not null && ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
         {
             var features = RoutingFeatures.Extract(
                 userMessage,
@@ -440,7 +448,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (footmanDecision.IsAuthoritative)
             {
                 var footmanIntent = AgentStateMapper.ToIntentString(footmanDecision.NextState);
-                route = DefaultRouter.MakeRoute(
+                var footmanRoute = DefaultRouter.MakeRoute(
                     footmanIntent,
                     confidence: footmanDecision.Confidence,
                     needsWeb: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.WebSearch),
@@ -451,10 +459,21 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
                     needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
 
-                LogEvent("FOOTMAN_OVERRIDE",
-                    $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
-                    $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
-                    $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}");
+                if (ShouldBlockFootmanLookupDowngrade(lowerIncoming, route, footmanRoute, webEvidence))
+                {
+                    LogEvent("FOOTMAN_DOWNGRADE_BLOCKED",
+                        $"baseIntent={route.Intent}, proposedIntent={footmanIntent}, " +
+                        $"reason={footmanDecision.ReasonCode}, webScore={webEvidence.Score:0.0}, " +
+                        $"webReason={webEvidence.ReasonCode}");
+                }
+                else
+                {
+                    route = footmanRoute;
+                    LogEvent("FOOTMAN_OVERRIDE",
+                        $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
+                        $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
+                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}");
+                }
             }
             else
             {
@@ -465,12 +484,47 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
 
         // ── Apply Footman context policy ─────────────────────────────
+        LogEvent("ROUTER_WEB_EVIDENCE",
+            $"phase=post_footman, baseIntent={routeIntentBeforeFootman}, " +
+            $"baseConfidence={routeConfidenceBeforeFootman:F2}, finalIntent={route.Intent}, " +
+            $"finalConfidence={route.Confidence:F2}, needsWeb={route.NeedsWeb}, " +
+            $"needsSearch={route.NeedsSearch}");
+
         if (footmanDecision is { IsAuthoritative: true })
         {
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
         }
 
         // ── Policy: determine which tools the executor may see ───────
+
+        var lookupFloorIntent = GetLookupFloorIntent(lowerIncoming, route, webEvidence);
+        if (!string.IsNullOrWhiteSpace(lookupFloorIntent))
+        {
+            route = lookupFloorIntent switch
+            {
+                Intents.LookupDeepDive => DefaultRouter.MakeRoute(
+                    Intents.LookupDeepDive,
+                    confidence: 0.95,
+                    needsWeb: true,
+                    needsSearch: true,
+                    needsBrowser: true),
+                Intents.LookupNews => DefaultRouter.MakeRoute(
+                    Intents.LookupNews,
+                    confidence: 0.93,
+                    needsWeb: true,
+                    needsSearch: true),
+                _ => DefaultRouter.MakeRoute(
+                    Intents.LookupFact,
+                    confidence: Math.Clamp(Math.Max(0.88, webEvidence.Confidence), 0.88, 0.96),
+                    needsWeb: true,
+                    needsSearch: true)
+            };
+
+            LogEvent("LOOKUP_FLOOR_UPGRADE",
+                $"intent={route.Intent}, webScore={webEvidence.Score:0.0}, " +
+                $"webReason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}");
+        }
+
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
         LogEvent("POLICY_DECISION",
             $"allowedCaps=[{string.Join(", ", policy.AllowedCapabilities)}], " +
@@ -828,6 +882,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
             InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileReadArgs(contextualUserMessage, out var explicitFileReadArgs, out var explicitFilePath))
+            {
+                var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
+                    explicitFileReadArgs,
+                    explicitFilePath,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
+            }
+
             // ── Chat-only: skip tool loop entirely ───────────────────
             // No tools, no function-calling grammar. The LLM just
             // responds with text. Fastest path for casual conversation.
@@ -900,6 +967,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var fallbackEligible =
                     hasRefusalOrUncertaintySignals &&
                     route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    (IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) ||
+                     IntentFeatureExtractor.LooksLikeFactLookup(lowerIncoming) ||
+                     IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming)) &&
                     !deterministicRouteMatched &&
                     !lookupAlreadyExecuted;
 

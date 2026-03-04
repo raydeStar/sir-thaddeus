@@ -679,6 +679,9 @@ public class DialogueLocationCarryForwardTests
     [InlineData("is it going to rain tomorrow")]         // starts with "is"
     [InlineData("What time is it in New York")]          // starts with "what"
     [InlineData("I was wondering why is Dante so chunky")] // starts with "I", too many words
+    [InlineData("latest")]                               // temporal freshness token, not a place
+    [InlineData("recent")]                               // temporal freshness token, not a place
+    [InlineData("current")]                              // temporal freshness token, not a place
     public void ValidateSlots_DropsGarbageLocationValues(string garbage)
     {
         var merged = new MergedSlots

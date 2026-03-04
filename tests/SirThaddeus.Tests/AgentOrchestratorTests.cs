@@ -1869,6 +1869,40 @@ public class ToolLoopTests
         // Should bail with a safety message
         Assert.Contains("maximum", result.Text, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ExplicitFileReadRequest_InvokesFileReadDeterministically()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse
+            {
+                IsComplete = true,
+                Content = "No tool call.",
+                FinishReason = "stop"
+            });
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "file_read" or "FileRead" => "An error occurred invoking 'file_read'.",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            @"Use file_read on C:\Users\Public\nonexistent.txt and explain the failure.");
+
+        Assert.True(result.Success);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("file_read", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("FileRead", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("failed", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 #endregion
@@ -2210,6 +2244,7 @@ public class PolicyFilteringTests
         // Verify both new audit events exist
         Assert.NotEmpty(audit.GetByAction("ROUTER_OUTPUT"));
         Assert.NotEmpty(audit.GetByAction("POLICY_DECISION"));
+        Assert.NotEmpty(audit.GetByAction("ROUTER_WEB_EVIDENCE"));
     }
 
     [Fact]

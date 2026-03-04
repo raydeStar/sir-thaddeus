@@ -934,4 +934,116 @@ public sealed partial class AgentOrchestrator
 
     private static string? ExtractLocationFromWeatherMessage(string message) =>
         Utilities.WeatherResponseBuilder.ExtractLocationFromMessage(message);
+
+    private static bool TryBuildExplicitFileReadArgs(
+        string message,
+        out string argsJson,
+        out string? path)
+    {
+        argsJson = "{}";
+        path = null;
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.ToLowerInvariant();
+        if (!lower.Contains("file_read", StringComparison.Ordinal))
+            return false;
+
+        var match = Regex.Match(
+            message,
+            @"\bfile_read\b.*?\bon\s+(?<path>.+?)(?:\s+and\s+|[?.!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (!match.Success)
+            return true;
+
+        var candidate = match.Groups["path"].Value.Trim().Trim('"', '\'');
+        if (string.IsNullOrWhiteSpace(candidate))
+            return true;
+
+        path = candidate;
+        argsJson = JsonSerializer.Serialize(new { path = candidate });
+        return true;
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitFileReadAsync(
+        string fileReadArgsJson,
+        string? explicitPath,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var fileReadCall = await CallUtilityToolWithAliasAsync(
+            "file_read",
+            fileReadArgsJson,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = fileReadCall.ToolName,
+            Arguments = fileReadArgsJson,
+            Result = fileReadCall.Result,
+            Success = fileReadCall.Success
+        });
+
+        var target = string.IsNullOrWhiteSpace(explicitPath) ? "that path" : explicitPath;
+        var resultText = (fileReadCall.Result ?? "").Trim();
+
+        string responseText;
+        if (!fileReadCall.Success || LooksLikeFileReadFailure(resultText))
+        {
+            responseText =
+                $"I attempted `file_read` on `{target}`, but it failed. " +
+                "That file/path is likely missing or inaccessible from the current permissions.";
+        }
+        else
+        {
+            var summary = resultText.Length > 600
+                ? resultText[..600].TrimEnd() + "..."
+                : resultText;
+
+            responseText =
+                $"I read `{target}`. Summary:\n{summary}";
+        }
+
+        _history.Add(ChatMessage.Assistant(responseText));
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private static bool LooksLikeFileReadFailure(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return true;
+
+        if (payload.Contains("error occurred invoking", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("permission", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+
+            return doc.RootElement.TryGetProperty("error", out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

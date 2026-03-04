@@ -84,10 +84,25 @@ public sealed class DefaultRouter : IRouter
             return MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
-            return MakeRoute(Intents.LookupFact, confidence: 0.96, needsWeb: true, needsSearch: true);
+            return MakeRoute(
+                Intents.LookupFact,
+                confidence: ComputeFactLookupConfidence(lower),
+                needsWeb: true,
+                needsSearch: true);
 
-        if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower))
-            return MakeRoute(Intents.GeneralTool, confidence: 0.96);
+        var explicitToolIntent = IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower);
+        if (!string.IsNullOrWhiteSpace(explicitToolIntent))
+        {
+            return explicitToolIntent switch
+            {
+                Intents.FileTask => MakeRoute(Intents.FileTask, confidence: 0.97, needsFile: true),
+                Intents.ScreenObserve => MakeRoute(Intents.ScreenObserve, confidence: 0.97, needsScreen: true),
+                Intents.SystemTask => MakeRoute(Intents.SystemTask, confidence: 0.97, needsSystem: true, risk: "medium"),
+                Intents.LookupSearch => MakeRoute(Intents.LookupSearch, confidence: 0.97, needsWeb: true, needsSearch: true, needsBrowser: true),
+                Intents.MemoryWrite => MakeRoute(Intents.MemoryWrite, confidence: 0.97, needsMemoryWrite: true),
+                _ => MakeRoute(Intents.GeneralTool, confidence: 0.96)
+            };
+        }
 
         var intent = await ClassifyIntentAsync(userMessage, cancellationToken);
 
@@ -267,6 +282,15 @@ public sealed class DefaultRouter : IRouter
             : IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
                 ? ChatIntent.NewsLookup
                 : ChatIntent.FactLookup;
+
+    private static double ComputeFactLookupConfidence(string lower)
+    {
+        var evidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+        if (evidence.ShouldLookup)
+            return Math.Clamp(Math.Max(0.88, evidence.Confidence), 0.88, 0.96);
+
+        return 0.96;
+    }
 
     internal static RouterOutput MakeRoute(
         string intent,

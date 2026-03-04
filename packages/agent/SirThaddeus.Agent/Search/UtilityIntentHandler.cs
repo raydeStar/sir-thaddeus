@@ -56,7 +56,8 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
 
         if (utilityResult is null &&
             !deterministicRouteRequested &&
-            request.TryInferWithLlmAsync is not null)
+            request.TryInferWithLlmAsync is not null &&
+            ShouldUseLlmUtilityInference(route, message))
         {
             utilityResult = await request.TryInferWithLlmAsync(message, cancellationToken);
         }
@@ -423,6 +424,27 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             "time" => 6,
             _ => 100
         };
+    }
+
+    private static bool ShouldUseLlmUtilityInference(RouterOutput route, string message)
+    {
+        var intent = (route.Intent ?? "").Trim();
+        if (intent.Length == 0)
+            return false;
+
+        // Primary path: broad fallback route.
+        if (intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Secondary path: lookup-routed turns that still read like a
+        // utility request (e.g. flexible weather phrasing). This prevents
+        // accidental web fallback when deterministic utility matching
+        // misses the first pass.
+        if (!OrchestratorMessageHelpers.MightBeUtilityIntent(message))
+            return false;
+
+        return intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
+               intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? BuildLocalTimeSummary(IList<ToolCallRecord> calls)

@@ -1501,6 +1501,7 @@ public sealed class SearchOrchestrator
 
         // Strip template garbage
         text = StripTemplateTokens(text);
+        text = SearchResponseFormatter.Normalize(text);
         if (string.IsNullOrWhiteSpace(text))
             text = "I wasn't able to generate a clean answer — try rephrasing?";
 
