@@ -1,0 +1,365 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using static SirThaddeus.Agent.OrchestratorMessageHelpers;
+using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Guardrails;
+using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.PostProcessing;
+using SirThaddeus.Agent.ConversationSegmentation;
+using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.ToolLoop;
+using SirThaddeus.Agent.Tools;
+using SirThaddeus.AuditLog;
+using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine.Formatting;
+
+namespace SirThaddeus.Agent;
+
+public sealed partial class AgentOrchestrator
+{
+    /// <summary>
+    /// Maps a <see cref="RouterOutput"/> back to the legacy
+    /// <see cref="ChatIntent"/> enum for code that still uses it
+    /// (WebLookup deterministic path).
+    /// </summary>
+    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(string userMessage, CancellationToken cancellationToken)
+    {
+        if (!MemoryEnabled)
+            return new MemoryContextResult();
+
+        try
+        {
+            return await _memoryContextProvider.GetContextAsync(
+                new MemoryContextRequest
+                {
+                    UserMessage = userMessage,
+                    MemoryEnabled = MemoryEnabled,
+                    IsColdGreeting = IsColdGreeting(userMessage),
+                    ActiveProfileId = ActiveProfileId,
+                    Timeout = MemoryRetrievalTimeout
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Memory is best-effort; on failure or timeout, return empty
+            return new MemoryContextResult();
+        }
+    }
+
+    private static ChatIntent MapRouteToLegacyIntent(RouterOutput route)
+    {
+        return route.Intent switch
+        {
+            Intents.ChatOnly      => ChatIntent.Casual,
+            Intents.UtilityDeterministic => ChatIntent.Casual,
+            Intents.MemoryRead    => ChatIntent.Casual,
+            Intents.LookupFact    => ChatIntent.WebLookup,
+            Intents.LookupNews    => ChatIntent.WebLookup,
+            Intents.LookupDeepDive => ChatIntent.WebLookup,
+            Intents.LookupSearch  => ChatIntent.WebLookup,
+            _                     => ChatIntent.Tooling
+        };
+    }
+
+    private static LookupModeHint ResolveLookupModeHint(RouterOutput route)
+    {
+        return route.Intent switch
+        {
+            Intents.LookupFact => LookupModeHint.Fact,
+            Intents.LookupNews => LookupModeHint.News,
+            Intents.LookupDeepDive => LookupModeHint.DeepDive,
+            _ => LookupModeHint.Auto
+        };
+    }
+
+    private static bool IsDeterministicInlineRoute(RouterOutput route) =>
+        string.Equals(route.Intent, Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLookupIntent(string intent) =>
+        intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ShouldRunFootmanForRoute(
+        RouterOutput route,
+        string lowerIncoming,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (route.Confidence < 0.95)
+            return true;
+
+        // Strong deterministic lookup intents should bypass Footman to
+        // avoid stochastic downgrades into chat-only paths.
+        if (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            return false;
+        }
+
+        if (route.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        {
+            return false;
+        }
+
+        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
+            webEvidence.ShouldLookup &&
+            webEvidence.Score >= 2.8)
+        {
+            return false;
+        }
+
+        if (IsLookupIntent(route.Intent))
+            return true;
+
+        return route.NeedsWeb || route.NeedsSearch || route.NeedsBrowserAutomation;
+    }
+
+    private static bool ShouldBlockFootmanLookupDowngrade(
+        string lowerIncoming,
+        RouterOutput baseRoute,
+        RouterOutput footmanRoute,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (!IsLookupIntent(baseRoute.Intent))
+            return false;
+
+        if (IsLookupIntent(footmanRoute.Intent))
+            return false;
+
+        if (baseRoute.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            return true;
+        }
+
+        if (baseRoute.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        {
+            return true;
+        }
+
+        if (baseRoute.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
+            IsLookupFloorEligiblePrompt(lowerIncoming) &&
+            webEvidence.ShouldLookup &&
+            webEvidence.Score >= 2.8)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? GetLookupFloorIntent(
+        string lowerIncoming,
+        RouterOutput finalRoute,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+    {
+        if (IsLookupIntent(finalRoute.Intent))
+            return null;
+
+        if (!IsLookupFloorEligiblePrompt(lowerIncoming))
+            return null;
+
+        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+            return Intents.LookupDeepDive;
+
+        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+            return Intents.LookupNews;
+
+        if (webEvidence.ShouldLookup && webEvidence.Score >= 2.8)
+            return Intents.LookupFact;
+
+        return null;
+    }
+
+    private static bool IsLookupFloorEligiblePrompt(string lowerIncoming)
+    {
+        if (string.IsNullOrWhiteSpace(lowerIncoming))
+            return false;
+
+        if (IntentFeatureExtractor.LooksLikeGreeting(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeConversationalCheckIn(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeVoiceMicCheck(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeSystemCommand(lowerIncoming) ||
+            lowerIncoming.Contains("tell me about yourself", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("about your favorite", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("favorite thing", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what do you think", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what's your opinion", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("whats your opinion", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("what's your take", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("whats your take", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
+    {
+        if (string.IsNullOrWhiteSpace(processedDraft))
+            return true;
+
+        var lower = processedDraft.Trim().ToLowerInvariant();
+        ReadOnlySpan<string> markers =
+        [
+            "i don't know",
+            "i dont know",
+            "i'm not sure",
+            "im not sure",
+            "not sure",
+            "i can't",
+            "i cant",
+            "i cannot",
+            "unable to",
+            "can't answer",
+            "cannot answer",
+            "don't have enough information",
+            "do not have enough information",
+            "not enough information",
+            "i couldn't find",
+            "i could not find",
+            "i wasn't able to",
+            "i was not able to"
+        ];
+
+        foreach (var marker in markers)
+        {
+            if (lower.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(rawDraft))
+            return true;
+
+        return false;
+    }
+
+    private static UtilityRouter.UtilityResult ToUtilityResult(DeterministicUtilityMatch match)
+    {
+        return new UtilityRouter.UtilityResult
+        {
+            Category = match.Result.Category,
+            Answer = match.Result.Answer
+        };
+    }
+
+    private AgentResponse? TryBuildFirstPrinciplesFollowUpResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        int roundTrips)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (!LooksLikeReasoningFollowUp(lower))
+            return null;
+
+        if (!HasRecentFirstPrinciplesRationale())
+            return null;
+
+        var age = _timeProvider.GetUtcNow() - _lastFirstPrinciplesAt;
+
+        var goal = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Goal:",
+            fallback: "complete the real-world objective");
+        var constraint = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Constraint:",
+            fallback: "pick the option that is physically feasible and goal-aligned");
+        var decision = ExtractRationaleValue(
+            _lastFirstPrinciplesRationale,
+            prefix: "Decision:",
+            fallback: "choose the option that directly completes the task");
+
+        var text =
+            $"Because the goal was to {goal}. " +
+            $"The deciding constraint was: {constraint}. " +
+            $"So the choice was: {decision}.";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = "FIRST_PRINCIPLES_FOLLOWUP",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["ageSeconds"] = Math.Max(0, (long)age.TotalSeconds)
+            }
+        });
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips,
+            GuardrailsUsed = true,
+            GuardrailsRationale = _lastFirstPrinciplesRationale.Take(3).ToArray()
+        };
+    }
+
+    private bool HasRecentFirstPrinciplesRationale()
+    {
+        if (_lastFirstPrinciplesAt == default ||
+            _lastFirstPrinciplesRationale.Count < 3)
+        {
+            return false;
+        }
+
+        var age = _timeProvider.GetUtcNow() - _lastFirstPrinciplesAt;
+        return age <= FirstPrinciplesFollowUpTtl;
+    }
+
+    private static string ExtractRationaleValue(
+        IReadOnlyList<string> rationale,
+        string prefix,
+        string fallback)
+    {
+        foreach (var line in rationale)
+        {
+            if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = line[prefix.Length..].Trim();
+            value = value.TrimEnd('.', ';', ':').Trim();
+            return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+
+        return fallback;
+    }
+
+    private static bool LooksLikeReasoningFollowUp(string lower)
+        => IntentFeatureExtractor.LooksLikeReasoningFollowUp(lower);
+
+    // Back-compat seam for reflection-based tests while greeting detection
+    // logic now lives in IntentFeatureExtractor.
+    private static bool LooksLikeGreeting(string lower)
+        => IntentFeatureExtractor.LooksLikeGreeting(lower);
+
+    /// <summary>
+    /// Detects a "cold greeting" — the very first user message after a
+    /// conversation reset, and it looks like a simple hello/hi/hey.
+    /// When true, memory retrieval uses <c>mode = "greet"</c> for
+    /// shallow context (profile + 1-2 nuggets, no deep digging).
+    /// </summary>
+    private bool IsColdGreeting(string userMessage)
+    {
+        // Cold-start: history should contain only the system prompt +
+        // the current user message (which hasn't been added yet at this
+        // point, or has just been added).  Accept 1 (system only) or
+        // 2 (system + this user message) entries.
+        var userTurns = _history.Count(m => m.Role == "user");
+        if (userTurns > 1)
+            return false;
+
+        return LooksLikeGreeting(userMessage.ToLowerInvariant().Trim());
+    }
+}

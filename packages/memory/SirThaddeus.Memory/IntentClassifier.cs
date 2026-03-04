@@ -59,9 +59,9 @@ public static class IntentClassifier
         var lower = query.ToLowerInvariant();
         var words = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        var personalScore  = CountMatches(words, lower, PersonalKeywords);
+        var personalScore = CountMatches(words, lower, PersonalKeywords);
         var technicalScore = CountMatches(words, lower, TechnicalKeywords);
-        var planningScore  = CountMatches(words, lower, PlanningKeywords);
+        var planningScore = CountMatches(words, lower, PlanningKeywords);
 
         // Require at least one match to classify
         if (personalScore == 0 && technicalScore == 0 && planningScore == 0)

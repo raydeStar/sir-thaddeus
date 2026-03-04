@@ -93,7 +93,7 @@ public class RuntimeControllerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var transition = events.Last();
-        
+
         Assert.Equal("STATE_CHANGE", transition.Action);
         Assert.Equal("ReadingScreen", transition.Target);
         Assert.NotNull(transition.Details);
@@ -185,7 +185,7 @@ public class RuntimeControllerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var stopEvent = events.Last();
-        
+
         Assert.Equal("STOP_ALL", stopEvent.Action);
         Assert.Equal("user", stopEvent.Actor);
         Assert.Equal("ok", stopEvent.Result);
@@ -219,7 +219,7 @@ public class RuntimeControllerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var rejection = events.Last();
-        
+
         Assert.Equal("STATE_CHANGE_REJECTED", rejection.Action);
         Assert.Equal("denied", rejection.Result);
     }
@@ -255,7 +255,7 @@ public class RuntimeControllerTests : IDisposable
         // Assert
         Assert.False(controller.IsStopped);
         Assert.Equal(AssistantState.Idle, controller.CurrentState);
-        
+
         var result = controller.SetState(AssistantState.Listening);
         Assert.True(result);
     }

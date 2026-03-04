@@ -27,9 +27,9 @@ namespace SirThaddeus.DesktopRuntime.Services;
 /// </summary>
 public sealed class WpfPermissionGate : IToolPermissionGate
 {
-    private readonly IPermissionBroker   _broker;
+    private readonly IPermissionBroker _broker;
     private readonly IPermissionPrompter _prompter;
-    private readonly IAuditLogger        _audit;
+    private readonly IAuditLogger _audit;
     private readonly string _sessionId;
 
     /// <summary>
@@ -54,15 +54,15 @@ public sealed class WpfPermissionGate : IToolPermissionGate
     // ─────────────────────────────────────────────────────────────────
 
     public WpfPermissionGate(
-        IPermissionBroker   broker,
+        IPermissionBroker broker,
         IPermissionPrompter prompter,
-        IAuditLogger        audit,
-        AppSettings         initialSettings,
-        string?             sessionId = null)
+        IAuditLogger audit,
+        AppSettings initialSettings,
+        string? sessionId = null)
     {
-        _broker   = broker   ?? throw new ArgumentNullException(nameof(broker));
+        _broker = broker ?? throw new ArgumentNullException(nameof(broker));
         _prompter = prompter ?? throw new ArgumentNullException(nameof(prompter));
-        _audit    = audit    ?? throw new ArgumentNullException(nameof(audit));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _sessionId = string.IsNullOrWhiteSpace(sessionId) ? "runtime" : sessionId.Trim();
 
         _snapshot = ToolGroupPolicy.BuildSnapshot(initialSettings, IsDebugBuild);
@@ -117,10 +117,10 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         string toolName, string argumentsJson, CancellationToken ct)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
-        var snapshot  = _snapshot; // capture once for consistency
-        var group     = ToolGroupPolicy.ResolveGroup(canonical);
+        var snapshot = _snapshot; // capture once for consistency
+        var group = ToolGroupPolicy.ResolveGroup(canonical);
         var effective = ToolGroupPolicy.ResolveEffectivePolicy(group, snapshot);
-        var riskTier  = ResolveRiskTier(group);
+        var riskTier = ResolveRiskTier(group);
 
         // ── Off → hard block, no prompt ──────────────────────────
         if (effective == "off")
@@ -133,7 +133,7 @@ public sealed class WpfPermissionGate : IToolPermissionGate
 
             _audit.Append(new AuditEvent
             {
-                Actor  = "gate",
+                Actor = "gate",
                 Action = "MCP_PERMISSION_BLOCKED",
                 Result = denyReason,
                 Details = new Dictionary<string, object>
@@ -166,10 +166,10 @@ public sealed class WpfPermissionGate : IToolPermissionGate
         var request = new PermissionRequest
         {
             Capability = MapGroupToCapability(group),
-            Purpose    = purpose,
-            ToolName   = canonical,
-            Duration   = TokenTtl,
-            Requester  = "agent"
+            Purpose = purpose,
+            ToolName = canonical,
+            Duration = TokenTtl,
+            Requester = "agent"
         };
 
         _audit.Append(new AuditEvent
@@ -230,7 +230,7 @@ public sealed class WpfPermissionGate : IToolPermissionGate
 
             _audit.Append(new AuditEvent
             {
-                Actor  = "user",
+                Actor = "user",
                 Action = "MCP_PERMISSION_DENIED",
                 Result = decision.DenialReason ?? "Denied by user",
                 Details = new Dictionary<string, object>
@@ -282,7 +282,7 @@ public sealed class WpfPermissionGate : IToolPermissionGate
 
             _audit.Append(new AuditEvent
             {
-                Actor  = "user",
+                Actor = "user",
                 Action = "MCP_PERMISSION_ALLOW_ALWAYS",
                 Result = "persisted",
                 Details = new Dictionary<string, object>
@@ -326,13 +326,13 @@ public sealed class WpfPermissionGate : IToolPermissionGate
 
     private static Capability MapGroupToCapability(string group) => group switch
     {
-        "screen"      => Capability.ScreenRead,
-        "files"       => Capability.FileAccess,
-        "system"      => Capability.SystemExecute,
-        "web"         => Capability.WebAccess,
-        "memoryRead"  => Capability.MemoryRead,
+        "screen" => Capability.ScreenRead,
+        "files" => Capability.FileAccess,
+        "system" => Capability.SystemExecute,
+        "web" => Capability.WebAccess,
+        "memoryRead" => Capability.MemoryRead,
         "memoryWrite" => Capability.MemoryWrite,
-        _             => Capability.SystemExecute // safe fallback: prompts
+        _ => Capability.SystemExecute // safe fallback: prompts
     };
 
     private static string ResolveRiskTier(string group) => group switch

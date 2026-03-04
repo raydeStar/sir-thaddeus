@@ -204,8 +204,8 @@ public partial class App : System.Windows.Application
                     // Ensure ttsVoiceId is never empty. SettingsViewModel might 
                     // clear it if it doesn't match the catalog, so we force 
                     // a known-good default here.
-                    TtsVoiceId = string.IsNullOrWhiteSpace(_settings.Voice.TtsVoiceId) 
-                        ? "bm_lewis" 
+                    TtsVoiceId = string.IsNullOrWhiteSpace(_settings.Voice.TtsVoiceId)
+                        ? "bm_lewis"
                         : _settings.Voice.TtsVoiceId
                 }
             };
@@ -326,15 +326,18 @@ public partial class App : System.Windows.Application
         // ── 3c. Create Footman router (fast LLM-based routing) ──────────
         // Uses the gatekeeper model for sub-200ms routing decisions.
         // Falls back gracefully if the gatekeeper is unavailable.
-        _footmanRouter = new Agent.Routing.FastLlmFootmanRouter(
-            _gatekeeperLlmClient,
-            logEvent: (action, details) => _auditLogger.Append(new AuditEvent
-            {
-                Actor = "footman",
-                Action = action,
-                Result = "ok",
-                Details = new Dictionary<string, object> { ["detail"] = details }
-            }));
+        if (_gatekeeperLlmClient is not null)
+        {
+            _footmanRouter = new Agent.Routing.FastLlmFootmanRouter(
+                _gatekeeperLlmClient,
+                logEvent: (action, details) => _auditLogger.Append(new AuditEvent
+                {
+                    Actor = "footman",
+                    Action = action,
+                    Result = "ok",
+                    Details = new Dictionary<string, object> { ["detail"] = details }
+                }));
+        }
 
         // ── 4. Spawn MCP server (Layer 4) ────────────────────────────
         _splash?.SetStatus("Starting MCP server…");
@@ -355,13 +358,13 @@ public partial class App : System.Windows.Application
 
         _auditLogger.Append(new AuditEvent
         {
-            Actor  = "runtime",
+            Actor = "runtime",
             Action = "MCP_SERVER_PATH_RESOLVED",
             Result = File.Exists(mcpServerPath) ? "ok" : "file_not_found",
             Details = new Dictionary<string, object>
             {
                 ["resolvedPath"] = mcpServerPath,
-                ["exists"]       = File.Exists(mcpServerPath)
+                ["exists"] = File.Exists(mcpServerPath)
             }
         });
 
@@ -408,7 +411,7 @@ public partial class App : System.Windows.Application
                 Details = new Dictionary<string, object>
                 {
                     ["error"] = ex.Message,
-                    ["path"]  = mcpServerPath
+                    ["path"] = mcpServerPath
                 }
             });
 
@@ -494,7 +497,8 @@ public partial class App : System.Windows.Application
             activePersonalityId: _settings.ActivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(_settings),
             footmanRouter: _footmanRouter,
-            autoMemoryExtractor: autoMemoryExtractor);
+            autoMemoryExtractor: autoMemoryExtractor,
+            gatekeeperLlm: _gatekeeperLlmClient);
 
         // Seed the orchestrator with the active profile from settings
         // so it can pass it through to MCP tool calls at runtime.
@@ -565,7 +569,7 @@ public partial class App : System.Windows.Application
         _audioCaptureService = new AudioCaptureService(_auditLogger)
         {
             DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(_settings.Audio.InputDeviceName),
-            InputGain    = Math.Clamp(_settings.Audio.InputGain, 0.0, 2.0)
+            InputGain = Math.Clamp(_settings.Audio.InputGain, 0.0, 2.0)
         };
         _audioCaptureService.FirstAudioFrameCaptured += OnCaptureFirstFrameCaptured;
         _localTtsClient = new LocalTtsHttpClient(GetVoiceHostBaseUrlForRequests, () => _settings.Voice, _auditLogger);
@@ -594,6 +598,7 @@ public partial class App : System.Windows.Application
                 AsrTimeout = TimeSpan.FromMilliseconds(Math.Max(5_000, _settings.Voice.AsrTimeoutMs)),
                 AgentTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.AgentTimeoutMs)),
                 SpeakingTimeout = TimeSpan.FromMilliseconds(Math.Max(10_000, _settings.Voice.SpeakingTimeoutMs)),
+                MinPttHoldDuration = TimeSpan.FromMilliseconds(500),
                 // Preview transcript can shave final ASR latency when the operator releases PTT.
                 // A slightly more permissive freshness/length gate avoids unnecessary fallback ASR calls
                 // without bypassing ASR entirely.
@@ -726,15 +731,22 @@ public partial class App : System.Windows.Application
         // Cancel any in-flight read-aloud playback
         CancelReadAloud();
 
-        if (_audioPlaybackService?.IsPlaying != true)
-            return;
+        // Always cancel the active voice turn, even if we're currently
+        // transcribing/thinking and not yet speaking.
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
+        _voiceOrchestrator?.EnqueueShutup();
 
-        // Stop playback immediately so it doesn't keep speaking
-        try { _ = _audioPlaybackService.StopAsync(CancellationToken.None); } catch { }
+        // Stop playback immediately if currently speaking.
+        try
+        {
+            var playback = _audioPlaybackService;
+            if (playback is not null)
+                _ = playback.StopAsync(CancellationToken.None);
+        }
+        catch { }
 
         _ = StopLiveAsrPreviewLoopAsync(waitForDrain: false);
         PublishVoiceStatus("Canceled.");
-        _voiceOrchestrator?.EnqueueShutup();
         AppendVoiceActivity("Voice canceled by operator.", LogEntryKind.Info);
     }
 
@@ -747,10 +759,15 @@ public partial class App : System.Windows.Application
 
     private async Task TryHandleMicUpAsync()
     {
-        // Never gate mic release on readiness checks: stop capture first.
+        // Preview transcripts are partial by design. Keep them for live UI only;
+        // always run final ASR on the full captured clip after mic-up.
+        _voiceOrchestrator?.SetRealtimeTranscriptHint("", DateTimeOffset.MinValue);
+
+        // Preview is best-effort diagnostics. Never block mic-up on preview drain.
+        await StopLiveAsrPreviewLoopAsync(waitForDrain: false);
+
         _voiceOrchestrator?.EnqueueMicUp();
         PublishVoiceStatus("Transcribing...");
-        await StopLiveAsrPreviewLoopAsync(waitForDrain: true);
     }
 
     private string GetVoiceHostBaseUrlForRequests()
@@ -1102,7 +1119,7 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                await Task.Delay(180, token);
+                await Task.Delay(350, token);
                 while (!token.IsCancellationRequested)
                 {
                     try
@@ -1113,7 +1130,7 @@ public partial class App : System.Windows.Application
                             continue;
                         }
 
-                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 2_000);
+                        var clip = _audioCaptureService.CreateLiveSnapshotClip(maxDurationMs: 1_200);
                         if (clip is null || clip.AudioBytes.Length < 2_400)
                         {
                             await Task.Delay(120, token);
@@ -1134,7 +1151,7 @@ public partial class App : System.Windows.Application
                         // Preview is diagnostics-only and must not interrupt voice orchestration.
                     }
 
-                    await Task.Delay(300, token);
+                    await Task.Delay(650, token);
                 }
             }
             catch (OperationCanceledException)
@@ -1230,13 +1247,13 @@ public partial class App : System.Windows.Application
             // Map orchestrator state to the debug panel.
             var label = e.CurrentState switch
             {
-                VoiceState.Idle         => "",
-                VoiceState.Listening    => "Listening...",
+                VoiceState.Idle => "",
+                VoiceState.Listening => "Listening...",
                 VoiceState.Transcribing => "Transcribing...",
-                VoiceState.Thinking     => "Thinking...",
-                VoiceState.Speaking     => "Speaking...",
-                VoiceState.Faulted      => "Faulted.",
-                _                       => ""
+                VoiceState.Thinking => "Thinking...",
+                VoiceState.Speaking => "Speaking...",
+                VoiceState.Faulted => "Faulted.",
+                _ => ""
             };
 
             PublishVoiceStatus(label);
@@ -2137,7 +2154,7 @@ public partial class App : System.Windows.Application
 
         // Wire delegates
         chatVm.VoiceMicDown = OnPttMicDown;
-        chatVm.VoiceMicUp  = OnPttMicUp;
+        chatVm.VoiceMicUp = OnPttMicUp;
         chatVm.VoiceShutup = OnPttShutup;
         chatVm.ReadAloudRequestedAsync = ReadChatMessageAloudAsync;
 
@@ -2171,7 +2188,7 @@ public partial class App : System.Windows.Application
             {
                 var dbPath = ResolveMemoryDbPath(_settings);
                 settingsStore = new SqliteMemoryStore(dbPath);
-                var memVm  = new MemoryBrowserViewModel(settingsStore, _auditLogger!);
+                var memVm = new MemoryBrowserViewModel(settingsStore, _auditLogger!);
                 window.SetMemoryBrowserViewModel(memVm);
 
                 var profileVm = new ProfileBrowserViewModel(settingsStore, _auditLogger!);
@@ -2221,7 +2238,7 @@ public partial class App : System.Windows.Application
             _auditLogger!,
             youtubeJobsClient: null,
             voiceHostProcessManager: _voiceHostProcessManager);
-        
+
         settingsVm.ActiveProfileChanged += (profileId, displayName) =>
         {
             if (_orchestrator is not null)
@@ -2280,7 +2297,7 @@ public partial class App : System.Windows.Application
             if (_audioCaptureService is not null)
             {
                 _audioCaptureService.DeviceNumber = AudioDeviceEnumerator.ResolveInputDeviceNumber(updated.Audio.InputDeviceName);
-                _audioCaptureService.InputGain    = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
+                _audioCaptureService.InputGain = Math.Clamp(updated.Audio.InputGain, 0.0, 2.0);
             }
             if (_audioPlaybackService is not null)
                 _audioPlaybackService.OutputDeviceNumber = AudioDeviceEnumerator.ResolveOutputDeviceNumber(updated.Audio.OutputDeviceName);
@@ -2415,7 +2432,7 @@ public partial class App : System.Windows.Application
             dirName = Path.GetFileName(dir?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         }
 
-        var mcpBinDebug = dir != null 
+        var mcpBinDebug = dir != null
             ? Path.GetFullPath(Path.Combine(dir, "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"))
             : Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "mcp-server", "SirThaddeus.McpServer", "bin", "Debug"));
 
@@ -2433,7 +2450,7 @@ public partial class App : System.Windows.Application
                     var writeTime = File.GetLastWriteTimeUtc(candidate);
                     if (writeTime > newestTime)
                     {
-                        newest     = candidate;
+                        newest = candidate;
                         newestTime = writeTime;
                     }
                 }
@@ -2447,7 +2464,7 @@ public partial class App : System.Windows.Application
                     var writeTime = File.GetLastWriteTimeUtc(candidate);
                     if (writeTime > newestTime)
                     {
-                        newest     = candidate;
+                        newest = candidate;
                         newestTime = writeTime;
                     }
                 }
@@ -2525,7 +2542,7 @@ public partial class App : System.Windows.Application
         if (settings.Memory.Enabled)
         {
             env["ST_MEMORY_DB_PATH"] = ResolveMemoryDbPath(settings);
-            env["ST_LLM_BASEURL"]    = settings.Llm.BaseUrl;
+            env["ST_LLM_BASEURL"] = settings.Llm.BaseUrl;
 
             // Embeddings model: use explicit setting, fall back to the chat model
             if (settings.Memory.UseEmbeddings)
@@ -2786,13 +2803,13 @@ public partial class App : System.Windows.Application
             {
                 Permissions = group switch
                 {
-                    "screen"      => perms with { Screen      = "always" },
-                    "files"       => perms with { Files       = "always" },
-                    "system"      => perms with { System      = "always" },
-                    "web"         => perms with { Web         = "always" },
-                    "memoryRead"  => perms with { MemoryRead  = "always" },
+                    "screen" => perms with { Screen = "always" },
+                    "files" => perms with { Files = "always" },
+                    "system" => perms with { System = "always" },
+                    "web" => perms with { Web = "always" },
+                    "memoryRead" => perms with { MemoryRead = "always" },
                     "memoryWrite" => perms with { MemoryWrite = "always" },
-                    _             => perms
+                    _ => perms
                 }
             }
         };
@@ -2803,7 +2820,7 @@ public partial class App : System.Windows.Application
 
         _auditLogger?.Append(new AuditEvent
         {
-            Actor  = "user",
+            Actor = "user",
             Action = "SETTINGS_SAVED",
             Result = $"group={group} policy=always (via permission prompt)"
         });

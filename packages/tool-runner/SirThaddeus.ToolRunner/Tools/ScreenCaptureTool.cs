@@ -19,8 +19,8 @@ public sealed class ScreenCaptureTool : ITool
         context.CancellationToken.ThrowIfCancellationRequested();
 
         // Extract target from call arguments
-        var target = context.Call.Arguments?.TryGetValue("target", out var t) == true 
-            ? t?.ToString() ?? "active_window" 
+        var target = context.Call.Arguments?.TryGetValue("target", out var t) == true
+            ? t?.ToString() ?? "active_window"
             : "active_window";
 
         // Stub implementation - returns mock data

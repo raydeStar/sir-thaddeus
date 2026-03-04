@@ -36,11 +36,11 @@ public class SearchModeRouterTests
     }
 
     [Theory]
-    [InlineData("pull up the news",         SearchMode.NewsAggregate)]
-    [InlineData("top headlines today",       SearchMode.NewsAggregate)]
-    [InlineData("whats happening",           SearchMode.NewsAggregate)]
-    [InlineData("breaking news",             SearchMode.NewsAggregate)]
-    [InlineData("daily briefing",            SearchMode.NewsAggregate)]
+    [InlineData("pull up the news", SearchMode.NewsAggregate)]
+    [InlineData("top headlines today", SearchMode.NewsAggregate)]
+    [InlineData("whats happening", SearchMode.NewsAggregate)]
+    [InlineData("breaking news", SearchMode.NewsAggregate)]
+    [InlineData("daily briefing", SearchMode.NewsAggregate)]
     public void NewsQueries_ClassifyAsNewsAggregate(string message, SearchMode expected)
     {
         var mode = SearchModeRouter.Classify(message, EmptySession(), DateTimeOffset.UtcNow);
@@ -48,9 +48,9 @@ public class SearchModeRouterTests
     }
 
     [Theory]
-    [InlineData("who is Elon Musk",         SearchMode.WebFactFind)]
+    [InlineData("who is Elon Musk", SearchMode.WebFactFind)]
     [InlineData("explain quantum computing", SearchMode.WebFactFind)]
-    [InlineData("stock price of AAPL",       SearchMode.WebFactFind)]
+    [InlineData("stock price of AAPL", SearchMode.WebFactFind)]
     public void FactQueries_ClassifyAsWebFactFind(string message, SearchMode expected)
     {
         var mode = SearchModeRouter.Classify(message, EmptySession(), DateTimeOffset.UtcNow);
@@ -105,12 +105,12 @@ public class SearchModeRouterTests
 public class UtilityRouterTests
 {
     [Theory]
-    [InlineData("what's 15% of 230",  "calculator", "15% of 230 = **34.50**")]
+    [InlineData("what's 15% of 230", "calculator", "15% of 230 = **34.50**")]
     [InlineData("what is 15 percent of 230", "calculator", "15% of 230 = **34.50**")]
-    [InlineData("what's 10*45?",      "calculator", "10*45 = **450**")]
-    [InlineData("what is 6 plus 7?",  "calculator", "6 + 7 = **13**")]
+    [InlineData("what's 10*45?", "calculator", "10*45 = **450**")]
+    [InlineData("what is 6 plus 7?", "calculator", "6 + 7 = **13**")]
     [InlineData("Hey, Thaddeus, what's 6x7?", "calculator", "6 * 7 = **42**")]
-    [InlineData("100 + 50",           "calculator", "100 + 50 = **150**")]
+    [InlineData("100 + 50", "calculator", "100 + 50 = **150**")]
     public void Calculator_ReturnsInlineAnswer(string input, string category, string expected)
     {
         var result = UtilityRouter.TryHandle(input);
@@ -121,10 +121,10 @@ public class UtilityRouterTests
     }
 
     [Theory]
-    [InlineData("convert 10 miles to km",      "conversion")]
-    [InlineData("convert 1 mile to feet",      "conversion")]
+    [InlineData("convert 10 miles to km", "conversion")]
+    [InlineData("convert 1 mile to feet", "conversion")]
     [InlineData("convert 100 fahrenheit to celsius", "conversion")]
-    [InlineData("convert 5 lbs to kg",         "conversion")]
+    [InlineData("convert 5 lbs to kg", "conversion")]
     public void Conversion_ReturnsInlineAnswer(string input, string category)
     {
         var result = UtilityRouter.TryHandle(input);
@@ -157,7 +157,7 @@ public class UtilityRouterTests
     }
 
     [Theory]
-    [InlineData("time in Tokyo",           "time")]
+    [InlineData("time in Tokyo", "time")]
     [InlineData("what's the time in London", "time")]
     public void TimeZone_RoutesToGeocodeTool(string input, string category)
     {
@@ -473,7 +473,8 @@ public class SearchSessionTests
         var session = new SearchSession();
         var source = new SourceItem
         {
-            Url = "https://a.com", Title = "Test",
+            Url = "https://a.com",
+            Title = "Test",
             SourceId = SourceItem.ComputeSourceId("https://a.com")
         };
         session.RecordSearchResults(
@@ -548,8 +549,8 @@ public class QueryBuilderFallbackTests
     {
         var entity = new EntityResolver.ResolvedEntity
         {
-            CanonicalName  = "Elon Musk",
-            Type           = "Person",
+            CanonicalName = "Elon Musk",
+            Type = "Person",
             Disambiguation = "CEO of SpaceX"
         };
 
@@ -567,12 +568,12 @@ public class QueryBuilderFallbackTests
     [Fact]
     public void DetectRecency_FindsTemporalMarkers()
     {
-        Assert.Equal("day",   QueryBuilder.DetectRecencyFromMessage("news today"));
-        Assert.Equal("week",  QueryBuilder.DetectRecencyFromMessage("events this week"));
-        Assert.Equal("week",  QueryBuilder.DetectRecencyFromMessage("recent headlines from last week"));
+        Assert.Equal("day", QueryBuilder.DetectRecencyFromMessage("news today"));
+        Assert.Equal("week", QueryBuilder.DetectRecencyFromMessage("events this week"));
+        Assert.Equal("week", QueryBuilder.DetectRecencyFromMessage("recent headlines from last week"));
         Assert.Equal("month", QueryBuilder.DetectRecencyFromMessage("updates past month"));
-        Assert.Equal("day",   QueryBuilder.DetectRecencyFromMessage("breaking news"));
-        Assert.Equal("day",   QueryBuilder.DetectRecencyFromMessage("what's the dow jones at most recently?"));
+        Assert.Equal("day", QueryBuilder.DetectRecencyFromMessage("breaking news"));
+        Assert.Equal("day", QueryBuilder.DetectRecencyFromMessage("what's the dow jones at most recently?"));
     }
 
     [Fact]
@@ -678,6 +679,9 @@ public class DialogueLocationCarryForwardTests
     [InlineData("is it going to rain tomorrow")]         // starts with "is"
     [InlineData("What time is it in New York")]          // starts with "what"
     [InlineData("I was wondering why is Dante so chunky")] // starts with "I", too many words
+    [InlineData("latest")]                               // temporal freshness token, not a place
+    [InlineData("recent")]                               // temporal freshness token, not a place
+    [InlineData("current")]                              // temporal freshness token, not a place
     public void ValidateSlots_DropsGarbageLocationValues(string garbage)
     {
         var merged = new MergedSlots
@@ -898,7 +902,7 @@ public class SearchPipelineGoldenTests
     /// </summary>
     private static FakeLlmClient MakePipelineLlm(
         string entityJson = """{"name":"","type":"none","hint":""}""",
-        string queryJson  = """{"query":"test query","recency":"any"}""",
+        string queryJson = """{"query":"test query","recency":"any"}""",
         string summaryText = "Here is a summary of the results.")
     {
         return new FakeLlmClient((messages, tools) =>
@@ -1526,7 +1530,7 @@ public class SearchPipelineGoldenTests
     {
         var llm = MakePipelineLlm(
             entityJson: """{"name":"","type":"none","hint":""}""",
-            queryJson:  """{"query":"the local news latest","recency":"day"}""",
+            queryJson: """{"query":"the local news latest","recency":"day"}""",
             summaryText: "Here are local headlines.");
 
         var searchResult =
@@ -1559,7 +1563,7 @@ public class SearchPipelineGoldenTests
     {
         var llm = MakePipelineLlm(
             entityJson: """{"name":"","type":"none","hint":""}""",
-            queryJson:  """{"query":"local news in Boise, ID","recency":"day"}""",
+            queryJson: """{"query":"local news in Boise, ID","recency":"day"}""",
             summaryText: "Here are Boise headlines.");
 
         var searchResult =
@@ -1601,7 +1605,7 @@ public class SearchPipelineGoldenTests
         // message even when the query itself is normalized.
         var llm = MakePipelineLlm(
             entityJson: """{"name":"","type":"none","hint":""}""",
-            queryJson:  queryJson,
+            queryJson: queryJson,
             summaryText: "Here are local headlines.");
 
         var searchResult =
@@ -1694,8 +1698,8 @@ public class SearchPipelineGoldenTests
     public async Task NewsSearch_EntityResolution_ProducesGoodQuery()
     {
         var llm = MakePipelineLlm(
-            entityJson:  """{"name":"SpaceX","type":"Org","hint":"Elon Musk's space company"}""",
-            queryJson:   """{"query":"SpaceX latest news","recency":"week"}""",
+            entityJson: """{"name":"SpaceX","type":"Org","hint":"Elon Musk's space company"}""",
+            queryJson: """{"query":"SpaceX latest news","recency":"week"}""",
             summaryText: "SpaceX recently launched another Starship prototype.");
 
         var searchResult =
@@ -1719,6 +1723,8 @@ public class SearchPipelineGoldenTests
         Assert.NotEmpty(webSearchCalls);
     }
 
+    // ExistenceGuard test removed — feature was intentionally removed for latency reasons.
+
     [Fact]
     public async Task NewsToFollowUp_DeepDive_BrowsesPriorSource()
     {
@@ -1730,8 +1736,8 @@ public class SearchPipelineGoldenTests
             $"[{{\"url\":\"{sourceUrl}\",\"title\":\"SpaceX Starship Test Flight\"}}]";
 
         var llm = MakePipelineLlm(
-            entityJson:  """{"name":"SpaceX","type":"Org","hint":"space company"}""",
-            queryJson:   """{"query":"SpaceX news","recency":"week"}""",
+            entityJson: """{"name":"SpaceX","type":"Org","hint":"space company"}""",
+            queryJson: """{"query":"SpaceX news","recency":"week"}""",
             summaryText: "SpaceX conducted a successful test flight.");
 
         var mcp = new FakeMcpClient((tool, args) =>
@@ -1772,8 +1778,8 @@ public class SearchPipelineGoldenTests
             $"[{{\"url\":\"{sourceUrl}\",\"title\":\"Major Tech Layoffs 2026\"}}]";
 
         var llm = MakePipelineLlm(
-            entityJson:  """{"name":"","type":"none","hint":""}""",
-            queryJson:   """{"query":"tech layoffs 2026","recency":"week"}""",
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"tech layoffs 2026","recency":"week"}""",
             summaryText: "Multiple tech companies have announced layoffs.");
 
         var searchCount = 0;
@@ -1850,7 +1856,7 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
+
         };
 
         var result = await agent.ProcessAsync("What are TSA ID requirements at the airport?");
@@ -1929,7 +1935,7 @@ public class SearchPipelineGoldenTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
         {
-        
+
         };
 
         var result = await agent.ProcessAsync("what is 9 plus 4?");
@@ -1954,13 +1960,13 @@ public class LocalBusinessDetectionTests
         var llm = new FakeLlmClient((messages, tools) =>
         {
             var userText = messages.LastOrDefault(m => m.Role == "user")?.Content ?? "";
-            
+
             if (userText.Contains("walk or drive", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { Content = "Drive, because you need the car at the destination.", IsComplete = true };
-            
+
             if (userText.Contains("bakery nearby", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { Content = "Here are some bakeries nearby: Left Bank Pastry.", IsComplete = true };
-                
+
             if (userText.Contains("Left Bank Pastry", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse { Content = "Here is a briefing on Left Bank Pastry.", IsComplete = true };
 
@@ -2005,7 +2011,7 @@ public class LocalBusinessDetectionTests
         Assert.True(result2.Success);
         Assert.Contains(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("bakeries nearby", result2.Text);
-        
+
         // Ensure the session recorded that this was a local business discovery
         var sessionFlagFound = false;
         var orchestratorField = typeof(AgentOrchestrator).GetField("_searchOrchestrator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -2020,7 +2026,7 @@ public class LocalBusinessDetectionTests
         // Step 3: Follow-up Briefing
         var result3 = await agent.ProcessAsync("Show me Left Bank Pastry");
         Assert.True(result3.Success);
-        
+
         // It should have routed to the briefing pipeline and called places_lookup (or search again)
         Assert.True(mcp.Calls.Count > priorCallCount, "Should have called tools for the briefing.");
         Assert.NotNull(result3.DeepDiveBriefing);

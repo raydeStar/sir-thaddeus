@@ -377,7 +377,7 @@ public class ToolRunnerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var executeEvent = events.FirstOrDefault(e => e.Action == "TOOL_EXECUTE" && e.Result == "ok");
-        
+
         Assert.NotNull(executeEvent);
         Assert.Equal("screen_capture", executeEvent.Target);
         Assert.Equal(token.Id, executeEvent.PermissionTokenId);
@@ -401,7 +401,7 @@ public class ToolRunnerTests : IDisposable
         // Assert
         var events = _auditLogger.ReadTail(10);
         var executeEvent = events.FirstOrDefault(e => e.Action == "TOOL_EXECUTE" && e.Result == "error");
-        
+
         Assert.NotNull(executeEvent);
         Assert.Equal("screen_capture", executeEvent.Target);
         Assert.NotNull(executeEvent.Details);

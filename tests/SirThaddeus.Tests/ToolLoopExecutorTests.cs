@@ -197,6 +197,8 @@ public class ToolLoopExecutorTests
         Assert.True(systemErrorInHistory, "Expected PlanValidator to inject a System Error for the unpermitted web_search tool.");
     }
 
+    // ExistenceGuard test removed — feature was intentionally removed for latency reasons.
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

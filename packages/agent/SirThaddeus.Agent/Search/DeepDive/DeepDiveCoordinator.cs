@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Agent.Search.DeepDive;
@@ -160,11 +161,11 @@ public sealed partial class DeepDiveCoordinator
 
         // Strip conversational filler before building a search query.
         // "Can you tell me what the operating hours of Trader Joe's in Portland is?"
-        // becomes "Trader Joe's Portland" — the kind of query that actually works.
+        // becomes "Trader Joe's Portland" - the kind of query that actually works.
         //
         // For web search (unlike Places API), always inject location context when
         // no explicit city is in the query.  Search engines handle proximity
-        // gracefully — "Target near Rexburg, ID hours" is better than "Target hours".
+        // gracefully - "Target near Rexburg, ID hours" is better than "Target hours".
         var webLocationSuffix = !string.IsNullOrWhiteSpace(userLocationHint)
             && !cleanedQuery.Contains(userLocationHint, StringComparison.OrdinalIgnoreCase)
             ? $" near {userLocationHint}"
@@ -198,6 +199,34 @@ public sealed partial class DeepDiveCoordinator
         }
 
         var extractedChunks = new List<string>();
+
+        // -- Last-resort fallback: browse a search engine directly --
+        // When all web_search providers returned 0 results (SearxNG not
+        // running, DDG blocked, Google News RSS doesn't index businesses),
+        // browse a Google search URL directly to extract structured data.
+        if (sources.Count == 0)
+        {
+            AddAuditStep(auditSteps, "search", "web_search returned 0 results - browsing Google search directly.");
+            var googleUrl = $"https://www.google.com/search?q={Uri.EscapeDataString(cleanedQuery + webLocationSuffix + " hours address phone")}";
+            var browseArgs = JsonSerializer.Serialize(new { url = googleUrl });
+            var browseContent = await CallToolBoundedAsync(
+                BrowseTool,
+                BrowseToolAlt,
+                browseArgs,
+                "open_page",
+                $"Browsed Google search: {googleUrl}");
+            if (!string.IsNullOrWhiteSpace(browseContent) && !browseContent.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !browseContent.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
+            {
+                extractedChunks.Add(browseContent!);
+                sourceRefs.Add(new SourceRef
+                {
+                    Name = "Google Search",
+                    Url = googleUrl,
+                    FetchedIso = now.ToString("O")
+                });
+            }
+        }
+
         foreach (var source in sources.Take(2))
         {
             var args = JsonSerializer.Serialize(new { url = source.Url });
@@ -207,11 +236,11 @@ public sealed partial class DeepDiveCoordinator
                 args,
                 "open_page",
                 $"Opened fallback page: {source.Url}");
-            if (!string.IsNullOrWhiteSpace(content))
+            if (!string.IsNullOrWhiteSpace(content) && !content.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !content.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
                 extractedChunks.Add(content!);
         }
 
-        if (!string.IsNullOrWhiteSpace(webResult))
+        if (!string.IsNullOrWhiteSpace(webResult) && !webResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !webResult.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
             extractedChunks.Add(webResult!);
 
         // Source snippets often contain hours, address, phone, and ratings
@@ -233,7 +262,7 @@ public sealed partial class DeepDiveCoordinator
         if (!hours.HasAnyHours)
             warnings.Add("No structured hours found. Call ahead before visiting.");
         if (hours.HasConflict)
-            warnings.Add("Different sources disagree on hours — verify directly.");
+            warnings.Add("Different sources disagree on hours - verify directly.");
 
         // Confidence scales with what we actually managed to extract.
         var hasUsefulData = hours.HasAnyHours ||
@@ -686,7 +715,8 @@ public sealed partial class DeepDiveCoordinator
         var parts = new List<string>();
 
         // Title + status
-        parts.Add($"**{briefing.Hero.Title}**");
+        var leadTitle = NormalizeHeroTitleForLead(briefing.Hero.Title);
+        parts.Add($"**{leadTitle}**");
 
         if (!string.IsNullOrWhiteSpace(briefing.Hero.StatusLine))
             parts.Add(briefing.Hero.StatusLine);
@@ -697,29 +727,53 @@ public sealed partial class DeepDiveCoordinator
 
         // Address for context
         if (!string.IsNullOrWhiteSpace(briefing.Hero.Address))
-            parts.Add($"📍 {briefing.Hero.Address}");
+            parts.Add($"Address: {briefing.Hero.Address}");
 
         // Phone
         if (!string.IsNullOrWhiteSpace(briefing.Hero.Phone))
-            parts.Add($"📞 {briefing.Hero.Phone}");
+            parts.Add($"Phone: {briefing.Hero.Phone}");
 
-        // Pull rating from the reviews card if available
+        // Pull a true rating line from the reviews card when available.
+        // Avoid matching arbitrary snippets that happen to include '/5'.
         var reviewCard = briefing.Cards.FirstOrDefault(c =>
             c.Type.Equals("reviews", StringComparison.OrdinalIgnoreCase));
         if (reviewCard is not null)
         {
             var ratingBullet = reviewCard.Bullets.FirstOrDefault(b =>
-                b.Contains("rating", StringComparison.OrdinalIgnoreCase) ||
-                b.Contains("/5", StringComparison.Ordinal));
+                b.StartsWith("Rating:", StringComparison.OrdinalIgnoreCase) ||
+                b.StartsWith("Average rating:", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrWhiteSpace(ratingBullet))
-                parts.Add($"⭐ {ratingBullet}");
+                parts.Add(ratingBullet);
         }
 
-        parts.Add("\nOpen the **Briefing** tab for full details, reviews, and sources.");
+        if (briefing.Hero.Confidence.Equals(DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add(!string.IsNullOrWhiteSpace(briefing.Hero.Phone)
+                ? "I could not verify live open status from reliable sources. Call the store to confirm current hours."
+                : "I could not verify live open status from reliable sources. Check the listed source before visiting.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(briefing.Hero.Website))
+            parts.Add("Use the listed website to confirm current hours before visiting.");
+
+        parts.Add("Briefing summary: hours and review details are based on currently available web sources.");
 
         return string.Join("\n", parts);
     }
 
+    private static string NormalizeHeroTitleForLead(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return title;
+
+        var normalized = title.Trim()
+            .Replace("\u2019", "'", StringComparison.Ordinal)
+            .Replace("`", "'", StringComparison.Ordinal);
+
+        // Normalize possessive/apostrophe variants so token matching remains stable.
+        normalized = Regex.Replace(normalized, @"(?<=\p{L})'(?=\p{L})", "");
+        return normalized;
+    }
     private static List<string> BuildReviewBullets(
         IReadOnlyList<string> reviews,
         double? rating,
@@ -812,7 +866,7 @@ public sealed partial class DeepDiveCoordinator
     {
         if (value.Length <= maxChars)
             return value;
-        return value[..maxChars] + "…";
+        return value[..maxChars] + "...";
     }
 
     private static SourceRef CreateSyntheticSourceRef(string url)
@@ -830,10 +884,10 @@ public sealed partial class DeepDiveCoordinator
     /// user message to produce a search-engine-friendly query.
     ///
     /// "Can you tell me what the operating hours of Trader Joe's in Portland is?"
-    ///  → "Trader Joe's Portland"
+    ///  -> "Trader Joe's Portland"
     ///
     /// "When does Trader Joe's in Portland OR open?"
-    ///  → "Trader Joe's Portland OR"
+    ///  -> "Trader Joe's Portland OR"
     /// </summary>
     internal static string CleanQueryForWebFallback(string raw)
     {
@@ -881,9 +935,10 @@ public sealed partial class DeepDiveCoordinator
     private static partial System.Text.RegularExpressions.Regex CleanDanglingCopulaRegex();
 
     /// <summary>
-    /// Uses configured user location only for ambiguous place queries.
-    /// If the user named a specific place (2+ cleaned tokens), avoid biasing
-    /// lookup with home location and trust the explicit place string.
+    /// Uses configured user location for place queries unless the query
+    /// already contains a city/state reference from the location hint.
+    /// "William's Flowers" -> appends "Olympia, WA"
+    /// "Trader Joe's Portland OR" -> already contains a city, skips hint
     /// </summary>
     private static string? ResolveLocationHintForQuery(
         string rawQuery,
@@ -893,6 +948,7 @@ public sealed partial class DeepDiveCoordinator
         if (string.IsNullOrWhiteSpace(userLocationHint))
             return null;
 
+        // Explicit proximity cues always use the hint.
         var lower = rawQuery.ToLowerInvariant();
         if (lower.Contains("near me", StringComparison.Ordinal) ||
             lower.Contains("nearby", StringComparison.Ordinal) ||
@@ -901,11 +957,22 @@ public sealed partial class DeepDiveCoordinator
             return userLocationHint;
         }
 
-        var tokenCount = cleanedQuery
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Length;
+        // Check if the query already mentions the configured location
+        // (city or state). Split the hint into tokens and check for any
+        // significant word (skip short tokens like "WA" -> 2 chars is OK).
+        // Examples:
+        //   hint="Olympia, WA"  -> ["olympia", "wa"]
+        //   query="Trader Joe's Olympia" -> contains "olympia" -> skip
+        //   query="William's Flowers"    -> no match -> include hint
+        var hintTokens = userLocationHint
+            .ToLowerInvariant()
+            .Split([' ', ',', '.'], StringSplitOptions.RemoveEmptyEntries);
 
-        return tokenCount >= 2 ? null : userLocationHint;
+        var queryLower = cleanedQuery.ToLowerInvariant();
+        var queryAlreadyHasLocation = hintTokens.Any(token =>
+            token.Length >= 2 && queryLower.Contains(token, StringComparison.Ordinal));
+
+        return queryAlreadyHasLocation ? null : userLocationHint;
     }
 
     private static int ParseIntEnv(string key, int fallback, int min, int max)
@@ -924,3 +991,4 @@ public sealed record DeepDiveExecutionResult
     public string AssistantText { get; init; } = "";
     public DeepDiveBriefing? Briefing { get; init; }
 }
+

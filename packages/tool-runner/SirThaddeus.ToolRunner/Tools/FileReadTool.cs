@@ -19,8 +19,8 @@ public sealed class FileReadTool : ITool
         context.CancellationToken.ThrowIfCancellationRequested();
 
         // Extract path argument
-        var path = context.Call.Arguments?.TryGetValue("path", out var p) == true 
-            ? p?.ToString() 
+        var path = context.Call.Arguments?.TryGetValue("path", out var p) == true
+            ? p?.ToString()
             : null;
 
         if (string.IsNullOrEmpty(path))

@@ -76,5 +76,20 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Copy Piper TTS dependencies if present -->
+  <ItemGroup Condition="Exists('..\..\voice-backend\piper')">
+    <None Include="..\..\voice-backend\piper\**\*.*"
+          Link="voice\piper\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\voice-backend\piper-voices')">
+    <None Include="..\..\voice-backend\piper-voices\**\*.*"
+          Link="voice\piper-voices\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 
 </Project>

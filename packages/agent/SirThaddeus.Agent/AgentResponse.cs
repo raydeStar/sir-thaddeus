@@ -100,6 +100,19 @@ public sealed record AgentResponse
     /// </summary>
     public string? CorrelationId { get; init; }
 
+    /// <summary>
+    /// Deterministic completion confidence from the completion checker.
+    /// Null when completion contracts were not evaluated for this turn.
+    /// </summary>
+    public double? CompletionConfidence { get; init; }
+
+    /// <summary>
+    /// Completion stop reason (for diagnostics/UI), for example:
+    /// "complete", "missing_required_fields", or
+    /// "evidence_or_count_requirements_unmet".
+    /// </summary>
+    public string? CompletionStopReason { get; init; }
+
     public static AgentResponse FromError(string error) => new()
     {
         Text = error,

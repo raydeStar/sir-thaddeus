@@ -26,8 +26,8 @@ public class AuditedMcpToolClientTests
     {
         var inner = new FakeMcpClient("tool output here");
         var audit = new TestAuditLogger();
-        var gate  = new AlwaysGrantGate();
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         await sut.CallToolAsync("WebSearch", "{\"query\":\"test\"}");
 
@@ -35,7 +35,7 @@ public class AuditedMcpToolClientTests
         Assert.True(events.Count >= 2, "Should have at least START + END events");
 
         var start = events.First(e => e.Action == "MCP_TOOL_CALL_START");
-        var end   = events.First(e => e.Action == "MCP_TOOL_CALL_END");
+        var end = events.First(e => e.Action == "MCP_TOOL_CALL_END");
 
         Assert.Equal("agent", start.Actor);
         Assert.Equal("web_search", start.Target);   // Canonicalized
@@ -55,8 +55,8 @@ public class AuditedMcpToolClientTests
     {
         var inner = new ErrorThrowingMcpClient(new InvalidOperationException("MCP error: Boom"));
         var audit = new TestAuditLogger();
-        var gate  = new AlwaysGrantGate();
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         var result = await sut.CallToolAsync("file_read", "{\"path\":\"C:\\\\test.txt\"}");
 
@@ -76,8 +76,8 @@ public class AuditedMcpToolClientTests
     {
         var inner = new FakeMcpClient("should not reach this");
         var audit = new TestAuditLogger();
-        var gate  = new AlwaysDenyGate("User said no");
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new AlwaysDenyGate("User said no");
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         var result = await sut.CallToolAsync("ScreenCapture", "{}");
 
@@ -100,8 +100,8 @@ public class AuditedMcpToolClientTests
     {
         var inner = new FakeMcpClient("ok");
         var audit = new TestAuditLogger();
-        var gate  = new FixedTokenGate("tok-abc123");
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new FixedTokenGate("tok-abc123");
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         await sut.CallToolAsync("system_execute", "{\"command\":\"whoami\"}");
 
@@ -118,10 +118,10 @@ public class AuditedMcpToolClientTests
     public async Task CallToolAsync_RedactsScreenCaptureOutput()
     {
         var ocrText = "Lots of sensitive text visible on screen " + new string('x', 500);
-        var inner   = new FakeMcpClient(ocrText);
-        var audit   = new TestAuditLogger();
-        var gate    = new AlwaysGrantGate();
-        var sut     = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var inner = new FakeMcpClient(ocrText);
+        var audit = new TestAuditLogger();
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         await sut.CallToolAsync("screen_capture", "{\"target\":\"full_screen\"}");
 
@@ -144,8 +144,8 @@ public class AuditedMcpToolClientTests
         var fileContent = "SECRET_API_KEY=abc123xyz\nDATABASE_PASSWORD=hunter2";
         var inner = new FakeMcpClient(fileContent);
         var audit = new TestAuditLogger();
-        var gate  = new AlwaysGrantGate();
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         await sut.CallToolAsync("FileRead", "{\"path\":\"C:\\\\secrets.env\"}");
 
@@ -233,8 +233,8 @@ public class AuditedMcpToolClientTests
         };
         var inner = new FakeMcpClient((_, _) => "", tools);
         var audit = new TestAuditLogger();
-        var gate  = new AlwaysGrantGate();
-        var sut   = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+        var gate = new AlwaysGrantGate();
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
 
         var result = await sut.ListToolsAsync();
 
@@ -294,7 +294,7 @@ public class AuditedMcpToolClientTests
             IReadOnlyList<McpToolInfo>? tools = null)
         {
             _handler = handler;
-            _tools   = tools ?? [];
+            _tools = tools ?? [];
         }
 
         public Task<string> CallToolAsync(

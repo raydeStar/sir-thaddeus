@@ -112,7 +112,7 @@ public sealed class RuntimeController : IDisposable
 
             _currentState = newState;
             LogStateChange(previousState, newState, reason);
-            
+
             StateChanged?.Invoke(this, new StateChangedEventArgs(previousState, newState));
             return true;
         }

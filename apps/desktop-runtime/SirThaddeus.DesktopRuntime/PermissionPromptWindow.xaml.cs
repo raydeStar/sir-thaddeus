@@ -35,12 +35,12 @@ public partial class PermissionPromptWindow : Window
         WarningText.Text = request.Capability switch
         {
             Capability.SystemExecute => "This tool can run commands on your system. Review the details carefully before allowing.",
-            Capability.FileAccess    => "This tool can read or write files on your computer. Review the path before allowing.",
-            Capability.ScreenRead    => "This tool will capture what is currently visible on your screen.",
-            Capability.WebAccess     => "This tool will make an outbound internet request on your behalf.",
-            Capability.MemoryWrite   => "This tool will store or modify data in your local memory database.",
-            Capability.MemoryRead    => "This tool will read from your local memory database.",
-            _                        => "Sir Thaddeus is requesting access to a tool on your behalf. Choose how to proceed."
+            Capability.FileAccess => "This tool can read or write files on your computer. Review the path before allowing.",
+            Capability.ScreenRead => "This tool will capture what is currently visible on your screen.",
+            Capability.WebAccess => "This tool will make an outbound internet request on your behalf.",
+            Capability.MemoryWrite => "This tool will store or modify data in your local memory database.",
+            Capability.MemoryRead => "This tool will read from your local memory database.",
+            _ => "Sir Thaddeus is requesting access to a tool on your behalf. Choose how to proceed."
         };
     }
 

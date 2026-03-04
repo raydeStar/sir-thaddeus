@@ -74,33 +74,33 @@ public sealed class SingleTestRunner
         switch (mode)
         {
             case HarnessExecutionMode.Live:
-            {
-                llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                baseExecutor = new LiveToolExecutor(settings);
-                break;
-            }
-            case HarnessExecutionMode.Replay:
-            {
-                llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
-                baseExecutor = new ReplayToolExecutor(loadedFixture!);
-                break;
-            }
-            case HarnessExecutionMode.Stub:
-            {
-                if (loadedFixture is not null)
-                {
-                    llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
-                    var replayExecutor = new ReplayToolExecutor(loadedFixture);
-                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
-                }
-                else
                 {
                     llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                    var liveExecutor = new LiveToolExecutor(settings);
-                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
+                    baseExecutor = new LiveToolExecutor(settings);
+                    break;
                 }
-                break;
-            }
+            case HarnessExecutionMode.Replay:
+                {
+                    llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
+                    baseExecutor = new ReplayToolExecutor(loadedFixture!);
+                    break;
+                }
+            case HarnessExecutionMode.Stub:
+                {
+                    if (loadedFixture is not null)
+                    {
+                        llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
+                        var replayExecutor = new ReplayToolExecutor(loadedFixture);
+                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
+                    }
+                    else
+                    {
+                        llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
+                        var liveExecutor = new LiveToolExecutor(settings);
+                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
+                    }
+                    break;
+                }
             default:
                 throw new InvalidOperationException($"Unsupported mode: {mode}");
         }
@@ -121,7 +121,8 @@ public sealed class SingleTestRunner
             ? test.PersonalityId
             : settings.ActivePersonalityId;
 
-        var footmanRouter = BuildFootmanRouter(settings, llmClient);
+        var gatekeeperClient = BuildGatekeeperClient(settings);
+        var footmanRouter = gatekeeperClient is not null ? new FastLlmFootmanRouter(gatekeeperClient, logEvent: (_, _) => { }) : null;
 
         var orchestrator = new AgentOrchestrator(
             llmClient,
@@ -130,7 +131,8 @@ public sealed class SingleTestRunner
             settings.Llm.SystemPrompt,
             activePersonalityId: effectivePersonalityId,
             personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings),
-            footmanRouter: footmanRouter);
+            footmanRouter: footmanRouter,
+            gatekeeperLlm: gatekeeperClient);
         orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
 
         var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
@@ -199,7 +201,7 @@ public sealed class SingleTestRunner
         return recordingClient;
     }
 
-    private static IFootmanRouter? BuildFootmanRouter(AppSettings settings, ILlmClient primaryLlmClient)
+    private static ILlmClient? BuildGatekeeperClient(AppSettings settings)
     {
         var gatekeeperBaseUrl = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperBaseUrl)
             ? settings.Llm.BaseUrl
@@ -211,17 +213,13 @@ public sealed class SingleTestRunner
         if (string.IsNullOrWhiteSpace(gatekeeperModel))
             return null;
 
-        var gatekeeperClient = new LmStudioClient(new LlmClientOptions
+        return new LmStudioClient(new LlmClientOptions
         {
             BaseUrl = gatekeeperBaseUrl,
             Model = gatekeeperModel,
             MaxTokens = 120,
             Temperature = 0.0
         });
-
-        return new FastLlmFootmanRouter(
-            gatekeeperClient,
-            logEvent: (_, _) => { });
     }
 
     private static HarnessExecutionMode ResolveMode(HarnessCommandOptions options, HarnessTestCase test)

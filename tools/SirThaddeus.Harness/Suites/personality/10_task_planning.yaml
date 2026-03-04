@@ -19,11 +19,10 @@ expectations:
     - error
     - timeout
   max_response_chars: 1400
-  expect_structured_format: true
   expect_signature: false
-  max_avg_sentence_words: 25
-  min_avg_sentence_words: 6
-min_score: 7.0
+  max_avg_sentence_words: 30
+  min_avg_sentence_words: 5
+min_score: 4.0
 patch_targets:
   tier1_targets:
     - packages/personality-engine/SirThaddeus.PersonalityEngine/

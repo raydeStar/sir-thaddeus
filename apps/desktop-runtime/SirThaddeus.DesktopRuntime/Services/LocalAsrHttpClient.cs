@@ -13,6 +13,10 @@ namespace SirThaddeus.DesktopRuntime.Services;
 /// </summary>
 public sealed class LocalAsrHttpClient : IAsrService, IDisposable
 {
+    // Voice capture is interactive: keep startup retries short so the UI
+    // does not appear hung in "Transcribing..." when the backend is down.
+    private static readonly TimeSpan MaxInteractiveStartupRetryBudget = TimeSpan.FromSeconds(12);
+
     private readonly HttpClient _httpClient;
     private readonly Func<string> _baseUrlProvider;
     private readonly Func<VoiceSettings> _voiceSettingsProvider;
@@ -95,8 +99,12 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
         var allowStartupRetries =
             voiceSettings.VoiceHostEnabled &&
             !IsPreviewSessionId(sessionId);
-        var retryDeadlineUtc = startedAt + TimeSpan.FromMilliseconds(
+        var configuredStartupBudget = TimeSpan.FromMilliseconds(
             Math.Clamp(voiceSettings.VoiceHostStartupTimeoutMs, 2_000, 1_800_000));
+        var effectiveStartupBudget = configuredStartupBudget <= MaxInteractiveStartupRetryBudget
+            ? configuredStartupBudget
+            : MaxInteractiveStartupRetryBudget;
+        var retryDeadlineUtc = startedAt + effectiveStartupBudget;
         var attempt = 0;
         string transcript;
 
@@ -155,6 +163,12 @@ public sealed class LocalAsrHttpClient : IAsrService, IDisposable
                 !cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InvalidOperationException(
+                    "Voice backend is unreachable. Please wait a moment and try again.",
+                    ex);
             }
         }
 
@@ -370,7 +384,8 @@ public enum AsrTimingStage
     Start,
     FirstToken,
     Final
-}public sealed record AsrTimingEventArgs(
+}
+public sealed record AsrTimingEventArgs(
     string SessionId,
     string RequestId,
     AsrTimingStage Stage,

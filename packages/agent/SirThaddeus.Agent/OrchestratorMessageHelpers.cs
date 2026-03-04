@@ -615,7 +615,7 @@ internal static partial class OrchestratorMessageHelpers
     private static partial Regex NumericOperatorExpressionRegex();
 
     [GeneratedRegex(
-        @"\b(?:calculate|calculation|math|plus|minus|times|multiplied\s+by|divided\s+by|over|percent|percentage|sum|difference|product|quotient)\b",
+        @"\b(?:calculate|calculation|math|plus|minus|times|multiplied\s+by|divided\s+by|percent|percentage|sum|difference|product|quotient)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex MathCueRegex();
 

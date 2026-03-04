@@ -142,24 +142,24 @@ public static class AuditSensitiveDataScrubber
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-            {
-                var scrubbed = new Dictionary<string, object>();
-                foreach (var property in element.EnumerateObject())
                 {
-                    scrubbed[property.Name] = IsSensitiveKey(property.Name)
-                        ? RedactedValue
-                        : ScrubJsonElement(property.Value, property.Name);
-                }
+                    var scrubbed = new Dictionary<string, object>();
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        scrubbed[property.Name] = IsSensitiveKey(property.Name)
+                            ? RedactedValue
+                            : ScrubJsonElement(property.Value, property.Name);
+                    }
 
-                return scrubbed;
-            }
+                    return scrubbed;
+                }
             case JsonValueKind.Array:
-            {
-                var scrubbed = new List<object>();
-                foreach (var item in element.EnumerateArray())
-                    scrubbed.Add(ScrubJsonElement(item, keyHint: null));
-                return scrubbed;
-            }
+                {
+                    var scrubbed = new List<object>();
+                    foreach (var item in element.EnumerateArray())
+                        scrubbed.Add(ScrubJsonElement(item, keyHint: null));
+                    return scrubbed;
+                }
             case JsonValueKind.String:
                 return ScrubString(element.GetString() ?? "", keyHint);
             case JsonValueKind.Number:

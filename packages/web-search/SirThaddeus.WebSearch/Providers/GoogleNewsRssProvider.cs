@@ -31,7 +31,7 @@ namespace SirThaddeus.WebSearch.Providers;
 
 public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposable
 {
-    private const string SearchUrl    = "https://news.google.com/rss/search";
+    private const string SearchUrl = "https://news.google.com/rss/search";
     private const string HeadlinesUrl = "https://news.google.com/rss";
     private readonly HttpClient _http;
 
@@ -85,7 +85,7 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
 
             return new SearchResults
             {
-                Results  = results,
+                Results = results,
                 Provider = Name
             };
         }
@@ -148,9 +148,9 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
 
     private static List<SearchResult> ParseRssResults(string xml, int maxResults, DateTime? cutoffUtc)
     {
-        var results    = new List<SearchResult>();
+        var results = new List<SearchResult>();
         var seenTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenUrls   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -164,14 +164,14 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
             {
                 if (results.Count >= maxResults) break;
 
-                var title       = WebUtility.HtmlDecode(
+                var title = WebUtility.HtmlDecode(
                     item.SelectSingleNode("title")?.InnerText?.Trim() ?? "");
                 var redirectUrl = item.SelectSingleNode("link")?.InnerText?.Trim() ?? "";
-                var source      = item.SelectSingleNode("source")?.InnerText?.Trim() ?? "";
-                var sourceUrl   = item.SelectSingleNode("source")?.Attributes?["url"]?.Value ?? "";
+                var source = item.SelectSingleNode("source")?.InnerText?.Trim() ?? "";
+                var sourceUrl = item.SelectSingleNode("source")?.Attributes?["url"]?.Value ?? "";
                 var description = WebUtility.HtmlDecode(
                     item.SelectSingleNode("description")?.InnerText?.Trim() ?? "");
-                var pubDate     = item.SelectSingleNode("pubDate")?.InnerText?.Trim() ?? "";
+                var pubDate = item.SelectSingleNode("pubDate")?.InnerText?.Trim() ?? "";
 
                 if (string.IsNullOrEmpty(title))
                     continue;
@@ -189,7 +189,7 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
                 //   <a href="https://realsite.com/article">Title</a>
                 // This is the actual article URL we can fetch and read.
                 var realUrl = ExtractUrlFromDescription(description);
-                var url     = !string.IsNullOrEmpty(realUrl) ? realUrl : redirectUrl;
+                var url = !string.IsNullOrEmpty(realUrl) ? realUrl : redirectUrl;
 
                 if (string.IsNullOrEmpty(url))
                     continue;
@@ -230,11 +230,11 @@ public sealed partial class GoogleNewsRssProvider : IWebSearchProvider, IDisposa
 
                 results.Add(new SearchResult
                 {
-                    Title   = cleanTitle,
-                    Url     = url,
+                    Title = cleanTitle,
+                    Url = url,
                     Snippet = snippet,
                     PublishedAt = publishedAt,
-                    Source  = domain
+                    Source = domain
                 });
             }
         }

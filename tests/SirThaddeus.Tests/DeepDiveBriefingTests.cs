@@ -253,6 +253,13 @@ Phone: (503) 555-9580
         // Extraction should have pulled address and phone from snippets.
         var summaryCard = result.Briefing.Cards.FirstOrDefault(c => c.Type is "summary" or "details");
         Assert.NotNull(summaryCard);
+
+        Assert.NotNull(result.AssistantText);
+        Assert.Contains("McDonalds", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Address:", result.AssistantText!, StringComparison.Ordinal);
+        Assert.Contains("Phone:", result.AssistantText!, StringComparison.Ordinal);
+        Assert.Contains("Briefing summary:", result.AssistantText!, StringComparison.Ordinal);
+        Assert.DoesNotContain("Briefing tab", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

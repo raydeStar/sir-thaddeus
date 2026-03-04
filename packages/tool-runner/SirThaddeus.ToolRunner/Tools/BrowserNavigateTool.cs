@@ -19,8 +19,8 @@ public sealed class BrowserNavigateTool : ITool
         context.CancellationToken.ThrowIfCancellationRequested();
 
         // Extract URL argument
-        var url = context.Call.Arguments?.TryGetValue("url", out var u) == true 
-            ? u?.ToString() ?? "about:blank" 
+        var url = context.Call.Arguments?.TryGetValue("url", out var u) == true
+            ? u?.ToString() ?? "about:blank"
             : "about:blank";
 
         // Basic URL validation

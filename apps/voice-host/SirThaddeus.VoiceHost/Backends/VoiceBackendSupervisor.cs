@@ -563,7 +563,7 @@ public sealed class VoiceBackendSupervisor : IDisposable
 
             var logPath = Path.Combine(AppContext.BaseDirectory, "voice-backend-debug.log");
             var logLock = new object();
-            
+
             void WriteLog(string level, string? data)
             {
                 if (string.IsNullOrWhiteSpace(data)) return;
@@ -867,13 +867,13 @@ public sealed record BackendSupervisorResult
         string message,
         int? processId = null,
         string? executablePath = null) => new()
-    {
-        Success = true,
-        ErrorCode = errorCode,
-        Message = message,
-        ProcessId = processId,
-        ExecutablePath = executablePath
-    };
+        {
+            Success = true,
+            ErrorCode = errorCode,
+            Message = message,
+            ProcessId = processId,
+            ExecutablePath = executablePath
+        };
 
     public static BackendSupervisorResult Skipped(string errorCode, string message) => new()
     {
@@ -887,11 +887,11 @@ public sealed record BackendSupervisorResult
         string message,
         int? processId = null,
         string? executablePath = null) => new()
-    {
-        Success = false,
-        ErrorCode = errorCode,
-        Message = message,
-        ProcessId = processId,
-        ExecutablePath = executablePath
-    };
+        {
+            Success = false,
+            ErrorCode = errorCode,
+            Message = message,
+            ProcessId = processId,
+            ExecutablePath = executablePath
+        };
 }

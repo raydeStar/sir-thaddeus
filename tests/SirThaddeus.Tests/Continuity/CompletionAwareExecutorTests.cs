@@ -116,6 +116,8 @@ public sealed class CompletionAwareExecutorTests
 
         Assert.False(response.IsPartial);
         Assert.Equal(ctx.CorrelationId.Value, response.CorrelationId);
+        Assert.Equal(1.0, response.CompletionConfidence);
+        Assert.Equal("complete", response.CompletionStopReason);
         Assert.Equal(1, inner.ExecutionCount);
         Assert.Equal(0, ctx.RepairCount);
     }
@@ -183,6 +185,7 @@ public sealed class CompletionAwareExecutorTests
         Assert.True(response.IsPartial);
         Assert.Contains("name", response.MissingFields);
         Assert.Equal(ctx.CorrelationId.Value, response.CorrelationId);
+        Assert.Equal("repair_budget_exhausted", response.CompletionStopReason);
         Assert.Equal(2, ctx.RepairCount);
     }
 
@@ -205,6 +208,7 @@ public sealed class CompletionAwareExecutorTests
         var response = await executor.ExecuteAsync(MakeRequest(Intents.LookupFact, ctx));
 
         Assert.True(response.IsPartial);
+        Assert.Equal("repair_budget_exhausted", response.CompletionStopReason);
         Assert.Equal(1, inner.ExecutionCount);
         Assert.Equal(0, ctx.RepairCount);
     }

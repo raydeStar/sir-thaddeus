@@ -32,11 +32,11 @@ public sealed class ValidateSlots
     private readonly ValidationOptions _options;
 
     private static readonly Regex TemporalOnlyLocationPattern = new(
-        @"^(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|last\s+(?:week|month)|next\s+week|yesterday)$",
+        @"^(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|latest|recent|current|breaking|this\s+(?:morning|afternoon|evening|week|weekend|month|year)|last\s+(?:week|month|year)|next\s+week|past\s+year|yesterday)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex LocationTemporalTailPattern = new(
-        @"\s+(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|this\s+(?:morning|afternoon|evening|week|weekend)|last\s+(?:week|month)|next\s+week|yesterday)\s*$",
+        @"\s+(?:for\s+)?(?:today|tomorrow|tonight|now|right now|currently|latest|recent|current|breaking|this\s+(?:morning|afternoon|evening|week|weekend|month|year)|last\s+(?:week|month|year)|next\s+week|past\s+year|yesterday)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public ValidateSlots(ValidationOptions options)

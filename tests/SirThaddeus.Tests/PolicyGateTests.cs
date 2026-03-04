@@ -34,6 +34,10 @@ public class PolicyGateTests
         MakeTool("status_check_url"),
         MakeTool("file_read"),
         MakeTool("file_list"),
+        MakeTool("file_read_preview"),
+        MakeTool("file_read_apply"),
+        MakeTool("file_list_preview"),
+        MakeTool("file_list_apply"),
         MakeTool("system_execute"),
         MakeTool("memory_retrieve"),
         MakeTool("memory_list_facts"),
@@ -175,6 +179,10 @@ public class PolicyGateTests
 
         Assert.Contains("file_read", names);
         Assert.Contains("file_list", names);
+        Assert.DoesNotContain("file_read_preview", names);
+        Assert.DoesNotContain("file_read_apply", names);
+        Assert.DoesNotContain("file_list_preview", names);
+        Assert.DoesNotContain("file_list_apply", names);
         Assert.DoesNotContain("screen_capture", names);
         Assert.DoesNotContain("system_execute", names);
         Assert.DoesNotContain("web_search", names);

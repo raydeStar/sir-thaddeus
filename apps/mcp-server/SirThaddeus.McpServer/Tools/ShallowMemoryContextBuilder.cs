@@ -30,8 +30,8 @@ internal static class ShallowMemoryContextBuilder
     /// Returns empty string when no profile and no nuggets exist.
     /// </summary>
     public static string Build(
-        ProfileCard?              userProfile,
-        ProfileCard?              otherProfile,
+        ProfileCard? userProfile,
+        ProfileCard? otherProfile,
         IReadOnlyList<MemoryNugget> nuggets)
     {
         if (userProfile is null && nuggets.Count == 0 && otherProfile is null)
@@ -90,13 +90,13 @@ internal static class ShallowMemoryContextBuilder
             var root = doc.RootElement;
 
             TryAdd(root, "preferred_name", v => parts.Add($"Call me: {v}"));
-            TryAdd(root, "pronouns",       v => parts.Add($"Pronouns: {v}"));
-            TryAdd(root, "timezone",       v => parts.Add($"TZ: {v}"));
-            TryAdd(root, "style",          v => parts.Add($"Style: {v}"));
+            TryAdd(root, "pronouns", v => parts.Add($"Pronouns: {v}"));
+            TryAdd(root, "timezone", v => parts.Add($"TZ: {v}"));
+            TryAdd(root, "style", v => parts.Add($"Style: {v}"));
 
             // Privacy: "never_mention" is enforced at retrieval time,
             // but also useful as a reminder in the injected block.
-            TryAdd(root, "never_mention",  v => parts.Add($"[NEVER mention: {v}]"));
+            TryAdd(root, "never_mention", v => parts.Add($"[NEVER mention: {v}]"));
         }
         catch
         {
@@ -130,9 +130,9 @@ internal static class ShallowMemoryContextBuilder
             var root = doc.RootElement;
 
             // Pull out at most 2 quick highlights to keep it tight
-            TryAdd(root, "age",       v => highlights.Add($"age {v}"));
+            TryAdd(root, "age", v => highlights.Add($"age {v}"));
             TryAdd(root, "highlight", v => highlights.Add(v));
-            TryAdd(root, "notes",     v => highlights.Add(v));
+            TryAdd(root, "notes", v => highlights.Add(v));
         }
         catch
         {

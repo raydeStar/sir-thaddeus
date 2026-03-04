@@ -170,6 +170,23 @@ public sealed class CompletionCheckerTests
     }
 
     [Fact]
+    public void Evidence_MinTwoUrls_SingleUrlField_IsIncomplete()
+    {
+        var contract = new CompletionContract
+        {
+            Intent = "test",
+            Fields = [],
+            Evidence = new EvidenceRequirement { MinSourceUrls = 2 }
+        };
+
+        var results = new[] { Ok("web_search", """{"source_url": "https://example.com"}""") };
+        var report = _checker.Check(contract, results);
+
+        Assert.False(report.IsComplete);
+        Assert.Contains(report.Issues, i => i.Contains("Expected at least 2 source URL", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Evidence_UrlFoundInAssistantText_IsComplete()
     {
         var contract = new CompletionContract
@@ -195,7 +212,7 @@ public sealed class CompletionCheckerTests
         };
 
         var report = _checker.Check(
-            contract, 
+            contract,
             [Ok("web_search", """{"url": "https://nyt.com/article"}""")],
             assistantText: "According to the New York Times, the event was held on Friday.");
 
@@ -456,5 +473,38 @@ public sealed class CompletionCheckerTests
 
         var report = _checker.Check(contract, results);
         Assert.True(report.IsComplete);
+    }
+
+    [Fact]
+    public void IncompleteReport_ComputesConfidenceBelowOne()
+    {
+        var contract = new CompletionContract
+        {
+            Intent = "test",
+            Fields =
+            [
+                new FieldRequirement { FieldName = "name", Necessity = FieldNecessity.Required },
+                new FieldRequirement { FieldName = "address", Necessity = FieldNecessity.Required }
+            ]
+        };
+
+        var report = _checker.Check(contract, [Ok("places_lookup", """{"name":"Joe's"}""")]);
+
+        Assert.False(report.IsComplete);
+        Assert.True(report.Confidence >= 0.0 && report.Confidence < 1.0);
+        Assert.Equal("missing_required_fields", report.StopReason);
+    }
+
+    [Fact]
+    public void CompleteReport_HasFullConfidence()
+    {
+        var contract = CompletionContractRegistry.For(Intents.LookupNews);
+        var report = _checker.Check(
+            contract,
+            [Ok("web_search", """{"answer":"A","source_url":"https://example.com"}""")]);
+
+        Assert.True(report.IsComplete);
+        Assert.Equal(1.0, report.Confidence);
+        Assert.Equal("complete", report.StopReason);
     }
 }

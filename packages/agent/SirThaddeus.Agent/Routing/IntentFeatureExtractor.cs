@@ -5,11 +5,18 @@ namespace SirThaddeus.Agent.Routing;
 /// </summary>
 public static class IntentFeatureExtractor
 {
+    public readonly record struct WebLookupHeuristicEvidence(
+        double Score,
+        string ReasonCode,
+        bool ShouldLookup,
+        double Confidence);
+
     public static bool LooksLikeScreenRequest(string lower)
     {
         ReadOnlySpan<string> patterns =
         [
             "what's on my screen",   "whats on my screen",
+            "what is on my screen",
             "what can you see",      "what do you see",
             "look at my screen",     "look at the screen",
             "take a screenshot",     "screenshot",
@@ -17,6 +24,7 @@ public static class IntentFeatureExtractor
             "screen capture",        "what's happening on screen",
             "show me my screen",     "read my screen",
             "what's on the screen",  "whats on the screen",
+            "what is on the screen",
             "active window",
             "look at my cursor",     "look at cursor",
             "what's in my editor",   "whats in my editor",
@@ -118,34 +126,73 @@ public static class IntentFeatureExtractor
     /// </summary>
     public static bool LooksLikeExplicitToolInvocation(string lower)
     {
+        return TryGetExplicitToolInvocationIntent(lower) is not null;
+    }
+
+    /// <summary>
+    /// Maps explicit "use/call/run <tool>" prompts to the safest
+    /// deterministic route for that tool family.
+    /// </summary>
+    public static string? TryGetExplicitToolInvocationIntent(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return null;
+
         ReadOnlySpan<string> actionPhrases =
         [
             "use ", "call ", "invoke ", "run ", "execute ", "try "
         ];
 
-        ReadOnlySpan<string> toolNamePatterns =
-        [
-            "tool_ping", "tool_capabilities", "tool_list",
-            "memory_retrieve", "memory_store",
-            "web_search", "browser_navigate",
-            "places_lookup", "weather_geocode", "weather_forecast",
-            "file_read", "file_list", "file_write",
-            "screen_capture", "system_execute"
-        ];
-
-        foreach (var toolName in toolNamePatterns)
+        var hasAction = false;
+        foreach (var action in actionPhrases)
         {
-            if (!lower.Contains(toolName, StringComparison.Ordinal))
-                continue;
-
-            foreach (var action in actionPhrases)
+            if (lower.Contains(action, StringComparison.Ordinal))
             {
-                if (lower.Contains(action, StringComparison.Ordinal))
-                    return true;
+                hasAction = true;
+                break;
             }
         }
 
-        return false;
+        if (!hasAction)
+            return null;
+
+        if (ContainsAny(lower,
+            ["file_read", "file read", "file_list", "file list", "file_write", "file write"]))
+        {
+            return Intents.FileTask;
+        }
+
+        if (ContainsAny(lower,
+            ["screen_capture", "screen capture", "get_active_window", "active window"]))
+        {
+            return Intents.ScreenObserve;
+        }
+
+        if (ContainsAny(lower,
+            ["system_execute", "system execute", "shell command", "terminal command"]))
+        {
+            return Intents.SystemTask;
+        }
+
+        if (ContainsAny(lower,
+            ["web_search", "web search", "browser_navigate", "browser navigate", "places_lookup", "places lookup"]))
+        {
+            return Intents.LookupSearch;
+        }
+
+        if (ContainsAny(lower,
+            ["memory_store", "memory_store_facts", "memory_update_fact", "memory_delete_fact"]))
+        {
+            return Intents.MemoryWrite;
+        }
+
+        if (ContainsAny(lower,
+            ["memory_retrieve", "memory_list_facts", "tool_ping", "tool_list_capabilities", "capabilities.describe", "policy.get_state", "health.check", "time_now"]))
+        {
+            return Intents.GeneralTool;
+        }
+
+        return null;
     }
 
     public static bool LooksLikeBrowseRequest(string lower)
@@ -212,6 +259,89 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    /// <summary>
+    /// True for pure greeting/small-talk messages that should stay chat-only.
+    /// This intentionally excludes greeting + actionable requests
+    /// (e.g. "hello, what's the weather in Seattle?").
+    /// </summary>
+    public static bool LooksLikeGreetingOnlyOrSmallTalk(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var conversational = LooksLikeConversationalCheckIn(lower);
+        var greeting = LooksLikeGreeting(lower);
+        if (!conversational && !greeting)
+            return false;
+
+        if (LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower))
+        {
+            return false;
+        }
+
+        if (TryGetExplicitToolInvocationIntent(lower) is not null)
+            return false;
+
+        if (LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Detects short, non-actionable transcript fragments that are common
+    /// when push-to-talk clipping drops leading words (e.g. "world.").
+    /// These should default to chat instead of forcing lookup/search.
+    /// </summary>
+    public static bool LooksLikeStrayTranscriptFragment(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        // If explicit intent/tool/search signals exist, do not suppress.
+        if (TryGetExplicitToolInvocationIntent(lower) is not null ||
+            LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower) ||
+            LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
+
+        if (normalized.Contains(' '))
+            return false;
+
+        // Single-token fragments that frequently appear from clipped STT.
+        return normalized.Equals("world", StringComparison.Ordinal) ||
+               normalized.Equals("stuff", StringComparison.Ordinal) ||
+               normalized.Equals("things", StringComparison.Ordinal) ||
+               normalized.Equals("okay", StringComparison.Ordinal) ||
+               normalized.Equals("ok", StringComparison.Ordinal) ||
+               normalized.Equals("hmm", StringComparison.Ordinal) ||
+               normalized.Equals("uh", StringComparison.Ordinal) ||
+               normalized.Equals("huh", StringComparison.Ordinal);
+    }
+
     public static bool LooksLikeReasoningFollowUp(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower) || lower.Length > 220)
@@ -264,6 +394,78 @@ public static class IntentFeatureExtractor
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Detects conversational check-ins that may include temporal words
+    /// like "today" but should remain chat-only.
+    /// </summary>
+    public static bool LooksLikeConversationalCheckIn(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasDirectCheckIn =
+            lower.Contains("how are you", StringComparison.Ordinal) ||
+            lower.Contains("hows it going", StringComparison.Ordinal) ||
+            lower.Contains("how's it going", StringComparison.Ordinal) ||
+            lower.Contains("how have you been", StringComparison.Ordinal) ||
+            lower.Contains("how've you been", StringComparison.Ordinal) ||
+            lower.Contains("you doing", StringComparison.Ordinal) ||
+            lower.Contains("you been", StringComparison.Ordinal);
+
+        if (hasDirectCheckIn)
+            return true;
+
+        var hasGreetingLead =
+            lower.StartsWith("hi", StringComparison.Ordinal) ||
+            lower.StartsWith("hey", StringComparison.Ordinal) ||
+            lower.StartsWith("hello", StringComparison.Ordinal) ||
+            lower.StartsWith("good morning", StringComparison.Ordinal) ||
+            lower.StartsWith("good afternoon", StringComparison.Ordinal) ||
+            lower.StartsWith("good evening", StringComparison.Ordinal);
+
+        if (!hasGreetingLead)
+            return false;
+
+        return lower.Contains("hope", StringComparison.Ordinal) ||
+               lower.Contains("things are good", StringComparison.Ordinal) ||
+               lower.Contains("doing good", StringComparison.Ordinal) ||
+               lower.Contains("doing well", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Detects short microphone check / dictation test phrases that should
+    /// stay in chat mode and never trigger web lookup.
+    /// </summary>
+    public static bool LooksLikeVoiceMicCheck(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        if (normalized.Length == 0 || normalized.Length > 80)
+            return false;
+
+        ReadOnlySpan<string> phrases =
+        [
+            "testing testing",
+            "testing one two three",
+            "testing testing one two three",
+            "test test",
+            "mic check",
+            "check one two",
+            "check one two three",
+            "one two three"
+        ];
+
+        foreach (var phrase in phrases)
+        {
+            if (normalized.Contains(phrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     public static bool LooksLikeMemoryWriteRequest(string lower)
@@ -327,18 +529,43 @@ public static class IntentFeatureExtractor
     }
 
     public static bool LooksLikeWebSearchRequest(string lower)
+        => GetWebLookupHeuristicEvidence(lower).ShouldLookup;
+
+    public static WebLookupHeuristicEvidence GetWebLookupHeuristicEvidence(string lower)
     {
+        if (LooksLikeConversationalCheckIn(lower))
+            return new WebLookupHeuristicEvidence(0.0, "conversational_check_in", false, 0.0);
+
+        if (LooksLikeVoiceMicCheck(lower))
+            return new WebLookupHeuristicEvidence(0.0, "voice_mic_check", false, 0.0);
+
         if (LooksLikeLogicPuzzlePrompt(lower))
-            return false;
+            return new WebLookupHeuristicEvidence(0.0, "logic_puzzle", false, 0.0);
+
+        if (LooksLikePreferenceOrOpinionPrompt(lower))
+            return new WebLookupHeuristicEvidence(0.0, "opinion_or_preference", false, 0.0);
+
+        if (LooksLikeSeasonEpisodePlotLookup(lower))
+            return new WebLookupHeuristicEvidence(3.0, "season_episode_lookup", true, 0.96);
 
         if (lower.Contains("web_search", StringComparison.Ordinal) ||
             lower.Contains("web search", StringComparison.Ordinal))
         {
-            return true;
+            return new WebLookupHeuristicEvidence(3.0, "explicit_web_search", true, 0.96);
         }
 
-        if (LooksLikeIdentityLookup(lower))
-            return true;
+        var score = 0.0;
+        var reasonCode = "none";
+        var strongest = 0.0;
+        void AddSignal(double weight, string reason)
+        {
+            score += weight;
+            if (weight > strongest)
+            {
+                strongest = weight;
+                reasonCode = reason;
+            }
+        }
 
         ReadOnlySpan<string> phrases =
         [
@@ -366,22 +593,27 @@ public static class IntentFeatureExtractor
             "word for word",  "similar to the original",
             "like the original",
 
-            // Conversational search phrasing the LLM classifier often
-            // misclassifies as casual chat. Excludes "tell me about" and
-            // bare "tell me how/what" which are too broad (catch opinions).
-            "can you tell me", "tell me if",     "tell me whether"
+            // Conversational search phrasing. Keep this strict to avoid
+            // routing casual conversation into web lookup.
+            "tell me if",     "tell me whether"
         ];
 
         foreach (var phrase in phrases)
         {
             if (lower.Contains(phrase, StringComparison.Ordinal))
-                return true;
+            {
+                AddSignal(2.0, "explicit_search_phrase");
+                break;
+            }
         }
 
         // Temporal freshness + update/info keywords together strongly
         // signal a need for live web data regardless of domain topic.
         if (HasTemporalFreshnessWithUpdateCue(lower))
-            return true;
+            AddSignal(2.0, "freshness_update_combo");
+
+        if (LooksLikeIdentityLookup(lower))
+            AddSignal(1.2, "identity_lookup");
 
         var hasTopic =
             lower.Contains("news", StringComparison.Ordinal) ||
@@ -413,11 +645,39 @@ public static class IntentFeatureExtractor
             lower.Contains("supplement", StringComparison.Ordinal) ||
             lower.Contains("product", StringComparison.Ordinal);
 
-        if (!hasTopic)
-            return false;
+        if (hasTopic)
+            AddSignal(1.0, "domain_topic");
+
+        var hasMarketTopic =
+            lower.Contains("stock", StringComparison.Ordinal) ||
+            lower.Contains("share price", StringComparison.Ordinal) ||
+            lower.Contains("market", StringComparison.Ordinal) ||
+            lower.Contains("nasdaq", StringComparison.Ordinal) ||
+            lower.Contains("dow", StringComparison.Ordinal) ||
+            lower.Contains("s&p", StringComparison.Ordinal) ||
+            lower.Contains("crypto", StringComparison.Ordinal) ||
+            lower.Contains("bitcoin", StringComparison.Ordinal) ||
+            lower.Contains("ethereum", StringComparison.Ordinal);
+
+        var hasQuoteCue =
+            lower.Contains("price", StringComparison.Ordinal) ||
+            lower.Contains("quote", StringComparison.Ordinal) ||
+            lower.Contains("trading at", StringComparison.Ordinal) ||
+            lower.Contains("worth", StringComparison.Ordinal);
+
+        var hasFreshnessCue =
+            lower.Contains("today", StringComparison.Ordinal) ||
+            lower.Contains("right now", StringComparison.Ordinal) ||
+            lower.Contains("currently", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("live", StringComparison.Ordinal) ||
+            lower.Contains("current", StringComparison.Ordinal);
+
+        if ((hasMarketTopic || hasQuoteCue) && hasFreshnessCue)
+            AddSignal(1.2, "market_fresh_quote");
 
         if (lower.Contains('?', StringComparison.Ordinal))
-            return true;
+            AddSignal(0.8, "question_mark");
 
         if (lower.Contains("can you", StringComparison.Ordinal) ||
             lower.Contains("could you", StringComparison.Ordinal) ||
@@ -425,7 +685,7 @@ public static class IntentFeatureExtractor
             lower.Contains("will you", StringComparison.Ordinal) ||
             lower.Contains("please", StringComparison.Ordinal))
         {
-            return true;
+            AddSignal(0.4, "request_language");
         }
 
         if (lower.Contains("pull", StringComparison.Ordinal) ||
@@ -441,7 +701,7 @@ public static class IntentFeatureExtractor
             lower.Contains("give", StringComparison.Ordinal) ||
             lower.Contains("update", StringComparison.Ordinal))
         {
-            return true;
+            AddSignal(0.8, "retrieval_verb");
         }
 
         if (lower.Contains("what", StringComparison.Ordinal) ||
@@ -451,7 +711,7 @@ public static class IntentFeatureExtractor
             lower.Contains("who", StringComparison.Ordinal) ||
             lower.Contains("why", StringComparison.Ordinal))
         {
-            return true;
+            AddSignal(0.4, "question_word");
         }
 
         if (lower.Contains("today", StringComparison.Ordinal) ||
@@ -468,10 +728,20 @@ public static class IntentFeatureExtractor
             lower.Contains("recent", StringComparison.Ordinal) ||
             lower.Contains("lately", StringComparison.Ordinal))
         {
-            return true;
+            AddSignal(0.8, "freshness_term");
         }
 
-        return false;
+        // Require enough evidence so conversational prompts don't escalate.
+        var shouldLookup = score >= 2.0;
+        var confidence = shouldLookup
+            ? Math.Clamp(0.55 + (score * 0.08), 0.55, 0.96)
+            : Math.Clamp(score * 0.2, 0.0, 0.5);
+
+        return new WebLookupHeuristicEvidence(
+            Score: score,
+            ReasonCode: reasonCode,
+            ShouldLookup: shouldLookup,
+            Confidence: confidence);
     }
 
     public static bool LooksLikeExplicitNewsLookup(string lower)
@@ -760,6 +1030,9 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        if (LooksLikePreferenceOrOpinionPrompt(lower))
+            return false;
+
         if (LooksLikeExplicitNewsLookup(lower))
             return false;
 
@@ -840,12 +1113,27 @@ public static class IntentFeatureExtractor
                lower.Contains("who was ", StringComparison.Ordinal) ||
                lower.Contains("who the heck is", StringComparison.Ordinal) ||
                lower.Contains("who the hell is", StringComparison.Ordinal) ||
-               lower.Contains("what is ", StringComparison.Ordinal) ||
-               lower.Contains("what's ", StringComparison.Ordinal) ||
-               lower.Contains("whats ", StringComparison.Ordinal) ||
                lower.Contains("define ", StringComparison.Ordinal) ||
                lower.Contains("meaning of ", StringComparison.Ordinal) ||
                lower.Contains("what does ", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikePreferenceOrOpinionPrompt(string lower)
+    {
+        return lower.Contains("what is your favorite", StringComparison.Ordinal) ||
+               lower.Contains("what's your favorite", StringComparison.Ordinal) ||
+               lower.Contains("whats your favorite", StringComparison.Ordinal) ||
+               lower.Contains("tell me about your favorite", StringComparison.Ordinal) ||
+               lower.Contains("about your favorite", StringComparison.Ordinal) ||
+               lower.Contains("favorite thing", StringComparison.Ordinal) ||
+               lower.Contains("what do you think", StringComparison.Ordinal) ||
+               lower.Contains("what's your opinion", StringComparison.Ordinal) ||
+               lower.Contains("whats your opinion", StringComparison.Ordinal) ||
+               lower.Contains("what's your take", StringComparison.Ordinal) ||
+               lower.Contains("whats your take", StringComparison.Ordinal) ||
+               lower.Contains("tell me about yourself", StringComparison.Ordinal) ||
+               lower.Contains("what makes you good at", StringComparison.Ordinal) ||
+               lower.Contains("should i ", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -878,6 +1166,57 @@ public static class IntentFeatureExtractor
                lower.Contains("announcements", StringComparison.Ordinal) ||
                lower.Contains("version", StringComparison.Ordinal) ||
                lower.Contains("release", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Detects episodic TV lookup prompts that should be grounded with web
+    /// evidence rather than answered from model priors (e.g. canceled season
+    /// questions asking for a plot/synopsis).
+    /// </summary>
+    private static bool LooksLikeSeasonEpisodePlotLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasSeasonToken = lower.Contains("season ", StringComparison.Ordinal) ||
+                             lower.Contains("s1", StringComparison.Ordinal) ||
+                             lower.Contains("s2", StringComparison.Ordinal) ||
+                             lower.Contains("s3", StringComparison.Ordinal) ||
+                             lower.Contains("s4", StringComparison.Ordinal) ||
+                             lower.Contains("s5", StringComparison.Ordinal);
+
+        var hasEpisodeToken = lower.Contains("episode ", StringComparison.Ordinal) ||
+                              lower.Contains("ep ", StringComparison.Ordinal) ||
+                              lower.Contains("e1", StringComparison.Ordinal) ||
+                              lower.Contains("e2", StringComparison.Ordinal) ||
+                              lower.Contains("e3", StringComparison.Ordinal) ||
+                              lower.Contains("e4", StringComparison.Ordinal) ||
+                              lower.Contains("e5", StringComparison.Ordinal);
+
+        if (!hasSeasonToken || !hasEpisodeToken)
+            return false;
+
+        var asksForEpisodeContent =
+            lower.Contains("plot", StringComparison.Ordinal) ||
+            lower.Contains("synopsis", StringComparison.Ordinal) ||
+            lower.Contains("what happens", StringComparison.Ordinal) ||
+            lower.StartsWith("what would be", StringComparison.Ordinal) ||
+            lower.StartsWith("what is", StringComparison.Ordinal) ||
+            lower.StartsWith("what's", StringComparison.Ordinal) ||
+            lower.StartsWith("whats", StringComparison.Ordinal);
+
+        if (!asksForEpisodeContent)
+            return false;
+
+        // Creative writing prompts should remain chat-only.
+        var asksForCreativeWriting =
+            lower.Contains("write", StringComparison.Ordinal) ||
+            lower.Contains("fanfic", StringComparison.Ordinal) ||
+            lower.Contains("fan fiction", StringComparison.Ordinal) ||
+            lower.Contains("invent", StringComparison.Ordinal) ||
+            lower.Contains("make up", StringComparison.Ordinal);
+
+        return !asksForCreativeWriting;
     }
 
     private static bool ContainsAny(string lower, ReadOnlySpan<string> tokens)

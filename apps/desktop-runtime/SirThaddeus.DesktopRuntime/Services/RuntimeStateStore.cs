@@ -63,7 +63,7 @@ public sealed class RuntimeStateStore : IDisposable
     private readonly RuntimeController _controller;
     private readonly IVoiceStateSource? _voiceStateSource;
     private bool _disposed;
-    
+
     private RuntimeState _currentState = RuntimeState.Idle;
 
     public event EventHandler<RuntimeState>? StateChanged;

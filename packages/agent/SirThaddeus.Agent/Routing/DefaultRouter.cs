@@ -48,6 +48,12 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return MakeRoute(Intents.ChatOnly, confidence: 0.95);
 
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.98);
+
+        if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.92);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {
@@ -81,10 +87,28 @@ public sealed class DefaultRouter : IRouter
             return MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
-            return MakeRoute(Intents.LookupFact, confidence: 0.9, needsWeb: true, needsSearch: true);
+            return MakeRoute(
+                Intents.LookupFact,
+                confidence: ComputeFactLookupConfidence(lower),
+                needsWeb: true,
+                needsSearch: true);
 
-        if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower))
-            return MakeRoute(Intents.GeneralTool, confidence: 0.96);
+        var explicitToolIntent = IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower);
+        if (!string.IsNullOrWhiteSpace(explicitToolIntent))
+        {
+            return explicitToolIntent switch
+            {
+                Intents.FileTask => MakeRoute(Intents.FileTask, confidence: 0.97, needsFile: true),
+                Intents.ScreenObserve => MakeRoute(Intents.ScreenObserve, confidence: 0.97, needsScreen: true),
+                Intents.SystemTask => MakeRoute(Intents.SystemTask, confidence: 0.97, needsSystem: true, risk: "medium"),
+                Intents.LookupSearch => MakeRoute(Intents.LookupSearch, confidence: 0.97, needsWeb: true, needsSearch: true, needsBrowser: true),
+                Intents.MemoryWrite => MakeRoute(Intents.MemoryWrite, confidence: 0.97, needsMemoryWrite: true),
+                _ => MakeRoute(Intents.GeneralTool, confidence: 0.96)
+            };
+        }
+
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return MakeRoute(Intents.ChatOnly, confidence: 0.94);
 
         var intent = await ClassifyIntentAsync(userMessage, cancellationToken);
 
@@ -151,6 +175,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
             return ChatIntent.Casual;
 
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
+            return ChatIntent.Casual;
+
         if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
             return ChatIntent.DeepDive;
 
@@ -198,6 +225,8 @@ public sealed class DefaultRouter : IRouter
     private static ChatIntent InferFallbackIntent(string lower)
     {
         if (IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower))
+            return ChatIntent.Casual;
+        if (IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower))
             return ChatIntent.Casual;
         if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower))
             return ChatIntent.DeepDive;
@@ -259,6 +288,15 @@ public sealed class DefaultRouter : IRouter
             : IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
                 ? ChatIntent.NewsLookup
                 : ChatIntent.FactLookup;
+
+    private static double ComputeFactLookupConfidence(string lower)
+    {
+        var evidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+        if (evidence.ShouldLookup)
+            return Math.Clamp(Math.Max(0.88, evidence.Confidence), 0.88, 0.96);
+
+        return 0.96;
+    }
 
     internal static RouterOutput MakeRoute(
         string intent,
@@ -341,4 +379,3 @@ public sealed class DefaultRouter : IRouter
         return capabilities.ToList();
     }
 }
-

@@ -21,39 +21,39 @@ public enum RelevanceDecision { Allow, AllowSilent, Block }
 /// </summary>
 public sealed record MemoryFact
 {
-    public required string MemoryId   { get; init; }
-    public string          Id         => MemoryId;
+    public required string MemoryId { get; init; }
+    public string Id => MemoryId;
 
     /// <summary>
     /// Optional link to the profile_cards row that owns this fact.
     /// Null for legacy/unscoped facts. When set, retrieval and
     /// conflict detection are scoped to this profile.
     /// </summary>
-    public string?         ProfileId   { get; init; }
+    public string? ProfileId { get; init; }
 
-    public required string Subject    { get; init; }
-    public required string Predicate  { get; init; }
+    public required string Subject { get; init; }
+    public required string Predicate { get; init; }
 
     [JsonPropertyName("object")]
-    public required string Object     { get; init; }
+    public required string Object { get; init; }
 
-    public double          Confidence  { get; init; } = 1.0;
-    public double          Weight      { get; init; } = 0.65;
-    public Sensitivity     Sensitivity { get; init; } = Sensitivity.Public;
-    
+    public double Confidence { get; init; } = 1.0;
+    public double Weight { get; init; } = 0.65;
+    public Sensitivity Sensitivity { get; init; } = Sensitivity.Public;
+
     // Metadata / Safety Contracts
-    public string?         SourceTurnId { get; init; }
-    public string?         SourceHash   { get; init; }
-    public string?         DedupeKey    { get; init; }
-    public string?         Origin       { get; init; }
-    
-    public float[]?        Embedding    { get; init; }
-    public string?         EmbeddingModel{ get; init; }
-    public int?            EmbeddingDims{ get; init; }
-    
-    public DateTimeOffset  CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset  UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
-    public string?         SourceRef   { get; init; }
+    public string? SourceTurnId { get; init; }
+    public string? SourceHash { get; init; }
+    public string? DedupeKey { get; init; }
+    public string? Origin { get; init; }
+
+    public float[]? Embedding { get; init; }
+    public string? EmbeddingModel { get; init; }
+    public int? EmbeddingDims { get; init; }
+
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public string? SourceRef { get; init; }
 }
 
 /// <summary>
@@ -61,36 +61,36 @@ public sealed record MemoryFact
 /// </summary>
 public sealed record MemoryEvent
 {
-    public required string  EventId     { get; init; }
-    public string           Id          => EventId;
+    public required string EventId { get; init; }
+    public string Id => EventId;
 
     /// <summary>
     /// Optional link to the profile_cards row that owns this event.
     /// Null for legacy/unscoped events.
     /// </summary>
-    public string?          ProfileId   { get; init; }
+    public string? ProfileId { get; init; }
 
-    public required string  Type        { get; init; }
-    public required string  Title       { get; init; }
-    public string?          Summary     { get; init; }
-    public DateTimeOffset?  WhenIso     { get; init; }
-    public double           Confidence  { get; init; } = 1.0;
-    public double           Weight      { get; init; } = 0.65;
-    public Sensitivity      Sensitivity { get; init; } = Sensitivity.Public;
-    
+    public required string Type { get; init; }
+    public required string Title { get; init; }
+    public string? Summary { get; init; }
+    public DateTimeOffset? WhenIso { get; init; }
+    public double Confidence { get; init; } = 1.0;
+    public double Weight { get; init; } = 0.65;
+    public Sensitivity Sensitivity { get; init; } = Sensitivity.Public;
+
     // Metadata / Safety Contracts
-    public string?          SourceTurnId { get; init; }
-    public string?          SourceHash   { get; init; }
-    public string?          DedupeKey    { get; init; }
-    public string?          Origin       { get; init; }
-    
-    public float[]?         Embedding    { get; init; }
-    public string?          EmbeddingModel{ get; init; }
-    public int?             EmbeddingDims{ get; init; }
-    
-    public DateTimeOffset   CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset   UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
-    public string?          SourceRef   { get; init; }
+    public string? SourceTurnId { get; init; }
+    public string? SourceHash { get; init; }
+    public string? DedupeKey { get; init; }
+    public string? Origin { get; init; }
+
+    public float[]? Embedding { get; init; }
+    public string? EmbeddingModel { get; init; }
+    public int? EmbeddingDims { get; init; }
+
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public string? SourceRef { get; init; }
 }
 
 /// <summary>
@@ -99,15 +99,15 @@ public sealed record MemoryEvent
 /// </summary>
 public sealed record MemoryChunk
 {
-    public required string  ChunkId     { get; init; }
-    public required string  SourceType  { get; init; }   // conversation | doc
-    public string?          SourceRef   { get; init; }
-    public required string  Text        { get; init; }
-    public DateTimeOffset?  WhenIso     { get; init; }
-    public Sensitivity      Sensitivity { get; init; } = Sensitivity.Public;
-    public float[]?         Embedding   { get; init; }
-    public string?          EmbeddingModel{ get; init; }
-    public int?             EmbeddingDims{ get; init; }
+    public required string ChunkId { get; init; }
+    public required string SourceType { get; init; }   // conversation | doc
+    public string? SourceRef { get; init; }
+    public required string Text { get; init; }
+    public DateTimeOffset? WhenIso { get; init; }
+    public Sensitivity Sensitivity { get; init; } = Sensitivity.Public;
+    public float[]? Embedding { get; init; }
+    public string? EmbeddingModel { get; init; }
+    public int? EmbeddingDims { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -123,13 +123,13 @@ public sealed record MemoryChunk
 /// </summary>
 public sealed record ProfileCard
 {
-    public required string  ProfileId    { get; init; }
-    public string           Kind         { get; init; } = "user";
-    public required string  DisplayName  { get; init; }
-    public string?          Relationship { get; init; }
-    public string?          Aliases      { get; init; }   // semicolon-delimited
-    public string           ProfileJson  { get; init; } = "{}";
-    public DateTimeOffset   UpdatedAt    { get; init; } = DateTimeOffset.UtcNow;
+    public required string ProfileId { get; init; }
+    public string Kind { get; init; } = "user";
+    public required string DisplayName { get; init; }
+    public string? Relationship { get; init; }
+    public string? Aliases { get; init; }   // semicolon-delimited
+    public string ProfileJson { get; init; } = "{}";
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -147,30 +147,30 @@ public sealed record ProfileCard
 /// </summary>
 public sealed record MemoryNugget
 {
-    public required string  NuggetId    { get; init; }
-    public string           Id          => NuggetId;
-    
-    public required string  Text        { get; init; }
-    public string?          Tags        { get; init; }     // ;identity;preference;
-    public double           Weight      { get; init; } = 0.65;
-    public int              PinLevel    { get; init; }     // 0=normal, 1=pinned, 2=system
-    public string           Sensitivity { get; init; } = "low";  // low|med|high
-    
+    public required string NuggetId { get; init; }
+    public string Id => NuggetId;
+
+    public required string Text { get; init; }
+    public string? Tags { get; init; }     // ;identity;preference;
+    public double Weight { get; init; } = 0.65;
+    public int PinLevel { get; init; }     // 0=normal, 1=pinned, 2=system
+    public string Sensitivity { get; init; } = "low";  // low|med|high
+
     // Metadata / Safety Contracts
-    public string?          SourceTurnId { get; init; }
-    public string?          SourceHash   { get; init; }
-    public string?          DedupeKey    { get; init; }
-    public string?          Origin       { get; init; }
-    public string?          ChunkCitation{ get; init; }
+    public string? SourceTurnId { get; init; }
+    public string? SourceHash { get; init; }
+    public string? DedupeKey { get; init; }
+    public string? Origin { get; init; }
+    public string? ChunkCitation { get; init; }
 
-    public float[]?         Embedding    { get; init; }
-    public string?          EmbeddingModel{ get; init; }
-    public int?             EmbeddingDims{ get; init; }
+    public float[]? Embedding { get; init; }
+    public string? EmbeddingModel { get; init; }
+    public int? EmbeddingDims { get; init; }
 
-    public int              UseCount    { get; init; }
-    public DateTimeOffset?  LastUsedAt  { get; init; }
-    public DateTimeOffset   CreatedAt   { get; init; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset   UpdatedAt   { get; init; } = DateTimeOffset.UtcNow;
+    public int UseCount { get; init; }
+    public DateTimeOffset? LastUsedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -178,9 +178,9 @@ public sealed record MemoryNugget
 /// </summary>
 public static class NuggetSensitivity
 {
-    public const string Low    = "low";
+    public const string Low = "low";
     public const string Medium = "med";
-    public const string High   = "high";
+    public const string High = "high";
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -193,12 +193,12 @@ public static class NuggetSensitivity
 /// </summary>
 public sealed record ScoredCandidate<T>
 {
-    public required T          Item            { get; init; }
-    public double              Score           { get; init; }
-    public double              LexicalScore    { get; init; }
-    public double              RecencyScore    { get; init; }
-    public double              SimilarityScore { get; init; }
-    public RelevanceDecision   Decision        { get; init; } = RelevanceDecision.Block;
+    public required T Item { get; init; }
+    public double Score { get; init; }
+    public double LexicalScore { get; init; }
+    public double RecencyScore { get; init; }
+    public double SimilarityScore { get; init; }
+    public RelevanceDecision Decision { get; init; } = RelevanceDecision.Block;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -211,11 +211,11 @@ public sealed record ScoredCandidate<T>
 /// </summary>
 public sealed record MemoryPack
 {
-    public IReadOnlyList<MemoryFact>  Facts     { get; init; } = [];
-    public IReadOnlyList<MemoryEvent> Events    { get; init; } = [];
-    public IReadOnlyList<MemoryChunk> Chunks    { get; init; } = [];
-    public string                     Notes     { get; init; } = "";
-    public IReadOnlyList<string>      Citations { get; init; } = [];
+    public IReadOnlyList<MemoryFact> Facts { get; init; } = [];
+    public IReadOnlyList<MemoryEvent> Events { get; init; } = [];
+    public IReadOnlyList<MemoryChunk> Chunks { get; init; } = [];
+    public string Notes { get; init; } = "";
+    public IReadOnlyList<string> Citations { get; init; } = [];
 
     /// <summary>
     /// Pre-formatted text block for direct injection into the system prompt.
@@ -238,9 +238,9 @@ public sealed record MemoryPack
 /// </summary>
 public sealed record RetrievalContext
 {
-    public string?                ConversationId  { get; init; }
-    public IReadOnlyList<string>? RecentMessages  { get; init; }
-    public string?                Mode            { get; init; }  // chat | planning | technical
+    public string? ConversationId { get; init; }
+    public IReadOnlyList<string>? RecentMessages { get; init; }
+    public string? Mode { get; init; }  // chat | planning | technical
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -272,7 +272,7 @@ public static class MemoryParsing
         value?.ToLowerInvariant() switch
         {
             "personal" => Sensitivity.Personal,
-            "secret"   => Sensitivity.Secret,
-            _          => Sensitivity.Public
+            "secret" => Sensitivity.Secret,
+            _ => Sensitivity.Public
         };
 }

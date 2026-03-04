@@ -250,3 +250,30 @@ public class ChatPostProcessorReasoningBehaviorTests
         Assert.DoesNotContain("<think>", output, StringComparison.OrdinalIgnoreCase);
     }
 }
+
+public class SearchResponseFormatterTests
+{
+    [Fact]
+    public void Normalize_RemovesBriefingUiLeak_AndNormalizesInterWordApostrophes()
+    {
+        var input =
+            "**McDonald's**\n" +
+            "Details from web sources\n" +
+            "Open the **Briefing** tab for full details, reviews, and sources.\n";
+
+        var output = SearchResponseFormatter.Normalize(input);
+
+        Assert.Contains("**McDonalds**", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Briefing", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Normalize_CollapsesExcessBlankLines()
+    {
+        var input = "Line one\n\n\nLine two\n";
+
+        var output = SearchResponseFormatter.Normalize(input);
+
+        Assert.Equal("Line one\n\nLine two", output);
+    }
+}

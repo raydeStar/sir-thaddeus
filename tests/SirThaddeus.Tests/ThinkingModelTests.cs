@@ -163,10 +163,10 @@ public class IsThinkingModelTests
     [InlineData("lfm2.5-1.2b-thinking", 2048, 4096)]   // boosted to minimum
     [InlineData("lfm2.5-1.2b-thinking", 8192, 8192)]   // configured value larger, kept
     [InlineData("lfm2.5-1.2b-thinking", 4096, 4096)]   // exactly at minimum
-    [InlineData("lfm2.5-1.2b",          2048, 2048)]   // non-thinking LFM: unchanged
-    [InlineData("lfm2.5-1.2b",          512,  512)]    // non-thinking LFM: unchanged
-    [InlineData("qwen2.5-7b-instruct",  2048, 2048)]   // non-thinking: unchanged
-    [InlineData("qwen2.5-7b-instruct",  512,  512)]    // non-thinking: unchanged
+    [InlineData("lfm2.5-1.2b", 2048, 2048)]   // non-thinking LFM: unchanged
+    [InlineData("lfm2.5-1.2b", 512, 512)]    // non-thinking LFM: unchanged
+    [InlineData("qwen2.5-7b-instruct", 2048, 2048)]   // non-thinking: unchanged
+    [InlineData("qwen2.5-7b-instruct", 512, 512)]    // non-thinking: unchanged
     public void EffectiveMaxTokens_BoostsOnlyForThinkingModels(
         string model, int configured, int expectedEffective)
     {
@@ -177,7 +177,7 @@ public class IsThinkingModelTests
     [Theory]
     [InlineData("lfm2.5-1.2b-thinking", 200, 4096)]    // explicit override boosted
     [InlineData("lfm2.5-1.2b-thinking", 8000, 8000)]   // explicit override kept
-    [InlineData("qwen2.5-7b-instruct",  200,  200)]    // non-thinking: override unchanged
+    [InlineData("qwen2.5-7b-instruct", 200, 200)]    // non-thinking: override unchanged
     public void EffectiveMaxTokens_WithExplicitOverride(
         string model, int explicitOverride, int expectedEffective)
     {
@@ -200,8 +200,8 @@ public class LmStudioClientThinkingTests
     {
         var options = new LlmClientOptions
         {
-            BaseUrl   = "http://localhost:1234",
-            Model     = model,
+            BaseUrl = "http://localhost:1234",
+            Model = model,
             MaxTokens = 2048,
         };
         var handler = new SequenceHttpHandler([], onRequest);
@@ -219,7 +219,7 @@ public class LmStudioClientThinkingTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b-thinking",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -242,7 +242,7 @@ public class LmStudioClientThinkingTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b-thinking",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -265,7 +265,7 @@ public class LmStudioClientThinkingTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b-thinking",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -289,7 +289,7 @@ public class LmStudioClientThinkingTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b-thinking",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -309,7 +309,7 @@ public class LmStudioClientThinkingTests
         // LM Studio ≥ 0.3.x exposes reasoning_content as a separate field
         var json = JsonSerializer.Serialize(new
         {
-            id      = "test-123",
+            id = "test-123",
             choices = new[]
             {
                 new
@@ -330,7 +330,7 @@ public class LmStudioClientThinkingTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b-thinking",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -354,8 +354,8 @@ public class LmStudioClientThinkingTests
 
         var options = new LlmClientOptions
         {
-            BaseUrl   = "http://localhost:1234",
-            Model     = "lfm2.5-1.2b-thinking",
+            BaseUrl = "http://localhost:1234",
+            Model = "lfm2.5-1.2b-thinking",
             MaxTokens = 2048,   // below the 4096 minimum
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -381,8 +381,8 @@ public class LmStudioClientThinkingTests
 
         var options = new LlmClientOptions
         {
-            BaseUrl   = "http://localhost:1234",
-            Model     = "qwen2.5-7b-instruct",
+            BaseUrl = "http://localhost:1234",
+            Model = "qwen2.5-7b-instruct",
             MaxTokens = 2048,
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -408,8 +408,8 @@ public class LmStudioClientThinkingTests
 
         var options = new LlmClientOptions
         {
-            BaseUrl   = "http://localhost:1234",
-            Model     = "deepseek-r1-distill-qwen-7b",
+            BaseUrl = "http://localhost:1234",
+            Model = "deepseek-r1-distill-qwen-7b",
             MaxTokens = 8192,   // already above the minimum boost
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -430,7 +430,7 @@ public class LmStudioClientThinkingTests
     private static (System.Net.HttpStatusCode, string) MakeContentResponse(string content) =>
         (System.Net.HttpStatusCode.OK, JsonSerializer.Serialize(new
         {
-            id      = "test-123",
+            id = "test-123",
             choices = new[]
             {
                 new
@@ -467,7 +467,7 @@ public class NonThinkingModelRegressionTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b",
+            Model = "lfm2.5-1.2b",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -492,8 +492,8 @@ public class NonThinkingModelRegressionTests
 
         var options = new LlmClientOptions
         {
-            BaseUrl   = "http://localhost:1234",
-            Model     = "lfm2.5-1.2b",
+            BaseUrl = "http://localhost:1234",
+            Model = "lfm2.5-1.2b",
             MaxTokens = 2048,
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -516,7 +516,7 @@ public class NonThinkingModelRegressionTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b",
+            Model = "lfm2.5-1.2b",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -577,7 +577,7 @@ public class NonThinkingModelRegressionTests
         var options = new LlmClientOptions
         {
             BaseUrl = "http://localhost:1234",
-            Model   = "lfm2.5-1.2b",
+            Model = "lfm2.5-1.2b",
             MaxTokens = 2048
         };
         using var client = new LmStudioClient(options, new HttpClient(handler)
@@ -596,7 +596,7 @@ public class NonThinkingModelRegressionTests
     private static (System.Net.HttpStatusCode, string) MakeContentResponse(string content) =>
         (System.Net.HttpStatusCode.OK, JsonSerializer.Serialize(new
         {
-            id      = "test-123",
+            id = "test-123",
             choices = new[]
             {
                 new

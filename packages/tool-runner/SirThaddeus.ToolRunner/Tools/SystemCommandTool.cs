@@ -19,8 +19,8 @@ public sealed class SystemCommandTool : ITool
         context.CancellationToken.ThrowIfCancellationRequested();
 
         // Extract command argument
-        var command = context.Call.Arguments?.TryGetValue("command", out var c) == true 
-            ? c?.ToString() 
+        var command = context.Call.Arguments?.TryGetValue("command", out var c) == true
+            ? c?.ToString()
             : null;
 
         if (string.IsNullOrEmpty(command))

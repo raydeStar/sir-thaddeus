@@ -9,9 +9,9 @@ public sealed class BudgetPolicyTests
     public void Default_MatchesCurrentHardcodedValues()
     {
         var p = BudgetPolicy.Default;
-        Assert.Equal(15, p.MaxToolCalls);
+        Assert.Equal(20, p.MaxToolCalls);
         Assert.Equal(10, p.MaxLlmRoundTrips);
-        Assert.Equal(5, p.MaxToolCallsPerResponse);
+        Assert.Equal(8, p.MaxToolCallsPerResponse);
         Assert.Equal(2, p.MaxRepairs);
     }
 

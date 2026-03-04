@@ -40,7 +40,7 @@ public static class RetryHelper
         Func<Task<T>> operation,
         CancellationToken cancellationToken,
         int maxRetries = DefaultMaxRetries,
-        int backoffMs  = DefaultBackoffMs)
+        int backoffMs = DefaultBackoffMs)
     {
         var attempt = 0;
 

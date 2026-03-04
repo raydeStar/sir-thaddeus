@@ -62,20 +62,29 @@ public sealed class CompletionAwareToolLoopExecutor : IToolLoopExecutor
         var report = _checker.Check(contract, response.ToolCallsMade, response.Text);
 
         if (report.IsComplete)
-            return StampCorrelation(response, ctx);
+            return StampCompletion(StampCorrelation(response, ctx), report);
 
         // Attempt repair loop
         var repairAttempt = 1;
+        string? stopReasonOverride = null;
         while (!report.IsComplete && repairAttempt <= ctx.MaxRepairs)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             if (!ctx.RecordRepair())
+            {
+                stopReasonOverride = "repair_budget_exhausted";
                 break;
+            }
 
             var directive = _repairPlanner.Plan(report, repairAttempt, ctx.MaxRepairs);
             if (directive is null)
+            {
+                stopReasonOverride = repairAttempt > ctx.MaxRepairs
+                    ? "repair_budget_exhausted"
+                    : "no_actionable_repair";
                 break;
+            }
 
             request.LogEvent?.Invoke("COMPLETION_REPAIR",
                 $"attempt={repairAttempt}/{ctx.MaxRepairs}, missing=[{string.Join(",", report.MissingFields)}]");
@@ -91,15 +100,35 @@ public sealed class CompletionAwareToolLoopExecutor : IToolLoopExecutor
             repairAttempt++;
         }
 
+        if (!report.IsComplete &&
+            stopReasonOverride is null &&
+            ctx.RepairCount >= ctx.MaxRepairs)
+        {
+            stopReasonOverride = "repair_budget_exhausted";
+        }
+
+        var finalStopReason = report.IsComplete
+            ? report.StopReason
+            : stopReasonOverride ?? report.StopReason;
+
         // Stamp final response with completion info
         return response with
         {
             IsPartial = !report.IsComplete,
             MissingFields = report.MissingFields,
-            CorrelationId = ctx.CorrelationId.Value
+            CorrelationId = ctx.CorrelationId.Value,
+            CompletionConfidence = report.Confidence,
+            CompletionStopReason = finalStopReason
         };
     }
 
     private static AgentResponse StampCorrelation(AgentResponse response, RunContext ctx) =>
         response with { CorrelationId = ctx.CorrelationId.Value };
+
+    private static AgentResponse StampCompletion(AgentResponse response, CompletionReport report) =>
+        response with
+        {
+            CompletionConfidence = report.Confidence,
+            CompletionStopReason = report.StopReason
+        };
 }

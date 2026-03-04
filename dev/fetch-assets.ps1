@@ -31,16 +31,41 @@ function Get-FileSHA256($path) {
     (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
 }
 
+function Get-RequiredRelativePaths($assetId) {
+    switch ($assetId) {
+        'voice-runtime-win-x64' { return @('runtime\python\python.exe', 'bin\uv.exe') }
+        'voice-deps-win-x64' { return @('faster_whisper-1.2.1-py3-none-any.whl') }
+        'piper-win-x64' { return @('piper.exe') }
+        'piper-voice-en_US-john-medium' { return @('en_US-john-medium.onnx', 'en_US-john-medium.onnx.json') }
+        'stt-model-whisper-base' { return @('model.bin') }
+        default { return @() }
+    }
+}
+
+function Test-AssetPayload($asset, $extractDir) {
+    $required = Get-RequiredRelativePaths $asset.id
+    foreach ($relative in $required) {
+        $candidate = Join-Path $extractDir $relative
+        if (-not (Test-Path $candidate)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Install-Asset($asset) {
     $extractDir = Join-Path $repoRoot ($asset.extractTo -replace '/', '\')
     $markerPath = Join-Path $extractDir '.installed.marker'
 
     if (-not $Force -and (Test-Path $markerPath)) {
         $existing = (Get-Content $markerPath -Raw).Trim()
-        if ($existing -eq $asset.sha256) {
+        if ($existing -eq $asset.sha256 -and (Test-AssetPayload -asset $asset -extractDir $extractDir)) {
             Write-Host "  [SKIP] $($asset.id) -- already installed (sha256 matches)" -ForegroundColor DarkGray
             return
         }
+
+        Write-Host "  [REPAIR] $($asset.id) marker present but payload invalid/stale; reinstalling..." -ForegroundColor Yellow
+        Remove-Item -Force $markerPath -ErrorAction SilentlyContinue
     }
 
     $url = "$baseUrl$($asset.filename)"
@@ -65,6 +90,11 @@ function Install-Asset($asset) {
         Write-Host "  [EXTRACT] -> $extractDir" -ForegroundColor Yellow
         New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
         Expand-Archive -Path $tempZip -DestinationPath $extractDir -Force
+
+        if (-not (Test-AssetPayload -asset $asset -extractDir $extractDir)) {
+            Write-Error "Asset payload validation failed for $($asset.id) at $extractDir"
+            return
+        }
 
         Set-Content -Path $markerPath -Value $asset.sha256
         Write-Host "  [OK] $($asset.id) installed" -ForegroundColor Green

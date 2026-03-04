@@ -14,9 +14,10 @@ namespace SirThaddeus.DesktopRuntime.Services;
 /// Ensures the local VoiceHost process is reachable and ready for ASR/TTS.
 /// Startup is lazy and triggered on first voice usage.
 /// </summary>
-public sealed class VoiceHostProcessManager : IAsyncDisposable
+public sealed partial class VoiceHostProcessManager : IAsyncDisposable
 {
-    private static readonly TimeSpan HealthProbeTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan HealthProbeTimeout = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan ReadyReuseWindow = TimeSpan.FromSeconds(2);
 
     private readonly IAuditLogger _auditLogger;
     private readonly HttpClient _httpClient;
@@ -37,6 +38,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     private int _warmupScheduled;
     private int _staleSessionReaped;
     private bool _disposed;
+    private DateTimeOffset? _lastReadyAtUtc;
     private volatile string _lastStartupPhase = "";
     private string? _vcRedistWarning;
     private bool _vcRedistChecked;
@@ -137,39 +139,11 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         KillOrphanedVoiceHostProcesses();
         _currentBaseUrl = null;
         _currentPort = null;
+        _lastReadyAtUtc = null;
         WriteAudit("VOICEHOST_MANUAL_STOP", "ok", new Dictionary<string, object>
         {
             ["reason"] = "user_requested"
         });
-    }
-
-    private void KillOrphanedVoiceHostProcesses()
-    {
-        try
-        {
-            foreach (var process in Process.GetProcessesByName("SirThaddeus.VoiceHost"))
-            {
-                using (process)
-                {
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            var pid = process.Id;
-                            process.Kill(entireProcessTree: true);
-                            process.WaitForExit(2_000);
-                            WriteAudit("VOICEHOST_ORPHAN_KILLED", "ok", new Dictionary<string, object>
-                            {
-                                ["pid"] = pid,
-                                ["source"] = "manual_stop"
-                            });
-                        }
-                    }
-                    catch { /* best effort */ }
-                }
-            }
-        }
-        catch { /* best effort */ }
     }
 
     public void UpdateSettings(VoiceSettings settings)
@@ -292,9 +266,20 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
             // Fast path: if current base is already ready, no process action needed.
             if (!string.IsNullOrWhiteSpace(_currentBaseUrl))
             {
+                var now = _timeProvider.GetUtcNow();
+                if (HasManagedProcessAlive() &&
+                    _lastReadyAtUtc is not null &&
+                    now - _lastReadyAtUtc.Value <= ReadyReuseWindow)
+                {
+                    return VoiceHostEnsureResult.Ok(_currentBaseUrl);
+                }
+
                 var currentHealth = await ProbeHealthAsync(_currentBaseUrl, healthPath, cancellationToken);
                 if (currentHealth.Ready)
+                {
+                    _lastReadyAtUtc = now;
                     return VoiceHostEnsureResult.Ok(_currentBaseUrl);
+                }
             }
 
             // Next quick path: preferred port already has a ready VoiceHost.
@@ -476,255 +461,6 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         }
     }
 
-    private (bool Started, string Error) StartManagedProcess(
-        string hostPath,
-        int port,
-        VoiceSettings settings)
-    {
-        try
-        {
-            StopManagedProcessIfAny();
-
-            var args = $"--port {port} --bind 127.0.0.1 --mode proxy-first";
-            if (!string.IsNullOrWhiteSpace(settings.AsrEndpoint))
-                args += $" --asr-upstream {QuoteArg(settings.AsrEndpoint.Trim())}";
-            if (!string.IsNullOrWhiteSpace(settings.TtsEndpoint))
-                args += $" --tts-upstream {QuoteArg(settings.TtsEndpoint.Trim())}";
-            args += $" --tts-engine {QuoteArg(settings.GetNormalizedTtsEngine())}";
-            var configuredSttEngine = settings.GetNormalizedSttEngine();
-            // Interactive voice should always boot with faster-whisper.
-            // Qwen is reserved for transcription jobs.
-            const string frontendSttEngine = "faster-whisper";
-            args += $" --stt-engine {QuoteArg(frontendSttEngine)}";
-
-            var resolvedSttModelId = ResolveFrontendSttModelId(settings, configuredSttEngine);
-            if (!string.IsNullOrWhiteSpace(resolvedSttModelId))
-                args += $" --stt-model-id {QuoteArg(resolvedSttModelId)}";
-            var resolvedSttLanguage = settings.GetResolvedSttLanguage();
-            if (!string.IsNullOrWhiteSpace(resolvedSttLanguage))
-                args += $" --stt-language {QuoteArg(resolvedSttLanguage)}";
-
-            var resolvedTtsModelId = settings.GetResolvedTtsModelId();
-            if (!string.IsNullOrWhiteSpace(resolvedTtsModelId))
-                args += $" --tts-model-id {QuoteArg(resolvedTtsModelId)}";
-
-            var resolvedTtsVoiceId = settings.GetResolvedTtsVoiceId();
-            if (!string.IsNullOrWhiteSpace(resolvedTtsVoiceId))
-                args += $" --tts-voice-id {QuoteArg(resolvedTtsVoiceId)}";
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = hostPath,
-                Arguments = args,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                WorkingDirectory = Path.GetDirectoryName(hostPath) ?? AppContext.BaseDirectory
-            };
-
-            var process = _processStarter(startInfo);
-            if (process is null)
-            {
-                WriteAudit("VOICEHOST_PROCESS_START_FAILED", "error", new Dictionary<string, object>
-                {
-                    ["path"] = hostPath,
-                    ["port"] = port
-                });
-                return (false, "Process.Start returned null.");
-            }
-
-            var logPath = Path.Combine(AppContext.BaseDirectory, "voicehost-debug.log");
-            var logLock = new object();
-            static bool IsDebugLogError(string level, string line)
-            {
-                if (string.Equals(level, "ERR", StringComparison.OrdinalIgnoreCase))
-                {
-                    var lowered = line.ToLowerInvariant();
-                    return lowered.Contains("error") ||
-                           lowered.Contains("exception") ||
-                           lowered.Contains("fatal") ||
-                           lowered.Contains("traceback") ||
-                           lowered.Contains("critical");
-                }
-
-                if (string.Equals(level, "SYS", StringComparison.OrdinalIgnoreCase))
-                {
-                    return line.Contains("exited with code", StringComparison.OrdinalIgnoreCase) &&
-                           !line.EndsWith(" code 0", StringComparison.OrdinalIgnoreCase);
-                }
-
-                return false;
-            }
-
-            void WriteLog(string level, string? data)
-            {
-                if (string.IsNullOrWhiteSpace(data)) return;
-                var line = data.Trim();
-                if (!IsDebugLogError(level, line))
-                    return;
-
-                try
-                {
-                    lock (logLock)
-                    {
-                        File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {line}{Environment.NewLine}");
-                    }
-                }
-                catch { }
-            }
-
-            process.EnableRaisingEvents = true;
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                {
-                    var trimmed = e.Data.Trim();
-                    UpdateStartupPhase(trimmed);
-                    WriteLog("OUT", trimmed);
-                    WriteAudit("VOICEHOST_PROCESS_STDOUT", "ok", new Dictionary<string, object>
-                    {
-                        ["pid"] = process.Id,
-                        ["line"] = trimmed
-                    });
-                }
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                {
-                    var trimmed = e.Data.Trim();
-                    UpdateStartupPhase(trimmed);
-                    WriteLog("ERR", trimmed);
-                    WriteAudit("VOICEHOST_PROCESS_STDERR", "warn", new Dictionary<string, object>
-                    {
-                        ["pid"] = process.Id,
-                        ["line"] = trimmed
-                    });
-                }
-            };
-            process.Exited += (_, _) =>
-            {
-                WriteLog("SYS", $"Process exited with code {process.ExitCode}");
-                WriteAudit("VOICEHOST_PROCESS_EXITED", "ok", new Dictionary<string, object>
-                {
-                    ["pid"] = process.Id,
-                    ["exitCode"] = process.ExitCode
-                });
-            };
-
-            try
-            {
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-            }
-            catch
-            {
-                // Not fatal; process can still run without stream readers.
-            }
-
-            lock (_processGate)
-            {
-                _managedProcess = process;
-                _managedProcessPort = port;
-            }
-
-            WriteAudit("VOICEHOST_PROCESS_STARTED", "ok", new Dictionary<string, object>
-            {
-                ["path"] = hostPath,
-                ["port"] = port,
-                ["pid"] = process.Id,
-                ["args"] = args,
-                ["configuredSttEngine"] = configuredSttEngine,
-                ["effectiveSttEngine"] = frontendSttEngine,
-                ["effectiveSttModelId"] = resolvedSttModelId
-            });
-
-            return (true, "");
-        }
-        catch (Exception ex)
-        {
-            WriteAudit("VOICEHOST_PROCESS_START_FAILED", "error", new Dictionary<string, object>
-            {
-                ["path"] = hostPath,
-                ["port"] = port,
-                ["message"] = ex.Message
-            });
-            return (false, ex.Message);
-        }
-    }
-
-    private void UpdateStartupPhase(string line)
-    {
-        // Map well-known stdout/stderr markers emitted by start-voice-backend.ps1
-        // and server.py to short, user-friendly descriptions.
-        if (line.Contains("[VENV_OK]", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Setting up Python environment...";
-        else if (line.Contains("Installing dependencies", StringComparison.OrdinalIgnoreCase) ||
-                 line.Contains("uv pip install", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Installing voice dependencies...";
-        else if (line.Contains("Dependencies already installed", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Preparing voice engine...";
-        else if (line.Contains("[ASSET_OK]", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Voice models verified.";
-        else if (line.Contains("Preparing voice/ASR", StringComparison.OrdinalIgnoreCase) ||
-                 line.Contains("[VOICE_PREFETCH]", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Preparing voice assets...";
-        else if (line.Contains("[VOICE_TTS_READY]", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "TTS engine ready, starting server...";
-        else if (line.Contains("Voice Backend starting", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Starting voice server...";
-        else if (line.Contains("Application startup complete", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Voice server started, loading models...";
-        else if (line.Contains("Lazy-loading faster-whisper", StringComparison.OrdinalIgnoreCase) ||
-                 line.Contains("Loading faster-whisper", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Loading speech recognition model...";
-        else if (line.Contains("faster-whisper model", StringComparison.OrdinalIgnoreCase) &&
-                 line.Contains("loaded", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Speech recognition ready.";
-        else if (line.Contains("TTS Warmup", StringComparison.OrdinalIgnoreCase) &&
-                 line.Contains("READY", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Voice engine ready.";
-        else if (line.Contains("Uvicorn running", StringComparison.OrdinalIgnoreCase))
-            _lastStartupPhase = "Voice backend online, waiting for readiness...";
-    }
-
-    /// <summary>
-    /// Checks whether the Visual C++ 2015-2022 x64 Redistributable is installed.
-    /// CTranslate2 (used by faster-whisper) requires it for native DLL loading.
-    /// Returns a user-friendly warning message, or null if the runtime is present.
-    /// </summary>
-    internal static string? CheckVcRedistInstalled()
-    {
-        try
-        {
-            // The VC++ 2015-2022 x64 redist registers under this key.
-            // "Installed" DWORD = 1 means it's present.
-            using var key = Registry.LocalMachine.OpenSubKey(
-                @"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64");
-            if (key is not null)
-            {
-                var installed = key.GetValue("Installed");
-                if (installed is int i && i == 1)
-                    return null; // present
-            }
-
-            // Fallback: check if the DLL itself exists in System32.
-            var sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
-            if (File.Exists(Path.Combine(sys32, "vcruntime140.dll")))
-                return null;
-        }
-        catch
-        {
-            // Registry access failed — can't confirm either way, assume OK.
-            return null;
-        }
-
-        return "Visual C++ Redistributable is not installed. "
-             + "Speech recognition may crash without it. "
-             + "Download it from: https://aka.ms/vs/17/release/vc_redist.x64.exe";
-    }
-
     private static string QuoteArg(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -867,6 +603,7 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     {
         _currentBaseUrl = baseUrl.TrimEnd('/');
         _currentPort = port;
+        _lastReadyAtUtc = _timeProvider.GetUtcNow();
         PersistSessionState(_currentBaseUrl, port, processId);
         WriteAudit("VOICEHOST_READY", "ok", new Dictionary<string, object>
         {
@@ -1017,261 +754,6 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
         return message;
     }
 
-    private string ResolveVoiceHostPath()
-    {
-        const string exeName = "SirThaddeus.VoiceHost.exe";
-        var baseDir = AppContext.BaseDirectory;
-
-        var adjacent = Path.Combine(baseDir, exeName);
-        if (File.Exists(adjacent))
-            return adjacent;
-
-        var dir = new DirectoryInfo(baseDir);
-        while (dir is null == false && dir.Name != "apps")
-        {
-            dir = dir.Parent;
-        }
-
-        if (dir is null)
-        {
-            // Give up if we can't find 'apps'
-            return Path.Combine(baseDir, exeName);
-        }
-
-        var voiceHostBinDebug = Path.Combine(
-            dir.FullName,
-            "voice-host", "SirThaddeus.VoiceHost",
-            "bin", "Debug");
-
-        if (Directory.Exists(voiceHostBinDebug))
-        {
-            string? newest = null;
-            var newestTime = DateTime.MinValue;
-            foreach (var tfmDir in Directory.GetDirectories(voiceHostBinDebug))
-            {
-                var candidate = Path.Combine(tfmDir, exeName);
-                if (!File.Exists(candidate))
-                    continue;
-
-                var writeTime = File.GetLastWriteTimeUtc(candidate);
-                if (writeTime > newestTime)
-                {
-                    newest = candidate;
-                    newestTime = writeTime;
-                }
-            }
-
-            if (newest is not null)
-                return newest;
-        }
-
-        return Path.GetFullPath(Path.Combine(
-            voiceHostBinDebug,
-            "net8.0",
-            exeName));
-    }
-
-    private bool HasManagedProcessExited()
-    {
-        lock (_processGate)
-        {
-            return _managedProcess is not null && _managedProcess.HasExited;
-        }
-    }
-
-    private bool HasManagedProcessAlive()
-    {
-        lock (_processGate)
-        {
-            return _managedProcess is not null && !_managedProcess.HasExited;
-        }
-    }
-
-    private bool IsManagedProcessAliveOnPort(int port)
-    {
-        lock (_processGate)
-        {
-            return _managedProcess is not null &&
-                   !_managedProcess.HasExited &&
-                   _managedProcessPort == port;
-        }
-    }
-
-    private int? TryGetManagedProcessId()
-    {
-        lock (_processGate)
-        {
-            if (_managedProcess is null)
-                return null;
-            try
-            {
-                return _managedProcess.Id;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-    }
-
-    private void StopManagedProcessIfAny()
-    {
-        _lastStartupPhase = "";
-        lock (_processGate)
-        {
-            if (_managedProcess is null)
-            {
-                _managedProcessPort = null;
-                return;
-            }
-
-            try
-            {
-                if (!_managedProcess.HasExited)
-                    _managedProcess.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // best effort
-            }
-            finally
-            {
-                _managedProcess.Dispose();
-                _managedProcess = null;
-                _managedProcessPort = null;
-            }
-        }
-    }
-
-    private void PersistSessionState(string baseUrl, int port, int? processId)
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(_sessionStatePath);
-            if (!string.IsNullOrWhiteSpace(dir))
-                Directory.CreateDirectory(dir);
-
-            var payload = JsonSerializer.Serialize(new
-            {
-                baseUrl,
-                port,
-                pid = processId,
-                updatedAtUtc = DateTimeOffset.UtcNow
-            });
-            File.WriteAllText(_sessionStatePath, payload);
-        }
-        catch
-        {
-            // diagnostics-only write
-        }
-    }
-
-    private void TryReapStaleSessionProcess()
-    {
-        if (Interlocked.Exchange(ref _staleSessionReaped, 1) == 1)
-            return;
-
-        // If another runtime instance is alive, do not reap shared voice infra.
-        if (HasAnotherDesktopRuntimeAlive())
-            return;
-
-        // Phase 1: Kill session-tracked PID (existing behavior).
-        try
-        {
-            if (File.Exists(_sessionStatePath))
-            {
-                var json = File.ReadAllText(_sessionStatePath);
-                if (!string.IsNullOrWhiteSpace(json))
-                {
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("pid", out var pidElem) &&
-                        pidElem.TryGetInt32(out var pid) && pid > 0)
-                    {
-                        try
-                        {
-                            using var process = Process.GetProcessById(pid);
-                            if (!process.HasExited &&
-                                process.ProcessName.Contains("VoiceHost", StringComparison.OrdinalIgnoreCase))
-                            {
-                                process.Kill(entireProcessTree: true);
-                                process.WaitForExit(2_000);
-                                WriteAudit("VOICEHOST_STALE_PROCESS_REAPED", "ok", new Dictionary<string, object>
-                                {
-                                    ["pid"] = pid,
-                                    ["source"] = "session_file"
-                                });
-                            }
-                        }
-                        catch { /* PID may no longer exist */ }
-                    }
-                }
-
-                try { File.Delete(_sessionStatePath); } catch { /* best effort */ }
-            }
-        }
-        catch { /* best effort */ }
-
-        // Phase 2: Kill any orphaned VoiceHost processes by name.
-        // Catches stale processes from other installations (e.g., packaged
-        // releases) that hold the port range but aren't tracked in session state.
-        try
-        {
-            foreach (var process in Process.GetProcessesByName("SirThaddeus.VoiceHost"))
-            {
-                using (process)
-                {
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            var pid = process.Id;
-                            process.Kill(entireProcessTree: true);
-                            process.WaitForExit(2_000);
-                            WriteAudit("VOICEHOST_STALE_PROCESS_REAPED", "ok", new Dictionary<string, object>
-                            {
-                                ["pid"] = pid,
-                                ["source"] = "process_name_scan"
-                            });
-                        }
-                    }
-                    catch { /* best effort */ }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            WriteAudit("VOICEHOST_STALE_PROCESS_REAP_FAILED", "error", new Dictionary<string, object>
-            {
-                ["message"] = ex.Message
-            });
-        }
-    }
-
-    private static bool HasAnotherDesktopRuntimeAlive()
-    {
-        try
-        {
-            var currentPid = Environment.ProcessId;
-            foreach (var process in Process.GetProcessesByName("SirThaddeus.DesktopRuntime"))
-            {
-                using (process)
-                {
-                    if (process.Id == currentPid)
-                        continue;
-
-                    if (!process.HasExited)
-                        return true;
-                }
-            }
-        }
-        catch
-        {
-            // Best effort detection only.
-        }
-
-        return false;
-    }
-
     private static bool ReadBool(JsonElement root, string property)
     {
         if (!root.TryGetProperty(property, out var value))
@@ -1324,39 +806,3 @@ public sealed class VoiceHostProcessManager : IAsyncDisposable
     }
 }
 
-public sealed record VoiceHostEnsureResult
-{
-    public required bool Success { get; init; }
-    public string? BaseUrl { get; init; }
-    public string? ErrorCode { get; init; }
-    public string UserMessage { get; init; } = "";
-
-    public static VoiceHostEnsureResult Ok(string baseUrl) => new()
-    {
-        Success = true,
-        BaseUrl = baseUrl
-    };
-
-    public static VoiceHostEnsureResult Failure(string errorCode, string message) => new()
-    {
-        Success = false,
-        ErrorCode = errorCode,
-        UserMessage = message
-    };
-}
-
-public sealed record VoiceHostHealthResult(
-    bool Reachable,
-    bool Ready,
-    string Status,
-    bool AsrReady,
-    bool TtsReady,
-    string Version,
-    string ErrorCode,
-    string Message)
-{
-    public static VoiceHostHealthResult Unreachable(
-        string errorCode = "",
-        string message = "")
-        => new(false, false, "", false, false, "", errorCode, message);
-}

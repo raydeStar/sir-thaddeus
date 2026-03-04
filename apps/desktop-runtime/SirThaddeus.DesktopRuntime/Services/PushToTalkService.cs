@@ -47,6 +47,7 @@ public sealed class PushToTalkService : IDisposable
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _hookProc;
     private bool _isListening;
+    private ActivePttBinding _activePttBinding;
     private bool _shutupLatched;
     private readonly HashSet<uint> _pressedKeys = [];
     private bool _disposed;
@@ -96,7 +97,7 @@ public sealed class PushToTalkService : IDisposable
         _hookProc = HookCallback;
         using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
         using var curModule = curProcess.MainModule!;
-        
+
         _hookId = SetWindowsHookEx(
             WH_KEYBOARD_LL,
             _hookProc,
@@ -149,6 +150,7 @@ public sealed class PushToTalkService : IDisposable
         if (_isListening)
         {
             _isListening = false;
+            _activePttBinding = ActivePttBinding.None;
         }
 
         _auditLogger.Append(new AuditEvent
@@ -173,8 +175,8 @@ public sealed class PushToTalkService : IDisposable
             }
             else if (message == WM_KEYUP || message == WM_SYSKEYUP)
             {
-                HandleKeyUp(vkCode);
                 _pressedKeys.Remove(vkCode);
+                HandleKeyUp(vkCode);
             }
         }
 
@@ -183,9 +185,12 @@ public sealed class PushToTalkService : IDisposable
 
     private void HandleKeyDown(uint vkCode)
     {
-        if (!_isListening && (MatchesLegacyPtt(vkCode) || MatchesChordOnKeyDown(vkCode, _pttChord)))
+        var legacyPressed = MatchesLegacyPtt(vkCode);
+        var chordPressed = MatchesChordOnKeyDown(vkCode, _pttChord);
+        if (!_isListening && (legacyPressed || chordPressed))
         {
             _isListening = true;
+            _activePttBinding = chordPressed ? ActivePttBinding.Chord : ActivePttBinding.Legacy;
             MicDown?.Invoke();
             _auditLogger.Append(new AuditEvent
             {
@@ -210,9 +215,10 @@ public sealed class PushToTalkService : IDisposable
 
     private void HandleKeyUp(uint vkCode)
     {
-        if (_isListening && (MatchesLegacyPtt(vkCode) || IsChordTriggerKey(vkCode, _pttChord)))
+        if (_isListening && ShouldReleaseActivePtt(vkCode))
         {
             _isListening = false;
+            _activePttBinding = ActivePttBinding.None;
             MicUp?.Invoke();
             _auditLogger.Append(new AuditEvent
             {
@@ -286,6 +292,20 @@ public sealed class PushToTalkService : IDisposable
     }
 
     private bool IsPressed(uint vkCode) => _pressedKeys.Contains(vkCode);
+
+    private bool IsChordHeld(KeyChord chord)
+        => IsPressed(chord.TriggerKey) && AreModifiersPressed(chord.Modifiers);
+
+    private bool ShouldReleaseActivePtt(uint vkCode)
+    {
+        return _activePttBinding switch
+        {
+            ActivePttBinding.Legacy => MatchesLegacyPtt(vkCode),
+            ActivePttBinding.Chord => _pttChord is null || !IsChordHeld(_pttChord),
+            _ => MatchesLegacyPtt(vkCode) ||
+                 (_pttChord is not null && !IsChordHeld(_pttChord))
+        };
+    }
 
     private static KeyChord? ParseChord(string? text)
     {
@@ -410,6 +430,13 @@ public sealed class PushToTalkService : IDisposable
         Shift = 1 << 1,
         Alt = 1 << 2,
         Win = 1 << 3
+    }
+
+    private enum ActivePttBinding
+    {
+        None = 0,
+        Legacy = 1,
+        Chord = 2
     }
 
     private sealed record KeyChord(string RawText, uint TriggerKey, KeyModifiers Modifiers);

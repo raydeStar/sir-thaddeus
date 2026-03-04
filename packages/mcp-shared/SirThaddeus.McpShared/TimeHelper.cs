@@ -40,10 +40,10 @@ public static class TimeHelper
 
         return JsonSerializer.Serialize(new
         {
-            iso        = now.ToString("o"),               // ISO 8601 with offset
-            unix_ms    = now.ToUnixTimeMilliseconds(),
-            timezone   = windowsTimezoneId,
-            offset     = offsetStr
+            iso = now.ToString("o"),               // ISO 8601 with offset
+            unix_ms = now.ToUnixTimeMilliseconds(),
+            timezone = windowsTimezoneId,
+            offset = offsetStr
         }, JsonOpts);
     }
 }

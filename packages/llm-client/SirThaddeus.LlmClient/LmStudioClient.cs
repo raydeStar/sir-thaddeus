@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -11,6 +12,9 @@ namespace SirThaddeus.LlmClient;
 /// </summary>
 public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 {
+    private static readonly TimeSpan ModelDiscoveryTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ModelLoadTimeout = TimeSpan.FromSeconds(10);
+
     private HttpClient _http;
     private readonly object _optionsGate = new();
     private LlmClientOptions _options;
@@ -18,17 +22,23 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     private long _promptTokensTotal;
     private long _completionTokensTotal;
     private long _totalTokensTotal;
+    private readonly HashSet<string> _confirmedLoadedModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _autoLoadEnabled;
 
     public LmStudioClient(LlmClientOptions options, HttpClient? httpClient = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
-        
+
         // ── Sir Thaddeus notes: A butler must exhibit patience! ───
         // Local GPUs require time to sweep their VRAM floors. 
         // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
         _http.Timeout = TimeSpan.FromSeconds(300);
+
+        // Only auto-load models when using the internal HttpClient.
+        // External clients (e.g. test mocks) don't support /v1/models/load.
+        _autoLoadEnabled = httpClient is null;
 
         _json = new JsonSerializerOptions
         {
@@ -105,6 +115,10 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     {
         ArgumentNullException.ThrowIfNull(messages);
 
+        // Ensure the configured model is loaded in LM Studio before
+        // sending the request. This is a no-op after the first call.
+        await EnsureModelLoadedAsync(cancellationToken);
+
         var requestMessages = tools is { Count: > 0 }
             ? messages
             : NormalizeMessagesForPlainChat(messages);
@@ -134,7 +148,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 return await ParseResponse(response, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            
+
             // If the bare request still fails, it is highly likely the local model 
             // is not properly instructed for tool schemas. We must inform the user elegantly.
             throw new HttpRequestException(
@@ -144,7 +158,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         }
 
         var options = GetOptionsSnapshot();
-        
+
         // Handle LM Studio 500 HTML errors (often means model not loaded or crashed)
         if ((int)response.StatusCode == 500 && errorBody.Contains("<!DOCTYPE html>", StringComparison.OrdinalIgnoreCase))
         {
@@ -265,11 +279,11 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         var options = GetOptionsSnapshot();
         var body = new Dictionary<string, object>
         {
-            ["model"]       = options.Model,
-            ["messages"]    = messages,
-            ["max_tokens"]  = options.EffectiveMaxTokens(maxTokensOverride),
+            ["model"] = options.Model,
+            ["messages"] = messages,
+            ["max_tokens"] = options.EffectiveMaxTokens(maxTokensOverride),
             ["temperature"] = options.Temperature,
-            ["stream"]      = false
+            ["stream"] = false
         };
 
         if (includeExtras)
@@ -286,7 +300,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         if (tools is { Count: > 0 })
         {
-            body["tools"]       = tools;
+            body["tools"] = tools;
             body["tool_choice"] = "auto";
         }
         // When tools is null/empty, intentionally omit both fields.
@@ -312,13 +326,13 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         {
             return new LlmResponse
             {
-                IsComplete    = true,
-                Content       = "[No response from model]",
-                FinishReason  = "error"
+                IsComplete = true,
+                Content = "[No response from model]",
+                FinishReason = "error"
             };
         }
 
-        var choice  = completion.Choices[0];
+        var choice = completion.Choices[0];
         var message = choice.Message;
 
         var hasToolCalls = message?.ToolCalls is { Count: > 0 };
@@ -334,12 +348,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
 
         return new LlmResponse
         {
-            IsComplete      = !hasToolCalls,
-            Content         = content,
+            IsComplete = !hasToolCalls,
+            Content = content,
             ReasoningContent = message?.ReasoningContent,
-            ToolCalls       = message?.ToolCalls,
-            FinishReason    = choice.FinishReason,
-            Usage           = completion.Usage
+            ToolCalls = message?.ToolCalls,
+            FinishReason = choice.FinishReason,
+            Usage = completion.Usage
         };
     }
 
@@ -395,6 +409,109 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         _http.Dispose();
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // Auto-Model Loading
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ensures the configured model is loaded in LM Studio before
+    /// the first request. Uses <c>GET /v1/models</c> to check and
+    /// <c>POST /v1/models/load</c> to load if missing. Results are
+    /// cached per model ID so the HTTP round-trip only happens once.
+    /// <para>
+    /// IMPORTANT: Only loads via POST when zero models are present.
+    /// If other models are already loaded, we skip — sending a load
+    /// request could displace an active model, causing regressions
+    /// when multiple LLM clients share the same LM Studio endpoint.
+    /// </para>
+    /// </summary>
+    private async Task EnsureModelLoadedAsync(CancellationToken cancellationToken)
+    {
+        var options = GetOptionsSnapshot();
+        var modelId = options.Model;
+        if (string.IsNullOrWhiteSpace(modelId))
+            return;
+
+        // Fast path: already confirmed loaded this session,
+        // or auto-loading is disabled (e.g. test/external HttpClient).
+        if (!_autoLoadEnabled || _confirmedLoadedModels.Contains(modelId))
+            return;
+
+        try
+        {
+            // Check what's currently loaded.
+            using var discoverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            discoverCts.CancelAfter(ModelDiscoveryTimeout);
+            var modelsResponse = await _http.GetAsync("/v1/models", discoverCts.Token);
+            if (!modelsResponse.IsSuccessStatusCode)
+            {
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            var raw = await modelsResponse.Content.ReadAsStringAsync(discoverCts.Token);
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Array)
+            {
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            var loadedCount = data.GetArrayLength();
+            var foundOurModel = false;
+
+            foreach (var item in data.EnumerateArray())
+            {
+                if (!item.TryGetProperty("id", out var idEl) ||
+                    idEl.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var loadedId = idEl.GetString();
+                if (string.Equals(loadedId, modelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundOurModel = true;
+                    break;
+                }
+            }
+
+            if (foundOurModel)
+            {
+                // Our model is already loaded — nothing to do.
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            if (loadedCount > 0)
+            {
+                // Other models are loaded but ours isn't. Do NOT force-
+                // load because that could displace them. The request will
+                // go through to whichever model is active; LM Studio may
+                // route it if multi-model is enabled.
+                _confirmedLoadedModels.Add(modelId);
+                return;
+            }
+
+            // No models loaded at all — safe to load ours.
+            var loadPayload = new StringContent(
+                JsonSerializer.Serialize(new { model = modelId }),
+                Encoding.UTF8,
+                "application/json");
+
+            using var loadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            loadCts.CancelAfter(ModelLoadTimeout);
+            await _http.PostAsync("/v1/models/load", loadPayload, loadCts.Token);
+            _confirmedLoadedModels.Add(modelId);
+        }
+        catch
+        {
+            // Non-fatal: if the models API is unavailable (e.g. older
+            // LM Studio or non-LM Studio backend), skip gracefully.
+            // Mark as "confirmed" so we don't retry every request.
+            _confirmedLoadedModels.Add(modelId);
+        }
+    }
+
     /// <summary>
     /// Strips all <c>&lt;think&gt;...&lt;/think&gt;</c> blocks at the transport
     /// layer. Handles multiple blocks and truncated (unclosed) tags so
@@ -405,7 +522,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         if (string.IsNullOrWhiteSpace(content))
             return content;
 
-        const string openTag  = "<think>";
+        const string openTag = "<think>";
         const string closeTag = "</think>";
 
         // Fast-path: no think tags at all → return content unchanged

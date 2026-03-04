@@ -232,7 +232,11 @@ public sealed class DeterministicChatPostProcessor
 
         var sentenceEnd = cleaned.LastIndexOfAny(['.', '!', '?']);
         if (sentenceEnd >= 40)
-            return cleaned[..(sentenceEnd + 1)].Trim();
+        {
+            var danglingPart = cleaned[(sentenceEnd + 1)..];
+            if (!danglingPart.Contains('\n'))
+                return cleaned[..(sentenceEnd + 1)].Trim();
+        }
 
         return cleaned.TrimEnd(',', ';', ':', '-', '—').Trim();
     }

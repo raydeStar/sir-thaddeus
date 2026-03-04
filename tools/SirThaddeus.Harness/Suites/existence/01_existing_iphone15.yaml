@@ -1,0 +1,34 @@
+id: existence_existing_iphone15
+name: Existence - Existing Artifact (iPhone 15)
+user_message: "Does iPhone 15 exist as a released product?"
+allowed_tools:
+  - memory_retrieve
+  - web_search
+  - browser_navigate
+mode: live
+assertions:
+  required_tools:
+    - web_search
+  forbidden_tools:
+    - system_execute
+    - file_read
+    - file_list
+    - file_write
+    - screen_capture
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords:
+    - could not verify definitive proof
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 1200
+min_score: 9.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

@@ -65,7 +65,7 @@ public sealed class RunContext
 
     // ── Default Budgets ──────────────────────────────────────────────
 
-    public const int DefaultMaxToolCalls = 15;
+    public const int DefaultMaxToolCalls = 20;
     public const int DefaultMaxLlmRoundTrips = 10;
     public const int DefaultMaxRepairs = 2;
 
