@@ -16,6 +16,9 @@ public sealed record PersonalityProfile
     [JsonPropertyName("display_name")]
     public string DisplayName { get; init; } = "";
 
+    [JsonPropertyName("alias")]
+    public string Alias { get; init; } = "";
+
     [JsonPropertyName("description")]
     public string Description { get; init; } = "";
 
@@ -251,6 +254,7 @@ public sealed record PersonalityProfileDescriptor
 {
     public required string Id { get; init; }
     public required string DisplayName { get; init; }
+    public string Alias { get; init; } = "";
     public required string Description { get; init; }
     public required string Hash { get; init; }
     public required string SourcePath { get; init; }

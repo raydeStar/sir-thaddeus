@@ -2,9 +2,8 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- Windows 10 TFM required for Windows.Media.Ocr (built-in OCR engine) -->
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <TargetFrameworks>net8.0;net8.0-windows10.0.19041.0</TargetFrameworks>
+    <SupportedOSPlatformVersion Condition="'$(TargetFramework)' == 'net8.0-windows10.0.19041.0'">10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     
@@ -19,21 +18,18 @@
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageReference Include="System.Drawing.Common" Version="8.0.11" />
-    <PackageReference Include="SmartReader" Version="0.11.0" />
-    <PackageReference Include="HtmlAgilityPack" Version="1.11.72" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
-    <ProjectReference Include="..\..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
-    <ProjectReference Include="..\..\..\packages\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
-    <ProjectReference Include="..\..\..\packages\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
-    <ProjectReference Include="..\..\..\packages\local-tools\SirThaddeus.LocalTools.Playwright\SirThaddeus.LocalTools.Playwright.csproj" />
-    <ProjectReference Include="..\..\..\packages\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
-    <ProjectReference Include="..\..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
-    <ProjectReference Include="..\..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
-    <ProjectReference Include="..\..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <ProjectReference Include="..\..\..\packages\mcp-tools-core\SirThaddeus.McpTools.Core\SirThaddeus.McpTools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows10.0.19041.0'">
+    <ProjectReference Include="..\..\..\packages\mcp-tools-windows\SirThaddeus.McpTools.Windows\SirThaddeus.McpTools.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Tools\**\*.cs" />
   </ItemGroup>
 
 </Project>

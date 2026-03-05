@@ -103,6 +103,7 @@ public sealed class PersonalityProfileStore
                 {
                     Id = profile.Id,
                     DisplayName = profile.DisplayName,
+                    Alias = profile.Alias,
                     Description = profile.Description,
                     Hash = CanonicalJsonHasher.ComputeHash(doc.RootElement),
                     SourcePath = file
@@ -181,6 +182,7 @@ public sealed class PersonalityProfileStore
         {
             Id = profile.Id,
             DisplayName = profile.DisplayName,
+            Alias = profile.Alias,
             Description = profile.Description,
             Hash = CanonicalJsonHasher.ComputeHash(profile),
             SourcePath = path
@@ -228,6 +230,7 @@ public sealed class PersonalityProfileStore
         {
             Id = parsedProfile.Id,
             DisplayName = parsedProfile.DisplayName,
+            Alias = parsedProfile.Alias,
             Description = parsedProfile.Description,
             Hash = CanonicalJsonHasher.ComputeHash(doc.RootElement),
             SourcePath = path

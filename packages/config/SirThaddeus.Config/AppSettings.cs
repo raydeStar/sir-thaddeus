@@ -113,6 +113,9 @@ public sealed partial record AppSettings
 /// </summary>
 public sealed record UserProfileSettings
 {
+    [JsonPropertyName("alias")]
+    public string Alias { get; init; } = "";
+
     [JsonPropertyName("displayName")]
     public string DisplayName { get; init; } = "";
 
@@ -124,6 +127,10 @@ public sealed record UserProfileSettings
 
     [JsonPropertyName("locationsByProfile")]
     public Dictionary<string, LocationSettings> LocationsByProfile { get; init; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("aliasesByProfile")]
+    public Dictionary<string, string> AliasesByProfile { get; init; } =
         new(StringComparer.OrdinalIgnoreCase);
 }
 

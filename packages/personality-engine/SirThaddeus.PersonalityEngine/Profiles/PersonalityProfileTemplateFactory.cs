@@ -22,6 +22,7 @@ public static class PersonalityProfileTemplateFactory
             Version = "1.0",
             Id = normalizedId,
             DisplayName = "New Personality",
+            Alias = normalizedId.Replace('_', '-'),
             Description = coreIdentity,
             Identity = new PersonalityIdentity
             {
@@ -84,6 +85,7 @@ public static class PersonalityProfileTemplateFactory
             Version = string.IsNullOrWhiteSpace(profile.Version) ? "1.0" : profile.Version.Trim(),
             Id = profile.Id,
             DisplayName = profile.DisplayName,
+            Alias = profile.Alias,
             Identity = new MinimalIdentity
             {
                 SelfName = ResolveSelfName(profile),
@@ -161,6 +163,9 @@ public static class PersonalityProfileTemplateFactory
 
         [JsonPropertyName("display_name")]
         public string DisplayName { get; init; } = "";
+
+        [JsonPropertyName("alias")]
+        public string Alias { get; init; } = "";
 
         [JsonPropertyName("identity")]
         public MinimalIdentity Identity { get; init; } = new();
