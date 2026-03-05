@@ -11,6 +11,8 @@ Write-Host "  Sir Thaddeus Local Runner"
 Write-Host "══════════════════════════════════════════════════════════════"
 
 $DebugMode = $args -contains "--debug"
+$TerminalMode = $args -contains "--terminal"
+$ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" })
 
 function Ensure-LocalVoiceAssets {
     param([string]$RepoRootPath)
@@ -100,7 +102,7 @@ Write-Host "`n[2/5] Checking local voice assets/session state..." -ForegroundCol
 Ensure-LocalVoiceAssets -RepoRootPath $RepoRoot
 Repair-StaleVoiceSessionState
 
-# 3. Build VoiceHost & MCP Server (DesktopRuntime doesn't reference them directly)
+# 3. Build VoiceHost & MCP Server (UI/terminal hosts don't directly reference them)
 Write-Host "`n[3/5] Building VoiceHost..." -ForegroundColor Yellow
 $VoiceHostPath = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
 & dotnet build $VoiceHostPath
@@ -152,24 +154,37 @@ if ($DebugMode) {
     }
 
     Write-Host "      Backend logs are now visible in dedicated windows." -ForegroundColor DarkGray
-    Write-Host "      Starting Desktop Runtime..." -ForegroundColor Yellow
+    Write-Host "      Starting runtime host..." -ForegroundColor Yellow
 }
 else {
-    Write-Host "`n[5/5] Starting Sir Thaddeus (Desktop Runtime)..." -ForegroundColor Yellow
+    Write-Host "`n[5/5] Starting Sir Thaddeus..." -ForegroundColor Yellow
     Write-Host "      VoiceHost and Backend services will auto-start as needed." -ForegroundColor DarkGray
     Write-Host "      (Use --debug to see background service logs in separate windows)" -ForegroundColor DarkGray
 }
 
-$ProjectPath = Join-Path $RepoRoot "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
+$ProjectPath = if ($TerminalMode) {
+    Join-Path $RepoRoot "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj"
+}
+else {
+    Join-Path $RepoRoot "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
+}
+
+if ($TerminalMode) {
+    Write-Host "      Mode: terminal (headless runtime)" -ForegroundColor Cyan
+}
+else {
+    Write-Host "      Mode: Avalonia UI" -ForegroundColor Cyan
+}
+
 # Keep startup snappy: rely on normal incremental build.
 & dotnet build $ProjectPath -v q
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: DesktopRuntime build failed." -ForegroundColor Red
+    Write-Host "`nERROR: startup project build failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
 try {
-    & dotnet run --project $ProjectPath --no-build -- $args
+    & dotnet run --project $ProjectPath --no-build -- $ForwardArgs
 }
 finally {
     if ($DebugMode) {
