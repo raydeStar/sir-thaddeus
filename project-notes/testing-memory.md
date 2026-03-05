@@ -26,7 +26,7 @@ dotnet run --project apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus
 Or build and run the executable:
 ```powershell
 dotnet build apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj
-.\apps\desktop-runtime\SirThaddeus.DesktopRuntime\bin\Debug\net8.0-windows\SirThaddeus.DesktopRuntime.exe
+.\apps\desktop-runtime\SirThaddeus.DesktopRuntime\bin\Debug\net10.0-windows\SirThaddeus.DesktopRuntime.exe
 ```
 
 ### 3. Test Memory Retrieval
@@ -170,7 +170,7 @@ $env:ST_MEMORY_DB_PATH = "$env:LOCALAPPDATA\SirThaddeus\memory.db"
 $env:ST_LLM_BASEURL = "http://localhost:1234"
 
 # Run MCP server (it will read from stdin/stdout)
-.\apps\mcp-server\SirThaddeus.McpServer\bin\Debug\net8.0-windows10.0.19041.0\SirThaddeus.McpServer.exe
+.\apps\mcp-server\SirThaddeus.McpServer\bin\Debug\net10.0-windows10.0.19041.0\SirThaddeus.McpServer.exe
 ```
 
 Then send JSON-RPC requests via stdin (or use an MCP client).

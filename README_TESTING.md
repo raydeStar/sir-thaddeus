@@ -54,7 +54,7 @@ Use the harness in tiers so PR checks stay fast and cheap:
 1. Tier 1 (every PR, fastest live check):
 
 ```powershell
-dotnet tools/SirThaddeus.Harness/bin/Debug/net9.0/SirThaddeus.Harness.dll smoke --mode live --max-iters 1 --judge none
+dotnet tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll smoke --mode live --max-iters 1 --judge none
 ```
 
 or use the wrapper that downgrades known external provider outages to `INCONCLUSIVE`:
@@ -66,7 +66,7 @@ powershell -ExecutionPolicy Bypass -File ./dev/harness-pr-fast.ps1
 2. Tier 2 (targeted feature checks):
 
 ```powershell
-dotnet tools/SirThaddeus.Harness/bin/Debug/net9.0/SirThaddeus.Harness.dll run --suite stargate --mode live --max-iters 1 --judge none
+dotnet tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll run --suite stargate --mode live --max-iters 1 --judge none
 ```
 
 3. Tier 3 (nightly / pre-release, expensive):

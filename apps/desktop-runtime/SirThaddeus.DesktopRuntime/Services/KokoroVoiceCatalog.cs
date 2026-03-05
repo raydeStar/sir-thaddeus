@@ -144,7 +144,7 @@ public static class KokoroVoiceCatalog
         yield return Path.Combine(baseDir, "bin", "voice", "voices");
 
         // Dev build layout:
-        //   AppContext.BaseDirectory = apps/desktop-runtime/.../bin/Debug/net8.0-windows/
+        //   AppContext.BaseDirectory = apps/desktop-runtime/.../bin/Debug/net10.0-windows/
         //   5 parent jumps → apps/
         //   Then sibling into voice-backend/voices/
         var devRoot = Path.GetFullPath(Path.Combine(

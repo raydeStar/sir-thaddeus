@@ -36,7 +36,7 @@ public static class RuntimePathResolver
                 return newest;
         }
 
-        return Path.Combine(mcpBinDebug, "net8.0", names[0]);
+        return Path.Combine(mcpBinDebug, "net10.0", names[0]);
     }
 
     private static string ResolveConfiguredPath(string configuredPath, string baseDirectory)

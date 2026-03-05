@@ -127,7 +127,7 @@ public static class PiperVoiceCatalog
         // Packaged release layout: bin/voice/piper-voices (from release-package.ps1)
         yield return Path.Combine(baseDir, "bin", "voice", "piper-voices");
 
-        // Dev build layout: bin\Debug\net8.0-windows\win-x64 → up 6 to apps\
+        // Dev build layout: bin\Debug\net10.0-windows\win-x64 → up 6 to apps\
         var devRoot = Path.GetFullPath(Path.Combine(
             baseDir, "..", "..", "..", "..", "..", "..",
             "voice-backend", "piper-voices"));

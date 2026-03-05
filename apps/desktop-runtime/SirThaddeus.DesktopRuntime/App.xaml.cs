@@ -2403,7 +2403,7 @@ public partial class App : System.Windows.Application
     /// Resolves the MCP server executable path. "auto" searches the build
     /// output directory tree so we don't break when the TFM changes.
     ///
-    /// Path geometry from AppContext.BaseDirectory (bin/Debug/net8.0-windows):
+    /// Path geometry from AppContext.BaseDirectory (bin/Debug/net10.0-windows):
     ///   .. (×5)  → apps/
     ///   .. (×6)  → repo root
     ///

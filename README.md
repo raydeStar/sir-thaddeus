@@ -180,7 +180,7 @@ dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tool
 ```
 
 MCP now has a split tool model:
-- Core tools run cross-platform (`net8.0`)
+- Core tools run cross-platform (`net10.0`)
 - Windows-only tools (screen capture / OCR) load only on Windows
 
 ---

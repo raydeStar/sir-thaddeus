@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 
 param(
     [ValidateSet("Debug", "Release")]
@@ -163,14 +163,14 @@ $projects = @(
 
 $projectFrameworkOverrides = @{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = @{
-        default = "net8.0"
-        windows = "net8.0-windows10.0.19041.0"
+        default = "net10.0"
+        windows = "net10.0-windows10.0.19041.0"
     }
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
-        default = "net8.0"
+        default = "net10.0"
     }
     "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj" = @{
-        windows = "net8.0-windows"
+        windows = "net10.0-windows"
     }
 }
 

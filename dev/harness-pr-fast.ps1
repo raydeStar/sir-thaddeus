@@ -14,7 +14,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
 $HarnessProject = Join-Path $RepoRoot "tools/SirThaddeus.Harness/SirThaddeus.Harness.csproj"
-$HarnessDll = Join-Path $RepoRoot "tools/SirThaddeus.Harness/bin/Debug/net9.0/SirThaddeus.Harness.dll"
+$HarnessDll = Join-Path $RepoRoot "tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll"
 
 function Write-Info([string]$Text) {
     Write-Host "[harness-pr-fast] $Text"

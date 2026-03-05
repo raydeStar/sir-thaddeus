@@ -100,7 +100,7 @@ public sealed partial class VoiceHostProcessManager
 
             return Path.GetFullPath(Path.Combine(
                 voiceHostBinDebug,
-                "net8.0",
+                "net10.0",
                 exeName));
         }
 }
