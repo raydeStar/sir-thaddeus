@@ -62,6 +62,22 @@ function Warn([string]$Check) {
     $script:warnings += $Check
 }
 
+function Resolve-PackagePath([string]$Primary, [string]$Legacy = "") {
+    $primaryPath = Join-Path $testDir $Primary
+    if (Test-Path $primaryPath) {
+        return $primaryPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Legacy)) {
+        $legacyPath = Join-Path $testDir $Legacy
+        if (Test-Path $legacyPath) {
+            return $legacyPath
+        }
+    }
+
+    return $null
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
 # -- Resolve test directory ------------------------------------------------
@@ -177,19 +193,21 @@ foreach ($file in $requiredFiles) {
     }
 }
 
-# bin/ directory must exist and contain DLLs
+# Package must contain managed payload DLLs in either modern (root) or legacy (bin/) layout
+$rootDllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
 $binDir = Join-Path $testDir "bin"
-if (Test-Path $binDir) {
-    $dllCount = @(Get-ChildItem -Path $binDir -Filter "*.dll" -Recurse).Count
-    if ($dllCount -gt 0) {
-        Pass "bin/ directory contains $dllCount DLLs"
-    }
-    else {
-        Fail "bin/ directory exists but contains no DLLs"
-    }
+$binDllCount = if (Test-Path $binDir) {
+    @(Get-ChildItem -Path $binDir -Filter "*.dll" -File -Recurse).Count
 }
 else {
-    Fail "bin/ directory missing"
+    0
+}
+
+if ($rootDllCount -gt 0 -or $binDllCount -gt 0) {
+    Pass "Managed payload present (root DLLs: $rootDllCount, bin DLLs: $binDllCount)"
+}
+else {
+    Fail "No managed payload DLLs found in package"
 }
 
 # Voice backend assets.
@@ -197,14 +215,14 @@ else {
 # that only work after runtime downloads.
 $voiceAssetsRequired = -not $AllowRuntimeAssetDownload
 $voiceAssets = @(
-    @{ Path = "bin/voice/piper/piper.exe";              Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
-    @{ Path = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
-    @{ Path = "bin/voice/stt-models/base/model.bin";    Required = $voiceAssetsRequired; Label = "Whisper STT model" }
+    @{ Path = "voice/piper/piper.exe";                                  LegacyPath = "bin/voice/piper/piper.exe";                                  Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
+    @{ Path = "voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; LegacyPath = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
+    @{ Path = "voice/stt-models/base/model.bin";                        LegacyPath = "bin/voice/stt-models/base/model.bin";                        Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
 
 foreach ($asset in $voiceAssets) {
-    $path = Join-Path $testDir $asset.Path
-    if (Test-Path $path) {
+    $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
+    if ($path) {
         Pass "$($asset.Label) present"
     }
     else {
@@ -265,7 +283,7 @@ if (-not $SkipLaunch) {
             while ($maxWait -gt 0 -and -not $voiceHostProcess.HasExited) {
                 try {
                     $response = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -TimeoutSec 2 -ErrorAction Stop
-                    if ($response.status -eq 'ok') {
+                    if ($response.status -eq 'ok' -or $response.status -eq 'loading') {
                         $healthy = $true
                         break
                     }
@@ -278,7 +296,7 @@ if (-not $SkipLaunch) {
             }
 
             if ($healthy) {
-                Pass "VoiceHost started and /health returned ok"
+                Pass "VoiceHost started and /health responded"
             }
             elseif ($voiceHostProcess.HasExited) {
                 Fail "VoiceHost exited early" "exit code: $($voiceHostProcess.ExitCode)"

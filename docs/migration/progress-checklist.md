@@ -21,11 +21,13 @@ Date: 2026-03-05
 
 ## Validation
 
-- [ ] Smoke script passes
-- [ ] 5 regression validations pass
+- [x] Smoke script passes
+- [x] 5 regression validations pass
 - [x] `dotnet build SirThaddeus.sln -m:1 -v m` passes
 - [x] `dotnet test tests/SirThaddeus.Tests/SirThaddeus.Tests.csproj -m:1 -v m` passes
 
 ## Notes
 
 - Legacy desktop UI project has been removed from solution default build in this pass; source still exists on disk for controlled retirement.
+- Smoke validation now passes against a freshly built Avalonia package (`SirThaddeus.UI.Avalonia.exe`) with VoiceHost `/health` responsiveness and UI launch gate.
+- Regression gate (5 tests): `CasualChat_NoToolCalls`, `WebLookup_CallsToolThenSummarizes`, `Executor_GrantsPermission_ExecutesTool`, `Executor_DeniesPermission_ReturnsFailure`, `SelfMemoryQuestion_ReturnsStoredFactsSummary`.

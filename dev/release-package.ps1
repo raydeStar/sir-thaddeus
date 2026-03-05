@@ -244,8 +244,6 @@ if (Test-Path $stageDir) {
     Remove-Item -Path $stageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
-$binDir = Join-Path $stageDir "bin"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
@@ -254,26 +252,18 @@ foreach ($project in $projects) {
     Write-Host "  Staging $projectName files..."
     @(Get-ChildItem -Path $projectPublishDir -Recurse) | ForEach-Object {
         $relativePath = $_.FullName.Substring($projectPublishDir.Length).TrimStart('\')
-        $isExe = ($_.Extension -eq ".exe" -and $relativePath -notmatch '\\')
+        $dest = Join-Path $stageDir $relativePath
 
-        if ($isExe) {
-            # Top-level EXEs land at the ZIP root
-            $dest = Join-Path $stageDir $_.Name
-        }
-        elseif ($_.PSIsContainer) {
-            # Recreate subdirectories under bin/
-            $dest = Join-Path $binDir $relativePath
+        if ($_.PSIsContainer) {
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             return
         }
-        else {
-            # Everything else (DLLs, assets, voice/) goes into bin/
-            $dest = Join-Path $binDir $relativePath
-            $destParent = Split-Path $dest -Parent
-            if (-not (Test-Path $destParent)) {
-                New-Item -ItemType Directory -Path $destParent -Force | Out-Null
-            }
+
+        $destParent = Split-Path $dest -Parent
+        if (-not (Test-Path $destParent)) {
+            New-Item -ItemType Directory -Path $destParent -Force | Out-Null
         }
+
         Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction Stop
     }
 }
@@ -283,15 +273,15 @@ foreach ($project in $projects) {
 # They land under bin/voice/ alongside the Python scripts already
 # staged by the VoiceHost dotnet publish output.
 
-$voiceStageBinDir = Join-Path $binDir "voice"
-if (-not (Test-Path $voiceStageBinDir)) {
-    New-Item -ItemType Directory -Force -Path $voiceStageBinDir | Out-Null
+$voiceStageDir = Join-Path $stageDir "voice"
+if (-not (Test-Path $voiceStageDir)) {
+    New-Item -ItemType Directory -Force -Path $voiceStageDir | Out-Null
 }
 
 # Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
 $piperSource = Join-Path $voiceBackendDir "piper"
 if (Test-Path $piperSource) {
-    $piperDest = Join-Path $voiceStageBinDir "piper"
+    $piperDest = Join-Path $voiceStageDir "piper"
     New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
     Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
     $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
@@ -308,7 +298,7 @@ else {
 # Piper voice models (default: en_US-john-medium)
 $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
 if (Test-Path $piperVoicesSource) {
-    $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
+    $piperVoicesDest = Join-Path $voiceStageDir "piper-voices"
     New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
     Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
     $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
@@ -325,7 +315,7 @@ else {
 # uv.exe — Python environment manager
 $uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
 if (Test-Path $uvSource) {
-    $uvDest = Join-Path $voiceStageBinDir "bin"
+    $uvDest = Join-Path $voiceStageDir "bin"
     New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
     Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
     Write-Host "  Staged: bin/uv.exe"
@@ -341,7 +331,7 @@ else {
 # Bundled Python 3.11 runtime
 $runtimeSource = Join-Path $voiceBackendDir "runtime/python"
 if (Test-Path $runtimeSource) {
-    $runtimeDest = Join-Path $voiceStageBinDir "runtime/python"
+    $runtimeDest = Join-Path $voiceStageDir "runtime/python"
     New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
     Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
     $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
@@ -358,7 +348,7 @@ else {
 # Python wheel dependencies (offline pip install)
 $wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
 if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
-    $wheelsDest = Join-Path $voiceStageBinDir "deps/wheels"
+    $wheelsDest = Join-Path $voiceStageDir "deps/wheels"
     New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
     Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
     $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
@@ -376,7 +366,7 @@ else {
 # Faster-Whisper base STT model
 $sttSource = Join-Path $voiceBackendDir "stt-models/base"
 if (Test-Path $sttSource) {
-    $sttDest = Join-Path $voiceStageBinDir "stt-models/base"
+    $sttDest = Join-Path $voiceStageDir "stt-models/base"
     New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
     Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
     Write-Host "  Staged: stt-models/base"
