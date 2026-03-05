@@ -1,6 +1,11 @@
 # Avalonia Parity Checklist (Phase 1)
 
 Date: 2026-03-05
+Last updated: 2026-03-05 (Passes 1-4 in progress)
+
+Status legend:
+- `[x]` implemented and validated in build/tests
+- `[ ]` pending
 
 ## Routing + orchestration parity
 
@@ -11,14 +16,14 @@ Date: 2026-03-05
 
 ## Permission workflow parity
 
-- [ ] Tool call requiring permission emits `tool.requested`.
-- [ ] Approve path emits `tool.approved` and run continues.
-- [ ] Deny path emits `tool.denied` and run degrades gracefully.
+- [x] Tool call requiring permission emits `tool.requested`.
+- [x] Approve path emits `tool.approved` and run continues.
+- [x] Deny path emits `tool.denied` and run degrades gracefully.
 
 ## STOP/cancel parity
 
-- [ ] Active run can be cancelled via STOP command.
-- [ ] Cancellation terminates tool loop quickly and emits `run.failed` with cancellation marker.
+- [x] Active run can be cancelled via STOP command.
+- [x] Cancellation terminates tool loop quickly and emits `run.failed` with cancellation marker.
 - [ ] No further token deltas are emitted after cancellation acknowledgement.
 
 ## Audit/log parity
@@ -30,7 +35,7 @@ Date: 2026-03-05
 
 ## Manual smoke sequence
 
-1. Build: `dotnet build SirThaddeus.sln -m:1 -v m`
-2. Tests: `dotnet test tests/SirThaddeus.Tests/SirThaddeus.Tests.csproj -m:1 -v m`
+1. Build: `dotnet build SirThaddeus.sln -m:1 -v m` (`[x]` passing)
+2. Tests: `dotnet test tests/SirThaddeus.Tests/SirThaddeus.Tests.csproj -m:1 -v m` (`[x]` passing)
 3. Harness smoke: `dotnet tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll smoke --mode live --max-iters 1 --judge none`
 4. Package smoke (optional): `./dev/smoke-test.ps1`
