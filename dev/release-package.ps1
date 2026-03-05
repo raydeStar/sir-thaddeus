@@ -161,21 +161,68 @@ $projects = @(
     "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
 )
 
+$projectFrameworkOverrides = @{
+    "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = @{
+        default = "net8.0"
+        windows = "net8.0-windows10.0.19041.0"
+    }
+    "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
+        default = "net8.0"
+    }
+    "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj" = @{
+        windows = "net8.0-windows"
+    }
+}
+
+function Resolve-PublishFramework([string]$ProjectPath, [string]$TargetRuntime) {
+    if (-not $projectFrameworkOverrides.ContainsKey($ProjectPath)) {
+        return $null
+    }
+
+    $frameworkSet = $projectFrameworkOverrides[$ProjectPath]
+    $isWindowsRuntime = $TargetRuntime -like "win-*"
+
+    if ($isWindowsRuntime -and $frameworkSet.ContainsKey("windows")) {
+        return $frameworkSet["windows"]
+    }
+
+    if ($frameworkSet.ContainsKey("default")) {
+        return $frameworkSet["default"]
+    }
+
+    return $null
+}
+
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
+    $targetFramework = Resolve-PublishFramework -ProjectPath $project -TargetRuntime $Runtime
     
     if (Test-Path $projectPublishDir) {
         Remove-Item -Path $projectPublishDir -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $projectPublishDir | Out-Null
 
-    Write-Host "  Publishing $project to $projectPublishDir"
-    dotnet publish $project `
-        -c $Configuration `
-        -r $Runtime `
-        --self-contained $selfContainedValue `
-        -o $projectPublishDir
+    if ([string]::IsNullOrWhiteSpace($targetFramework)) {
+        Write-Host "  Publishing $project to $projectPublishDir"
+    }
+    else {
+        Write-Host "  Publishing $project to $projectPublishDir (framework: $targetFramework)"
+    }
+
+    $publishArgs = @(
+        "publish", $project,
+        "-c", $Configuration,
+        "-r", $Runtime,
+        "--self-contained", $selfContainedValue,
+        "-o", $projectPublishDir
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($targetFramework)) {
+        $publishArgs += @("-f", $targetFramework)
+    }
+
+    dotnet @publishArgs
     if ($LASTEXITCODE -ne 0) {
         Fail "dotnet publish failed for $project (exit code $LASTEXITCODE)." $LASTEXITCODE
     }
