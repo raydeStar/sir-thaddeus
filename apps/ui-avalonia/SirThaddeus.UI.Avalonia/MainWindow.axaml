@@ -36,8 +36,8 @@
           <TextBlock x:Name="PermissionSummaryText">No pending permission requests.</TextBlock>
           <TextBox x:Name="PermissionPayloadBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" />
           <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button Width="120" IsEnabled="False">Approve</Button>
-            <Button Width="120" IsEnabled="False">Deny</Button>
+            <Button x:Name="ApprovePermissionButton" Width="120" IsEnabled="False" Click="ApprovePermissionButton_Click">Approve</Button>
+            <Button x:Name="DenyPermissionButton" Width="120" IsEnabled="False" Click="DenyPermissionButton_Click">Deny</Button>
           </StackPanel>
         </Grid>
       </TabItem>

@@ -30,23 +30,36 @@ using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(setting
 var mcp = await CreateMcpClientAsync(options, settings, audit, CancellationToken.None);
 await using var mcpScope = mcp.Scope;
 ConsolePermissionGate? permissionGate = null;
+ApiPermissionGate? apiPermissionGate = null;
 
 IMcpToolClient agentMcp = mcp.Client;
 if (options.EnableTools)
 {
-    permissionGate = new ConsolePermissionGate(
-        audit,
-        settings,
-        persistGroupAsAlways: group =>
-        {
-            settings = PersistGroupPolicyAsAlways(settings, group);
-            permissionGate?.UpdateSettings(settings);
-        });
+    IToolPermissionGate toolPermissionGate;
+    if (options.ServerMode)
+    {
+        apiPermissionGate = new ApiPermissionGate(
+            settings,
+            () => RunExecutionContext.CurrentRunId);
+        toolPermissionGate = apiPermissionGate;
+    }
+    else
+    {
+        permissionGate = new ConsolePermissionGate(
+            audit,
+            settings,
+            persistGroupAsAlways: group =>
+            {
+                settings = PersistGroupPolicyAsAlways(settings, group);
+                permissionGate?.UpdateSettings(settings);
+            });
+        toolPermissionGate = permissionGate;
+    }
 
     agentMcp = new AuditedMcpToolClient(
         mcp.Client,
         audit,
-        permissionGate,
+        toolPermissionGate,
         sessionId: Guid.NewGuid().ToString("N")[..12],
         runtimeControls: () => RuntimeControlState.FromSettings(settings));
 }
@@ -67,6 +80,26 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings) => new(
 };
 
 var orchestrator = BuildOrchestrator(settings);
+
+if (options.ServerMode)
+{
+    using var serverCancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        serverCancellation.Cancel();
+    };
+
+    Console.WriteLine($"Runtime API listening on http://127.0.0.1:{options.ServerPort}");
+    await RuntimeApiServer.RunAsync(
+        options.ServerPort,
+        BuildOrchestrator,
+        () => settings,
+        audit,
+        apiPermissionGate,
+        serverCancellation.Token);
+    return;
+}
 
 PrintBanner(settings, options, handles);
 PrintHelpHint();
@@ -416,6 +449,8 @@ static void PrintHelp()
     Console.WriteLine("CLI options");
     Console.WriteLine("  --tools                 Enable MCP tool calls");
     Console.WriteLine("  --mcp-server <path>     MCP server executable path");
+    Console.WriteLine("  --server                Run HTTP runtime API host");
+    Console.WriteLine("  --port <number>         HTTP API port (default: 5378)");
     Console.WriteLine("  --help                  Show this help");
 }
 
@@ -1539,13 +1574,20 @@ static AppSettings PersistGroupPolicyAsAlways(AppSettings settings, string group
     return updated;
 }
 
-file sealed record HeadlessOptions(bool EnableTools, string? McpServerPath, bool ShowHelp)
+file sealed record HeadlessOptions(
+    bool EnableTools,
+    string? McpServerPath,
+    bool ShowHelp,
+    bool ServerMode,
+    int ServerPort)
 {
     public static HeadlessOptions Parse(string[] args)
     {
         var enableTools = false;
         string? mcpServerPath = null;
         var showHelp = false;
+        var serverMode = false;
+        var serverPort = 5378;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -1566,10 +1608,26 @@ file sealed record HeadlessOptions(bool EnableTools, string? McpServerPath, bool
             if (arg.Equals("--mcp-server", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 mcpServerPath = args[++i];
+                continue;
+            }
+
+            if (arg.Equals("--server", StringComparison.OrdinalIgnoreCase))
+            {
+                serverMode = true;
+                continue;
+            }
+
+            if (arg.Equals("--port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                if (int.TryParse(args[++i], out var parsedPort) &&
+                    parsedPort is >= 1 and <= 65535)
+                {
+                    serverPort = parsedPort;
+                }
             }
         }
 
-        return new HeadlessOptions(enableTools, mcpServerPath, showHelp);
+        return new HeadlessOptions(enableTools, mcpServerPath, showHelp, serverMode, serverPort);
     }
 }
 

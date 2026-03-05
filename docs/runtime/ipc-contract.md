@@ -83,6 +83,27 @@ Returns audit entries for UI log view.
 
 Returns runtime status and version.
 
+### `POST /api/permissions/{requestId}/decision`
+
+Submits an operator decision for a pending tool request.
+
+Request body:
+
+```json
+{
+  "approved": true
+}
+```
+
+Response:
+
+```json
+{
+  "requestId": "abc123",
+  "applied": true
+}
+```
+
 ## Event types
 
 - `token.delta`: incremental output token chunk.
@@ -97,7 +118,7 @@ Returns runtime status and version.
 
 1. Runtime emits `tool.requested` with request id, tool name, reason, arguments.
 2. UI presents approve/deny.
-3. UI posts decision to runtime (endpoint to be finalized in Pass 3).
+3. UI posts decision to runtime via `POST /api/permissions/{requestId}/decision`.
 4. Runtime emits `tool.approved` or `tool.denied`.
 
 ## Shared DTO package

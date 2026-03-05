@@ -1,4 +1,5 @@
 using SirThaddeus.Contracts;
+using System.Collections.Generic;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -49,5 +50,65 @@ internal sealed class RuntimeApiClient
     {
         var entries = await _httpClient.GetFromJsonAsync<List<AuditEntryDto>>("/api/audit", JsonOptions, cancellationToken);
         return entries ?? [];
+    }
+
+    public async Task<bool> SubmitPermissionDecisionAsync(string requestId, bool approved, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"/api/permissions/{Uri.EscapeDataString(requestId)}/decision",
+            new PermissionDecisionRequest(approved),
+            JsonOptions,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        var body = await response.Content.ReadFromJsonAsync<PermissionDecisionResponse>(JsonOptions, cancellationToken);
+        return body?.Applied == true;
+    }
+
+    public async IAsyncEnumerable<RuntimeEventEnvelope> StreamRunEventsAsync(
+        string runId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/runs/{Uri.EscapeDataString(runId)}/events");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var json = line["data:".Length..].Trim();
+            if (json.Length == 0)
+            {
+                continue;
+            }
+
+            var envelope = JsonSerializer.Deserialize<RuntimeEventEnvelope>(json, JsonOptions);
+            if (envelope is not null)
+            {
+                yield return envelope;
+            }
+        }
     }
 }
