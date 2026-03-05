@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SirThaddeus.UI.Avalonia.MainWindow"
+        Width="1100"
+        Height="760"
+        MinWidth="880"
+        MinHeight="620"
+        Title="Sir Thaddeus (Avalonia Parity Shell)">
+  <Grid RowDefinitions="Auto,*">
+    <Border Grid.Row="0" Padding="12" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <TextBlock VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold">Sir Thaddeus</TextBlock>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" DockPanel.Dock="Right">
+          <TextBlock VerticalAlignment="Center">Runtime URL</TextBlock>
+          <TextBox x:Name="RuntimeUrlBox" Width="250" Text="http://127.0.0.1:5378" />
+          <Button x:Name="ConnectButton" Click="ConnectButton_Click">Connect</Button>
+          <TextBlock x:Name="ConnectionStatusText" VerticalAlignment="Center">Disconnected</TextBlock>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <TabControl Grid.Row="1">
+      <TabItem Header="Chat">
+        <Grid Margin="12" RowDefinitions="*,Auto,Auto" RowSpacing="8">
+          <TextBox x:Name="TranscriptBox" IsReadOnly="True" AcceptsReturn="True" />
+          <TextBox x:Name="PromptBox" Grid.Row="1" Watermark="Enter prompt..." AcceptsReturn="True" Height="88" />
+          <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="SendButton" Width="120" Click="SendButton_Click">Send</Button>
+            <Button x:Name="StopButton" Width="120" Click="StopButton_Click">STOP</Button>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Permissions">
+        <Grid Margin="12" RowDefinitions="Auto,*,Auto" RowSpacing="8">
+          <TextBlock x:Name="PermissionSummaryText">No pending permission requests.</TextBlock>
+          <TextBox x:Name="PermissionPayloadBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" />
+          <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Width="120" IsEnabled="False">Approve</Button>
+            <Button Width="120" IsEnabled="False">Deny</Button>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Logs / Audit">
+        <Grid Margin="12" RowDefinitions="Auto,*" RowSpacing="8">
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="RefreshAuditButton" Click="RefreshAuditButton_Click">Refresh</Button>
+          </StackPanel>
+          <ListBox x:Name="AuditList" Grid.Row="1" />
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Settings">
+        <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+          <TextBlock FontWeight="SemiBold">Runtime Connection</TextBlock>
+          <TextBlock Grid.Row="1" x:Name="SettingsRuntimeText">Runtime: not connected</TextBlock>
+          <TextBlock Grid.Row="2" TextWrapping="Wrap">
+            Voice remains hosted by runtime/headless host. This UI only requests capabilities and controls runs.
+          </TextBlock>
+        </Grid>
+      </TabItem>
+    </TabControl>
+  </Grid>
+</Window>
