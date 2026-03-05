@@ -1,65 +1,240 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="SirThaddeus.UI.Avalonia.MainWindow"
-        Width="1100"
-        Height="760"
-        MinWidth="880"
-        MinHeight="620"
-        Title="Sir Thaddeus (Avalonia Parity Shell)">
-  <Grid RowDefinitions="Auto,*">
-    <Border Grid.Row="0" Padding="12" BorderThickness="0,0,0,1">
-      <DockPanel>
-        <TextBlock VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold">Sir Thaddeus</TextBlock>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" DockPanel.Dock="Right">
-          <TextBlock VerticalAlignment="Center">Runtime URL</TextBlock>
-          <TextBox x:Name="RuntimeUrlBox" Width="250" Text="http://127.0.0.1:5378" />
-          <Button x:Name="ConnectButton" Click="ConnectButton_Click">Connect</Button>
-          <TextBlock x:Name="ConnectionStatusText" VerticalAlignment="Center">Disconnected</TextBlock>
+        Width="1020"
+        Height="720"
+        MinWidth="800"
+        MinHeight="560"
+        Title="Sir Thaddeus"
+        Background="{StaticResource BaseBrush}"
+        Foreground="{StaticResource TextBrush}"
+        KeyDown="Window_KeyDown">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- ═══════════════════════════════════════════════════════════
+         HEADER BAR
+         ═══════════════════════════════════════════════════════ -->
+    <Border Grid.Row="0"
+            Background="{StaticResource MantleBrush}"
+            Padding="16,10"
+            BorderBrush="{StaticResource Surface0Brush}"
+            BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+
+        <!-- ── Left: Status ── -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
+          <TextBlock Text="Sir Thaddeus"
+                     FontSize="15" FontWeight="SemiBold"
+                     Foreground="{StaticResource TextBrush}"
+                     VerticalAlignment="Center"/>
+          <TextBlock x:Name="ConnectionStatusText" Text="Disconnected"
+                     FontSize="13" FontWeight="Normal"
+                     Foreground="{StaticResource Overlay0Brush}"
+                     VerticalAlignment="Center"/>
         </StackPanel>
-      </DockPanel>
+
+        <!-- ── Center: View Tabs ── -->
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="0">
+          <ToggleButton x:Name="ChatTabButton"    Content="Chat"        IsChecked="True"  Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="PermTabButton"    Content="Permissions" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="AuditTabButton"   Content="Logs / Audit" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="SettingsTabButton" Content="Settings"   IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+        </StackPanel>
+
+        <!-- ── Right: Actions ── -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+          <Button x:Name="ConnectButton" Content="Connect" Classes="headerBtn" Click="ConnectButton_Click"/>
+          <Button x:Name="StopAllButton" Content="⏹ STOP ALL" Classes="cancelBtn" Click="StopButton_Click"/>
+        </StackPanel>
+      </Grid>
     </Border>
 
-    <TabControl Grid.Row="1">
-      <TabItem Header="Chat">
-        <Grid Margin="12" RowDefinitions="*,Auto,Auto" RowSpacing="8">
-          <TextBox x:Name="TranscriptBox" IsReadOnly="True" AcceptsReturn="True" />
-          <TextBox x:Name="PromptBox" Grid.Row="1" Watermark="Enter prompt..." AcceptsReturn="True" Height="88" />
-          <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button x:Name="SendButton" Width="120" Click="SendButton_Click">Send</Button>
-            <Button x:Name="StopButton" Width="120" Click="StopButton_Click">STOP</Button>
-          </StackPanel>
-        </Grid>
-      </TabItem>
+    <!-- ═══════════════════════════════════════════════════════════
+         CONTENT AREA — Switched views
+         ═══════════════════════════════════════════════════════ -->
 
-      <TabItem Header="Permissions">
-        <Grid Margin="12" RowDefinitions="Auto,*,Auto" RowSpacing="8">
-          <TextBlock x:Name="PermissionSummaryText">No pending permission requests.</TextBlock>
-          <TextBox x:Name="PermissionPayloadBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" />
-          <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button x:Name="ApprovePermissionButton" Width="120" IsEnabled="False" Click="ApprovePermissionButton_Click">Approve</Button>
-            <Button x:Name="DenyPermissionButton" Width="120" IsEnabled="False" Click="DenyPermissionButton_Click">Deny</Button>
-          </StackPanel>
-        </Grid>
-      </TabItem>
+    <!-- ── CHAT VIEW ──────────────────────────────────────────── -->
+    <Grid Grid.Row="1" x:Name="ChatView">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
 
-      <TabItem Header="Logs / Audit">
-        <Grid Margin="12" RowDefinitions="Auto,*" RowSpacing="8">
+      <ScrollViewer x:Name="ChatScroller"
+                    Background="{StaticResource BaseBrush}"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+        <Grid>
+          <!-- Empty State Hero -->
+          <StackPanel x:Name="EmptyHero"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      Margin="0,60,0,0">
+            <TextBlock Text="Your AI. Your Rules."
+                       FontSize="28"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource TextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="A local-first copilot that only acts with explicit permission."
+                       FontSize="14"
+                       Foreground="{StaticResource Subtext0Brush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,24"/>
+            <TextBlock Text="Hold to talk (Ctrl+Alt+M)"
+                       FontSize="13"
+                       Foreground="{StaticResource Overlay0Brush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,4"/>
+            <TextBlock Text="Command Palette (Ctrl+Space)"
+                       FontSize="13"
+                       Foreground="{StaticResource Overlay0Brush}"
+                       HorizontalAlignment="Center"/>
+          </StackPanel>
+
+          <!-- Transcript -->
+          <TextBox x:Name="TranscriptBox"
+                   Classes="transcript"
+                   AcceptsReturn="True"
+                   VerticalAlignment="Stretch"/>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+
+    <!-- ── PERMISSIONS VIEW ───────────────────────────────────── -->
+    <Grid Grid.Row="1" x:Name="PermissionsView" IsVisible="False"
+          Background="{StaticResource BaseBrush}">
+      <Grid Margin="24" RowDefinitions="Auto,*,Auto" RowSpacing="12">
+        <TextBlock x:Name="PermissionSummaryText"
+                   Text="No pending permission requests."
+                   FontSize="15" FontWeight="SemiBold"
+                   Foreground="{StaticResource TextBrush}"/>
+
+        <Border Grid.Row="1"
+                Background="{StaticResource MantleBrush}"
+                CornerRadius="{StaticResource RadiusMd}"
+                Padding="16,12"
+                BorderBrush="{StaticResource Surface0Brush}"
+                BorderThickness="1">
+          <TextBox x:Name="PermissionPayloadBox"
+                   IsReadOnly="True" AcceptsReturn="True"
+                   Background="Transparent"
+                   Foreground="{StaticResource Subtext1Brush}"
+                   BorderThickness="0"
+                   FontSize="12"
+                   TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+          <Button x:Name="ApprovePermissionButton" Content="Approve"
+                  Classes="approveBtn" IsEnabled="False"
+                  Click="ApprovePermissionButton_Click"/>
+          <Button x:Name="DenyPermissionButton" Content="Deny"
+                  Classes="denyBtn" IsEnabled="False"
+                  Click="DenyPermissionButton_Click"/>
+        </StackPanel>
+      </Grid>
+    </Grid>
+
+    <!-- ── LOGS / AUDIT VIEW ──────────────────────────────────── -->
+    <Grid Grid.Row="1" x:Name="AuditView" IsVisible="False"
+          Background="{StaticResource BaseBrush}">
+      <Grid RowDefinitions="Auto,*" RowSpacing="0">
+        <Border Background="{StaticResource MantleBrush}"
+                Padding="12,8"
+                BorderBrush="{StaticResource Surface0Brush}"
+                BorderThickness="0,0,0,1">
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="RefreshAuditButton" Click="RefreshAuditButton_Click">Refresh</Button>
+            <Button x:Name="RefreshAuditButton" Content="Refresh"
+                    Classes="actionBtn" Click="RefreshAuditButton_Click"/>
           </StackPanel>
-          <ListBox x:Name="AuditList" Grid.Row="1" />
-        </Grid>
-      </TabItem>
+        </Border>
+        <ListBox x:Name="AuditList" Grid.Row="1"
+                 Background="{StaticResource BaseBrush}"
+                 Foreground="{StaticResource TextBrush}"/>
+      </Grid>
+    </Grid>
 
-      <TabItem Header="Settings">
-        <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
-          <TextBlock FontWeight="SemiBold">Runtime Connection</TextBlock>
-          <TextBlock Grid.Row="1" x:Name="SettingsRuntimeText">Runtime: not connected</TextBlock>
-          <TextBlock Grid.Row="2" TextWrapping="Wrap">
-            Voice remains hosted by runtime/headless host. This UI only requests capabilities and controls runs.
+    <!-- ── SETTINGS VIEW ──────────────────────────────────────── -->
+    <Grid Grid.Row="1" x:Name="SettingsView" IsVisible="False"
+          Background="{StaticResource BaseBrush}">
+      <ScrollViewer VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,24,32,24" MaxWidth="560">
+
+          <!-- Runtime Connection -->
+          <TextBlock Text="RUNTIME CONNECTION"
+                     FontSize="11" FontWeight="Bold"
+                     Foreground="{StaticResource BlueBrush}"
+                     Margin="0,0,0,8"/>
+          <TextBlock Text="Configure the connection to the Sir Thaddeus runtime backend."
+                     FontSize="12"
+                     Foreground="{StaticResource Overlay0Brush}"
+                     TextWrapping="Wrap"
+                     Margin="0,0,0,12"/>
+
+          <Grid Margin="0,0,0,10" ColumnDefinitions="100,*">
+            <TextBlock Text="URL"
+                       FontSize="12"
+                       Foreground="{StaticResource Subtext0Brush}"
+                       VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="RuntimeUrlBox"
+                     Text="http://127.0.0.1:5378"
+                     Classes="chatInput"
+                     FontSize="12" Padding="8,6"/>
+          </Grid>
+
+          <TextBlock Grid.Row="1" x:Name="SettingsRuntimeText"
+                     Text="Runtime: not connected"
+                     FontSize="13"
+                     Foreground="{StaticResource Subtext0Brush}"
+                     Margin="0,0,0,16"/>
+
+          <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,0,0,20"/>
+
+          <TextBlock Text="ABOUT"
+                     FontSize="11" FontWeight="Bold"
+                     Foreground="{StaticResource MauveBrush}"
+                     Margin="0,0,0,8"/>
+          <TextBlock TextWrapping="Wrap"
+                     FontSize="12"
+                     Foreground="{StaticResource Overlay0Brush}">
+            Voice remains hosted by runtime/headless host.
+            This UI only requests capabilities and controls runs.
           </TextBlock>
-        </Grid>
-      </TabItem>
-    </TabControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         INPUT BAR (Bottom — visible only during Chat)
+         ═══════════════════════════════════════════════════════ -->
+    <Border Grid.Row="2" x:Name="InputBar"
+            Background="{StaticResource MantleBrush}"
+            Padding="16,10"
+            BorderBrush="{StaticResource Surface0Brush}"
+            BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBox x:Name="PromptBox"
+                 Watermark="Type a message...  (Shift+Enter for new line)"
+                 AcceptsReturn="True"
+                 MinHeight="38"
+                 MaxHeight="120"
+                 TextWrapping="Wrap"
+                 Classes="chatInput"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                    VerticalAlignment="Bottom" Spacing="8" Margin="10,0,0,0">
+          <Button x:Name="SendButton" Content="Send ↵"
+                  Classes="sendBtn" Click="SendButton_Click"/>
+          <Button x:Name="StopButton" Content="STOP"
+                  Classes="cancelBtn" Click="StopButton_Click"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
   </Grid>
 </Window>

@@ -1,5 +1,8 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using SirThaddeus.Contracts;
 using System.Text.Json;
@@ -16,9 +19,20 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _eventStreamCancellation;
     private readonly StringBuilder _transcript = new();
 
+    // Tab references for view switching
+    private readonly ToggleButton[] _viewTabs;
+    private readonly Control[] _viewPanels;
+
     public MainWindow()
     {
         InitializeComponent();
+
+        // Populated after InitializeComponent so x:Name fields are resolved
+        _viewTabs = [ChatTabButton, PermTabButton, AuditTabButton, SettingsTabButton];
+        _viewPanels = [ChatView, PermissionsView, AuditView, SettingsView];
+
+        // Show the empty hero, hide transcript initially
+        TranscriptBox.IsVisible = false;
     }
 
     protected override void OnClosed(EventArgs e)
@@ -28,6 +42,45 @@ public partial class MainWindow : Window
         _eventStreamCancellation = null;
         base.OnClosed(e);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  TAB SWITCHING
+    // ═══════════════════════════════════════════════════════════════
+
+    private void ViewTab_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton clicked)
+            return;
+
+        // Radio-style: uncheck all others, check the clicked one
+        foreach (var tab in _viewTabs)
+            tab.IsChecked = ReferenceEquals(tab, clicked);
+
+        // Show/hide the corresponding panel
+        for (int i = 0; i < _viewTabs.Length; i++)
+            _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
+
+        // Show/hide input bar — only visible for Chat
+        InputBar.IsVisible = ChatTabButton.IsChecked == true;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  KEYBOARD SHORTCUTS
+    // ═══════════════════════════════════════════════════════════════
+
+    private void Window_KeyDown(object? sender, KeyEventArgs e)
+    {
+        // Enter sends (unless Shift is held for newline)
+        if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift) && PromptBox.IsFocused)
+        {
+            e.Handled = true;
+            SendButton_Click(sender, e);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CONNECTION
+    // ═══════════════════════════════════════════════════════════════
 
     private async void ConnectButton_Click(object? sender, RoutedEventArgs e)
     {
@@ -40,19 +93,32 @@ public partial class MainWindow : Window
                 return;
             }
 
+            ConnectionStatusText.Text = "Connecting…";
+            ConnectionStatusText.Foreground = Brushes.White;
+
             var httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
             _runtimeApiClient = new RuntimeApiClient(httpClient);
             var health = await _runtimeApiClient.GetHealthAsync(CancellationToken.None);
-            ConnectionStatusText.Text = health is null
-                ? "Connected (no health payload)"
-                : $"Connected: {health.Version}";
-            SettingsRuntimeText.Text = $"Runtime: {baseUrl}";
+
+            ConnectionStatusText.Text = "Connected";
+            ConnectionStatusText.Foreground =
+                (IBrush?)this.FindResource("GreenBrush")
+                ?? Brushes.LightGreen;
+
+            SettingsRuntimeText.Text = $"Runtime: {baseUrl} ({health?.Version ?? "?"})";
         }
         catch (Exception ex)
         {
-            ConnectionStatusText.Text = $"Connect failed: {ex.Message}";
+            ConnectionStatusText.Text = $"Failed: {ex.Message}";
+            ConnectionStatusText.Foreground =
+                (IBrush?)this.FindResource("RedBrush")
+                ?? Brushes.Salmon;
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CHAT — SEND / STOP
+    // ═══════════════════════════════════════════════════════════════
 
     private async void SendButton_Click(object? sender, RoutedEventArgs e)
     {
@@ -104,6 +170,10 @@ public partial class MainWindow : Window
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  AUDIT
+    // ═══════════════════════════════════════════════════════════════
+
     private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_runtimeApiClient is null)
@@ -122,6 +192,10 @@ public partial class MainWindow : Window
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  PERMISSIONS
+    // ═══════════════════════════════════════════════════════════════
+
     private async void ApprovePermissionButton_Click(object? sender, RoutedEventArgs e)
     {
         await SubmitPermissionDecisionAsync(true);
@@ -132,8 +206,19 @@ public partial class MainWindow : Window
         await SubmitPermissionDecisionAsync(false);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  INTERNALS
+    // ═══════════════════════════════════════════════════════════════
+
     private void AppendTranscript(string line)
     {
+        // Once we have content, show the transcript and hide the hero
+        if (EmptyHero.IsVisible)
+        {
+            EmptyHero.IsVisible = false;
+            TranscriptBox.IsVisible = true;
+        }
+
         _transcript.AppendLine(line);
         TranscriptBox.Text = _transcript.ToString();
     }
@@ -200,6 +285,13 @@ public partial class MainWindow : Window
                     ApprovePermissionButton.IsEnabled = true;
                     DenyPermissionButton.IsEnabled = true;
                     AppendTranscript($"[system] Permission requested: {request.ToolName}");
+
+                    // Auto-switch to Permissions tab
+                    foreach (var tab in _viewTabs)
+                        tab.IsChecked = ReferenceEquals(tab, PermTabButton);
+                    for (int i = 0; i < _viewTabs.Length; i++)
+                        _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
+                    InputBar.IsVisible = false;
                 }
                 break;
             case RuntimeEventTypes.ToolApproved:
@@ -236,6 +328,13 @@ public partial class MainWindow : Window
             AppendTranscript(applied
                 ? $"[system] Permission decision submitted ({(approved ? "approve" : "deny")})."
                 : "[system] Permission decision rejected by runtime.");
+
+            // Switch back to Chat tab after permission decision
+            foreach (var tab in _viewTabs)
+                tab.IsChecked = ReferenceEquals(tab, ChatTabButton);
+            for (int i = 0; i < _viewTabs.Length; i++)
+                _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
+            InputBar.IsVisible = true;
         }
         catch (Exception ex)
         {

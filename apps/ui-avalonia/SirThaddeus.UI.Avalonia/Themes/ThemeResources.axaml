@@ -1,0 +1,54 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         SIR THADDEUS — Avalonia Design Tokens
+         Calm, minimal, trust-forward desktop experience
+         ═══════════════════════════════════════════════════════════ -->
+
+    <!-- ── Core Palette (True Dark, High-Contrast) ──────────────── -->
+    <SolidColorBrush x:Key="CrustBrush"    Color="#0D1117"/>
+    <SolidColorBrush x:Key="MantleBrush"   Color="#161B22"/>
+    <SolidColorBrush x:Key="BaseBrush"     Color="#21262D"/>
+    <SolidColorBrush x:Key="Surface0Brush" Color="#30363D"/>
+    <SolidColorBrush x:Key="Surface1Brush" Color="#39414A"/>
+    <SolidColorBrush x:Key="Surface2Brush" Color="#424A53"/>
+    <SolidColorBrush x:Key="Overlay0Brush" Color="#6E7681"/>
+    <SolidColorBrush x:Key="Overlay1Brush" Color="#8B949E"/>
+    <SolidColorBrush x:Key="Overlay2Brush" Color="#A1ABB5"/>
+    <SolidColorBrush x:Key="Subtext0Brush" Color="#8B949E"/>
+    <SolidColorBrush x:Key="Subtext1Brush" Color="#C9D1D9"/>
+    <SolidColorBrush x:Key="TextBrush"     Color="#E6EDF3"/>
+
+    <!-- ── Accent Palette ────────────────────────────────────────── -->
+    <SolidColorBrush x:Key="BlueBrush"     Color="#0A84FF"/>
+    <SolidColorBrush x:Key="SapphireBrush" Color="#409CFF"/>
+    <SolidColorBrush x:Key="GreenBrush"    Color="#3EA876"/>
+    <SolidColorBrush x:Key="RedBrush"      Color="#D94E68"/>
+    <SolidColorBrush x:Key="RedLightBrush" Color="#E56A82"/>
+    <SolidColorBrush x:Key="YellowBrush"   Color="#C69E58"/>
+    <SolidColorBrush x:Key="MauveBrush"    Color="#9269DF"/>
+    <SolidColorBrush x:Key="PeachBrush"    Color="#D88A60"/>
+    <SolidColorBrush x:Key="TealBrush"     Color="#3B9CA6"/>
+
+    <!-- ── Semantic Surfaces ─────────────────────────────────────── -->
+    <SolidColorBrush x:Key="CardBgBrush"       Color="#161B22"/>
+    <SolidColorBrush x:Key="HeroCardBgBrush"   Color="#21262D"/>
+    <SolidColorBrush x:Key="ErrorBgBrush"      Color="#2D1A1A"/>
+    <SolidColorBrush x:Key="BlueLightBrush"    Color="#5299FF"/>
+    <SolidColorBrush x:Key="BlueBadgeBgBrush"  Color="#0D2E5E"/>
+
+    <!-- ── Ledger Surfaces ─────────────────────────────────────── -->
+    <SolidColorBrush x:Key="LedgerEntryBgBrush"   Color="#1A1F26"/>
+    <SolidColorBrush x:Key="ToolActivityBgBrush"   Color="#161B22"/>
+    <SolidColorBrush x:Key="SpineCommandBrush"     Color="#409CFF"/>
+    <SolidColorBrush x:Key="SpineResultBrush"      Color="#39414A"/>
+    <SolidColorBrush x:Key="SpineToolBrush"        Color="#30363D"/>
+
+    <!-- ── Standard Corner Radii ────────────────────────────────── -->
+    <CornerRadius x:Key="RadiusSm">4</CornerRadius>
+    <CornerRadius x:Key="RadiusMd">4</CornerRadius>
+    <CornerRadius x:Key="RadiusLg">4</CornerRadius>
+    <CornerRadius x:Key="RadiusInput">8</CornerRadius>
+
+</ResourceDictionary>

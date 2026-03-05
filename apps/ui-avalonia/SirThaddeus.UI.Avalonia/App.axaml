@@ -1,7 +1,163 @@
-<Application xmlns="https://github.com/avaloniaui"
+﻿<Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="SirThaddeus.UI.Avalonia.App">
+             x:Class="SirThaddeus.UI.Avalonia.App"
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://SirThaddeus.UI.Avalonia/Themes/ThemeResources.axaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.Styles>
-    <FluentTheme />
+    <FluentTheme DensityStyle="Compact" />
+
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+         COMPONENT STYLES
+         â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+
+    <!-- â”€â”€ Chat Input (Text Box) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="TextBox.chatInput">
+        <Setter Property="Background"              Value="{StaticResource Surface0Brush}"/>
+        <Setter Property="Foreground"              Value="{StaticResource TextBrush}"/>
+        <Setter Property="CaretBrush"              Value="{StaticResource BlueBrush}"/>
+        <Setter Property="BorderBrush"             Value="{StaticResource Surface1Brush}"/>
+        <Setter Property="BorderThickness"         Value="1"/>
+        <Setter Property="CornerRadius"            Value="{StaticResource RadiusInput}"/>
+        <Setter Property="Padding"                 Value="16,12"/>
+        <Setter Property="FontSize"                Value="15"/>
+        <Setter Property="SelectionBrush"          Value="{StaticResource BlueBrush}"/>
+    </Style>
+    <Style Selector="TextBox.chatInput:pointerover">
+        <Setter Property="BorderBrush" Value="{StaticResource Surface2Brush}"/>
+    </Style>
+    <Style Selector="TextBox.chatInput:focus">
+        <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+    </Style>
+
+    <!-- â”€â”€ Primary Button (Send / Confirm) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.sendBtn">
+        <Setter Property="Background"      Value="{StaticResource BlueBrush}"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="20,8"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusLg}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="Button.sendBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource SapphireBrush}"/>
+    </Style>
+
+    <!-- â”€â”€ Danger Button (Cancel / STOP) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.cancelBtn">
+        <Setter Property="Background"      Value="{StaticResource RedBrush}"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Padding"         Value="12,6"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusLg}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="Button.cancelBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource RedLightBrush}"/>
+    </Style>
+
+    <!-- â”€â”€ Ghost / Header Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.headerBtn">
+        <Setter Property="Background"      Value="Transparent"/>
+        <Setter Property="Foreground"      Value="{StaticResource Subtext0Brush}"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="12,8"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusMd}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="Button.headerBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+    </Style>
+
+    <!-- â”€â”€ Subtle Action Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.actionBtn">
+        <Setter Property="Background"      Value="{StaticResource Surface0Brush}"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextBrush}"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="14,8"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusMd}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="Button.actionBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
+    </Style>
+
+    <!-- â”€â”€ Approve Button (Green) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.approveBtn">
+        <Setter Property="Background"      Value="{StaticResource GreenBrush}"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="16,8"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusLg}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+
+    <!-- â”€â”€ Deny Button (Red) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="Button.denyBtn">
+        <Setter Property="Background"      Value="{StaticResource RedBrush}"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="16,8"/>
+        <Setter Property="CornerRadius"    Value="{StaticResource RadiusLg}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+
+    <!-- â”€â”€ View Tab (Header toggle for Chat/Permissions/etc.) â”€â”€â”€ -->
+    <Style Selector="ToggleButton.viewTab">
+        <Setter Property="Background"      Value="Transparent"/>
+        <Setter Property="Foreground"      Value="{StaticResource Overlay0Brush}"/>
+        <Setter Property="FontSize"        Value="14"/>
+        <Setter Property="FontWeight"      Value="Medium"/>
+        <Setter Property="Padding"         Value="16,8"/>
+        <Setter Property="BorderThickness" Value="0,0,0,2"/>
+        <Setter Property="BorderBrush"     Value="Transparent"/>
+        <Setter Property="CornerRadius"    Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="ToggleButton.viewTab:checked">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.viewTab:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+    </Style>
+
+    <!-- â”€â”€ Transcript / Read-Only TextBox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="TextBox.transcript">
+        <Setter Property="Background"      Value="{StaticResource BaseBrush}"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding"         Value="16,12"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="IsReadOnly"      Value="True"/>
+        <Setter Property="TextWrapping"    Value="Wrap"/>
+        <Setter Property="CaretBrush"      Value="{StaticResource BlueBrush}"/>
+        <Setter Property="SelectionBrush"  Value="{StaticResource BlueBrush}"/>
+    </Style>
+
+    <!-- â”€â”€ ListBox for Audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <Style Selector="ListBoxItem">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Setter Property="FontSize"   Value="12"/>
+        <Setter Property="Padding"    Value="12,6"/>
+    </Style>
+
   </Application.Styles>
 </Application>
+
