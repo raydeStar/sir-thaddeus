@@ -10,7 +10,9 @@ param(
 
     [string]$Version = "",
 
-    [switch]$SkipPreflight
+    [switch]$SkipPreflight,
+
+    [switch]$FullBundle
 )
 
 Set-StrictMode -Version Latest
@@ -100,6 +102,7 @@ Write-Section "Package Settings"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  Runtime       : $Runtime"
 Write-Host "  SelfContained : $effectiveSelfContained"
+Write-Host "  Bundle profile: $(if ($FullBundle) { 'full' } else { 'lite' })"
 if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     Write-Host "  Version       : <timestamp>"
 }
@@ -118,39 +121,46 @@ if (-not $SkipPreflight) {
     }
 }
 
-$strictVoiceAssetGate = $Configuration -eq "Release"
+$includeOptionalBundledAssets = $FullBundle.IsPresent
+$strictVoiceAssetGate = ($Configuration -eq "Release") -and $includeOptionalBundledAssets
 
 # -- Verify Piper TTS assets ---------------------------------------------------
 # Assets are fetched from GitHub Releases via dev/fetch-assets.ps1 (CI)
 # or downloaded at runtime by AssetManager. Verify they are present.
 
-Write-Section "Verify Piper TTS Assets"
-
 $voiceBackendDir = Join-Path $RepoRoot "apps/voice-backend"
 $piperExe = Join-Path $voiceBackendDir "piper/piper.exe"
 $piperVoiceModel = Join-Path $voiceBackendDir "piper-voices/en_US-john-medium/en_US-john-medium.onnx"
 
-if (Test-Path $piperExe) {
-    Write-Host "  piper.exe present"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "piper.exe not found at $piperExe" `
-        -WarnMessage "piper.exe not found at $piperExe" `
-        -Required $strictVoiceAssetGate
-}
+if ($includeOptionalBundledAssets) {
+    Write-Section "Verify Piper TTS Assets"
 
-if (Test-Path $piperVoiceModel) {
-    $voiceSize = [math]::Round((Get-Item $piperVoiceModel).Length / 1MB, 1)
-    Write-Host "  Default voice model present (${voiceSize} MB)"
+    if (Test-Path $piperExe) {
+        Write-Host "  piper.exe present"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper.exe not found at $piperExe" `
+            -WarnMessage "piper.exe not found at $piperExe" `
+            -Required $strictVoiceAssetGate
+    }
+
+    if (Test-Path $piperVoiceModel) {
+        $voiceSize = [math]::Round((Get-Item $piperVoiceModel).Length / 1MB, 1)
+        Write-Host "  Default voice model present (${voiceSize} MB)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "Default voice model not found at $piperVoiceModel" `
+            -WarnMessage "Default voice model not found at $piperVoiceModel" `
+            -Required $strictVoiceAssetGate
+    }
 }
 else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "Default voice model not found at $piperVoiceModel" `
-        -WarnMessage "Default voice model not found at $piperVoiceModel" `
-        -Required $strictVoiceAssetGate
+    Write-Section "Lite Profile"
+    Write-Host "  Skipping bundled voice + Playwright payloads to minimize package size."
 }
 
 Write-Section "Publish Artifacts"
@@ -268,122 +278,148 @@ foreach ($project in $projects) {
     }
 }
 
-# -- Bundle voice-backend assets (GitHub Releases) ---------------------------
-# These are fetched from GitHub Releases via dev/fetch-assets.ps1 in CI.
-# They land under bin/voice/ alongside the Python scripts already
-# staged by the VoiceHost dotnet publish output.
+if ($includeOptionalBundledAssets) {
+    # -- Bundle voice-backend assets (GitHub Releases) ---------------------------
+    # These are fetched from GitHub Releases via dev/fetch-assets.ps1 in CI.
+    # They land under voice/ alongside the Python scripts staged by VoiceHost publish.
 
-$voiceStageDir = Join-Path $stageDir "voice"
-if (-not (Test-Path $voiceStageDir)) {
-    New-Item -ItemType Directory -Force -Path $voiceStageDir | Out-Null
-}
+    $voiceStageDir = Join-Path $stageDir "voice"
+    if (-not (Test-Path $voiceStageDir)) {
+        New-Item -ItemType Directory -Force -Path $voiceStageDir | Out-Null
+    }
 
-# Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
-$piperSource = Join-Path $voiceBackendDir "piper"
-if (Test-Path $piperSource) {
-    $piperDest = Join-Path $voiceStageDir "piper"
-    New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
-    Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
-    $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
-    Write-Host "  Staged: piper/ ($piperCount files)"
+    # Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
+    $piperSource = Join-Path $voiceBackendDir "piper"
+    if (Test-Path $piperSource) {
+        $piperDest = Join-Path $voiceStageDir "piper"
+        New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
+        Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
+        $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
+        Write-Host "  Staged: piper/ ($piperCount files)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper/ directory not found; TTS will be unavailable" `
+            -WarnMessage "piper/ directory not found; TTS will be unavailable" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Piper voice models (default: en_US-john-medium)
+    $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
+    if (Test-Path $piperVoicesSource) {
+        $piperVoicesDest = Join-Path $voiceStageDir "piper-voices"
+        New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
+        Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
+        $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
+        Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper-voices/ directory not found; no bundled voices" `
+            -WarnMessage "piper-voices/ directory not found; no bundled voices" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # uv.exe — Python environment manager
+    $uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
+    if (Test-Path $uvSource) {
+        $uvDest = Join-Path $voiceStageDir "bin"
+        New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
+        Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
+        Write-Host "  Staged: bin/uv.exe"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled uv.exe not found; offline venv creation may fail" `
+            -WarnMessage "bundled uv.exe not found; offline venv creation may fail" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Bundled Python 3.11 runtime
+    $runtimeSource = Join-Path $voiceBackendDir "runtime/python"
+    if (Test-Path $runtimeSource) {
+        $runtimeDest = Join-Path $voiceStageDir "runtime/python"
+        New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
+        Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
+        $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
+        Write-Host "  Staged: runtime/python ($runtimeCount files)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled Python runtime not found; will download at first run" `
+            -WarnMessage "bundled Python runtime not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Python wheel dependencies (offline pip install)
+    $wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
+    if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
+        $wheelsDest = Join-Path $voiceStageDir "deps/wheels"
+        New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
+        Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
+        $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
+        $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+        Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled Python wheels not found; will download at first run" `
+            -WarnMessage "bundled Python wheels not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Faster-Whisper base STT model
+    $sttSource = Join-Path $voiceBackendDir "stt-models/base"
+    if (Test-Path $sttSource) {
+        $sttDest = Join-Path $voiceStageDir "stt-models/base"
+        New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
+        Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
+        Write-Host "  Staged: stt-models/base"
+
+        $sttModelFile = Join-Path $sttDest "model.bin"
+        Assert-OrWarn `
+            -Condition (Test-Path $sttModelFile) `
+            -ErrorMessage "bundled STT model.bin missing at $sttModelFile" `
+            -WarnMessage "bundled STT model.bin missing at $sttModelFile" `
+            -Required $strictVoiceAssetGate
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled STT model not found; will download at first run" `
+            -WarnMessage "bundled STT model not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
 }
 else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "piper/ directory not found; TTS will be unavailable" `
-        -WarnMessage "piper/ directory not found; TTS will be unavailable" `
-        -Required $strictVoiceAssetGate
-}
+    # Remove optional heavyweight payloads for a smaller runtime package.
+    $litePruneTargets = @(
+        ".playwright",
+        "voice/piper",
+        "voice/piper-voices",
+        "voice/runtime",
+        "voice/deps",
+        "voice/stt-models"
+    )
 
-# Piper voice models (default: en_US-john-medium)
-$piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
-if (Test-Path $piperVoicesSource) {
-    $piperVoicesDest = Join-Path $voiceStageDir "piper-voices"
-    New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
-    Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
-    $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
-    Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "piper-voices/ directory not found; no bundled voices" `
-        -WarnMessage "piper-voices/ directory not found; no bundled voices" `
-        -Required $strictVoiceAssetGate
-}
+    foreach ($relative in $litePruneTargets) {
+        $target = Join-Path $stageDir $relative
+        if (Test-Path $target) {
+            Remove-Item -Path $target -Recurse -Force
+            Write-Host "  Pruned: $relative"
+        }
+    }
 
-# uv.exe — Python environment manager
-$uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
-if (Test-Path $uvSource) {
-    $uvDest = Join-Path $voiceStageDir "bin"
-    New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
-    Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
-    Write-Host "  Staged: bin/uv.exe"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled uv.exe not found; offline venv creation may fail" `
-        -WarnMessage "bundled uv.exe not found; offline venv creation may fail" `
-        -Required $strictVoiceAssetGate
-}
-
-# Bundled Python 3.11 runtime
-$runtimeSource = Join-Path $voiceBackendDir "runtime/python"
-if (Test-Path $runtimeSource) {
-    $runtimeDest = Join-Path $voiceStageDir "runtime/python"
-    New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
-    Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
-    $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
-    Write-Host "  Staged: runtime/python ($runtimeCount files)"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled Python runtime not found; will download at first run" `
-        -WarnMessage "bundled Python runtime not found; will download at first run" `
-        -Required $strictVoiceAssetGate
-}
-
-# Python wheel dependencies (offline pip install)
-$wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
-if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
-    $wheelsDest = Join-Path $voiceStageDir "deps/wheels"
-    New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
-    Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
-    $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
-    $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
-    Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled Python wheels not found; will download at first run" `
-        -WarnMessage "bundled Python wheels not found; will download at first run" `
-        -Required $strictVoiceAssetGate
-}
-
-# Faster-Whisper base STT model
-$sttSource = Join-Path $voiceBackendDir "stt-models/base"
-if (Test-Path $sttSource) {
-    $sttDest = Join-Path $voiceStageDir "stt-models/base"
-    New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
-    Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
-    Write-Host "  Staged: stt-models/base"
-
-    $sttModelFile = Join-Path $sttDest "model.bin"
-    Assert-OrWarn `
-        -Condition (Test-Path $sttModelFile) `
-        -ErrorMessage "bundled STT model.bin missing at $sttModelFile" `
-        -WarnMessage "bundled STT model.bin missing at $sttModelFile" `
-        -Required $strictVoiceAssetGate
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled STT model not found; will download at first run" `
-        -WarnMessage "bundled STT model not found; will download at first run" `
-        -Required $strictVoiceAssetGate
+    $uvTarget = Join-Path $stageDir "voice/bin/uv.exe"
+    if (Test-Path $uvTarget) {
+        Remove-Item -Path $uvTarget -Force
+        Write-Host "  Pruned: voice/bin/uv.exe"
+    }
 }
 
 # Stage asset manifest so the app can self-heal (download missing assets at runtime)
@@ -428,13 +464,13 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "  Removed debug symbols: $($pdbFiles.Count)"
 }
 
-Write-Section "Archive + Checksums (Full Bundle)"
+Write-Section "Archive + Checksums"
 
 foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath)) {
     if (Test-Path $p) { Remove-Item $p -Force }
 }
 
-# ── Full bundle zip (includes all vendored voice-backend assets) ─────
+# ── Package zip (lite by default; use -FullBundle for vendored assets) ─────
 $sourcePath = $stageDir
 if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
 Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force

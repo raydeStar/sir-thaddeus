@@ -21,6 +21,18 @@ dotnet test tests/SirThaddeus.Tests/SirThaddeus.Tests.csproj -m:1 -v m
 ./dev/release-package.ps1
 ```
 
+Default behavior is now **lite packaging**:
+
+- excludes heavyweight bundled voice payloads and Playwright runtime assets
+- keeps Avalonia + headless runtime executables intact
+- relies on runtime asset download/self-heal when optional assets are needed
+
+To create the previous heavy offline-style package, run:
+
+```powershell
+./dev/release-package.ps1 -FullBundle
+```
+
 Outputs:
 
 - Staged folder: `artifacts/stage/win-x64`
@@ -47,6 +59,8 @@ The smoke gate validates:
 - Required executables and assets are present
 - VoiceHost health endpoint responds
 - UI shell launches in smoke mode
+
+For lite packages, missing bundled voice assets are treated as runtime-download warnings.
 
 ## Local runner modes
 

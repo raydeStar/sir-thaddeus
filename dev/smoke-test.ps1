@@ -220,13 +220,29 @@ $voiceAssets = @(
     @{ Path = "voice/stt-models/base/model.bin";                        LegacyPath = "bin/voice/stt-models/base/model.bin";                        Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
 
+# Auto-detect lite packages (none of the heavyweight voice bundles are present)
+# and downgrade these checks to warnings.
+if ($voiceAssetsRequired) {
+    $detectedVoiceAssets = 0
+    foreach ($asset in $voiceAssets) {
+        if (Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath) {
+            $detectedVoiceAssets++
+        }
+    }
+
+    if ($detectedVoiceAssets -eq 0) {
+        Warn "Lite package detected (no bundled voice assets); enabling runtime-asset mode for smoke."
+        $voiceAssetsRequired = $false
+    }
+}
+
 foreach ($asset in $voiceAssets) {
     $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
     if ($path) {
         Pass "$($asset.Label) present"
     }
     else {
-        if ($asset.Required) {
+        if ($voiceAssetsRequired) {
             Fail "$($asset.Label) not bundled"
         }
         else {
