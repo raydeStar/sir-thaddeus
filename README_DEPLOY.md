@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide defines a repeatable production deployment workflow for the desktop runtime.
+This guide defines a repeatable production deployment workflow for the Avalonia UI runtime.
 
 ## 1) Preflight gate (required)
 
@@ -60,7 +60,7 @@ End users get these assets automatically during the first-run onboarding wizard.
 
 ### Required ZIP contents
 
-- `SirThaddeus.DesktopRuntime.exe` (primary app executable)
+- `SirThaddeus.UI.Avalonia.exe` (primary app executable)
 - `SirThaddeus.McpServer.exe` (MCP sidecar process)
 - `SirThaddeus.VoiceHost.exe` (voice sidecar process)
 - required runtime DLLs and support files from publish output
@@ -76,7 +76,7 @@ End users get these assets automatically during the first-run onboarding wizard.
 Run from the publish output folder:
 
 ```powershell
-.\SirThaddeus.DesktopRuntime.exe --headless
+.\SirThaddeus.UI.Avalonia.exe --headless
 ```
 
 Verify:
@@ -92,7 +92,7 @@ Verify:
 
 Notes:
 
-- Normal user flow is **one-step**: launch `SirThaddeus.DesktopRuntime.exe` only.
+- Normal user flow is **one-step**: launch `SirThaddeus.UI.Avalonia.exe` only.
 - Do **not** require users to run backend scripts or terminal commands in production.
 
 ## 4) Packaging and release handoff

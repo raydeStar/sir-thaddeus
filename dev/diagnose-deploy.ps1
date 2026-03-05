@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Diagnose a deployed release build. Run from the directory containing
-    SirThaddeus.DesktopRuntime.exe (the extracted ZIP root).
+    SirThaddeus.UI.Avalonia.exe (the extracted ZIP root).
 
 .EXAMPLE
     cd C:\path\to\extracted\zip
@@ -23,11 +23,18 @@ function Write-Err([string]$Msg) { Write-Host "  [FAIL] $Msg" -ForegroundColor R
 function Write-Warn([string]$Msg) { Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Info([string]$Msg) { Write-Host "  $Msg" -ForegroundColor Gray }
 
+function Resolve-UiExecutable([string]$Root) {
+    foreach ($name in @("SirThaddeus.UI.Avalonia.exe", "SirThaddeus.DesktopRuntime.exe")) {
+        $candidate = Join-Path $Root $name
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
 # ── 1. Check directory structure ─────────────────────────────────────
 Write-Section "1. Directory Structure"
 
 $checks = @(
-    @{ Path = "SirThaddeus.DesktopRuntime.exe"; Label = "DesktopRuntime exe" },
     @{ Path = "SirThaddeus.VoiceHost.exe";      Label = "VoiceHost exe" },
     @{ Path = "SirThaddeus.McpServer.exe";       Label = "McpServer exe" },
     @{ Path = "bin";                             Label = "bin/ directory" },
@@ -45,6 +52,14 @@ $checks = @(
     @{ Path = "assets\manifest.json";            Label = "Asset manifest (self-heal)" },
     @{ Path = "README_FIRST_RUN.md";             Label = "README first run" }
 )
+
+$uiExecutable = Resolve-UiExecutable $DeployDir
+if ($uiExecutable) {
+    $uiName = [System.IO.Path]::GetFileName($uiExecutable)
+    $checks = @(@{ Path = $uiName; Label = "UI executable" }) + $checks
+} else {
+    $checks = @(@{ Path = "SirThaddeus.UI.Avalonia.exe"; Label = "UI executable (expected)" }) + $checks
+}
 
 foreach ($check in $checks) {
     $fullPath = Join-Path $DeployDir $check.Path
