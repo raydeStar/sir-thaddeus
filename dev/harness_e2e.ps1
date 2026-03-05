@@ -156,7 +156,7 @@ if (-not $hasPlacesKey) {
 
 if ($IncludeUnitTests) {
     Write-Host ""
-    Write-Host "Tip: close DesktopRuntime before unit tests to avoid file-lock build failures." -ForegroundColor Yellow
+    Write-Host "Tip: close SirThaddeus UI windows before unit tests to avoid file-lock build failures." -ForegroundColor Yellow
     Invoke-Step -Name "Unit tests" -Action { ./dev/test.ps1 }
 }
 

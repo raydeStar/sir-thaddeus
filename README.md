@@ -42,7 +42,7 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 Use these in your repository "About" settings:
 
-`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `desktop-runtime`, `tool-orchestration`, `permissioned-ai`
+`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `avalonia-ui`, `headless-runtime`, `tool-orchestration`, `permissioned-ai`
 
 ---
 
@@ -226,9 +226,9 @@ flowchart LR
     Repair[Targeted Repair]
   end
 
-  subgraph frontend [Layer 2: Interface - apps/desktop-runtime]
+  subgraph frontend [Layer 2: Interface - apps/ui-avalonia + apps/headless-runtime]
     Tray[System Tray]
-    Overlay[WPF Overlay]
+    Overlay[Avalonia UI]
     PTT[Audio Input]
     Playback[Audio Playback]
     Palette[Command Palette]
@@ -282,7 +282,7 @@ flowchart LR
 | Layer | Project(s) | Responsibility | Talks to |
 | --- | --- | --- | --- |
 | Layer 1: Loop | `packages/agent` | Route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
-| Layer 2: Interface | `apps/desktop-runtime` | Tray, overlay, hotkeys, command palette, push-to-talk UX | Loop, Voice |
+| Layer 2: Interface | `apps/ui-avalonia`, `apps/headless-runtime` | Avalonia UI + terminal runtime entry points | Loop, Voice |
 | Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
 | Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
 | Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
@@ -294,7 +294,8 @@ flowchart LR
 ```text
 sir-thaddeus/
 |-- apps/
-|   |-- desktop-runtime/
+|   |-- ui-avalonia/
+|   |-- headless-runtime/
 |   |-- voice-host/
 |   |-- voice-backend/
 |   `-- mcp-server/

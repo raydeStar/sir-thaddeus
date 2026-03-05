@@ -17,7 +17,7 @@ Date: 2026-03-05
 
 - [x] `/docs/migration/avalonia-parity.md`
 - [x] `/docs/runtime/ipc-contract.md` (events + endpoints)
-- [ ] `/docs/build/publish.md` (how to build for win/linux/mac)
+- [x] `/docs/build/publish.md` (how to build for win/linux/mac)
 
 ## Validation
 
