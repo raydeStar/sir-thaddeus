@@ -152,10 +152,25 @@ A terminal entry point now exists for chat-first runs:
 dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
 ```
 
+Convenience launch scripts are available:
+
+```powershell
+# Windows PowerShell
+./dev/terminal.ps1
+```
+
+```bash
+# Linux/macOS shell
+./dev/terminal.sh
+# (or: bash ./dev/terminal.sh)
+```
+
 Commands:
 - `/help`
 - `/reset`
 - `/tools`
+- `/whoami`
+- `/quickstart`
 - `/exit`
 
 Tooling in headless mode is optional:
@@ -167,6 +182,12 @@ dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tool
 MCP now has a split tool model:
 - Core tools run cross-platform (`net8.0`)
 - Windows-only tools (screen capture / OCR) load only on Windows
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and recent updates.
 
 ---
 
