@@ -7,7 +7,7 @@
 #  candidate. Designed to catch the "works on my machine" class of
 #  failures:
 #    1) File structure -- all required EXEs, DLLs, and assets present
-#    2) Launch gate   -- DesktopRuntime starts in headless mode
+#    2) Launch gate   -- UI shell starts in headless/smoke mode
 #    3) Health check  -- VoiceHost /health endpoint responds
 #    4) Checksum      -- zip SHA256 matches sidecar file
 #
@@ -133,7 +133,6 @@ Write-Section "File Structure Checks"
 
 # Required top-level executables
 $requiredExes = @(
-    "SirThaddeus.DesktopRuntime.exe",
     "SirThaddeus.McpServer.exe",
     "SirThaddeus.VoiceHost.exe"
 )
@@ -147,6 +146,20 @@ foreach ($exe in $requiredExes) {
     else {
         Fail "$exe missing from package root"
     }
+}
+
+$uiExecutable = $null
+foreach ($candidate in @("SirThaddeus.UI.Avalonia.exe", "SirThaddeus.DesktopRuntime.exe")) {
+    $candidatePath = Join-Path $testDir $candidate
+    if (Test-Path $candidatePath) {
+        $uiExecutable = $candidatePath
+        $sizeMB = [math]::Round((Get-Item $candidatePath).Length / 1MB, 1)
+        Pass "$candidate present (${sizeMB} MB)"
+        break
+    }
+}
+if (-not $uiExecutable) {
+    Fail "UI executable missing from package root (expected SirThaddeus.UI.Avalonia.exe or SirThaddeus.DesktopRuntime.exe)"
 }
 
 # Required support files
@@ -284,39 +297,38 @@ if (-not $SkipLaunch) {
         Fail "Cannot test VoiceHost launch -- exe not found"
     }
 
-    # -- DesktopRuntime headless launch --
-    $desktopExe = Join-Path $testDir "SirThaddeus.DesktopRuntime.exe"
-    if (Test-Path $desktopExe) {
-        Write-Host "  Starting DesktopRuntime in headless mode..."
-        $desktopProcess = $null
+    # -- UI shell launch --
+    if ($uiExecutable) {
+        Write-Host "  Starting UI shell in smoke mode..."
+        $uiProcess = $null
         try {
-            $desktopProcess = Start-Process -FilePath $desktopExe `
+            $uiProcess = Start-Process -FilePath $uiExecutable `
                 -ArgumentList "--headless", "--smoke-test" `
                 -PassThru -WindowStyle Hidden
 
             # Give it a few seconds to start and not crash
             Start-Sleep -Seconds 5
 
-            if (-not $desktopProcess.HasExited) {
-                Pass "DesktopRuntime started in headless mode (still running after 5s)"
+            if (-not $uiProcess.HasExited) {
+                Pass "UI shell started in smoke mode (still running after 5s)"
             }
             else {
-                if ($desktopProcess.ExitCode -eq 0) {
-                    Pass "DesktopRuntime exited cleanly in smoke-test mode"
+                if ($uiProcess.ExitCode -eq 0) {
+                    Pass "UI shell exited cleanly in smoke-test mode"
                 }
                 else {
-                    Fail "DesktopRuntime crashed on launch" "exit code: $($desktopProcess.ExitCode)"
+                    Fail "UI shell crashed on launch" "exit code: $($uiProcess.ExitCode)"
                 }
             }
         }
         finally {
-            if ($desktopProcess -and -not $desktopProcess.HasExited) {
-                Stop-Process -Id $desktopProcess.Id -Force -ErrorAction SilentlyContinue
+            if ($uiProcess -and -not $uiProcess.HasExited) {
+                Stop-Process -Id $uiProcess.Id -Force -ErrorAction SilentlyContinue
             }
         }
     }
     else {
-        Fail "Cannot test DesktopRuntime launch -- exe not found"
+        Fail "Cannot test UI launch -- executable not found"
     }
 }
 else {

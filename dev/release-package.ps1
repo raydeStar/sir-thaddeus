@@ -158,7 +158,7 @@ Write-Section "Publish Artifacts"
 $projects = @(
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj",
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj",
-    "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
 )
 
 $projectFrameworkOverrides = @{
@@ -169,8 +169,8 @@ $projectFrameworkOverrides = @{
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
         default = "net10.0"
     }
-    "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj" = @{
-        windows = "net10.0-windows"
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = @{
+        default = "net10.0"
     }
 }
 
@@ -231,7 +231,7 @@ foreach ($project in $projects) {
 # -- Structured staging --------------------------------------------------------
 #
 #  ZIP root/
-#   ├── SirThaddeus.DesktopRuntime.exe   ← user double-clicks this
+#   ├── SirThaddeus.UI.Avalonia.exe      ← user double-clicks this
 #   ├── SirThaddeus.McpServer.exe
 #   ├── SirThaddeus.VoiceHost.exe
 #   ├── README_FIRST_RUN.md
