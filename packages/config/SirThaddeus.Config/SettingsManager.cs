@@ -239,6 +239,7 @@ public static class SettingsManager
         var normalizedLocationsByProfile = NormalizeLocationsByProfile(
             userProfile.LocationsByProfile,
             normalizedRootLocation);
+        var normalizedAliasesByProfile = NormalizeAliasesByProfile(userProfile.AliasesByProfile);
 
         var normalizedActiveProfileId = string.IsNullOrWhiteSpace(settings.ActiveProfileId)
             ? null
@@ -357,7 +358,8 @@ public static class SettingsManager
             UserProfile = userProfile with
             {
                 Location = normalizedUserLocation,
-                LocationsByProfile = normalizedLocationsByProfile
+                LocationsByProfile = normalizedLocationsByProfile,
+                AliasesByProfile = normalizedAliasesByProfile
             },
             ActiveProfileId = normalizedActiveProfileId,
             ActivePersonalityId = StringOrFallback(settings.ActivePersonalityId, defaults.ActivePersonalityId),
@@ -420,6 +422,26 @@ public static class SettingsManager
             Latitude = null,
             Longitude = null
         };
+    }
+
+    private static Dictionary<string, string> NormalizeAliasesByProfile(
+        Dictionary<string, string>? raw)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (raw is null)
+            return map;
+
+        foreach (var (key, value) in raw)
+        {
+            var normalizedKey = AppSettings.NormalizeLocationProfileKey(key);
+            var normalizedValue = (value ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(normalizedValue))
+                continue;
+
+            map[normalizedKey] = normalizedValue;
+        }
+
+        return map;
     }
 
     private static string StringOrFallback(string? value, string fallback)

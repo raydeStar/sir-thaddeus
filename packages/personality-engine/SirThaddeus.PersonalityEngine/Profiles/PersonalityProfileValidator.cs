@@ -13,6 +13,7 @@ public sealed partial class PersonalityProfileValidator
         "version",
         "id",
         "display_name",
+        "alias",
         "description",
         "identity",
         "tone",
