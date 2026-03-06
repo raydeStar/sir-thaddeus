@@ -6,9 +6,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using SirThaddeus.Memory;
+using SirThaddeus.Memory.Sqlite;
+using SirThaddeus.PersonalityEngine.Profiles;
+using SirThaddeus.RuntimeHost;
 
 internal static class RuntimeApiServer
 {
@@ -18,6 +23,7 @@ internal static class RuntimeApiServer
         int port,
         Func<AppSettings, AgentOrchestrator> buildOrchestrator,
         Func<AppSettings> getSettings,
+        Action<AppSettings> setSettings,
         IAuditLogger audit,
         ApiPermissionGate? permissionGate,
         CancellationToken cancellationToken)
@@ -79,6 +85,151 @@ internal static class RuntimeApiServer
             return Results.Json(dtos, JsonOptions);
         });
 
+        app.MapGet("/api/memory", async (string? filter, int? take, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.Json(new MemoryBrowseResponse([], [], [], [], 0, 0, 0, 0), JsonOptions);
+            }
+
+            var max = Math.Clamp(take ?? 40, 1, 200);
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+
+            var (facts, totalFacts) = await store.ListFactsAsync(filter, 0, max, ct);
+            var (events, totalEvents) = await store.ListEventsAsync(filter, 0, max, ct);
+            var (chunks, totalChunks) = await store.ListChunksAsync(filter, 0, max, ct);
+            var (nuggets, totalNuggets) = await store.ListNuggetsAsync(filter, 0, max, ct);
+
+            var response = new MemoryBrowseResponse(
+                Facts: facts.Select(ToFactDto).ToArray(),
+                Events: events.Select(ToEventDto).ToArray(),
+                Chunks: chunks.Select(ToChunkDto).ToArray(),
+                Nuggets: nuggets.Select(ToNuggetDto).ToArray(),
+                TotalFacts: totalFacts,
+                TotalEvents: totalEvents,
+                TotalChunks: totalChunks,
+                TotalNuggets: totalNuggets);
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapGet("/api/profiles", async (CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+
+            var profiles = Array.Empty<ProfileListItemDto>();
+            if (currentSettings.Memory.Enabled)
+            {
+                using var store = CreateMemoryStore(currentSettings);
+                await store.EnsureSchemaAsync(ct);
+                var cards = await store.ListProfilesAsync(ct);
+                profiles = cards
+                    .OrderByDescending(c => string.Equals(c.ProfileId, currentSettings.ActiveProfileId, StringComparison.OrdinalIgnoreCase))
+                    .ThenBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .Select(card => new ProfileListItemDto(
+                        ProfileId: card.ProfileId,
+                        Kind: card.Kind,
+                        DisplayName: card.DisplayName,
+                        PreferredName: ExtractPreferredName(card.ProfileJson),
+                        Relationship: card.Relationship,
+                        IsActive: string.Equals(card.ProfileId, currentSettings.ActiveProfileId, StringComparison.OrdinalIgnoreCase),
+                        UpdatedAtUtc: card.UpdatedAt.ToUniversalTime()))
+                    .ToArray();
+            }
+
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            var personalities = personalityStore
+                .ListProfiles(personalityDirectory)
+                .OrderByDescending(p => string.Equals(p.Id, currentSettings.ActivePersonalityId, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .Select(p => new PersonalityListItemDto(
+                    Id: p.Id,
+                    DisplayName: p.DisplayName,
+                    Alias: p.Alias,
+                    Description: p.Description,
+                    IsActive: string.Equals(p.Id, currentSettings.ActivePersonalityId, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+
+            var response = new ProfileSummaryResponse(
+                ActiveProfileId: currentSettings.ActiveProfileId,
+                Profiles: profiles,
+                Personalities: personalities,
+                ActivePersonalityId: currentSettings.ActivePersonalityId);
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPost("/api/profiles/active", async (SetActiveProfileRequest request, CancellationToken ct) =>
+        {
+            var requestedProfileId = (request.ProfileId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(requestedProfileId))
+            {
+                return Results.BadRequest("ProfileId is required.");
+            }
+
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.BadRequest("Memory is disabled in settings.");
+            }
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            var profiles = await store.ListProfilesAsync(ct);
+            var exists = profiles.Any(p => string.Equals(p.ProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase));
+            if (!exists)
+            {
+                return Results.NotFound();
+            }
+
+            var updatedSettings = currentSettings with { ActiveProfileId = requestedProfileId };
+            SettingsManager.Save(updatedSettings);
+            setSettings(updatedSettings);
+            permissionGate?.UpdateSettings(updatedSettings);
+
+            var response = new SetActiveProfileResponse(
+                Applied: true,
+                ActiveProfileId: requestedProfileId,
+                Message: "Active profile updated.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPost("/api/personalities/active", (SetActivePersonalityRequest request) =>
+        {
+            var requestedPersonalityId = (request.PersonalityId ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(requestedPersonalityId))
+            {
+                return Results.BadRequest("PersonalityId is required.");
+            }
+
+            var currentSettings = getSettings();
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            var exists = personalityStore
+                .ListProfiles(personalityDirectory)
+                .Any(p => string.Equals(p.Id, requestedPersonalityId, StringComparison.OrdinalIgnoreCase));
+            if (!exists)
+            {
+                return Results.NotFound();
+            }
+
+            var updatedSettings = currentSettings with { ActivePersonalityId = requestedPersonalityId };
+            SettingsManager.Save(updatedSettings);
+            setSettings(updatedSettings);
+            permissionGate?.UpdateSettings(updatedSettings);
+
+            var response = new SetActivePersonalityResponse(
+                Applied: true,
+                ActivePersonalityId: requestedPersonalityId,
+                Message: "Active personality updated.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
         app.MapPost("/api/chat", (ChatRequest request) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
@@ -98,7 +249,7 @@ internal static class RuntimeApiServer
                     var orchestrator = buildOrchestrator(getSettings());
                     var response = await orchestrator.ProcessAsync(request.Prompt, state.CancellationToken);
                     state.Append(RuntimeEventTypes.TokenDelta, new TokenDeltaPayload(response.Text, 0));
-                    state.Append(RuntimeEventTypes.RunCompleted, new RunCompletedPayload(response.Text, 0));
+                    state.Append(RuntimeEventTypes.RunCompleted, new RunCompletedPayload(response.Text, 0, ToBriefingDto(response.DeepDiveBriefing)));
                 }
                 catch (OperationCanceledException)
                 {
@@ -161,6 +312,116 @@ internal static class RuntimeApiServer
 
         await app.RunAsync(cancellationToken);
     }
+
+    private static SqliteMemoryStore CreateMemoryStore(AppSettings settings)
+    {
+        var dbPath = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath(settings.Memory.DbPath);
+        return new SqliteMemoryStore(dbPath);
+    }
+
+    private static string? ExtractPreferredName(string? profileJson)
+    {
+        if (string.IsNullOrWhiteSpace(profileJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(profileJson);
+            if (doc.RootElement.TryGetProperty("preferred_name", out var value) &&
+                value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString();
+            }
+        }
+        catch
+        {
+            // Best effort only.
+        }
+
+        return null;
+    }
+
+    private static MemoryFactItemDto ToFactDto(MemoryFact fact) => new(
+        MemoryId: fact.MemoryId,
+        ProfileId: fact.ProfileId,
+        Subject: fact.Subject,
+        Predicate: fact.Predicate,
+        Object: fact.Object,
+        Confidence: fact.Confidence,
+        UpdatedAtUtc: fact.UpdatedAt.ToUniversalTime(),
+        SourceRef: fact.SourceRef);
+
+    private static MemoryEventItemDto ToEventDto(MemoryEvent evt) => new(
+        EventId: evt.EventId,
+        ProfileId: evt.ProfileId,
+        Type: evt.Type,
+        Title: evt.Title,
+        Summary: evt.Summary,
+        WhenUtc: evt.WhenIso?.ToUniversalTime(),
+        Confidence: evt.Confidence,
+        UpdatedAtUtc: evt.UpdatedAt.ToUniversalTime(),
+        SourceRef: evt.SourceRef);
+
+    private static MemoryChunkItemDto ToChunkDto(MemoryChunk chunk) => new(
+        ChunkId: chunk.ChunkId,
+        SourceType: chunk.SourceType,
+        SourceRef: chunk.SourceRef,
+        Text: chunk.Text,
+        WhenUtc: chunk.WhenIso?.ToUniversalTime());
+
+    private static MemoryNuggetItemDto ToNuggetDto(MemoryNugget nugget) => new(
+        NuggetId: nugget.NuggetId,
+        Text: nugget.Text,
+        Tags: nugget.Tags,
+        Weight: nugget.Weight,
+        PinLevel: nugget.PinLevel,
+        UseCount: nugget.UseCount,
+        UpdatedAtUtc: nugget.UpdatedAt.ToUniversalTime());
+
+    private static DeepDiveBriefingDto? ToBriefingDto(DeepDiveBriefing? briefing)
+    {
+        if (briefing is null)
+        {
+            return null;
+        }
+
+        return new DeepDiveBriefingDto(
+            briefing.Version,
+            new BriefingTopicDto(
+                briefing.Topic.Kind,
+                briefing.Topic.Query,
+                briefing.Topic.Timezone,
+                briefing.Topic.Locale,
+                briefing.Topic.UserLocationHint),
+            new BriefingHeroDto(
+                briefing.Hero.Title,
+                briefing.Hero.Confidence,
+                briefing.Hero.LastCheckedIso,
+                briefing.Hero.StatusLine,
+                briefing.Hero.ClosesText,
+                briefing.Hero.Address,
+                briefing.Hero.Phone,
+                briefing.Hero.Website,
+                briefing.Hero.DirectionsUrl),
+            briefing.Cards.Select(card => new BriefingCardDto(
+                card.Type,
+                card.Title,
+                card.Sources.Select(ToSourceRefDto).ToArray(),
+                card.Bullets.ToArray())).ToArray(),
+            briefing.Map is null
+                ? null
+                : new BriefingMapDto(briefing.Map.Latitude, briefing.Map.Longitude, briefing.Map.Label),
+            briefing.Audit.Select(step => new BriefingAuditStepDto(
+                step.Step,
+                step.Detail,
+                step.TimestampIso,
+                step.Sources.Select(ToSourceRefDto).ToArray())).ToArray());
+    }
+
+    private static BriefingSourceRefDto ToSourceRefDto(SourceRef source)
+        => new(source.Name, source.Url, source.FetchedIso);
 
     private static string BuildAuditMessage(AuditEvent auditEvent)
     {
@@ -292,6 +553,11 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
     public event Action<string, ToolRequestedPayload>? Requested;
     public event Action<string, ToolDecisionPayload>? Resolved;
 
+    public void UpdateSettings(AppSettings settings)
+    {
+        _snapshot = ToolGroupPolicy.BuildSnapshot(settings, isDebugBuild: false);
+    }
+
     public Task<ToolPermissionResult> CheckAsync(string toolName, string argumentsJson, CancellationToken ct)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
@@ -388,3 +654,6 @@ internal static class RunExecutionContext
         }
     }
 }
+
+
+

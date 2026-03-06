@@ -34,8 +34,10 @@ public sealed record ToolDecisionPayload(
 
 public sealed record RunCompletedPayload(
     string FinalText,
-    int ToolLoopIterations);
+    int ToolLoopIterations,
+    DeepDiveBriefingDto? Briefing = null);
 
 public sealed record RunFailedPayload(
     string Error,
     bool IsCancelled);
+

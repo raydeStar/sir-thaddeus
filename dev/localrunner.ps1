@@ -14,6 +14,26 @@ $DebugMode = $args -contains "--debug"
 $TerminalMode = $args -contains "--terminal"
 $ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" })
 
+function Stop-ExistingInstances {
+    Write-Host "`n[0/5] Stopping any existing instances of Sir Thaddeus..." -ForegroundColor Yellow
+    $processesToKill = @("SirThaddeus.McpServer", "SirThaddeus.VoiceHost", "SirThaddeus.HeadlessRuntime", "SirThaddeus.UI.Avalonia")
+    foreach ($procName in $processesToKill) {
+        $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
+        if ($procs) {
+            Write-Host "      Killing $procName..." -ForegroundColor DarkGray
+            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+        }
+    }
+    
+    # Also clean up TCP ports if they are still held (e.g. by node or python backends if they got orphaned)
+    foreach ($p in @(8001, 17845)) {
+        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+        if ($conn) { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Stop-ExistingInstances
+
 function Ensure-LocalVoiceAssets {
     param([string]$RepoRootPath)
 

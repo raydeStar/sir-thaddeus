@@ -95,6 +95,7 @@ if (options.ServerMode)
         options.ServerPort,
         BuildOrchestrator,
         () => settings,
+        updatedSettings => settings = updatedSettings,
         audit,
         apiPermissionGate,
         serverCancellation.Token);
@@ -1769,3 +1770,4 @@ file sealed class ConsolePermissionGate : IToolPermissionGate
         }
     }
 }
+

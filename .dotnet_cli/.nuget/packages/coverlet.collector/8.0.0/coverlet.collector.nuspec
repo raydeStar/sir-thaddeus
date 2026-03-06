@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>coverlet.collector</id>
+    <version>8.0.0</version>
+    <title>coverlet.collector</title>
+    <authors>tonerdo</authors>
+    <developmentDependency>true</developmentDependency>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>coverlet-icon.png</icon>
+    <readme>VSTestIntegration.md</readme>
+    <projectUrl>https://github.com/coverlet-coverage/coverlet</projectUrl>
+    <description>Coverlet is a cross platform code coverage library for .NET, with support for line, branch and method coverage.</description>
+    <releaseNotes>https://github.com/coverlet-coverage/coverlet/blob/master/Documentation/Changelog.md</releaseNotes>
+    <copyright>(c) 2018 Toni Solarin-Sodara</copyright>
+    <tags>coverage testing unit-test lcov opencover quality</tags>
+    <repository type="git" url="https://github.com/coverlet-coverage/coverlet.git" branch="refs/heads/master" commit="449264873dbf365abb47c74de429566c55ddc86a" />
+  </metadata>
+</package>

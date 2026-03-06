@@ -113,3 +113,5 @@ msbuild.log
 
 # Scratch / temp directory
 tmp/
+
+.dotnet-cli/

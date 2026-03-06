@@ -5,9 +5,11 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.Platform.Storage;
 using SirThaddeus.Contracts;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -30,6 +32,22 @@ public partial class MainWindow : Window
     private bool _initialConnectAttempted;
     private bool _trayAvailable;
     private bool _stopAllInProgress;
+    private AttachedDocumentContext? _attachedDocument;
+    private string? _lastUserPrompt;
+    private string? _lastAssistantMessage;
+    private IReadOnlyList<string> _lastAssistantSources = Array.Empty<string>();
+    private readonly Dictionary<string, StringBuilder> _assistantBuffersByRunId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LocalTextToSpeechPlaybackService _ttsPlaybackService = new();
+    private readonly IMicrophoneCaptureService _microphoneCaptureService = new NAudioMicrophoneCaptureService();
+    private readonly LocalAsrHttpTranscriptionService _transcriptionService = new();
+    private readonly SemaphoreSlim _pttGate = new(1, 1);
+    private bool _pttCaptureActive;
+    private bool _pttHotkeyDown;
+    private int _pttSessionCounter;
+
+    private readonly ObservableCollection<MemoryListItem> _memoryItems = [];
+    private readonly ObservableCollection<ProfileListItemViewModel> _profileItems = [];
+    private readonly ObservableCollection<PersonalityListItemViewModel> _personalityItems = [];
 
     private readonly ObservableCollection<ChatSessionItem> _chatHistory = [];
     private ChatSessionItem _currentSession;
@@ -41,8 +59,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        _viewTabs = [ChatTabButton, PermTabButton, AuditTabButton, SettingsTabButton];
-        _viewPanels = [ChatView, PermissionsView, AuditView, SettingsView];
+        _viewTabs = [ChatTabButton, BriefingTabButton, SettingsTabButton];
+        _viewPanels = [ChatView, BriefingView, SettingsView];
 
         _uiSettings = _uiSettingsStore.Load();
         ApplyUiSettingsToControls();
@@ -51,14 +69,26 @@ public partial class MainWindow : Window
         _chatHistory.Add(_currentSession);
         ChatHistoryList.ItemsSource = _chatHistory;
         ChatHistoryList.SelectedItem = _currentSession;
+        MemoryList.ItemsSource = _memoryItems;
+        ProfilesList.ItemsSource = _profileItems;
+        PersonalitiesList.ItemsSource = _personalityItems;
+        InitializeBriefingUi();
+        InitializePushToTalkUi();
+        UpdateAttachmentUi();
         UpdateConversationTitle();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            PttHoldButton.IsEnabled = false;
+            ReadAloudButton.IsEnabled = false;
+            SetPushToTalkPlatformUnavailable();
+        }
 
         TranscriptBox.IsVisible = false;
         SetActiveView(ChatTabButton);
 
         Opened += OnOpened;
     }
-
     public void ConfigureTrayUi(bool trayAvailable, bool minimizeToTrayEnabled)
     {
         _trayAvailable = trayAvailable;
@@ -92,6 +122,10 @@ public partial class MainWindow : Window
         _runtimeApiClient = null;
 
         _runtimeLauncher.Dispose();
+        DisposePushToTalkUi();
+        _transcriptionService.Dispose();
+        _microphoneCaptureService.Dispose();
+        _pttGate.Dispose();
         PersistUiSettings();
 
         base.OnClosed(e);
@@ -105,6 +139,7 @@ public partial class MainWindow : Window
         }
 
         _initialConnectAttempted = true;
+        TryStartGlobalPushToTalkHotkey();
         if (_uiSettings.AutoConnectOnLaunch)
         {
             await EnsureRuntimeConnectedAsync(
@@ -152,16 +187,57 @@ public partial class MainWindow : Window
             _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
         }
 
-        InputBar.IsVisible = ChatTabButton.IsChecked == true;
+        InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true;
+    }
 
-        if (AuditTabButton.IsChecked == true)
+    private void SettingsTabControl_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not TabControl tabControl)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(tabControl.SelectedItem, AuditTabItem))
         {
             _ = RefreshAuditAsync();
+        }
+        else if (ReferenceEquals(tabControl.SelectedItem, MemoryTabItem))
+        {
+            _ = RefreshMemoryAsync();
+        }
+        else if (ReferenceEquals(tabControl.SelectedItem, ProfilesTabItem))
+        {
+            _ = RefreshProfilesAsync();
         }
     }
 
     private void Window_KeyDown(object? sender, KeyEventArgs e)
     {
+        if (OperatingSystem.IsWindows() &&
+            ShouldUseWindowScopedPttHotkey() &&
+            e.Key == Key.Escape &&
+            e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+            e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            e.Handled = true;
+            _ = RequestVoiceCancelAsync("window cancel hotkey");
+            return;
+        }
+
+        if (ShouldUseWindowScopedPttHotkey() &&
+            e.Key == Key.M &&
+            e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+            e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            e.Handled = true;
+            if (!_pttHotkeyDown)
+            {
+                _pttHotkeyDown = true;
+                _ = BeginPushToTalkAsync("hotkey");
+            }
+
+            return;
+        }
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             switch (e.Key)
@@ -171,14 +247,30 @@ public partial class MainWindow : Window
                     e.Handled = true;
                     return;
                 case Key.D2:
-                    SetActiveView(PermTabButton);
+                    SetActiveView(BriefingTabButton);
                     e.Handled = true;
                     return;
                 case Key.D3:
-                    SetActiveView(AuditTabButton);
+                    SetActiveView(SettingsTabButton);
+                    SettingsTabControl.SelectedItem = PermissionsTabItem;
                     e.Handled = true;
                     return;
                 case Key.D4:
+                    SetActiveView(SettingsTabButton);
+                    SettingsTabControl.SelectedItem = AuditTabItem;
+                    e.Handled = true;
+                    return;
+                case Key.D5:
+                    SetActiveView(SettingsTabButton);
+                    SettingsTabControl.SelectedItem = MemoryTabItem;
+                    e.Handled = true;
+                    return;
+                case Key.D6:
+                    SetActiveView(SettingsTabButton);
+                    SettingsTabControl.SelectedItem = ProfilesTabItem;
+                    e.Handled = true;
+                    return;
+                case Key.D7:
                     SetActiveView(SettingsTabButton);
                     e.Handled = true;
                     return;
@@ -192,6 +284,16 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             SendButton_Click(sender, e);
+        }
+    }
+
+    private void Window_KeyUp(object? sender, KeyEventArgs e)
+    {
+        if (ShouldUseWindowScopedPttHotkey() && e.Key == Key.M && _pttHotkeyDown)
+        {
+            _pttHotkeyDown = false;
+            e.Handled = true;
+            _ = EndPushToTalkAsync("hotkey");
         }
     }
 
@@ -258,6 +360,7 @@ public partial class MainWindow : Window
         EmptyHero.IsVisible = _transcript.Length == 0;
 
         UpdateConversationTitle();
+        LoadBriefingForSession(session);
         SetActiveView(ChatTabButton);
         ToggleConversationDrawer(false);
     }
@@ -265,6 +368,7 @@ public partial class MainWindow : Window
     private void ClearHistoryButton_Click(object? sender, RoutedEventArgs e)
     {
         _chatHistory.Clear();
+        _briefingBySession.Clear();
         _currentSession = new ChatSessionItem("New Chat");
         _chatHistory.Add(_currentSession);
         ChatHistoryList.SelectedItem = _currentSession;
@@ -275,6 +379,7 @@ public partial class MainWindow : Window
         EmptyHero.IsVisible = true;
 
         UpdateConversationTitle();
+        LoadBriefingForSession(_currentSession);
     }
 
     private void SendOnEnterCheckBox_Click(object? sender, RoutedEventArgs e)
@@ -332,6 +437,10 @@ public partial class MainWindow : Window
 
         _activeRunId = null;
         _pendingPermissionRequestId = null;
+        _assistantBuffersByRunId.Clear();
+        _lastUserPrompt = null;
+        _lastAssistantMessage = null;
+        _lastAssistantSources = Array.Empty<string>();
 
         _currentSession = new ChatSessionItem("New Chat");
         _chatHistory.Insert(0, _currentSession);
@@ -348,7 +457,11 @@ public partial class MainWindow : Window
         ApprovePermissionButton.IsEnabled = false;
         DenyPermissionButton.IsEnabled = false;
 
+        _attachedDocument = null;
+        UpdateAttachmentUi();
+
         UpdateConversationTitle();
+        LoadBriefingForSession(_currentSession);
         SetActiveView(ChatTabButton);
         ToggleConversationDrawer(false);
     }
@@ -402,6 +515,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        var runtimePrompt = prompt;
+        if (_attachedDocument is not null)
+        {
+            runtimePrompt = _attachedDocument.BuildContextBlock(prompt) + "\n" + prompt;
+            AppendTranscript($"[system] Attached context injected: {_attachedDocument.FileName}");
+            _attachedDocument = null;
+            UpdateAttachmentUi();
+        }
+
         try
         {
             if (_currentSession.Title == "New Chat")
@@ -410,9 +532,11 @@ public partial class MainWindow : Window
                 UpdateConversationTitle();
             }
 
+            _lastUserPrompt = prompt;
             AppendTranscript($"[user] {prompt}");
-            var run = await _runtimeApiClient.StartRunAsync(prompt, CancellationToken.None);
+            var run = await _runtimeApiClient.StartRunAsync(runtimePrompt, CancellationToken.None);
             _activeRunId = run.RunId;
+            _assistantBuffersByRunId[run.RunId] = new StringBuilder();
             AppendTranscript($"[system] Run started: {run.RunId}");
             StartEventStream(run.RunId);
             PromptBox.Text = string.Empty;
@@ -422,7 +546,6 @@ public partial class MainWindow : Window
             AppendTranscript($"[error] {ex.Message}");
         }
     }
-
     private async void StopAllButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_stopAllInProgress)
@@ -542,7 +665,155 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
+    private void PttHoldButton_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!PttHoldButton.IsEnabled)
+        {
+            return;
+        }
+
+        e.Pointer.Capture(PttHoldButton);
+        e.Handled = true;
+        _ = BeginPushToTalkAsync("button");
+    }
+
+    private void PttHoldButton_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.Pointer.Captured == PttHoldButton)
+        {
+            e.Pointer.Capture(null);
+        }
+
+        e.Handled = true;
+        _ = EndPushToTalkAsync("button");
+    }
+
+    private void PttHoldButton_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        _ = EndPushToTalkAsync("capture_lost");
+    }
+
+    private async Task BeginPushToTalkAsync(string source)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await _pttGate.WaitAsync();
+        try
+        {
+            if (_pttCaptureActive)
+            {
+                return;
+            }
+
+            if (_pttTranscriptionActive)
+            {
+                SetPushToTalkBusyTranscribing();
+                return;
+            }
+
+            await _microphoneCaptureService.StartCaptureAsync(CancellationToken.None);
+            _pttCaptureActive = true;
+            MarkPushToTalkCaptureStarted(source);
+            AppendTranscript($"[system] PTT listening ({source}).");
+        }
+        catch (Exception ex)
+        {
+            _pttCaptureActive = false;
+            MarkPushToTalkFailure("PTT start failed.", ex.Message);
+            AppendTranscript("[error] PTT start failed: " + ex.Message);
+        }
+        finally
+        {
+            _pttGate.Release();
+        }
+    }
+
+    private async Task EndPushToTalkAsync(string source)
+    {
+        byte[]? wavBytes;
+        CancellationTokenSource? transcriptionCancellation = null;
+
+        await _pttGate.WaitAsync();
+        try
+        {
+            if (!_pttCaptureActive)
+            {
+                return;
+            }
+
+            _pttCaptureActive = false;
+            _pttTranscriptionActive = true;
+            transcriptionCancellation = new CancellationTokenSource();
+            _pttTranscriptionCancellation = transcriptionCancellation;
+            MarkPushToTalkTranscribing(source);
+            wavBytes = await _microphoneCaptureService.StopCaptureAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _pttTranscriptionActive = false;
+            if (ReferenceEquals(_pttTranscriptionCancellation, transcriptionCancellation))
+            {
+                _pttTranscriptionCancellation = null;
+            }
+
+            transcriptionCancellation?.Dispose();
+            MarkPushToTalkFailure("PTT stop failed.", ex.Message);
+            AppendTranscript("[error] PTT stop failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            _pttGate.Release();
+        }
+
+        if (wavBytes is null || wavBytes.Length == 0)
+        {
+            await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+            MarkPushToTalkNoAudio();
+            return;
+        }
+
+        try
+        {
+            var sessionId = $"ui-ptt-{Interlocked.Increment(ref _pttSessionCounter)}";
+            var transcript = (await _transcriptionService.TranscribeAsync(
+                wavBytes,
+                sessionId,
+                transcriptionCancellation?.Token ?? CancellationToken.None)).Trim();
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                MarkPushToTalkNoSpeech();
+                return;
+            }
+
+            var existing = PromptBox.Text;
+            PromptBox.Text = string.IsNullOrWhiteSpace(existing)
+                ? transcript
+                : existing.TrimEnd() + " " + transcript;
+            PromptBox.CaretIndex = PromptBox.Text.Length;
+            MarkPushToTalkTranscriptInserted(transcript);
+            AppendTranscript($"[voice] {transcript}");
+        }
+        catch (OperationCanceledException) when (transcriptionCancellation?.IsCancellationRequested == true)
+        {
+            MarkPushToTalkCanceled(
+                headline: "Transcription canceled.",
+                detail: $"The local ASR request for {DescribeCaptureSource(_pttLastCaptureSource)} was canceled before the composer changed.");
+        }
+        catch (Exception ex)
+        {
+            MarkPushToTalkFailure("Transcription failed.", ex.Message);
+            AppendTranscript("[error] PTT transcription failed: " + ex.Message);
+        }
+        finally
+        {
+            await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+        }
+    }
+private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     {
         await RefreshAuditAsync();
     }
@@ -563,42 +834,12 @@ public partial class MainWindow : Window
         {
             AuditList.ItemsSource = new[] { "Audit load failed: " + ex.Message };
         }
-    }
-
-    private async void ActionReconnectButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await EnsureRuntimeConnectedAsync(
-            allowStartRuntime: _uiSettings.AutoStartRuntime,
-            appendTranscriptOnFailure: true);
-        await RefreshActionDrawerAsync();
-    }
-
-    private async void ActionRefreshAuditButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await RefreshAuditAsync();
-        await RefreshActionDrawerAsync();
-    }
+        }
 
     private void ActionOpenAuditTabButton_Click(object? sender, RoutedEventArgs e)
     {
-        SetActiveView(AuditTabButton);
-    }
-
-    private void ActionOpenSettingsTabButton_Click(object? sender, RoutedEventArgs e)
-    {
         SetActiveView(SettingsTabButton);
-    }
-
-    private async void ActionStartRuntimeButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await EnsureRuntimeConnectedAsync(allowStartRuntime: true, appendTranscriptOnFailure: true, forceRuntimeLaunch: true);
-        await RefreshActionDrawerAsync();
-    }
-
-    private void ActionStopRuntimeButton_Click(object? sender, RoutedEventArgs e)
-    {
-        StopRuntimeButton_Click(sender, e);
-        _ = RefreshActionDrawerAsync();
+        SettingsTabControl.SelectedItem = AuditTabItem;
     }
 
     private async Task RefreshActionDrawerAsync()
@@ -717,14 +958,39 @@ public partial class MainWindow : Window
                 var token = ReadPayload<TokenDeltaPayload>(envelope.Payload);
                 if (token is not null)
                 {
+                    if (!_assistantBuffersByRunId.TryGetValue(envelope.RunId, out var buffer))
+                    {
+                        buffer = new StringBuilder();
+                        _assistantBuffersByRunId[envelope.RunId] = buffer;
+                    }
+
+                    buffer.Append(token.Delta);
                     AppendTranscript($"[assistant] {token.Delta}");
                 }
                 break;
             case RuntimeEventTypes.RunCompleted:
+                var completed = ReadPayload<RunCompletedPayload>(envelope.Payload);
+                if (_assistantBuffersByRunId.TryGetValue(envelope.RunId, out var completedBuffer))
+                {
+                    _lastAssistantMessage = completedBuffer.ToString();
+                    _assistantBuffersByRunId.Remove(envelope.RunId);
+                }
+                else if (!string.IsNullOrWhiteSpace(completed?.FinalText))
+                {
+                    _lastAssistantMessage = completed.FinalText;
+                }
+
+                _lastAssistantSources = BuildAssistantSourceList(_lastAssistantMessage ?? string.Empty, completed?.Briefing);
+                if (completed?.Briefing is not null)
+                {
+                    DisplayBriefing(completed.Briefing, recordHistory: true, activateTab: true);
+                }
+
                 AppendTranscript("[system] Run completed.");
                 _activeRunId = null;
                 break;
             case RuntimeEventTypes.RunFailed:
+                _assistantBuffersByRunId.Remove(envelope.RunId);
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
@@ -742,7 +1008,8 @@ public partial class MainWindow : Window
 
                     if (_uiSettings.AutoSwitchToPermissions)
                     {
-                        SetActiveView(PermTabButton);
+                        SetActiveView(SettingsTabButton);
+                        SettingsTabControl.SelectedItem = PermissionsTabItem;
                     }
                 }
                 break;
@@ -765,7 +1032,6 @@ public partial class MainWindow : Window
 
         UpdateActionDrawerSummary();
     }
-
     private async Task SubmitPermissionDecisionAsync(bool approved)
     {
         if (_runtimeApiClient is null || string.IsNullOrWhiteSpace(_pendingPermissionRequestId))
@@ -1016,6 +1282,454 @@ public partial class MainWindow : Window
         return $"{dto.TimestampUtc:O} [{dto.Category}] {dto.Message}";
     }
 
+    private async void RefreshMemoryButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await RefreshMemoryAsync();
+    }
+
+    private async Task RefreshMemoryAsync()
+    {
+        if (_runtimeApiClient is null)
+        {
+            MemoryStatusText.Text = "Memory: runtime not connected";
+            _memoryItems.Clear();
+            return;
+        }
+
+        try
+        {
+            var response = await _runtimeApiClient.GetMemoryAsync(MemoryFilterBox.Text, 40, CancellationToken.None);
+            _memoryItems.Clear();
+
+            foreach (var fact in response.Facts)
+            {
+                _memoryItems.Add(new MemoryListItem(
+                    Kind: "Fact",
+                    Title: $"{fact.Subject} {fact.Predicate} {fact.Object}",
+                    Detail: $"Profile: {fact.ProfileId ?? "(none)"} | Confidence: {fact.Confidence:0.00} | Source: {fact.SourceRef ?? "-"}",
+                    UpdatedUtc: fact.UpdatedAtUtc));
+            }
+
+            foreach (var evt in response.Events)
+            {
+                _memoryItems.Add(new MemoryListItem(
+                    Kind: "Event",
+                    Title: evt.Title,
+                    Detail: $"Type: {evt.Type} | Profile: {evt.ProfileId ?? "(none)"} | When: {evt.WhenUtc?.ToLocalTime().ToString("g") ?? "(unspecified)"}",
+                    UpdatedUtc: evt.UpdatedAtUtc));
+            }
+
+            foreach (var chunk in response.Chunks)
+            {
+                _memoryItems.Add(new MemoryListItem(
+                    Kind: "Chunk",
+                    Title: chunk.SourceRef ?? chunk.ChunkId,
+                    Detail: Truncate(chunk.Text, 220),
+                    UpdatedUtc: chunk.WhenUtc ?? DateTimeOffset.MinValue));
+            }
+
+            foreach (var nugget in response.Nuggets)
+            {
+                _memoryItems.Add(new MemoryListItem(
+                    Kind: "Nugget",
+                    Title: nugget.Text,
+                    Detail: $"Tags: {nugget.Tags ?? "-"} | Weight: {nugget.Weight:0.00} | Pins: {nugget.PinLevel}",
+                    UpdatedUtc: nugget.UpdatedAtUtc));
+            }
+
+            MemoryStatusText.Text = $"Memory loaded. Facts={response.TotalFacts}, Events={response.TotalEvents}, Chunks={response.TotalChunks}, Nuggets={response.TotalNuggets}";
+        }
+        catch (Exception ex)
+        {
+            MemoryStatusText.Text = "Memory load failed: " + ex.Message;
+        }
+    }
+
+    private async void RefreshProfilesButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await RefreshProfilesAsync();
+    }
+
+    private async Task RefreshProfilesAsync()
+    {
+        if (_runtimeApiClient is null)
+        {
+            ProfilesStatusText.Text = "Profiles: runtime not connected";
+            _profileItems.Clear();
+            _personalityItems.Clear();
+            SetActiveProfileButton.IsEnabled = false;
+            SetActivePersonalityButton.IsEnabled = false;
+            return;
+        }
+
+        try
+        {
+            var response = await _runtimeApiClient.GetProfilesAsync(CancellationToken.None);
+
+            _profileItems.Clear();
+            foreach (var profile in response.Profiles)
+            {
+                _profileItems.Add(new ProfileListItemViewModel(profile));
+            }
+
+            _personalityItems.Clear();
+            foreach (var personality in response.Personalities)
+            {
+                _personalityItems.Add(new PersonalityListItemViewModel(personality));
+            }
+
+            ProfilesStatusText.Text = $"Profiles loaded. Active profile: {response.ActiveProfileId ?? "(none)"} | Active personality: {response.ActivePersonalityId}";
+            SetActiveProfileButton.IsEnabled = false;
+            SetActivePersonalityButton.IsEnabled = false;
+        }
+        catch (Exception ex)
+        {
+            ProfilesStatusText.Text = "Profiles load failed: " + ex.Message;
+        }
+    }
+
+    private void ProfilesList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (ProfilesList.SelectedItem is ProfileListItemViewModel selected)
+        {
+            SetActiveProfileButton.IsEnabled = !selected.IsActive;
+        }
+        else
+        {
+            SetActiveProfileButton.IsEnabled = false;
+        }
+    }
+
+    private void PersonalitiesList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (PersonalitiesList.SelectedItem is PersonalityListItemViewModel selected)
+        {
+            SetActivePersonalityButton.IsEnabled = !selected.IsActive;
+        }
+        else
+        {
+            SetActivePersonalityButton.IsEnabled = false;
+        }
+    }
+
+    private async void SetActiveProfileButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_runtimeApiClient is null || ProfilesList.SelectedItem is not ProfileListItemViewModel selected)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _runtimeApiClient.SetActiveProfileAsync(selected.ProfileId, CancellationToken.None);
+            AppendTranscript($"[system] {result.Message}");
+            await RefreshProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Active profile update failed: " + ex.Message);
+        }
+    }
+
+    private async void SetActivePersonalityButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_runtimeApiClient is null || PersonalitiesList.SelectedItem is not PersonalityListItemViewModel selected)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _runtimeApiClient.SetActivePersonalityAsync(selected.Id, CancellationToken.None);
+            AppendTranscript($"[system] {result.Message}");
+            await RefreshProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Active personality update failed: " + ex.Message);
+        }
+    }
+    private async void CopyLastAssistantButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastAssistantMessage))
+        {
+            AppendTranscript("[system] Nothing to copy yet.");
+            return;
+        }
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+        {
+            AppendTranscript("[error] Clipboard is unavailable on this platform.");
+            return;
+        }
+
+        await clipboard.SetTextAsync(_lastAssistantMessage);
+        AppendTranscript("[system] Copied last assistant message.");
+    }
+
+    private void RetryLastPromptButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastUserPrompt))
+        {
+            AppendTranscript("[system] Nothing to retry yet.");
+            return;
+        }
+
+        PromptBox.Text = _lastUserPrompt;
+        PromptBox.CaretIndex = _lastUserPrompt.Length;
+        SendButton_Click(sender, e);
+    }
+
+    private async void ReadAloudButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_readAloudActive)
+        {
+            await RequestVoiceCancelAsync("read aloud button");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_lastAssistantMessage))
+        {
+            AppendTranscript("[system] Nothing to read aloud yet.");
+            return;
+        }
+
+        using var readAloudCancellation = new CancellationTokenSource();
+        _readAloudCancellation = readAloudCancellation;
+        _readAloudActive = true;
+        MarkReadAloudStarted(_lastAssistantMessage.Length);
+
+        try
+        {
+            await _ttsPlaybackService.SpeakAsync(_lastAssistantMessage, readAloudCancellation.Token);
+            MarkReadAloudCompleted(_lastAssistantMessage.Length);
+            AppendTranscript("[system] Read aloud complete.");
+        }
+        catch (OperationCanceledException) when (readAloudCancellation.IsCancellationRequested)
+        {
+            MarkPushToTalkCanceled(
+                headline: "Read aloud canceled.",
+                detail: "Local Windows speech playback was stopped before completion.");
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Read aloud failed: " + ex.Message);
+            MarkPushToTalkFailure("Read aloud failed.", ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_readAloudCancellation, readAloudCancellation))
+            {
+                _readAloudCancellation = null;
+            }
+
+            _readAloudActive = false;
+            ReadAloudButton.Content = "Read Aloud";
+        }
+    }
+private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_lastAssistantSources.Count == 0 && !string.IsNullOrWhiteSpace(_lastAssistantMessage))
+        {
+            _lastAssistantSources = ExtractUrls(_lastAssistantMessage);
+        }
+
+        var sources = _lastAssistantSources;
+        if (sources.Count == 0)
+        {
+            AppendTranscript("[system] No source URLs detected in the last assistant response.");
+            return;
+        }
+
+        AppendTranscript("[system] Sources from last assistant response:");
+        foreach (var url in sources)
+        {
+            AppendTranscript("[source] " + url);
+        }
+    }
+
+    private async void AttachFileButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            AppendTranscript("[error] File picker is unavailable on this platform.");
+            return;
+        }
+
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Attach a document",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Supported Documents")
+                {
+                    Patterns = ["*.txt", "*.csv", "*.md", "*.html", "*.htm", "*.json", "*.log"]
+                }
+            ]
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var content = await ReadAttachmentTextAsync(file, CancellationToken.None);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                AppendTranscript("[system] Selected file is empty.");
+                return;
+            }
+
+            if (content.Length > 200_000)
+            {
+                content = content[..200_000];
+                AppendTranscript("[system] Attachment was trimmed to 200,000 characters.");
+            }
+
+            _attachedDocument = new AttachedDocumentContext(file.Name, content);
+            UpdateAttachmentUi();
+            AppendTranscript($"[system] Attached file ready: {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Attachment failed: " + ex.Message);
+        }
+    }
+
+    private void RemoveAttachmentButton_Click(object? sender, RoutedEventArgs e)
+    {
+        _attachedDocument = null;
+        UpdateAttachmentUi();
+    }
+
+    private void UpdateAttachmentUi()
+    {
+        if (_attachedDocument is null)
+        {
+            AttachmentChip.IsVisible = false;
+            AttachmentNameText.Text = string.Empty;
+            AttachmentMetaText.Text = string.Empty;
+            return;
+        }
+
+        AttachmentChip.IsVisible = true;
+        AttachmentNameText.Text = _attachedDocument.FileName;
+        AttachmentMetaText.Text = _attachedDocument.IsSmall
+            ? $"{_attachedDocument.RawContent.Length:N0} chars (inline)"
+            : $"{_attachedDocument.RawContent.Length:N0} chars (context excerpts)";
+    }
+
+    private static async Task<string> ReadAttachmentTextAsync(IStorageFile file, CancellationToken cancellationToken)
+    {
+        if (file.TryGetLocalPath() is { Length: > 0 } path && File.Exists(path))
+        {
+            return await File.ReadAllTextAsync(path, cancellationToken);
+        }
+
+        await using var stream = await file.OpenReadAsync();
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
+    }
+
+    private static IReadOnlyList<string> ExtractUrls(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var urls = new List<string>();
+        var tokens = text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in tokens)
+        {
+            var trimmed = token.Trim(',', '.', ';', ')', ']', '}', '>');
+            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!urls.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+            {
+                urls.Add(trimmed);
+            }
+        }
+
+        return urls;
+    }
+
+    private static string Truncate(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        return text[..maxLength].TrimEnd() + "...";
+    }
+    private sealed record MemoryListItem(string Kind, string Title, string Detail, DateTimeOffset UpdatedUtc)
+    {
+        public string UpdatedLabel => UpdatedUtc == DateTimeOffset.MinValue
+            ? string.Empty
+            : UpdatedUtc.LocalDateTime.ToString("g");
+    }
+
+    private sealed class ProfileListItemViewModel
+    {
+        public ProfileListItemViewModel(ProfileListItemDto dto)
+        {
+            ProfileId = dto.ProfileId;
+            IsActive = dto.IsActive;
+
+            var displayName = dto.PreferredName;
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                displayName = dto.DisplayName;
+            }
+
+            DisplayName = string.IsNullOrWhiteSpace(displayName)
+                ? dto.ProfileId
+                : displayName;
+
+            Meta = $"Id: {dto.ProfileId} | Kind: {dto.Kind} | Active: {(dto.IsActive ? "yes" : "no")}";
+        }
+
+        public string ProfileId { get; }
+
+        public string DisplayName { get; }
+
+        public string Meta { get; }
+
+        public bool IsActive { get; }
+    }
+
+    private sealed class PersonalityListItemViewModel
+    {
+        public PersonalityListItemViewModel(PersonalityListItemDto dto)
+        {
+            Id = dto.Id;
+            IsActive = dto.IsActive;
+            DisplayName = string.IsNullOrWhiteSpace(dto.Alias)
+                ? dto.DisplayName
+                : $"{dto.Alias} ({dto.DisplayName})";
+            Meta = $"Id: {dto.Id} | Active: {(dto.IsActive ? "yes" : "no")}";
+        }
+
+        public string Id { get; }
+
+        public string DisplayName { get; }
+
+        public string Meta { get; }
+
+        public bool IsActive { get; }
+    }
+
     private sealed class ChatSessionItem : INotifyPropertyChanged
     {
         private string _title;
@@ -1082,6 +1796,15 @@ public partial class MainWindow : Window
         }
     }
 }
+
+
+
+
+
+
+
+
+
 
 
 

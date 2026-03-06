@@ -1,0 +1,399 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "coverlet.collector/8.0.0": {
+        "dependencies": {
+          "Microsoft.Bcl.AsyncInterfaces": "8.0.0",
+          "Microsoft.Extensions.DependencyInjection": "8.0.1",
+          "Microsoft.Sbom.Targets": "4.1.5",
+          "Microsoft.TestPlatform.ObjectModel": "18.0.1",
+          "Nerdbank.GitVersioning": "3.8.118",
+          "NuGet.Frameworks": "6.14.0",
+          "coverlet.core": "1.0.0"
+        },
+        "runtime": {
+          "coverlet.collector.dll": {}
+        }
+      },
+      "Microsoft.Bcl.AsyncInterfaces/8.0.0": {
+        "runtime": {
+          "lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.23.53103"
+          }
+        }
+      },
+      "Microsoft.Bcl.Cryptography/10.0.0": {
+        "dependencies": {
+          "System.Formats.Asn1": "10.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.Bcl.Cryptography.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection/8.0.1": {
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.DependencyInjection.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.1024.46610"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.2": {
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.1024.46610"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyModel/8.0.2": {
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.DependencyModel.dll": {
+            "assemblyVersion": "8.0.0.2",
+            "fileVersion": "8.0.1024.46610"
+          }
+        }
+      },
+      "Microsoft.Extensions.FileSystemGlobbing/8.0.0": {
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.FileSystemGlobbing.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.23.53103"
+          }
+        }
+      },
+      "Microsoft.Sbom.Targets/4.1.5": {},
+      "Microsoft.TestPlatform.ObjectModel/18.0.1": {
+        "dependencies": {
+          "System.Reflection.Metadata": "8.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.TestPlatform.CoreUtilities.dll": {
+            "assemblyVersion": "15.0.0.0",
+            "fileVersion": "18.0.125.55701"
+          },
+          "lib/net8.0/Microsoft.TestPlatform.PlatformAbstractions.dll": {
+            "assemblyVersion": "15.0.0.0",
+            "fileVersion": "18.0.125.55701"
+          },
+          "lib/net8.0/Microsoft.VisualStudio.TestPlatform.ObjectModel.dll": {
+            "assemblyVersion": "15.0.0.0",
+            "fileVersion": "18.0.125.55701"
+          }
+        },
+        "resources": {
+          "lib/net8.0/cs/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "cs"
+          },
+          "lib/net8.0/cs/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "cs"
+          },
+          "lib/net8.0/de/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "de"
+          },
+          "lib/net8.0/de/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "de"
+          },
+          "lib/net8.0/es/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "es"
+          },
+          "lib/net8.0/es/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "es"
+          },
+          "lib/net8.0/fr/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "fr"
+          },
+          "lib/net8.0/fr/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "fr"
+          },
+          "lib/net8.0/it/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "it"
+          },
+          "lib/net8.0/it/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "it"
+          },
+          "lib/net8.0/ja/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "ja"
+          },
+          "lib/net8.0/ja/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "ja"
+          },
+          "lib/net8.0/ko/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "ko"
+          },
+          "lib/net8.0/ko/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "ko"
+          },
+          "lib/net8.0/pl/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "pl"
+          },
+          "lib/net8.0/pl/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "pl"
+          },
+          "lib/net8.0/pt-BR/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "pt-BR"
+          },
+          "lib/net8.0/pt-BR/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "pt-BR"
+          },
+          "lib/net8.0/ru/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "ru"
+          },
+          "lib/net8.0/ru/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "ru"
+          },
+          "lib/net8.0/tr/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "tr"
+          },
+          "lib/net8.0/tr/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "tr"
+          },
+          "lib/net8.0/zh-Hans/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "zh-Hans"
+          },
+          "lib/net8.0/zh-Hans/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "zh-Hans"
+          },
+          "lib/net8.0/zh-Hant/Microsoft.TestPlatform.CoreUtilities.resources.dll": {
+            "locale": "zh-Hant"
+          },
+          "lib/net8.0/zh-Hant/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll": {
+            "locale": "zh-Hant"
+          }
+        }
+      },
+      "Mono.Cecil/0.11.6": {
+        "runtime": {
+          "lib/netstandard2.0/Mono.Cecil.Mdb.dll": {
+            "assemblyVersion": "0.11.6.0",
+            "fileVersion": "0.11.6.0"
+          },
+          "lib/netstandard2.0/Mono.Cecil.Pdb.dll": {
+            "assemblyVersion": "0.11.6.0",
+            "fileVersion": "0.11.6.0"
+          },
+          "lib/netstandard2.0/Mono.Cecil.Rocks.dll": {
+            "assemblyVersion": "0.11.6.0",
+            "fileVersion": "0.11.6.0"
+          },
+          "lib/netstandard2.0/Mono.Cecil.dll": {
+            "assemblyVersion": "0.11.6.0",
+            "fileVersion": "0.11.6.0"
+          }
+        }
+      },
+      "Nerdbank.GitVersioning/3.8.118": {},
+      "NuGet.Frameworks/6.14.0": {
+        "runtime": {
+          "lib/netstandard2.0/NuGet.Frameworks.dll": {
+            "assemblyVersion": "6.14.0.116",
+            "fileVersion": "6.14.0.116"
+          }
+        }
+      },
+      "NuGet.Versioning/6.14.0": {
+        "runtime": {
+          "lib/netstandard2.0/NuGet.Versioning.dll": {
+            "assemblyVersion": "6.14.0.116",
+            "fileVersion": "6.14.0.116"
+          }
+        }
+      },
+      "System.Collections.Immutable/8.0.0": {},
+      "System.Formats.Asn1/10.0.0": {
+        "runtime": {
+          "lib/net8.0/System.Formats.Asn1.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "System.Reflection.Metadata/8.0.0": {
+        "dependencies": {
+          "System.Collections.Immutable": "8.0.0"
+        }
+      },
+      "System.Security.Cryptography.Pkcs/10.0.0": {
+        "dependencies": {
+          "Microsoft.Bcl.Cryptography": "10.0.0",
+          "System.Formats.Asn1": "10.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/System.Security.Cryptography.Pkcs.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        },
+        "runtimeTargets": {
+          "runtimes/win/lib/net8.0/System.Security.Cryptography.Pkcs.dll": {
+            "rid": "win",
+            "assetType": "runtime",
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "System.Text.Json/8.0.6": {},
+      "coverlet.core/1.0.0": {
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection": "8.0.1",
+          "Microsoft.Extensions.DependencyModel": "8.0.2",
+          "Microsoft.Extensions.FileSystemGlobbing": "8.0.0",
+          "Mono.Cecil": "0.11.6",
+          "NuGet.Versioning": "6.14.0",
+          "System.Security.Cryptography.Pkcs": "10.0.0",
+          "System.Text.Json": "8.0.6"
+        },
+        "runtime": {
+          "coverlet.core.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.0.6"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "coverlet.collector/8.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Bcl.AsyncInterfaces/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-3WA9q9yVqJp222P3x1wYIGDAkpjAku0TMUaaQV22g6L67AI0LdOIrVS7Ht2vJfLHGSPVuqN94vIr15qn+HEkHw==",
+      "path": "microsoft.bcl.asyncinterfaces/8.0.0",
+      "hashPath": "microsoft.bcl.asyncinterfaces.8.0.0.nupkg.sha512"
+    },
+    "Microsoft.Bcl.Cryptography/10.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-2iilO1H+fkDBOsfYbFO57N1ElPsbWxNXyAekEtZ7b0sPrfm1akvLj+Wr7DzZy0fcEGUrez2jSyqAn4sTxDsgbg==",
+      "path": "microsoft.bcl.cryptography/10.0.0",
+      "hashPath": "microsoft.bcl.cryptography.10.0.0.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection/8.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-BmANAnR5Xd4Oqw7yQ75xOAYODybZQRzdeNucg7kS5wWKd2PNnMdYtJ2Vciy0QLylRmv42DGl5+AFL9izA6F1Rw==",
+      "path": "microsoft.extensions.dependencyinjection/8.0.1",
+      "hashPath": "microsoft.extensions.dependencyinjection.8.0.1.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-3iE7UF7MQkCv1cxzCahz+Y/guQbTqieyxyaWKhrRO91itI9cOKO76OHeQDahqG4MmW5umr3CcCvGmK92lWNlbg==",
+      "path": "microsoft.extensions.dependencyinjection.abstractions/8.0.2",
+      "hashPath": "microsoft.extensions.dependencyinjection.abstractions.8.0.2.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyModel/8.0.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-mUBDZZRgZrSyFOsJ2qJJ9fXfqd/kXJwf3AiDoqLD9m6TjY5OO/vLNOb9fb4juC0487eq4hcGN/M2Rh/CKS7QYw==",
+      "path": "microsoft.extensions.dependencymodel/8.0.2",
+      "hashPath": "microsoft.extensions.dependencymodel.8.0.2.nupkg.sha512"
+    },
+    "Microsoft.Extensions.FileSystemGlobbing/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-OK+670i7esqlQrPjdIKRbsyMCe9g5kSLpRRQGSr4Q58AOYEe/hCnfLZprh7viNisSUUQZmMrbbuDaIrP+V1ebQ==",
+      "path": "microsoft.extensions.filesystemglobbing/8.0.0",
+      "hashPath": "microsoft.extensions.filesystemglobbing.8.0.0.nupkg.sha512"
+    },
+    "Microsoft.Sbom.Targets/4.1.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-i5z+cNu/cOcdO0AgFB8aXk8w6In2H+haaDfSgd9ImvQIK+rSHavHZIogVoAZLL8jLwYx4bAcs5b7EyuMMG4mQQ==",
+      "path": "microsoft.sbom.targets/4.1.5",
+      "hashPath": "microsoft.sbom.targets.4.1.5.nupkg.sha512"
+    },
+    "Microsoft.TestPlatform.ObjectModel/18.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-qT/mwMcLF9BieRkzOBPL2qCopl8hQu6A1P7JWAoj/FMu5i9vds/7cjbJ/LLtaiwWevWLAeD5v5wjQJ/l6jvhWQ==",
+      "path": "microsoft.testplatform.objectmodel/18.0.1",
+      "hashPath": "microsoft.testplatform.objectmodel.18.0.1.nupkg.sha512"
+    },
+    "Mono.Cecil/0.11.6": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-f33RkDtZO8VlGXCtmQIviOtxgnUdym9xx/b1p9h91CRGOsJFxCFOFK1FDbVt1OCf1aWwYejUFa2MOQyFWTFjbA==",
+      "path": "mono.cecil/0.11.6",
+      "hashPath": "mono.cecil.0.11.6.nupkg.sha512"
+    },
+    "Nerdbank.GitVersioning/3.8.118": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-cRaG+ICcECG+CzbtQyUV2WftH7yl2B02AjYGGNScXx8TwYavZYwhCewBTiC0qTcsac7m6AzBUYna5xzBWmTGYw==",
+      "path": "nerdbank.gitversioning/3.8.118",
+      "hashPath": "nerdbank.gitversioning.3.8.118.nupkg.sha512"
+    },
+    "NuGet.Frameworks/6.14.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-xZ37J58DQAkVUX29qoMwla26iBYRScdcfSGNe1FIZjCX1tpafN9n7TinrkRxaJqYzW0D8Ob8a3eRSYhwEUauCA==",
+      "path": "nuget.frameworks/6.14.0",
+      "hashPath": "nuget.frameworks.6.14.0.nupkg.sha512"
+    },
+    "NuGet.Versioning/6.14.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-4v4blkhCv8mpKtfx+z0G/X0daVCzdIaHSC51GkUspugi5JIMn2Bo8xm5PdZYF0U68gOBfz/+aPWMnpRd85Jbow==",
+      "path": "nuget.versioning/6.14.0",
+      "hashPath": "nuget.versioning.6.14.0.nupkg.sha512"
+    },
+    "System.Collections.Immutable/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-AurL6Y5BA1WotzlEvVaIDpqzpIPvYnnldxru8oXJU2yFxFUy3+pNXjXd1ymO+RA0rq0+590Q8gaz2l3Sr7fmqg==",
+      "path": "system.collections.immutable/8.0.0",
+      "hashPath": "system.collections.immutable.8.0.0.nupkg.sha512"
+    },
+    "System.Formats.Asn1/10.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-0QCZNYeRswlUVyo9N3hXrt5X9dqqRup53loU4K4JatdoYPhXHLrK9PwRtg5vP0Sr9QbdCOKk2luEdip/kV5Sig==",
+      "path": "system.formats.asn1/10.0.0",
+      "hashPath": "system.formats.asn1.10.0.0.nupkg.sha512"
+    },
+    "System.Reflection.Metadata/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-ptvgrFh7PvWI8bcVqG5rsA/weWM09EnthFHR5SCnS6IN+P4mj6rE1lBDC4U8HL9/57htKAqy4KQ3bBj84cfYyQ==",
+      "path": "system.reflection.metadata/8.0.0",
+      "hashPath": "system.reflection.metadata.8.0.0.nupkg.sha512"
+    },
+    "System.Security.Cryptography.Pkcs/10.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-UPWqLSygJlFerRi9XNIuM0a1VC8gHUIufyP24xQ0sc+XimqUAEcjpOz9DhKpyDjH+5B/wO3RpC0KpkEeDj/ddg==",
+      "path": "system.security.cryptography.pkcs/10.0.0",
+      "hashPath": "system.security.cryptography.pkcs.10.0.0.nupkg.sha512"
+    },
+    "System.Text.Json/8.0.6": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-BvSpVBsVN9b+Y+wONbvJOHd1HjXQf33+XiC28ZMOwRsYb42mz3Q8YHnpTSwpwJLqYCMqM+0UUVC3V+pi25XfkQ==",
+      "path": "system.text.json/8.0.6",
+      "hashPath": "system.text.json.8.0.6.nupkg.sha512"
+    },
+    "coverlet.core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

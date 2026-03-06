@@ -9,7 +9,8 @@
         Icon="avares://SirThaddeus.UI.Avalonia/Assets/Icons/sir-thaddeus.ico"
         Background="{StaticResource BaseBrush}"
         Foreground="{StaticResource TextBrush}"
-        KeyDown="Window_KeyDown">
+        KeyDown="Window_KeyDown"
+        KeyUp="Window_KeyUp">
 
   <Grid RowDefinitions="Auto,*,Auto">
     <Border Grid.Row="0"
@@ -40,8 +41,7 @@
                     VerticalAlignment="Center"
                     Spacing="0">
           <ToggleButton x:Name="ChatTabButton" Content="Chat" IsChecked="True" Classes="viewTab" Click="ViewTab_Click"/>
-          <ToggleButton x:Name="PermTabButton" Content="Permissions" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
-          <ToggleButton x:Name="AuditTabButton" Content="Audit" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="BriefingTabButton" Content="Briefing" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
           <ToggleButton x:Name="SettingsTabButton" Content="Settings" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
         </StackPanel>
 
@@ -101,145 +101,553 @@
 
       <Grid Grid.Column="1">
         <Grid x:Name="ChatView">
-          <ScrollViewer x:Name="ChatScroller"
-                        Background="{StaticResource BaseBrush}"
-                        VerticalScrollBarVisibility="Auto"
-                        HorizontalScrollBarVisibility="Disabled">
-            <Grid>
-              <StackPanel x:Name="EmptyHero"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center"
-                          Margin="0,60,0,0">
-                <TextBlock Text="Your AI. Your Rules."
-                           FontSize="28"
-                           FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,8"/>
-                <TextBlock Text="A local-first copilot that only acts with explicit permission."
-                           FontSize="14"
-                           Foreground="{StaticResource Subtext0Brush}"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,24"/>
-                <TextBlock Text="Hold to talk (Ctrl+Alt+M)"
-                           FontSize="13"
-                           Foreground="{StaticResource Overlay0Brush}"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,4"/>
-                <TextBlock Text="Command Palette (Ctrl+Space)"
-                           FontSize="13"
-                           Foreground="{StaticResource Overlay0Brush}"
-                           HorizontalAlignment="Center"/>
-              </StackPanel>
-
-              <TextBox x:Name="TranscriptBox"
-                       Classes="transcript"
-                       AcceptsReturn="True"
-                       VerticalAlignment="Stretch"/>
-            </Grid>
-          </ScrollViewer>
-        </Grid>
-
-        <Grid x:Name="PermissionsView" IsVisible="False" Background="{StaticResource BaseBrush}">
-          <Grid Margin="24" RowDefinitions="Auto,*,Auto" RowSpacing="12">
-            <TextBlock x:Name="PermissionSummaryText"
-                       Text="No pending permission requests."
-                       FontSize="15"
-                       FontWeight="SemiBold"
-                       Foreground="{StaticResource TextBrush}"/>
-
-            <Border Grid.Row="1"
-                    Background="{StaticResource MantleBrush}"
-                    CornerRadius="{StaticResource RadiusMd}"
-                    Padding="16,12"
-                    BorderBrush="{StaticResource Surface0Brush}"
-                    BorderThickness="1">
-              <TextBox x:Name="PermissionPayloadBox"
-                       IsReadOnly="True"
-                       AcceptsReturn="True"
-                       Background="Transparent"
-                       Foreground="{StaticResource Subtext1Brush}"
-                       BorderThickness="0"
-                       FontSize="12"
-                       TextWrapping="Wrap"/>
-            </Border>
-
-            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-              <Button x:Name="ApprovePermissionButton" Content="Approve"
-                      Classes="approveBtn" IsEnabled="False"
-                      Click="ApprovePermissionButton_Click"/>
-              <Button x:Name="DenyPermissionButton" Content="Deny"
-                      Classes="denyBtn" IsEnabled="False"
-                      Click="DenyPermissionButton_Click"/>
-            </StackPanel>
-          </Grid>
-        </Grid>
-
-        <Grid x:Name="AuditView" IsVisible="False" Background="{StaticResource BaseBrush}">
           <Grid RowDefinitions="Auto,*" RowSpacing="0">
             <Border Background="{StaticResource MantleBrush}"
                     Padding="12,8"
                     BorderBrush="{StaticResource Surface0Brush}"
                     BorderThickness="0,0,0,1">
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="RefreshAuditButton" Content="Refresh"
-                        Classes="actionBtn" Click="RefreshAuditButton_Click"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="Copy Last" Classes="actionBtn" Click="CopyLastAssistantButton_Click"/>
+                <Button Content="Retry Last" Classes="actionBtn" Click="RetryLastPromptButton_Click"/>
+                <Button x:Name="ReadAloudButton" Content="Read Aloud" Classes="actionBtn" Click="ReadAloudButton_Click"/>
+                <Button Content="Sources" Classes="actionBtn" Click="ShowSourcesButton_Click"/>
               </StackPanel>
             </Border>
-            <ListBox x:Name="AuditList" Grid.Row="1"
-                     Background="{StaticResource BaseBrush}"
-                     Foreground="{StaticResource TextBrush}"/>
+
+            <ScrollViewer Grid.Row="1"
+                          x:Name="ChatScroller"
+                          Background="{StaticResource BaseBrush}"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <Grid>
+                <StackPanel x:Name="EmptyHero"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Margin="0,60,0,0">
+                  <TextBlock Text="Your AI. Your Rules."
+                             FontSize="28"
+                             FontWeight="Bold"
+                             Foreground="{StaticResource TextBrush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,8"/>
+                  <TextBlock Text="A local-first copilot that only acts with explicit permission."
+                             FontSize="14"
+                             Foreground="{StaticResource Subtext0Brush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,24"/>
+                  <TextBlock Text="Memory and profile state is runtime-backed."
+                             FontSize="13"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4"/>
+                  <TextBlock Text="Attachments and playback are local client actions."
+                             FontSize="13"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBox x:Name="TranscriptBox"
+                         Classes="transcript"
+                         AcceptsReturn="True"
+                         VerticalAlignment="Stretch"/>
+              </Grid>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+
+        <Grid x:Name="BriefingView" IsVisible="False" Background="{StaticResource BaseBrush}">
+          <Grid ColumnDefinitions="260,*,320">
+            <Border Grid.Column="0"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,1,0">
+              <Grid RowDefinitions="Auto,*">
+                <StackPanel Margin="16,16,16,12" Spacing="4">
+                  <TextBlock Text="Briefing History" FontSize="13" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="BriefingHistoryHintText"
+                             Text="Deep-dive results from this conversation appear here."
+                             FontSize="11"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <ListBox Grid.Row="1"
+                         x:Name="BriefingHistoryList"
+                         Margin="10,0,10,10"
+                         SelectionChanged="BriefingHistoryList_SelectionChanged"
+                         Background="{StaticResource BaseBrush}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource Surface0Brush}" CornerRadius="6">
+                        <StackPanel Spacing="4">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Text="{ReflectionBinding Title}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                            <Border Grid.Column="1" Background="{ReflectionBinding ConfidenceBrush}" CornerRadius="999" Padding="8,2">
+                              <TextBlock Text="{ReflectionBinding ConfidenceLabel}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource BaseBrush}"/>
+                            </Border>
+                          </Grid>
+                          <TextBlock Text="{ReflectionBinding StatusLine}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap" MaxLines="2"/>
+                          <TextBlock Text="{ReflectionBinding UpdatedLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Column="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="24,20,20,20" MaxWidth="760" Spacing="14">
+                <Border Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="12,10">
+                  <TextBlock x:Name="BriefingStatusText"
+                             Text="No briefing loaded yet. Ask for a place or product deep dive in chat."
+                             FontSize="12"
+                             Foreground="{StaticResource Subtext0Brush}"
+                             TextWrapping="Wrap"/>
+                </Border>
+
+                <Border x:Name="BriefingEmptyState"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="24,22">
+                  <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <TextBlock Text="No briefing loaded"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Use chat to ask about a business, place, or product. Structured briefing output will appear here when the runtime returns it."
+                               MaxWidth="480"
+                               FontSize="12"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="BriefingHeroCard"
+                        IsVisible="False"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="16,14">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="BriefingHeroTitleText" Text="Briefing title" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="BriefingHeroStatusText" Text="Status line" FontSize="14" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border x:Name="BriefingConfidenceBadge" Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="12,6" VerticalAlignment="Top">
+                        <TextBlock x:Name="BriefingConfidenceText" Text="UNKNOWN" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BaseBrush}"/>
+                      </Border>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                      <Border Background="{StaticResource BaseBrush}" CornerRadius="8" Padding="10,8" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="Checked" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                          <TextBlock x:Name="BriefingLastCheckedText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                      <Border Grid.Column="1" Background="{StaticResource BaseBrush}" CornerRadius="8" Padding="10,8" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="Hours" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                          <TextBlock x:Name="BriefingClosesText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="BriefingWebsiteButton" Content="Website" Classes="actionBtn" IsEnabled="False" Click="BriefingWebsiteButton_Click"/>
+                      <Button x:Name="BriefingDirectionsButton" Content="Directions" Classes="actionBtn" IsEnabled="False" Click="BriefingDirectionsButton_Click"/>
+                      <Button x:Name="BriefingCopyPhoneButton" Content="Copy Phone" Classes="actionBtn" IsEnabled="False" Click="BriefingCopyPhoneButton_Click"/>
+                      <Button x:Name="BriefingCopyAddressButton" Content="Copy Address" Classes="actionBtn" IsEnabled="False" Click="BriefingCopyAddressButton_Click"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <ItemsControl x:Name="BriefingCardsList" IsVisible="False">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="0,0,0,12"
+                              Padding="14,12"
+                              Background="{StaticResource MantleBrush}"
+                              BorderBrush="{StaticResource Surface0Brush}"
+                              BorderThickness="1"
+                              CornerRadius="{StaticResource RadiusMd}">
+                        <StackPanel Spacing="8">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Text="{ReflectionBinding Title}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="1" Text="{ReflectionBinding TypeLabel}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource BlueBrush}" VerticalAlignment="Center"/>
+                          </Grid>
+                          <ItemsControl ItemsSource="{ReflectionBinding Bullets}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                  <TextBlock Text="- " FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                                  <TextBlock Text="{Binding}" FontSize="12" Foreground="{StaticResource Subtext1Brush}" TextWrapping="Wrap" MaxWidth="620"/>
+                                </StackPanel>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Text="{ReflectionBinding SourceSummary}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border x:Name="BriefingAuditSection"
+                        IsVisible="False"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}">
+                  <Grid RowDefinitions="Auto,*">
+                    <TextBlock Grid.Row="0" Text="Audit Trail" Margin="14,12,14,4" FontSize="13" FontWeight="SemiBold"/>
+                    <ListBox x:Name="BriefingAuditList" Grid.Row="1" Margin="10,0,10,10" Background="Transparent">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource BaseBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" CornerRadius="6">
+                            <StackPanel Spacing="4">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBlock Text="{ReflectionBinding StepLabel}" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Grid.Column="1" Text="{ReflectionBinding TimestampLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}"/>
+                              </Grid>
+                              <TextBlock Text="{ReflectionBinding Detail}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                              <TextBlock Text="{ReflectionBinding SourceSummary}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Grid>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Column="2"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="1,0,0,0">
+              <ScrollViewer VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="16,18,16,18" Spacing="14">
+                  <TextBlock Text="Quick Info" FontSize="13" FontWeight="SemiBold"/>
+
+                  <Border Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          Padding="12,10">
+                    <StackPanel Spacing="8">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Address" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingAddressText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Phone" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingPhoneText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Query" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingQueryText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <Border x:Name="BriefingMapSection"
+                          IsVisible="False"
+                          Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          Padding="12,10">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="Map" FontSize="13" FontWeight="SemiBold"/>
+                      <TextBlock x:Name="BriefingMapLabelText" Text="Map" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                      <TextBlock x:Name="BriefingMapCoordsText" Text="-" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                      <TextBlock Text="Coordinates are shown now; platform map embedding can land later without changing the contract."
+                                 FontSize="10"
+                                 Foreground="{StaticResource Overlay0Brush}"
+                                 TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+
+                  <Border x:Name="BriefingSourcesSection"
+                          IsVisible="False"
+                          Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1">
+                    <Grid RowDefinitions="Auto,*">
+                      <TextBlock Grid.Row="0" Text="Sources" Margin="12,10,12,4" FontSize="13" FontWeight="SemiBold"/>
+                      <ListBox x:Name="BriefingSourcesList" Grid.Row="1" Margin="8,0,8,8" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate>
+                            <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" CornerRadius="6">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <StackPanel Spacing="3">
+                                  <TextBlock Text="{ReflectionBinding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                  <TextBlock Text="{ReflectionBinding Meta}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Open"
+                                        Classes="actionBtn"
+                                        Tag="{ReflectionBinding Url}"
+                                        Click="BriefingSourceOpenButton_Click"/>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                    </Grid>
+                  </Border>
+                </StackPanel>
+              </ScrollViewer>
+            </Border>
           </Grid>
         </Grid>
 
         <Grid x:Name="SettingsView" IsVisible="False" Background="{StaticResource BaseBrush}">
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="32,24,32,24" MaxWidth="720" Spacing="14">
-              <TextBlock Text="RUNTIME" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BlueBrush}"/>
+          <TabControl x:Name="SettingsTabControl" TabStripPlacement="Left" Padding="0" Background="Transparent" SelectionChanged="SettingsTabControl_SelectionChanged">
+            
+            <TabItem Header="General">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="32,24,32,24" MaxWidth="720" Spacing="14">
+                  <TextBlock Text="RUNTIME" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BlueBrush}"/>
 
-              <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
-                <TextBlock Text="Runtime URL" FontSize="12" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="1" x:Name="RuntimeUrlBox"
-                         Text="http://127.0.0.1:5378"
-                         Classes="chatInput"
-                         FontSize="12"
-                         Padding="8,6"/>
-                <Button Grid.Column="2" Content="Connect" Classes="actionBtn" Click="ConnectButton_Click"/>
+                  <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="Runtime URL" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="RuntimeUrlBox"
+                             Text="http://127.0.0.1:5378"
+                             Classes="chatInput"
+                             FontSize="12"
+                             Padding="8,6"/>
+                    <Button Grid.Column="2" Content="Connect" Classes="actionBtn" Click="ConnectButton_Click"/>
+                  </Grid>
+
+                  <TextBlock x:Name="SettingsRuntimeText" Text="Runtime: not connected" FontSize="13" Foreground="{StaticResource Subtext0Brush}"/>
+
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="StartRuntimeButton" Content="Start Local Runtime" Classes="actionBtn" Click="StartRuntimeButton_Click"/>
+                    <Button x:Name="StopRuntimeButton" Content="Stop Managed Runtime" Classes="actionBtn" Click="StopRuntimeButton_Click"/>
+                  </StackPanel>
+
+                  <TextBlock x:Name="RuntimeLaunchStateText" Text="Managed runtime: not running" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}"/>
+
+                  <TextBlock Text="INTERACTION" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MauveBrush}"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <StackPanel Spacing="8">
+                      <CheckBox x:Name="SendOnEnterCheckBox" Content="Send on Enter (Shift+Enter newline)" Click="SendOnEnterCheckBox_Click"/>
+                      <CheckBox x:Name="AutoSwitchPermissionsCheckBox" Content="Auto-switch to Permissions tab when approval is requested" Click="AutoSwitchPermissionsCheckBox_Click"/>
+                      <CheckBox x:Name="AutoConnectCheckBox" Content="Auto-connect on startup" Click="AutoConnectCheckBox_Click"/>
+                      <CheckBox x:Name="AutoStartRuntimeCheckBox" Content="Auto-start local runtime if unavailable" Click="AutoStartRuntimeCheckBox_Click"/>
+                      <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on close" Click="MinimizeToTrayCheckBox_Click"/>
+                      <TextBlock x:Name="TraySupportText" Text="Tray support is being detected..." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+
+                  <TextBlock Text="STATUS + SHORTCUTS" FontSize="11" FontWeight="Bold" Foreground="{StaticResource GreenBrush}"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <StackPanel Spacing="8">
+                      <TextBlock Text="Runtime status lives in the header connection drawer." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                      <TextBlock Text="Tabs: Ctrl+1 Chat, Ctrl+2 Briefing, Ctrl+3 Settings." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                      <TextBlock Text="Voice: Hold Talk or use Ctrl+Alt+M. On Windows the hotkey is global, and Ctrl+Alt+Esc cancels voice playback, transcription, or an active run. Other platforms keep the UI hooks in place while native capture support catches up. Read aloud is currently Windows-only." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="PermissionsTabItem" Header="Permissions">
+              <Grid Margin="24" RowDefinitions="Auto,*,Auto" RowSpacing="12">
+                <TextBlock x:Name="PermissionSummaryText"
+                           Text="No pending permission requests."
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource TextBrush}"/>
+
+                <Border Grid.Row="1"
+                        Background="{StaticResource MantleBrush}"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="16,12"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1">
+                  <TextBox x:Name="PermissionPayloadBox"
+                           IsReadOnly="True"
+                           AcceptsReturn="True"
+                           Background="Transparent"
+                           Foreground="{StaticResource Subtext1Brush}"
+                           BorderThickness="0"
+                           FontSize="12"
+                           TextWrapping="Wrap"/>
+                </Border>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+                  <Button x:Name="ApprovePermissionButton" Content="Approve"
+                          Classes="approveBtn" IsEnabled="False"
+                          Click="ApprovePermissionButton_Click"/>
+                  <Button x:Name="DenyPermissionButton" Content="Deny"
+                          Classes="denyBtn" IsEnabled="False"
+                          Click="DenyPermissionButton_Click"/>
+                </StackPanel>
               </Grid>
+            </TabItem>
 
-              <TextBlock x:Name="SettingsRuntimeText" Text="Runtime: not connected" FontSize="13" Foreground="{StaticResource Subtext0Brush}"/>
+            <TabItem x:Name="AuditTabItem" Header="Audit">
+              <Grid RowDefinitions="Auto,*" RowSpacing="0">
+                <Border Background="{StaticResource MantleBrush}"
+                        Padding="12,8"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="0,0,0,1">
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="RefreshAuditButton" Content="Refresh"
+                            Classes="actionBtn" Click="RefreshAuditButton_Click"/>
+                  </StackPanel>
+                </Border>
+                <ListBox x:Name="AuditList" Grid.Row="1"
+                         Background="{StaticResource BaseBrush}"
+                         Foreground="{StaticResource TextBrush}"/>
+              </Grid>
+            </TabItem>
 
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="StartRuntimeButton" Content="Start Local Runtime" Classes="actionBtn" Click="StartRuntimeButton_Click"/>
-                <Button x:Name="StopRuntimeButton" Content="Stop Managed Runtime" Classes="actionBtn" Click="StopRuntimeButton_Click"/>
-              </StackPanel>
+            <TabItem x:Name="MemoryTabItem" Header="Memory">
+              <Grid Margin="24" RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBox x:Name="MemoryFilterBox"
+                           Watermark="Filter memory..."
+                           Classes="chatInput"
+                           FontSize="12"
+                           Padding="8,6"/>
+                  <Button Grid.Column="1"
+                          x:Name="RefreshMemoryButton"
+                          Content="Refresh"
+                          Classes="actionBtn"
+                          Click="RefreshMemoryButton_Click"/>
+                </Grid>
 
-              <TextBlock x:Name="RuntimeLaunchStateText" Text="Managed runtime: not running" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                <TextBlock Grid.Row="1"
+                           x:Name="MemoryStatusText"
+                           Text="Memory: not loaded"
+                           FontSize="12"
+                           Foreground="{StaticResource Overlay0Brush}"/>
 
-              <Border Height="1" Background="{StaticResource Surface0Brush}"/>
+                <ListBox Grid.Row="2"
+                         x:Name="MemoryList"
+                         Background="{StaticResource MantleBrush}"
+                         BorderBrush="{StaticResource Surface0Brush}"
+                         BorderThickness="1">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="6,4" Padding="10,8" Background="{StaticResource Surface0Brush}" CornerRadius="6">
+                        <StackPanel Spacing="4">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{ReflectionBinding Kind}" FontSize="11" Foreground="{StaticResource BlueBrush}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{ReflectionBinding UpdatedLabel}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                          </StackPanel>
+                          <TextBlock Text="{ReflectionBinding Title}" FontWeight="SemiBold" FontSize="12"/>
+                          <TextBlock Text="{ReflectionBinding Detail}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap" MaxLines="3"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </TabItem>
 
-              <TextBlock Text="INTERACTION" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MauveBrush}"/>
-              <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
-                <StackPanel Spacing="8">
-                  <CheckBox x:Name="SendOnEnterCheckBox" Content="Send on Enter (Shift+Enter newline)" Click="SendOnEnterCheckBox_Click"/>
-                  <CheckBox x:Name="AutoSwitchPermissionsCheckBox" Content="Auto-switch to Permissions tab when approval is requested" Click="AutoSwitchPermissionsCheckBox_Click"/>
-                  <CheckBox x:Name="AutoConnectCheckBox" Content="Auto-connect on startup" Click="AutoConnectCheckBox_Click"/>
-                  <CheckBox x:Name="AutoStartRuntimeCheckBox" Content="Auto-start local runtime if unavailable" Click="AutoStartRuntimeCheckBox_Click"/>
-                  <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on close" Click="MinimizeToTrayCheckBox_Click"/>
-                  <TextBlock x:Name="TraySupportText" Text="Tray support is being detected..." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+            <TabItem x:Name="ProfilesTabItem" Header="Profiles">
+              <Grid Margin="24" RowDefinitions="Auto,*,Auto" RowSpacing="10">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                  <Button x:Name="RefreshProfilesButton"
+                          Content="Refresh"
+                          Classes="actionBtn"
+                          Click="RefreshProfilesButton_Click"/>
+                  <TextBlock Grid.Column="1"
+                             x:Name="ProfilesStatusText"
+                             Text="Profiles: not loaded"
+                             FontSize="12"
+                             VerticalAlignment="Center"
+                             Foreground="{StaticResource Overlay0Brush}"/>
+                </Grid>
+
+                <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="10">
+                  <Border Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusMd}">
+                    <Grid RowDefinitions="Auto,*" Margin="10">
+                      <TextBlock Text="Memory Profiles" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                      <ListBox Grid.Row="1"
+                               x:Name="ProfilesList"
+                               SelectionChanged="ProfilesList_SelectionChanged"
+                               Background="Transparent">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate>
+                            <Border Margin="0,0,0,6" Padding="8,6" Background="{StaticResource Surface0Brush}" CornerRadius="6">
+                              <StackPanel>
+                                <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
+                                <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                              </StackPanel>
+                            </Border>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                    </Grid>
+                  </Border>
+
+                  <Border Grid.Column="1"
+                          Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusMd}">
+                    <Grid RowDefinitions="Auto,*" Margin="10">
+                      <TextBlock Text="Personalities" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                      <ListBox Grid.Row="1"
+                               x:Name="PersonalitiesList"
+                               SelectionChanged="PersonalitiesList_SelectionChanged"
+                               Background="Transparent">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate>
+                            <Border Margin="0,0,0,6" Padding="8,6" Background="{StaticResource Surface0Brush}" CornerRadius="6">
+                              <StackPanel>
+                                <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
+                                <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                              </StackPanel>
+                            </Border>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                    </Grid>
+                  </Border>
+                </Grid>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                  <Button x:Name="SetActiveProfileButton"
+                          Content="Set Active Profile"
+                          Classes="actionBtn"
+                          IsEnabled="False"
+                          Click="SetActiveProfileButton_Click"/>
+                  <Button x:Name="SetActivePersonalityButton"
+                          Content="Set Active Personality"
+                          Classes="actionBtn"
+                          IsEnabled="False"
+                          Click="SetActivePersonalityButton_Click"/>
                 </StackPanel>
-              </Border>
+              </Grid>
+            </TabItem>
 
-              <TextBlock Text="ACTIONS + DIAGNOSTICS" FontSize="11" FontWeight="Bold" Foreground="{StaticResource GreenBrush}"/>
-              <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="This pass restores core workflow controls from the previous app surface." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
-                  <Button Content="Open Audit Tab" Classes="actionBtn" Click="ActionOpenAuditTabButton_Click"/>
-                  <Button Content="Open Activity Drawer" Classes="actionBtn" Click="OpenActionsDrawerButton_Click"/>
-                </StackPanel>
-              </Border>
-            </StackPanel>
-          </ScrollViewer>
+          </TabControl>
         </Grid>
       </Grid>
 
@@ -308,23 +716,78 @@
             Padding="16,10"
             BorderBrush="{StaticResource Surface0Brush}"
             BorderThickness="0,1,0,0">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-        <TextBox x:Name="PromptBox"
-                 Watermark="Type a message... (Shift+Enter for new line)"
-                 AcceptsReturn="True"
-                 MinHeight="38"
-                 MaxHeight="120"
-                 TextWrapping="Wrap"
-                 Classes="chatInput"/>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="8">
-          <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
-          <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click"/>
-        </StackPanel>
-      </Grid>
+      <StackPanel Spacing="8">
+        <Border x:Name="AttachmentChip"
+                IsVisible="False"
+                Background="{StaticResource Surface0Brush}"
+                CornerRadius="{StaticResource RadiusMd}"
+                Padding="10,6">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <StackPanel Spacing="2">
+              <TextBlock x:Name="AttachmentNameText" Text="attachment.txt" FontSize="12" FontWeight="SemiBold"/>
+              <TextBlock x:Name="AttachmentMetaText" Text="0 chars" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+            </StackPanel>
+            <Button Grid.Column="1" Content="Remove" Classes="actionBtn" Click="RemoveAttachmentButton_Click"/>
+          </Grid>
+        </Border>
+
+        <Border Background="{StaticResource BaseBrush}"
+                BorderBrush="{StaticResource Surface0Brush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource RadiusMd}"
+                Padding="10,8">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Border x:Name="PttStateBadge"
+                    Background="{StaticResource Surface0Brush}"
+                    CornerRadius="999"
+                    Padding="10,4"
+                    VerticalAlignment="Top">
+              <TextBlock x:Name="PttStateText"
+                         Text="READY"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         Foreground="{StaticResource BaseBrush}"/>
+            </Border>
+
+            <StackPanel Grid.Column="1" Spacing="2">
+              <TextBlock x:Name="PttStatusText"
+                         Text="Voice ready. Hold Talk or press Ctrl+Alt+M."
+                         FontSize="11"
+                         Foreground="{StaticResource TextBrush}"
+                         TextWrapping="Wrap"/>
+              <TextBlock x:Name="PttDetailText"
+                         Text="Preparing voice controls."
+                         FontSize="10"
+                         Foreground="{StaticResource Overlay0Brush}"
+                         TextWrapping="Wrap"/>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox x:Name="PromptBox"
+                   Watermark="Type a message... (Shift+Enter for new line)"
+                   AcceptsReturn="True"
+                   MinHeight="38"
+                   MaxHeight="120"
+                   TextWrapping="Wrap"
+                   Classes="chatInput"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="8">
+            <Button x:Name="PttHoldButton"
+                    Content="Hold Talk"
+                    Classes="actionBtn"
+                    PointerPressed="PttHoldButton_PointerPressed"
+                    PointerReleased="PttHoldButton_PointerReleased"
+                    PointerCaptureLost="PttHoldButton_PointerCaptureLost"/>
+            <Button x:Name="AttachFileButton" Content="Attach" Classes="actionBtn" Click="AttachFileButton_Click"/>
+            <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
+            <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click"/>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
     </Border>
   </Grid>
 </Window>
-
 
 
 

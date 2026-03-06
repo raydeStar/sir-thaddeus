@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.0" />
@@ -6,6 +6,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.0" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,4 +25,3 @@
   </PropertyGroup>
 
 </Project>
-

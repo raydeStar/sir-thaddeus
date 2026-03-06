@@ -52,6 +52,51 @@ internal sealed class RuntimeApiClient
         return entries ?? [];
     }
 
+    public async Task<MemoryBrowseResponse> GetMemoryAsync(string? filter, int take, CancellationToken cancellationToken)
+    {
+        var clampedTake = Math.Clamp(take, 1, 200);
+        var path = $"/api/memory?take={clampedTake}";
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            path += $"&filter={Uri.EscapeDataString(filter.Trim())}";
+        }
+
+        return await _httpClient.GetFromJsonAsync<MemoryBrowseResponse>(path, JsonOptions, cancellationToken)
+            ?? new MemoryBrowseResponse([], [], [], [], 0, 0, 0, 0);
+    }
+
+    public async Task<ProfileSummaryResponse> GetProfilesAsync(CancellationToken cancellationToken)
+    {
+        return await _httpClient.GetFromJsonAsync<ProfileSummaryResponse>("/api/profiles", JsonOptions, cancellationToken)
+            ?? new ProfileSummaryResponse(null, [], [], "");
+    }
+
+    public async Task<SetActiveProfileResponse> SetActiveProfileAsync(string profileId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "/api/profiles/active",
+            new SetActiveProfileRequest(profileId),
+            JsonOptions,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SetActiveProfileResponse>(JsonOptions, cancellationToken))
+            ?? throw new InvalidOperationException("Runtime did not return profile update metadata.");
+    }
+
+    public async Task<SetActivePersonalityResponse> SetActivePersonalityAsync(string personalityId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "/api/personalities/active",
+            new SetActivePersonalityRequest(personalityId),
+            JsonOptions,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SetActivePersonalityResponse>(JsonOptions, cancellationToken))
+            ?? throw new InvalidOperationException("Runtime did not return personality update metadata.");
+    }
+
     public async Task<bool> SubmitPermissionDecisionAsync(string requestId, bool approved, CancellationToken cancellationToken)
     {
         using var response = await _httpClient.PostAsJsonAsync(
