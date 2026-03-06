@@ -399,3 +399,24 @@ Create `agent.md` at repo root with this instruction (then run Codex CLI against
 - [x] Verified compile for UI project: `dotnet build apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj -m:1 -v m`.
 - [x] Verified launch stability with a startup probe (`dotnet run --no-build ...` remained running for 8 seconds).
 - [ ] Next pass: manual visual trim toward previous design and runtime-connect smoke validation.
+## Progress Update (2026-03-05 - Tray + UI Stabilization)
+- [x] Added Avalonia tray integration using existing lightweight icon assets (no new large binaries).
+- [x] Added tray menu actions: Open, Hide, Exit.
+- [x] Added minimize-to-tray behavior on supported platforms (Windows/macOS default on), with a Settings toggle.
+- [x] Added tray capability status text in Settings for graceful fallback when tray is unavailable.
+- [x] Applied a lightweight UI parity trim (header actions, new chat reset, cleaner input/footer behavior).
+- [x] Verified `dotnet build apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj -m:1 -v m` succeeds.
+- [x] Verified launch probe stays running (`dotnet run --no-build ...` for 8s).
+## Progress Update (2026-03-05 - Functional Rewire)
+- [x] Added local runtime lifecycle wiring in Avalonia (`RuntimeHostLauncher`) to start/stop managed headless runtime.
+- [x] Rewired Connect/Send flows to auto-connect with retry and optional local runtime bootstrap.
+- [x] Added Settings controls for runtime lifecycle (`Start Local Runtime`, `Stop Managed Runtime`) and status text.
+- [x] Added core keyboard tab shortcuts (`Ctrl+1..4`) and auto-refresh for Audit view.
+- [x] Build passes for Avalonia UI project after rewiring.
+- [ ] Full runtime end-to-end smoke in this sandbox is blocked by write restrictions outside workspace (headless runtime attempts to write audit under `%LOCALAPPDATA%`).
+## Progress Update (2026-03-05 - Drawer + Settings Functional Pass)
+- [x] Added a real `Conversation` drawer with chat session history list and session restore.
+- [x] Added a real `Connected` actions drawer with reconnect/runtime controls and recent activity preview.
+- [x] Expanded Settings with functional interaction toggles (auto-connect, auto-start runtime, send-on-enter, permission auto-switch, tray behavior).
+- [x] Added UI settings persistence (`ui-client-settings.json`) for those toggles and runtime URL.
+- [x] Build + launch probes pass for updated Avalonia UI shell.

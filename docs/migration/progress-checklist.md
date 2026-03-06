@@ -11,6 +11,7 @@ Date: 2026-03-05
 - [x] Stable IPC boundary between UI and runtime (HTTP + SSE + contracts package)
 - [x] Permissions workflow working end-to-end (request + approve/deny API)
 - [x] Streaming + STOP works
+- [x] Global STOP ALL tears down local backend servers and exits the Avalonia app
 - [ ] Cross-platform publish scripts
 
 ## Docs
@@ -32,3 +33,4 @@ Date: 2026-03-05
 - Smoke validation now passes against a freshly built Avalonia package (`SirThaddeus.UI.Avalonia.exe`) with VoiceHost `/health` responsiveness and UI launch gate.
 - Regression gate (5 tests): `CasualChat_NoToolCalls`, `WebLookup_CallsToolThenSummarizes`, `Executor_GrantsPermission_ExecutesTool`, `Executor_DeniesPermission_ReturnsFailure`, `SelfMemoryQuestion_ReturnsStoredFactsSummary`.
 - Packaging defaults now use a lite profile (no bundled voice runtime/models/wheels and no `.playwright` runtime payload) to reduce zip size; full offline bundle remains available via `./dev/release-package.ps1 -FullBundle`.
+- Avalonia STOP ALL now performs best-effort backend teardown (`HeadlessRuntime`, `McpServer`, `VoiceHost`, `voice-backend`) and then forces app shutdown.

@@ -24,6 +24,7 @@ Status legend:
 
 - [x] Active run can be cancelled via STOP command.
 - [x] Cancellation terminates tool loop quickly and emits `run.failed` with cancellation marker.
+- [x] Global STOP ALL tears down local backend servers and exits the Avalonia client.
 - [ ] No further token deltas are emitted after cancellation acknowledgement.
 
 ## Audit/log parity

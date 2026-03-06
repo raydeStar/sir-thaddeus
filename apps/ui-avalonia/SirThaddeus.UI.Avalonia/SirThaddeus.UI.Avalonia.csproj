@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.0" />
@@ -11,7 +11,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
   </ItemGroup>
-
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\..\assets\icons\sir-thaddeus.ico" Link="Assets\Icons\sir-thaddeus.ico" />
+    <AvaloniaResource Include="..\..\..\assets\icons\sir-thaddeus-tray.ico" Link="Assets\Icons\sir-thaddeus-tray.ico" />
+  </ItemGroup>
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -21,3 +24,4 @@
   </PropertyGroup>
 
 </Project>
+
