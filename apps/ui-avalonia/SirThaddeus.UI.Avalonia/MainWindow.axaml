@@ -586,20 +586,69 @@
                           BorderBrush="{StaticResource Surface0Brush}"
                           BorderThickness="1"
                           CornerRadius="{StaticResource RadiusMd}">
-                    <Grid RowDefinitions="Auto,*" Margin="10">
-                      <TextBlock Text="Memory Profiles" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
-                      <ListBox Grid.Row="1"
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10" Margin="14">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="Memory Profiles" FontWeight="SemiBold" FontSize="13"/>
+                        <TextBlock Text="Your user and person memory cards. Select one to edit, delete, or make active."
+                                   FontSize="11"
+                                   Opacity="0.72"
+                                   TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemHeight="34" ItemWidth="128">
+                        <Button x:Name="AddProfileButton"
+                                Content="Add"
+                                Classes="actionBtn"
+                                Click="AddProfileButton_Click"/>
+                        <Button x:Name="EditProfileButton"
+                                Content="Edit"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="EditProfileButton_Click"/>
+                        <Button x:Name="DeleteProfileButton"
+                                Content="Delete"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="DeleteProfileButton_Click"/>
+                        <Button x:Name="SetActiveProfileButton"
+                                Content="Set Active"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="SetActiveProfileButton_Click"/>
+                      </WrapPanel>
+                      <ListBox Grid.Row="2"
                                x:Name="ProfilesList"
                                SelectionChanged="ProfilesList_SelectionChanged"
-                               Background="Transparent">
+                               Background="Transparent"
+                               BorderThickness="0">
+                        <ListBox.Styles>
+                          <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="12,10"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                            <Setter Property="CornerRadius" Value="8"/>
+                            <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Cursor" Value="Hand"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:selected">
+                            <Setter Property="Foreground" Value="White"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource BlueLightBrush}"/>
+                          </Style>
+                        </ListBox.Styles>
                         <ListBox.ItemTemplate>
                           <DataTemplate>
-                            <Border Margin="0,0,0,6" Padding="8,6" Background="{StaticResource Surface0Brush}" CornerRadius="6">
-                              <StackPanel>
-                                <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
-                                <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
-                              </StackPanel>
-                            </Border>
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
+                              <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Opacity="0.72"/>
+                            </StackPanel>
                           </DataTemplate>
                         </ListBox.ItemTemplate>
                       </ListBox>
@@ -611,20 +660,69 @@
                           BorderBrush="{StaticResource Surface0Brush}"
                           BorderThickness="1"
                           CornerRadius="{StaticResource RadiusMd}">
-                    <Grid RowDefinitions="Auto,*" Margin="10">
-                      <TextBlock Text="Personalities" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
-                      <ListBox Grid.Row="1"
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10" Margin="14">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="Personalities" FontWeight="SemiBold" FontSize="13"/>
+                        <TextBlock Text="Assistant behavior profiles. Select one to edit, delete, or make active."
+                                   FontSize="11"
+                                   Opacity="0.72"
+                                   TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemHeight="34" ItemWidth="128">
+                        <Button x:Name="AddPersonalityButton"
+                                Content="Add"
+                                Classes="actionBtn"
+                                Click="AddPersonalityButton_Click"/>
+                        <Button x:Name="EditPersonalityButton"
+                                Content="Edit"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="EditPersonalityButton_Click"/>
+                        <Button x:Name="DeletePersonalityButton"
+                                Content="Delete"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="DeletePersonalityButton_Click"/>
+                        <Button x:Name="SetActivePersonalityButton"
+                                Content="Set Active"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="SetActivePersonalityButton_Click"/>
+                      </WrapPanel>
+                      <ListBox Grid.Row="2"
                                x:Name="PersonalitiesList"
                                SelectionChanged="PersonalitiesList_SelectionChanged"
-                               Background="Transparent">
+                               Background="Transparent"
+                               BorderThickness="0">
+                        <ListBox.Styles>
+                          <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="12,10"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                            <Setter Property="CornerRadius" Value="8"/>
+                            <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Cursor" Value="Hand"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:selected">
+                            <Setter Property="Foreground" Value="White"/>
+                          </Style>
+                          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource BlueLightBrush}"/>
+                          </Style>
+                        </ListBox.Styles>
                         <ListBox.ItemTemplate>
                           <DataTemplate>
-                            <Border Margin="0,0,0,6" Padding="8,6" Background="{StaticResource Surface0Brush}" CornerRadius="6">
-                              <StackPanel>
-                                <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
-                                <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
-                              </StackPanel>
-                            </Border>
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
+                              <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Opacity="0.72"/>
+                            </StackPanel>
                           </DataTemplate>
                         </ListBox.ItemTemplate>
                       </ListBox>
@@ -632,18 +730,11 @@
                   </Border>
                 </Grid>
 
-                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                  <Button x:Name="SetActiveProfileButton"
-                          Content="Set Active Profile"
-                          Classes="actionBtn"
-                          IsEnabled="False"
-                          Click="SetActiveProfileButton_Click"/>
-                  <Button x:Name="SetActivePersonalityButton"
-                          Content="Set Active Personality"
-                          Classes="actionBtn"
-                          IsEnabled="False"
-                          Click="SetActivePersonalityButton_Click"/>
-                </StackPanel>
+                <TextBlock Grid.Row="2"
+                           Text="Add opens a starter JSON document. Edit loads the current JSON. Active items are selected automatically when the tab refreshes."
+                           FontSize="12"
+                           Foreground="{StaticResource Overlay0Brush}"
+                           TextWrapping="Wrap"/>
               </Grid>
             </TabItem>
 
@@ -788,6 +879,7 @@
     </Border>
   </Grid>
 </Window>
+
 
 
 

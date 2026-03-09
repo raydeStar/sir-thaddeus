@@ -115,3 +115,4 @@ msbuild.log
 tmp/
 
 .dotnet-cli/
+/.codex-dotnet/.dotnet

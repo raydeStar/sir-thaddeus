@@ -1357,7 +1357,11 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
             ProfilesStatusText.Text = "Profiles: runtime not connected";
             _profileItems.Clear();
             _personalityItems.Clear();
+            EditProfileButton.IsEnabled = false;
+            DeleteProfileButton.IsEnabled = false;
             SetActiveProfileButton.IsEnabled = false;
+            EditPersonalityButton.IsEnabled = false;
+            DeletePersonalityButton.IsEnabled = false;
             SetActivePersonalityButton.IsEnabled = false;
             return;
         }
@@ -1379,8 +1383,8 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
             }
 
             ProfilesStatusText.Text = $"Profiles loaded. Active profile: {response.ActiveProfileId ?? "(none)"} | Active personality: {response.ActivePersonalityId}";
-            SetActiveProfileButton.IsEnabled = false;
-            SetActivePersonalityButton.IsEnabled = false;
+            SelectProfile(response.ActiveProfileId ?? _profileItems.FirstOrDefault()?.ProfileId);
+            SelectPersonality(response.ActivePersonalityId ?? _personalityItems.FirstOrDefault()?.Id);
         }
         catch (Exception ex)
         {
@@ -1392,10 +1396,14 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     {
         if (ProfilesList.SelectedItem is ProfileListItemViewModel selected)
         {
+            EditProfileButton.IsEnabled = true;
+            DeleteProfileButton.IsEnabled = true;
             SetActiveProfileButton.IsEnabled = !selected.IsActive;
         }
         else
         {
+            EditProfileButton.IsEnabled = false;
+            DeleteProfileButton.IsEnabled = false;
             SetActiveProfileButton.IsEnabled = false;
         }
     }
@@ -1404,10 +1412,14 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     {
         if (PersonalitiesList.SelectedItem is PersonalityListItemViewModel selected)
         {
+            EditPersonalityButton.IsEnabled = true;
+            DeletePersonalityButton.IsEnabled = true;
             SetActivePersonalityButton.IsEnabled = !selected.IsActive;
         }
         else
         {
+            EditPersonalityButton.IsEnabled = false;
+            DeletePersonalityButton.IsEnabled = false;
             SetActivePersonalityButton.IsEnabled = false;
         }
     }
@@ -1796,6 +1808,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
     }
 }
+
 
 
 

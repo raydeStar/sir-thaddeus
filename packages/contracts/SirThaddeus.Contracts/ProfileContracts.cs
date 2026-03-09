@@ -35,3 +35,35 @@ public sealed record SetActivePersonalityResponse(
     bool Applied,
     string ActivePersonalityId,
     string Message);
+
+public sealed record ProfileDocumentResponse(
+    string ProfileId,
+    string DocumentJson);
+
+public sealed record SaveProfileDocumentRequest(string DocumentJson);
+
+public sealed record SaveProfileDocumentResponse(
+    bool Applied,
+    string ProfileId,
+    string Message);
+
+public sealed record DeleteProfileResponse(
+    bool Applied,
+    string? ActiveProfileId,
+    string Message);
+
+public sealed record PersonalityDocumentResponse(
+    string PersonalityId,
+    string DocumentJson);
+
+public sealed record SavePersonalityDocumentRequest(string DocumentJson);
+
+public sealed record SavePersonalityDocumentResponse(
+    bool Applied,
+    string PersonalityId,
+    string Message);
+
+public sealed record DeletePersonalityResponse(
+    bool Applied,
+    string ActivePersonalityId,
+    string Message);

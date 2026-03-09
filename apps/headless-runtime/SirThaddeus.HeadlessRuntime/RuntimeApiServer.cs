@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -18,6 +19,18 @@ using SirThaddeus.RuntimeHost;
 internal static class RuntimeApiServer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions EditableDocumentJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+    private static readonly JsonDocumentOptions EditableDocumentReadOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
 
     public static async Task RunAsync(
         int port,
@@ -33,6 +46,12 @@ internal static class RuntimeApiServer
         var app = builder.Build();
 
         var runs = new ConcurrentDictionary<string, RunState>(StringComparer.OrdinalIgnoreCase);
+        void PersistSettings(AppSettings updatedSettings)
+        {
+            SettingsManager.Save(updatedSettings);
+            setSettings(updatedSettings);
+            permissionGate?.UpdateSettings(updatedSettings);
+        }
 
         if (permissionGate is not null)
         {
@@ -141,6 +160,7 @@ internal static class RuntimeApiServer
 
             var personalityStore = new PersonalityProfileStore();
             var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
             var personalities = personalityStore
                 .ListProfiles(personalityDirectory)
                 .OrderByDescending(p => string.Equals(p.Id, currentSettings.ActivePersonalityId, StringComparison.OrdinalIgnoreCase))
@@ -158,6 +178,49 @@ internal static class RuntimeApiServer
                 Profiles: profiles,
                 Personalities: personalities,
                 ActivePersonalityId: currentSettings.ActivePersonalityId);
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapGet("/api/profiles/template", (string? profileId) =>
+        {
+            var suggestedId = string.IsNullOrWhiteSpace(profileId)
+                ? ($"profile-{Guid.NewGuid():N}")[..16]
+                : profileId.Trim();
+
+            var response = new ProfileDocumentResponse(
+                ProfileId: suggestedId,
+                DocumentJson: CreateProfileTemplateJson(suggestedId));
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapGet("/api/profiles/{profileId}", async (string profileId, CancellationToken ct) =>
+        {
+            var requestedProfileId = (profileId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(requestedProfileId))
+            {
+                return Results.BadRequest("ProfileId is required.");
+            }
+
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.BadRequest("Memory is disabled in settings.");
+            }
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            var profiles = await store.ListProfilesAsync(ct);
+            var profile = profiles.FirstOrDefault(p => string.Equals(p.ProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase));
+            if (profile is null)
+            {
+                return Results.NotFound();
+            }
+
+            var response = new ProfileDocumentResponse(
+                ProfileId: profile.ProfileId,
+                DocumentJson: BuildProfileDocumentJson(profile));
 
             return Results.Json(response, JsonOptions);
         });
@@ -186,14 +249,147 @@ internal static class RuntimeApiServer
             }
 
             var updatedSettings = currentSettings with { ActiveProfileId = requestedProfileId };
-            SettingsManager.Save(updatedSettings);
-            setSettings(updatedSettings);
-            permissionGate?.UpdateSettings(updatedSettings);
+            PersistSettings(updatedSettings);
 
             var response = new SetActiveProfileResponse(
                 Applied: true,
                 ActiveProfileId: requestedProfileId,
                 Message: "Active profile updated.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPost("/api/profiles", async (SaveProfileDocumentRequest request, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.BadRequest("Memory is disabled in settings.");
+            }
+
+            if (!TryParseProfileDocument(request.DocumentJson, out var profile, out var error))
+            {
+                return Results.BadRequest(error);
+            }
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            var profiles = await store.ListProfilesAsync(ct);
+            var exists = profiles.Any(p => string.Equals(p.ProfileId, profile.ProfileId, StringComparison.OrdinalIgnoreCase));
+            if (exists)
+            {
+                return Results.Conflict($"Profile '{profile.ProfileId}' already exists.");
+            }
+
+            await store.StoreProfileAsync(profile, ct);
+
+            var response = new SaveProfileDocumentResponse(
+                Applied: true,
+                ProfileId: profile.ProfileId,
+                Message: $"Saved profile '{profile.ProfileId}'.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPut("/api/profiles/{profileId}", async (string profileId, SaveProfileDocumentRequest request, CancellationToken ct) =>
+        {
+            var routeProfileId = (profileId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(routeProfileId))
+            {
+                return Results.BadRequest("ProfileId is required.");
+            }
+
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.BadRequest("Memory is disabled in settings.");
+            }
+
+            if (!TryParseProfileDocument(request.DocumentJson, out var profile, out var error))
+            {
+                return Results.BadRequest(error);
+            }
+
+            if (!string.Equals(routeProfileId, profile.ProfileId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.BadRequest("Profile id in the document must match the profile being edited.");
+            }
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            var profiles = await store.ListProfilesAsync(ct);
+            var exists = profiles.Any(p => string.Equals(p.ProfileId, routeProfileId, StringComparison.OrdinalIgnoreCase));
+            if (!exists)
+            {
+                return Results.NotFound();
+            }
+
+            await store.StoreProfileAsync(profile, ct);
+
+            var response = new SaveProfileDocumentResponse(
+                Applied: true,
+                ProfileId: profile.ProfileId,
+                Message: $"Saved profile '{profile.ProfileId}'.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapDelete("/api/profiles/{profileId}", async (string profileId, CancellationToken ct) =>
+        {
+            var requestedProfileId = (profileId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(requestedProfileId))
+            {
+                return Results.BadRequest("ProfileId is required.");
+            }
+
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled)
+            {
+                return Results.BadRequest("Memory is disabled in settings.");
+            }
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            var profiles = await store.ListProfilesAsync(ct);
+            var profile = profiles.FirstOrDefault(p => string.Equals(p.ProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase));
+            if (profile is null)
+            {
+                return Results.NotFound();
+            }
+
+            await store.DeleteProfileAsync(requestedProfileId, ct);
+
+            string? nextActiveProfileId = currentSettings.ActiveProfileId;
+            if (string.Equals(currentSettings.ActiveProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase))
+            {
+                var remaining = (await store.ListProfilesAsync(ct))
+                    .OrderByDescending(p => string.Equals(p.Kind, "user", StringComparison.OrdinalIgnoreCase))
+                    .ThenBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                nextActiveProfileId = remaining.FirstOrDefault()?.ProfileId;
+                PersistSettings(currentSettings with { ActiveProfileId = nextActiveProfileId });
+            }
+
+            var response = new DeleteProfileResponse(
+                Applied: true,
+                ActiveProfileId: nextActiveProfileId,
+                Message: string.Equals(currentSettings.ActiveProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase)
+                    ? $"Deleted profile '{requestedProfileId}'. Active profile is now '{nextActiveProfileId ?? "(none)"}'."
+                    : $"Deleted profile '{requestedProfileId}'.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapGet("/api/personalities/template", (string? personalityId) =>
+        {
+            var suggestedId = string.IsNullOrWhiteSpace(personalityId)
+                ? ($"personality_{Guid.NewGuid():N}")[..20]
+                : personalityId.Trim().ToLowerInvariant();
+            var template = PersonalityProfileTemplateFactory.CreateAverageTemplate(suggestedId);
+
+            var response = new PersonalityDocumentResponse(
+                PersonalityId: suggestedId,
+                DocumentJson: PersonalityProfileTemplateFactory.RenderMinimalTemplateJson(template));
 
             return Results.Json(response, JsonOptions);
         });
@@ -209,6 +405,7 @@ internal static class RuntimeApiServer
             var currentSettings = getSettings();
             var personalityStore = new PersonalityProfileStore();
             var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
             var exists = personalityStore
                 .ListProfiles(personalityDirectory)
                 .Any(p => string.Equals(p.Id, requestedPersonalityId, StringComparison.OrdinalIgnoreCase));
@@ -218,14 +415,144 @@ internal static class RuntimeApiServer
             }
 
             var updatedSettings = currentSettings with { ActivePersonalityId = requestedPersonalityId };
-            SettingsManager.Save(updatedSettings);
-            setSettings(updatedSettings);
-            permissionGate?.UpdateSettings(updatedSettings);
+            PersistSettings(updatedSettings);
 
             var response = new SetActivePersonalityResponse(
                 Applied: true,
                 ActivePersonalityId: requestedPersonalityId,
                 Message: "Active personality updated.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapGet("/api/personalities/{personalityId}", (string personalityId) =>
+        {
+            var requestedPersonalityId = (personalityId ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(requestedPersonalityId))
+            {
+                return Results.BadRequest("PersonalityId is required.");
+            }
+
+            var currentSettings = getSettings();
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
+            var path = personalityStore.ResolveProfilePath(personalityDirectory, requestedPersonalityId);
+            if (!File.Exists(path))
+            {
+                return Results.NotFound();
+            }
+
+            var response = new PersonalityDocumentResponse(
+                PersonalityId: requestedPersonalityId,
+                DocumentJson: File.ReadAllText(path));
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPost("/api/personalities", (SavePersonalityDocumentRequest request) =>
+        {
+            if (!TryParsePersonalityDocument(request.DocumentJson, out var profile, out var error))
+            {
+                return Results.BadRequest(error);
+            }
+
+            var currentSettings = getSettings();
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
+            var path = personalityStore.ResolveProfilePath(personalityDirectory, profile.Id);
+            if (File.Exists(path))
+            {
+                return Results.Conflict($"Personality '{profile.Id}' already exists.");
+            }
+
+            personalityStore.SaveProfileTemplate(personalityDirectory, profile, request.DocumentJson);
+
+            var response = new SavePersonalityDocumentResponse(
+                Applied: true,
+                PersonalityId: profile.Id,
+                Message: $"Saved personality '{profile.Id}'.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPut("/api/personalities/{personalityId}", (string personalityId, SavePersonalityDocumentRequest request) =>
+        {
+            var routePersonalityId = (personalityId ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(routePersonalityId))
+            {
+                return Results.BadRequest("PersonalityId is required.");
+            }
+
+            if (!TryParsePersonalityDocument(request.DocumentJson, out var profile, out var error))
+            {
+                return Results.BadRequest(error);
+            }
+
+            if (!string.Equals(routePersonalityId, profile.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.BadRequest("Personality id in the document must match the personality being edited.");
+            }
+
+            var currentSettings = getSettings();
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
+            var path = personalityStore.ResolveProfilePath(personalityDirectory, routePersonalityId);
+            if (!File.Exists(path))
+            {
+                return Results.NotFound();
+            }
+
+            personalityStore.SaveProfileTemplate(personalityDirectory, profile, request.DocumentJson);
+
+            var response = new SavePersonalityDocumentResponse(
+                Applied: true,
+                PersonalityId: profile.Id,
+                Message: $"Saved personality '{profile.Id}'.");
+
+            return Results.Json(response, JsonOptions);
+        });
+
+        app.MapDelete("/api/personalities/{personalityId}", (string personalityId) =>
+        {
+            var requestedPersonalityId = (personalityId ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(requestedPersonalityId))
+            {
+                return Results.BadRequest("PersonalityId is required.");
+            }
+
+            if (string.Equals(requestedPersonalityId, BuiltInProfileCatalog.HelpfulDefaultId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.BadRequest("Cannot delete the fallback default personality.");
+            }
+
+            var currentSettings = getSettings();
+            var personalityStore = new PersonalityProfileStore();
+            var personalityDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings);
+            personalityStore.EnsureBuiltInsInstalled(personalityDirectory);
+            var path = personalityStore.ResolveProfilePath(personalityDirectory, requestedPersonalityId);
+            if (!File.Exists(path))
+            {
+                return Results.NotFound();
+            }
+
+            File.Delete(path);
+
+            var nextActivePersonalityId = currentSettings.ActivePersonalityId;
+            if (string.Equals(currentSettings.ActivePersonalityId, requestedPersonalityId, StringComparison.OrdinalIgnoreCase))
+            {
+                nextActivePersonalityId = BuiltInProfileCatalog.HelpfulDefaultId;
+                PersistSettings(currentSettings with { ActivePersonalityId = nextActivePersonalityId });
+            }
+
+            var response = new DeletePersonalityResponse(
+                Applied: true,
+                ActivePersonalityId: nextActivePersonalityId,
+                Message: string.Equals(currentSettings.ActivePersonalityId, requestedPersonalityId, StringComparison.OrdinalIgnoreCase)
+                    ? $"Deleted personality '{requestedPersonalityId}'. Active personality is now '{nextActivePersonalityId}'."
+                    : $"Deleted personality '{requestedPersonalityId}'.");
 
             return Results.Json(response, JsonOptions);
         });
@@ -317,6 +644,169 @@ internal static class RuntimeApiServer
     {
         var dbPath = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath(settings.Memory.DbPath);
         return new SqliteMemoryStore(dbPath);
+    }
+
+    private static string BuildProfileDocumentJson(ProfileCard profile)
+    {
+        JsonElement data;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(profile.ProfileJson) ? "{}" : profile.ProfileJson, EditableDocumentReadOptions);
+            data = doc.RootElement.Clone();
+        }
+        catch
+        {
+            data = ParseJsonElement("{}");
+        }
+
+        var document = new EditableProfileCardDocument
+        {
+            ProfileId = profile.ProfileId,
+            Kind = string.IsNullOrWhiteSpace(profile.Kind) ? "user" : profile.Kind,
+            DisplayName = profile.DisplayName,
+            Relationship = profile.Relationship,
+            Aliases = SplitAliases(profile.Aliases).ToArray(),
+            Data = data
+        };
+
+        return JsonSerializer.Serialize(document, EditableDocumentJsonOptions);
+    }
+
+    private static string CreateProfileTemplateJson(string profileId)
+    {
+        var document = new EditableProfileCardDocument
+        {
+            ProfileId = profileId,
+            Kind = "user",
+            DisplayName = "New Profile",
+            Relationship = "",
+            Aliases = [profileId],
+            Data = ParseJsonElement("""
+                {
+                  "preferred_name": "Preferred name",
+                  "pronouns": "they/them",
+                  "timezone": "America/Denver",
+                  "location": "Denver, CO",
+                  "style": "Direct, practical, friendly",
+                  "about_me": "Short summary for this profile",
+                  "highlight": "One useful detail to remember",
+                  "notes": "Anything else worth keeping handy",
+                  "never_mention": []
+                }
+                """)
+        };
+
+        return JsonSerializer.Serialize(document, EditableDocumentJsonOptions);
+    }
+
+    private static bool TryParseProfileDocument(string? documentJson, out ProfileCard profile, out string error)
+    {
+        profile = new ProfileCard
+        {
+            ProfileId = "",
+            DisplayName = ""
+        };
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(documentJson))
+        {
+            error = "DocumentJson is required.";
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(documentJson, EditableDocumentReadOptions);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                error = "Profile document must be a JSON object.";
+                return false;
+            }
+
+            var profileId = ReadRequiredString(root, "profile_id", out error);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                return false;
+            }
+
+            var displayName = ReadRequiredString(root, "display_name", out error);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                return false;
+            }
+
+            var kind = ReadOptionalString(root, "kind");
+            kind = string.IsNullOrWhiteSpace(kind) ? "user" : kind.Trim().ToLowerInvariant();
+            if (!string.Equals(kind, "user", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(kind, "person", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "Profile kind must be 'user' or 'person'.";
+                return false;
+            }
+
+            var relationship = ReadOptionalString(root, "relationship");
+            var aliases = ReadAliases(root);
+            var data = root.TryGetProperty("data", out var dataNode) && dataNode.ValueKind != JsonValueKind.Null
+                ? dataNode
+                : ParseJsonElement("{}");
+            if (data.ValueKind != JsonValueKind.Object)
+            {
+                error = "Profile document field 'data' must be a JSON object.";
+                return false;
+            }
+
+            var profileJson = JsonSerializer.Serialize(data, EditableDocumentJsonOptions);
+            profile = new ProfileCard
+            {
+                ProfileId = profileId,
+                Kind = kind,
+                DisplayName = displayName,
+                Relationship = string.IsNullOrWhiteSpace(relationship) ? null : relationship.Trim(),
+                Aliases = aliases.Count == 0 ? null : string.Join(';', aliases),
+                ProfileJson = profileJson,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool TryParsePersonalityDocument(string? documentJson, out PersonalityProfile profile, out string error)
+    {
+        profile = new PersonalityProfile();
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(documentJson))
+        {
+            error = "DocumentJson is required.";
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(documentJson, EditableDocumentReadOptions);
+            var validator = new PersonalityProfileValidator();
+            var validation = validator.ValidateJson(doc.RootElement);
+            if (!validation.IsValid)
+            {
+                error = $"{validation.ReasonCode}: {validation.Detail}";
+                return false;
+            }
+
+            profile = PersonalityProfileProjection.FromJson(doc.RootElement);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
     }
 
     private static string? ExtractPreferredName(string? profileJson)
@@ -431,6 +921,101 @@ internal static class RuntimeApiServer
         }
 
         return $"{auditEvent.Action} ({auditEvent.Result})";
+    }
+
+    private static string ReadRequiredString(JsonElement root, string propertyName, out string error)
+    {
+        error = "";
+        if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            error = $"Profile document field '{propertyName}' is required.";
+            return "";
+        }
+
+        var text = value.GetString()?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            error = $"Profile document field '{propertyName}' is required.";
+            return "";
+        }
+
+        return text;
+    }
+
+    private static string? ReadOptionalString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : value.GetRawText();
+    }
+
+    private static List<string> ReadAliases(JsonElement root)
+    {
+        if (!root.TryGetProperty("aliases", out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return [];
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString()?
+                .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                ?? [];
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            return value.EnumerateArray()
+                .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : item.GetRawText())
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return [];
+    }
+
+    private static IEnumerable<string> SplitAliases(string? aliases)
+    {
+        return string.IsNullOrWhiteSpace(aliases)
+            ? []
+            : aliases.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static JsonElement ParseJsonElement(string json)
+    {
+        using var doc = JsonDocument.Parse(json, EditableDocumentReadOptions);
+        return doc.RootElement.Clone();
+    }
+
+    private sealed record EditableProfileCardDocument
+    {
+        [JsonPropertyName("profile_id")]
+        public string ProfileId { get; init; } = "";
+
+        [JsonPropertyName("kind")]
+        public string Kind { get; init; } = "user";
+
+        [JsonPropertyName("display_name")]
+        public string DisplayName { get; init; } = "";
+
+        [JsonPropertyName("relationship")]
+        public string? Relationship { get; init; }
+
+        [JsonPropertyName("aliases")]
+        public IReadOnlyList<string> Aliases { get; init; } = [];
+
+        [JsonPropertyName("data")]
+        public JsonElement Data { get; init; }
     }
 
     private sealed class RunState

@@ -79,9 +79,11 @@ internal sealed class RuntimeApiClient
             JsonOptions,
             cancellationToken);
 
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<SetActiveProfileResponse>(JsonOptions, cancellationToken))
-            ?? throw new InvalidOperationException("Runtime did not return profile update metadata.");
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SetActiveProfileResponse>(
+            response,
+            "Runtime did not return profile update metadata.",
+            cancellationToken);
     }
 
     public async Task<SetActivePersonalityResponse> SetActivePersonalityAsync(string personalityId, CancellationToken cancellationToken)
@@ -92,9 +94,139 @@ internal sealed class RuntimeApiClient
             JsonOptions,
             cancellationToken);
 
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<SetActivePersonalityResponse>(JsonOptions, cancellationToken))
-            ?? throw new InvalidOperationException("Runtime did not return personality update metadata.");
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SetActivePersonalityResponse>(
+            response,
+            "Runtime did not return personality update metadata.",
+            cancellationToken);
+    }
+
+    public async Task<ProfileDocumentResponse> GetProfileTemplateAsync(string? suggestedProfileId, CancellationToken cancellationToken)
+    {
+        var path = "/api/profiles/template";
+        if (!string.IsNullOrWhiteSpace(suggestedProfileId))
+        {
+            path += $"?profileId={Uri.EscapeDataString(suggestedProfileId.Trim())}";
+        }
+
+        return await _httpClient.GetFromJsonAsync<ProfileDocumentResponse>(path, JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Runtime did not return a profile template.");
+    }
+
+    public async Task<ProfileDocumentResponse> GetProfileDocumentAsync(string profileId, CancellationToken cancellationToken)
+    {
+        return await _httpClient.GetFromJsonAsync<ProfileDocumentResponse>(
+                $"/api/profiles/{Uri.EscapeDataString(profileId)}",
+                JsonOptions,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Runtime did not return a profile document.");
+    }
+
+    public async Task<SaveProfileDocumentResponse> CreateProfileAsync(string documentJson, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "/api/profiles",
+            new SaveProfileDocumentRequest(documentJson),
+            JsonOptions,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SaveProfileDocumentResponse>(
+            response,
+            "Runtime did not return profile save metadata.",
+            cancellationToken);
+    }
+
+    public async Task<SaveProfileDocumentResponse> UpdateProfileAsync(string profileId, string documentJson, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"/api/profiles/{Uri.EscapeDataString(profileId)}",
+            new SaveProfileDocumentRequest(documentJson),
+            JsonOptions,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SaveProfileDocumentResponse>(
+            response,
+            "Runtime did not return profile save metadata.",
+            cancellationToken);
+    }
+
+    public async Task<DeleteProfileResponse> DeleteProfileAsync(string profileId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync(
+            $"/api/profiles/{Uri.EscapeDataString(profileId)}",
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<DeleteProfileResponse>(
+            response,
+            "Runtime did not return profile delete metadata.",
+            cancellationToken);
+    }
+
+    public async Task<PersonalityDocumentResponse> GetPersonalityTemplateAsync(string? suggestedPersonalityId, CancellationToken cancellationToken)
+    {
+        var path = "/api/personalities/template";
+        if (!string.IsNullOrWhiteSpace(suggestedPersonalityId))
+        {
+            path += $"?personalityId={Uri.EscapeDataString(suggestedPersonalityId.Trim())}";
+        }
+
+        return await _httpClient.GetFromJsonAsync<PersonalityDocumentResponse>(path, JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Runtime did not return a personality template.");
+    }
+
+    public async Task<PersonalityDocumentResponse> GetPersonalityDocumentAsync(string personalityId, CancellationToken cancellationToken)
+    {
+        return await _httpClient.GetFromJsonAsync<PersonalityDocumentResponse>(
+                $"/api/personalities/{Uri.EscapeDataString(personalityId)}",
+                JsonOptions,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Runtime did not return a personality document.");
+    }
+
+    public async Task<SavePersonalityDocumentResponse> CreatePersonalityAsync(string documentJson, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "/api/personalities",
+            new SavePersonalityDocumentRequest(documentJson),
+            JsonOptions,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SavePersonalityDocumentResponse>(
+            response,
+            "Runtime did not return personality save metadata.",
+            cancellationToken);
+    }
+
+    public async Task<SavePersonalityDocumentResponse> UpdatePersonalityAsync(string personalityId, string documentJson, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"/api/personalities/{Uri.EscapeDataString(personalityId)}",
+            new SavePersonalityDocumentRequest(documentJson),
+            JsonOptions,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<SavePersonalityDocumentResponse>(
+            response,
+            "Runtime did not return personality save metadata.",
+            cancellationToken);
+    }
+
+    public async Task<DeletePersonalityResponse> DeletePersonalityAsync(string personalityId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync(
+            $"/api/personalities/{Uri.EscapeDataString(personalityId)}",
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<DeletePersonalityResponse>(
+            response,
+            "Runtime did not return personality delete metadata.",
+            cancellationToken);
     }
 
     public async Task<bool> SubmitPermissionDecisionAsync(string requestId, bool approved, CancellationToken cancellationToken)
@@ -155,5 +287,50 @@ internal sealed class RuntimeApiClient
                 yield return envelope;
             }
         }
+    }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            throw new InvalidOperationException(UnwrapErrorBody(body));
+        }
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static async Task<T> ReadRequiredJsonAsync<T>(
+        HttpResponseMessage response,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        return (await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken))
+            ?? throw new InvalidOperationException(errorMessage);
+    }
+
+    private static string UnwrapErrorBody(string body)
+    {
+        var trimmed = body.Trim();
+        if (trimmed.Length >= 2 &&
+            trimmed[0] == '"' &&
+            trimmed[^1] == '"')
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<string>(trimmed) ?? trimmed;
+            }
+            catch
+            {
+                return trimmed;
+            }
+        }
+
+        return trimmed;
     }
 }
