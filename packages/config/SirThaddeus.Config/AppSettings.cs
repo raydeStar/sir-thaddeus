@@ -702,6 +702,35 @@ public sealed record WebSearchSettings
     public string SearxngBaseUrl { get; init; } = "http://localhost:8080";
 
     /// <summary>
+    /// If true, runtime will try to start a local SearxNG process when
+    /// webSearch.mode is "auto" or "searxng" and the base URL is loopback.
+    /// </summary>
+    [JsonPropertyName("searxngAutoStart")]
+    public bool SearxngAutoStart { get; init; } = true;
+
+    /// <summary>
+    /// Launch command for managed SearxNG.
+    /// "auto" tries common local commands and bundled executables.
+    /// Any other value is treated as the executable path/command.
+    /// </summary>
+    [JsonPropertyName("searxngLaunchCommand")]
+    public string SearxngLaunchCommand { get; init; } = "auto";
+
+    /// <summary>
+    /// Arguments for managed SearxNG launch.
+    /// "auto" applies default host/port args for the selected command.
+    /// Supports tokens: {host}, {port}, {baseUrl}.
+    /// </summary>
+    [JsonPropertyName("searxngLaunchArguments")]
+    public string SearxngLaunchArguments { get; init; } = "auto";
+
+    /// <summary>
+    /// Startup timeout for managed SearxNG in milliseconds.
+    /// </summary>
+    [JsonPropertyName("searxngStartupTimeoutMs")]
+    public int SearxngStartupTimeoutMs { get; init; } = 120_000;
+
+    /// <summary>
     /// HTTP timeout for search requests in milliseconds.
     /// </summary>
     [JsonPropertyName("timeoutMs")]

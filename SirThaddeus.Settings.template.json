@@ -16,5 +16,15 @@
     "enabled": true,
     "dbPath": "auto"
   },
+  "webSearch": {
+    "mode": "auto",
+    "searxngBaseUrl": "http://localhost:8080",
+    "searxngAutoStart": true,
+    "searxngLaunchCommand": "auto",
+    "searxngLaunchArguments": "auto",
+    "searxngStartupTimeoutMs": 120000,
+    "timeoutMs": 8000,
+    "maxResults": 5
+  },
   "activePersonalityId": "helpful_default"
 }

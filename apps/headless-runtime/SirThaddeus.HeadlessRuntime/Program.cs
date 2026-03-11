@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Security.Principal;
 using System.Text.Json;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.LlmClient;
@@ -25,7 +26,11 @@ var handles = ResolvePromptHandles(settings, personalityStore, profilePreferredN
 var settingsUndoStack = new Stack<AppSettings>();
 
 using var audit = JsonLineAuditLogger.CreateDefault();
+using var searxngLauncher = new SearxngHostLauncher();
+await EnsureManagedSearxngAsync(settings, options.EnableTools, searxngLauncher, audit, CancellationToken.None);
+
 using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+using var gatekeeperLlm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
 
 var mcp = await CreateMcpClientAsync(options, settings, audit, CancellationToken.None);
 await using var mcpScope = mcp.Scope;
@@ -64,20 +69,30 @@ if (options.EnableTools)
         runtimeControls: () => RuntimeControlState.FromSettings(settings));
 }
 
-AgentOrchestrator BuildOrchestrator(AppSettings currentSettings) => new(
-    llm,
-    agentMcp,
-    audit,
-    currentSettings.Llm.SystemPrompt,
-    activePersonalityId: currentSettings.ActivePersonalityId,
-    personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings))
+AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
 {
-    ActiveProfileId = currentSettings.ActiveProfileId,
-    MemoryEnabled = options.EnableTools && currentSettings.Memory.Enabled,
-    UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
-    UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
-    PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem()
-};
+    llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
+    gatekeeperLlm.UpdateOptions(RuntimeLlmOptionsFactory.BuildGatekeeper(currentSettings));
+
+    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
+
+    return new AgentOrchestrator(
+        llm,
+        agentMcp,
+        audit,
+        currentSettings.Llm.SystemPrompt,
+        activePersonalityId: currentSettings.ActivePersonalityId,
+        personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings),
+        footmanRouter: footmanRouter,
+        gatekeeperLlm: gatekeeperLlm)
+    {
+        ActiveProfileId = currentSettings.ActiveProfileId,
+        MemoryEnabled = options.EnableTools && currentSettings.Memory.Enabled,
+        UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
+        UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
+        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem()
+    };
+}
 
 var orchestrator = BuildOrchestrator(settings);
 
@@ -95,7 +110,16 @@ if (options.ServerMode)
         options.ServerPort,
         BuildOrchestrator,
         () => settings,
-        updatedSettings => settings = updatedSettings,
+        updatedSettings =>
+        {
+            settings = updatedSettings;
+            EnsureManagedSearxngAsync(
+                settings,
+                options.EnableTools,
+                searxngLauncher,
+                audit,
+                CancellationToken.None).GetAwaiter().GetResult();
+        },
         audit,
         apiPermissionGate,
         serverCancellation.Token);
@@ -426,6 +450,79 @@ static async Task<string> TryGetToolCountStatusAsync(
     catch (Exception ex)
     {
         return $"error: {ex.Message}";
+    }
+}
+
+static async Task EnsureManagedSearxngAsync(
+    AppSettings settings,
+    bool toolsEnabled,
+    SearxngHostLauncher launcher,
+    IAuditLogger audit,
+    CancellationToken cancellationToken)
+{
+    if (!toolsEnabled)
+    {
+        launcher.StopManagedSearxng();
+        return;
+    }
+
+    SearxngLaunchResult result;
+    try
+    {
+        result = await launcher.EnsureRunningAsync(settings.WebSearch, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "SEARXNG_AUTOSTART",
+            Target = settings.WebSearch.SearxngBaseUrl,
+            Result = "error",
+            Details = new Dictionary<string, object>
+            {
+                ["status"] = "exception",
+                ["message"] = ex.Message
+            }
+        });
+        return;
+    }
+
+    var mode = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
+    var resultLabel = result.Status.ToString();
+    var auditResult = result.Status switch
+    {
+        SearxngLaunchStatus.Started => "ok",
+        SearxngLaunchStatus.AlreadyRunning => "ok",
+        SearxngLaunchStatus.NotRequired => "skipped",
+        SearxngLaunchStatus.Disabled => "skipped",
+        _ => "error"
+    };
+
+    audit.Append(new AuditEvent
+    {
+        Actor = "runtime",
+        Action = "SEARXNG_AUTOSTART",
+        Target = result.BaseUrl ?? settings.WebSearch.SearxngBaseUrl,
+        Result = auditResult,
+        Details = new Dictionary<string, object>
+        {
+            ["status"] = resultLabel,
+            ["mode"] = mode,
+            ["message"] = result.Message
+        }
+    });
+
+    if (result.Status is SearxngLaunchStatus.Started or SearxngLaunchStatus.AlreadyRunning)
+    {
+        Console.WriteLine($"SearxNG: {result.Message}");
+        return;
+    }
+
+    if (mode == "searxng")
+    {
+        Console.WriteLine($"SearxNG: {result.Message}");
+        Console.WriteLine("SearxNG-only mode is configured; web search will fail until SearxNG is reachable.");
     }
 }
 

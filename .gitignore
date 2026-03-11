@@ -115,4 +115,7 @@ msbuild.log
 tmp/
 
 .dotnet-cli/
+.dotnet_cli/
+.dotnet_cli_home/
 /.codex-dotnet/.dotnet
+/external/searxng-upstream/

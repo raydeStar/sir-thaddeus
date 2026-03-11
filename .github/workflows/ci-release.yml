@@ -81,6 +81,10 @@ jobs:
         shell: pwsh
         run: ./dev/fetch-assets.ps1
 
+      - name: Build bundled SearXNG sidecar payload
+        shell: pwsh
+        run: ./dev/build-searxng-package.ps1
+
       - name: Package release zip + checksums
         shell: pwsh
         run: |

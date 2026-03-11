@@ -269,6 +269,35 @@ else {
     Warn "Asset manifest missing (runtime asset download unavailable)"
 }
 
+$searchPayloadChecks = @(
+    @{ Path = "search/start-searxng.ps1"; LegacyPath = "bin/search/start-searxng.ps1"; Label = "SearXNG bootstrap script" },
+    @{ Path = "search/runtime/python/python.exe"; LegacyPath = "bin/search/runtime/python/python.exe"; Label = "SearXNG Python runtime" },
+    @{ Path = "search/source/searxng-upstream/searx/webapp.py"; LegacyPath = "bin/search/source/searxng-upstream/searx/webapp.py"; Label = "SearXNG source payload" },
+    @{ Path = "search/deps/site-packages/flask/__init__.py"; LegacyPath = "bin/search/deps/site-packages/flask/__init__.py"; Label = "SearXNG Python dependencies" }
+)
+
+$detectedSearchPayload = 0
+foreach ($asset in $searchPayloadChecks) {
+    if (Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath) {
+        $detectedSearchPayload++
+    }
+}
+
+if ($detectedSearchPayload -eq 0) {
+    Warn "Bundled SearXNG payload not found; web search will use fallback providers only"
+}
+else {
+    foreach ($asset in $searchPayloadChecks) {
+        $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
+        if ($path) {
+            Pass "$($asset.Label) present"
+        }
+        else {
+            Fail "$($asset.Label) missing"
+        }
+    }
+}
+
 # No PDB files should be in release packages
 $pdbFiles = @(Get-ChildItem -Path $testDir -Filter "*.pdb" -Recurse)
 if ($pdbFiles.Count -eq 0) {

@@ -1,0 +1,23 @@
+use_default_settings: true
+
+general:
+  instance_name: "Sir Thaddeus Search"
+  enable_metrics: false
+
+search:
+  autocomplete: ""
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "__HOST__"
+  port: __PORT__
+  base_url: "http://__HOST__:__PORT__/"
+  secret_key: "__SECRET__"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+  method: "GET"
+

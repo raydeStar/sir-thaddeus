@@ -39,6 +39,14 @@ function Resolve-VoiceRoot([string]$Root) {
     return $null
 }
 
+function Resolve-SearchRoot([string]$Root) {
+    foreach ($relative in @("search", "bin\search")) {
+        $candidate = Join-Path $Root $relative
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
 # ── 1. Check directory structure ─────────────────────────────────────
 Write-Section "1. Directory Structure"
 
@@ -47,6 +55,8 @@ $checks = @(
     @{ Path = "SirThaddeus.McpServer.exe";      Label = "McpServer exe"; Optional = $false },
     @{ Path = "voice";                          Label = "voice/ directory (new layout)"; Optional = $true },
     @{ Path = "bin\voice";                      Label = "bin/voice/ directory (legacy layout)"; Optional = $true },
+    @{ Path = "search";                         Label = "search/ directory (new layout)"; Optional = $true },
+    @{ Path = "bin\search";                     Label = "bin/search/ directory (legacy layout)"; Optional = $true },
     @{ Path = "bin\Fixtures";                   Label = "Fixtures directory"; Optional = $true },
     @{ Path = "assets\manifest.json";           Label = "Asset manifest (self-heal)"; Optional = $false },
     @{ Path = "README_FIRST_RUN.md";            Label = "README first run"; Optional = $false }
@@ -116,6 +126,31 @@ if ($voiceRoot) {
     Write-Err "Voice directory not found (expected voice/ or bin/voice/)"
 }
 
+$searchRoot = Resolve-SearchRoot $DeployDir
+if ($searchRoot) {
+    Write-Info "  Search root detected: $searchRoot"
+    $searchChecks = @(
+        @{ Rel = "start-searxng.ps1"; Label = "SearXNG bootstrap script"; Optional = $false },
+        @{ Rel = "runtime\python\python.exe"; Label = "Bundled SearXNG Python runtime"; Optional = $false },
+        @{ Rel = "source\searxng-upstream\searx\webapp.py"; Label = "SearXNG source payload"; Optional = $false },
+        @{ Rel = "deps\site-packages\flask\__init__.py"; Label = "Bundled SearXNG dependencies"; Optional = $false },
+        @{ Rel = "THIRD_PARTY_NOTICES.md"; Label = "SearXNG license/source notice"; Optional = $false }
+    )
+
+    foreach ($entry in $searchChecks) {
+        $fullPath = Join-Path $searchRoot $entry.Rel
+        if (Test-Path $fullPath) {
+            Write-Ok "$($entry.Label) present"
+        } elseif ($entry.Optional) {
+            Write-Warn "$($entry.Label) not bundled"
+        } else {
+            Write-Err "$($entry.Label) missing"
+        }
+    }
+} else {
+    Write-Warn "Search directory not found (expected search/ or bin/search/)"
+}
+
 # ── 2. Settings file ────────────────────────────────────────────────
 Write-Section "2. Settings"
 
@@ -131,6 +166,8 @@ if (Test-Path $settingsFile) {
         Write-Info "  Voice.VoiceHostBaseUrl: $($settings.voice.voiceHostBaseUrl)"
         Write-Info "  Voice.TtsEngine: $($settings.voice.ttsEngine)"
         Write-Info "  Voice.TtsVoiceId: $($settings.voice.ttsVoiceId)"
+        Write-Info "  WebSearch.Mode: $($settings.webSearch.mode)"
+        Write-Info "  WebSearch.SearxngBaseUrl: $($settings.webSearch.searxngBaseUrl)"
         Write-Info "  RuntimeSafety.SafeMode: $($settings.runtimeSafety.safeMode)"
         Write-Info "  RuntimeSafety.SafeModeReason: $($settings.runtimeSafety.safeModeReason)"
         Write-Info "  RuntimeSafety.StrictHandshake: $($settings.runtimeSafety.strictHandshake)"

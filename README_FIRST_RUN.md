@@ -54,6 +54,9 @@ Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 
 The MCP tool server (`SirThaddeus.McpServer.exe`) starts automatically as a child process when required.
 
+If the package includes a bundled SearXNG sidecar under `search\`, web search can auto-start it on `http://localhost:8080` when `webSearch.mode` is `auto` or `searxng`.
+The bundled SearXNG source and license notice are included under `search\source\searxng-upstream\` and `search\THIRD_PARTY_NOTICES.md`.
+
 ## Local data paths
 
 - Settings: `%LOCALAPPDATA%\SirThaddeus\settings.json`

@@ -315,6 +315,13 @@ public static class SettingsManager
             {
                 Mode = NormalizeWebSearchMode(webSearch.Mode, defaults.WebSearch.Mode),
                 SearxngBaseUrl = StringOrFallback(webSearch.SearxngBaseUrl, defaults.WebSearch.SearxngBaseUrl),
+                SearxngLaunchCommand = StringOrFallback(webSearch.SearxngLaunchCommand, defaults.WebSearch.SearxngLaunchCommand),
+                SearxngLaunchArguments = StringOrFallback(webSearch.SearxngLaunchArguments, defaults.WebSearch.SearxngLaunchArguments),
+                SearxngStartupTimeoutMs = IntOrFallback(
+                    webSearch.SearxngStartupTimeoutMs,
+                    defaults.WebSearch.SearxngStartupTimeoutMs,
+                    min: 2_000,
+                    max: 180_000),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
                 MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
             },

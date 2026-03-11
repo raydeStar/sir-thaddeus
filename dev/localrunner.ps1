@@ -109,6 +109,32 @@ function Repair-StaleVoiceSessionState {
     }
 }
 
+function Ensure-LocalSearxngSidecar {
+    param([string]$RepoRootPath)
+
+    $buildScript = Join-Path $RepoRootPath "dev/build-searxng-package.ps1"
+    $packageRoot = Join-Path $RepoRootPath "apps/searxng/package"
+    $startScript = Join-Path $packageRoot "start-searxng.ps1"
+    $pythonExe = Join-Path $packageRoot "runtime/python/python.exe"
+    $depsRoot = Join-Path $packageRoot "deps/site-packages"
+    $sourceRoot = Join-Path $packageRoot "source/searxng-upstream/searx/webapp.py"
+
+    if ((Test-Path $startScript) -and (Test-Path $pythonExe) -and (Test-Path $depsRoot) -and (Test-Path $sourceRoot)) {
+        return
+    }
+
+    if (-not (Test-Path $buildScript)) {
+        Write-Host "      WARN: missing $buildScript; cannot build bundled SearXNG sidecar." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "      Missing SearXNG sidecar payload. Building..." -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      WARN: failed to build bundled SearXNG sidecar (exit $LASTEXITCODE)." -ForegroundColor Yellow
+    }
+}
+
 # 1. Bootstrap (Restores dependencies, validates SDK)
 Write-Host "`n[1/5] Bootstrapping environment..." -ForegroundColor Yellow
 & "$PSScriptRoot\bootstrap.ps1"
@@ -121,6 +147,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "`n[2/5] Checking local voice assets/session state..." -ForegroundColor Yellow
 Ensure-LocalVoiceAssets -RepoRootPath $RepoRoot
 Repair-StaleVoiceSessionState
+Ensure-LocalSearxngSidecar -RepoRootPath $RepoRoot
 
 # 3. Build VoiceHost & MCP Server (UI/terminal hosts don't directly reference them)
 Write-Host "`n[3/5] Building VoiceHost..." -ForegroundColor Yellow

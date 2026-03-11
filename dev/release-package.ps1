@@ -171,6 +171,14 @@ $projects = @(
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
 )
 
+$projectStageSubdirs = @{
+    "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = ""
+    "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = ""
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = ""
+}
+
+$optionalSearxngProject = "apps/searxng/SirThaddeus.Searxng/SirThaddeus.Searxng.csproj"
+
 $projectFrameworkOverrides = @{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = @{
         default = "net10.0"
@@ -180,6 +188,14 @@ $projectFrameworkOverrides = @{
         default = "net10.0"
     }
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = @{
+        default = "net10.0"
+    }
+}
+
+if (Test-Path (Join-Path $RepoRoot $optionalSearxngProject)) {
+    $projects += $optionalSearxngProject
+    $projectStageSubdirs[$optionalSearxngProject] = "search"
+    $projectFrameworkOverrides[$optionalSearxngProject] = @{
         default = "net10.0"
     }
 }
@@ -232,7 +248,24 @@ foreach ($project in $projects) {
         $publishArgs += @("-f", $targetFramework)
     }
 
-    dotnet @publishArgs
+    $nativePreference = $null
+    $hasNativePreference = $false
+    try {
+        $nativeVariable = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+        if ($null -ne $nativeVariable) {
+            $hasNativePreference = $true
+            $nativePreference = $nativeVariable.Value
+            $script:PSNativeCommandUseErrorActionPreference = $false
+        }
+
+        & dotnet @publishArgs
+    }
+    finally {
+        if ($hasNativePreference) {
+            $script:PSNativeCommandUseErrorActionPreference = $nativePreference
+        }
+    }
+
     if ($LASTEXITCODE -ne 0) {
         Fail "dotnet publish failed for $project (exit code $LASTEXITCODE)." $LASTEXITCODE
     }
@@ -258,11 +291,24 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
+    $stageSubdir = if ($projectStageSubdirs.ContainsKey($project)) { $projectStageSubdirs[$project] } else { "" }
+    
+    if ([string]::IsNullOrWhiteSpace($stageSubdir)) {
+        Write-Host "  Staging $projectName files..."
+    }
+    else {
+        Write-Host "  Staging $projectName files -> $stageSubdir/"
+    }
 
-    Write-Host "  Staging $projectName files..."
     @(Get-ChildItem -Path $projectPublishDir -Recurse) | ForEach-Object {
         $relativePath = $_.FullName.Substring($projectPublishDir.Length).TrimStart('\')
-        $dest = Join-Path $stageDir $relativePath
+        $destRoot = if ([string]::IsNullOrWhiteSpace($stageSubdir)) {
+            $stageDir
+        }
+        else {
+            Join-Path $stageDir $stageSubdir
+        }
+        $dest = Join-Path $destRoot $relativePath
 
         if ($_.PSIsContainer) {
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
@@ -276,6 +322,32 @@ foreach ($project in $projects) {
 
         Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction Stop
     }
+}
+
+$searchStageDir = Join-Path $stageDir "search"
+$searchSidecarStaged = Test-Path $searchStageDir
+if (-not $searchSidecarStaged) {
+    $rawSearxngPayloadCandidates = @(
+        (Join-Path $RepoRoot "apps/searxng/dist"),
+        (Join-Path $RepoRoot "apps/searxng/package"),
+        (Join-Path $RepoRoot "artifacts/searxng/$Runtime")
+    )
+
+    foreach ($candidate in $rawSearxngPayloadCandidates) {
+        if (-not (Test-Path $candidate)) {
+            continue
+        }
+
+        New-Item -ItemType Directory -Force -Path $searchStageDir | Out-Null
+        Copy-Item -Path (Join-Path $candidate "*") -Destination $searchStageDir -Recurse -Force
+        Write-Host "  Staged: search/ payload from $candidate"
+        $searchSidecarStaged = $true
+        break
+    }
+}
+
+if (-not $searchSidecarStaged) {
+    Write-Host "  Note: no bundled SearXNG sidecar payload found." -ForegroundColor DarkGray
 }
 
 if ($includeOptionalBundledAssets) {
