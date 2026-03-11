@@ -49,8 +49,9 @@ internal static class RuntimeApiServer
         void PersistSettings(AppSettings updatedSettings)
         {
             SettingsManager.Save(updatedSettings);
-            setSettings(updatedSettings);
-            permissionGate?.UpdateSettings(updatedSettings);
+            var persistedSettings = SettingsManager.Load();
+            setSettings(persistedSettings);
+            permissionGate?.UpdateSettings(persistedSettings);
         }
 
         if (permissionGate is not null)
@@ -81,6 +82,12 @@ internal static class RuntimeApiServer
                 Version: typeof(RuntimeApiServer).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                 Runtime: "headless-runtime",
                 UtcNow: DateTimeOffset.UtcNow);
+        });
+
+        app.MapPut("/api/settings", (AppSettings request) =>
+        {
+            PersistSettings(request);
+            return Results.Json(getSettings(), JsonOptions);
         });
 
         app.MapGet("/api/audit", async (int? take, CancellationToken ct) =>
@@ -132,6 +139,134 @@ internal static class RuntimeApiServer
                 TotalNuggets: totalNuggets);
 
             return Results.Json(response, JsonOptions);
+        });
+
+        app.MapPut("/api/memory/facts/{id}", async (string id, SaveMemoryFactRequest request, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+
+            var fact = new MemoryFact
+            {
+                MemoryId = id,
+                ProfileId = request.ProfileId,
+                Subject = request.Subject,
+                Predicate = request.Predicate,
+                Object = request.Object,
+                Confidence = request.Confidence,
+                SourceRef = request.SourceRef,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await store.StoreFactAsync(fact, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Fact updated"), JsonOptions);
+        });
+
+        app.MapDelete("/api/memory/facts/{id}", async (string id, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            await store.DeleteFactAsync(id, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Fact deleted"), JsonOptions);
+        });
+
+        app.MapPut("/api/memory/events/{id}", async (string id, SaveMemoryEventRequest request, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+
+            var evt = new MemoryEvent
+            {
+                EventId = id,
+                ProfileId = request.ProfileId,
+                Type = request.Type,
+                Title = request.Title,
+                Summary = request.Summary,
+                WhenIso = request.WhenUtc,
+                Confidence = request.Confidence,
+                SourceRef = request.SourceRef,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await store.StoreEventAsync(evt, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Event updated"), JsonOptions);
+        });
+
+        app.MapDelete("/api/memory/events/{id}", async (string id, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            await store.DeleteEventAsync(id, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Event deleted"), JsonOptions);
+        });
+
+        app.MapPut("/api/memory/chunks/{id}", async (string id, SaveMemoryChunkRequest request, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+
+            var chunk = new MemoryChunk
+            {
+                ChunkId = id,
+                SourceType = request.SourceType,
+                Text = request.Text,
+                WhenIso = request.WhenUtc,
+                SourceRef = request.SourceRef
+            };
+            await store.StoreChunkAsync(chunk, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Chunk updated"), JsonOptions);
+        });
+
+        app.MapDelete("/api/memory/chunks/{id}", async (string id, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            await store.DeleteChunkAsync(id, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Chunk deleted"), JsonOptions);
+        });
+
+        app.MapPut("/api/memory/nuggets/{id}", async (string id, SaveMemoryNuggetRequest request, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+
+            var nugget = new MemoryNugget
+            {
+                NuggetId = id,
+                Text = request.Text,
+                Tags = request.Tags,
+                Weight = request.Weight,
+                PinLevel = request.PinLevel,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await store.StoreNuggetAsync(nugget, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Nugget updated"), JsonOptions);
+        });
+
+        app.MapDelete("/api/memory/nuggets/{id}", async (string id, CancellationToken ct) =>
+        {
+            var currentSettings = getSettings();
+            if (!currentSettings.Memory.Enabled) return Results.BadRequest("Memory disabled.");
+            using var store = CreateMemoryStore(currentSettings);
+            await store.EnsureSchemaAsync(ct);
+            await store.DeleteNuggetAsync(id, ct);
+            return Results.Json(new GenericMemoryActionResponse(true, "Nugget deleted"), JsonOptions);
         });
 
         app.MapGet("/api/profiles", async (CancellationToken ct) =>
@@ -1239,6 +1374,9 @@ internal static class RunExecutionContext
         }
     }
 }
+
+
+
 
 
 

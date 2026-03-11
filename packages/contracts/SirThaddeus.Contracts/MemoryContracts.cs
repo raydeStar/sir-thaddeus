@@ -1,5 +1,8 @@
 ﻿namespace SirThaddeus.Contracts;
 
+using System.Collections.Generic;
+using System;
+
 public sealed record MemoryBrowseResponse(
     IReadOnlyList<MemoryFactItemDto> Facts,
     IReadOnlyList<MemoryEventItemDto> Events,
@@ -46,3 +49,36 @@ public sealed record MemoryNuggetItemDto(
     int PinLevel,
     int UseCount,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record SaveMemoryFactRequest(
+    string? ProfileId,
+    string Subject,
+    string Predicate,
+    string Object,
+    double Confidence,
+    string? SourceRef);
+
+public sealed record SaveMemoryEventRequest(
+    string? ProfileId,
+    string Type,
+    string Title,
+    string? Summary,
+    DateTimeOffset? WhenUtc,
+    double Confidence,
+    string? SourceRef);
+
+public sealed record SaveMemoryChunkRequest(
+    string SourceType,
+    string Text,
+    DateTimeOffset? WhenUtc,
+    string? SourceRef);
+
+public sealed record SaveMemoryNuggetRequest(
+    string Text,
+    string? Tags,
+    double Weight,
+    int PinLevel);
+
+public sealed record GenericMemoryActionResponse(
+    bool Applied,
+    string Message);
