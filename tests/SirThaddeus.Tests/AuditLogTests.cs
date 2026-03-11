@@ -73,6 +73,23 @@ public class AuditLogTests : IDisposable
     }
 
     [Fact]
+    public void Append_DoesNotThrow_WhenFileLocked()
+    {
+        _logger.Append(new AuditEvent { Actor = "test", Action = "PRE_LOCK" });
+
+        using var lockStream = new FileStream(
+            _testFilePath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+
+        var ex = Record.Exception(() =>
+            _logger.Append(new AuditEvent { Actor = "test", Action = "LOCKED_APPEND" }));
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
     public void ReadTail_ReturnsEmptyListWhenFileDoesNotExist()
     {
         // Arrange
