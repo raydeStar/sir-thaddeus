@@ -5,6 +5,7 @@ using SirThaddeus.Contracts;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using SirThaddeus.UI.Avalonia.ViewModels;
 
 namespace SirThaddeus.UI.Avalonia;
 

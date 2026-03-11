@@ -1,3 +1,4 @@
+using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using System.Collections.Generic;
 using System.Net.Http.Json;
@@ -46,6 +47,13 @@ internal sealed class RuntimeApiClient
         return await _httpClient.GetFromJsonAsync<HealthResponse>("/api/health", JsonOptions, cancellationToken);
     }
 
+    public async Task<AppSettings> SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync("/api/settings", settings, JsonOptions, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<AppSettings>(response, "Runtime did not return updated settings.", cancellationToken);
+    }
+
     public async Task<IReadOnlyList<AuditEntryDto>> GetAuditAsync(CancellationToken cancellationToken)
     {
         var entries = await _httpClient.GetFromJsonAsync<List<AuditEntryDto>>("/api/audit", JsonOptions, cancellationToken);
@@ -63,6 +71,62 @@ internal sealed class RuntimeApiClient
 
         return await _httpClient.GetFromJsonAsync<MemoryBrowseResponse>(path, JsonOptions, cancellationToken)
             ?? new MemoryBrowseResponse([], [], [], [], 0, 0, 0, 0);
+    }
+
+    public async Task<GenericMemoryActionResponse> SaveMemoryFactAsync(string memoryId, SaveMemoryFactRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync($"/api/memory/facts/{Uri.EscapeDataString(memoryId)}", request, JsonOptions, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> DeleteMemoryFactAsync(string memoryId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync($"/api/memory/facts/{Uri.EscapeDataString(memoryId)}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> SaveMemoryEventAsync(string eventId, SaveMemoryEventRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync($"/api/memory/events/{Uri.EscapeDataString(eventId)}", request, JsonOptions, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> DeleteMemoryEventAsync(string eventId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync($"/api/memory/events/{Uri.EscapeDataString(eventId)}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> SaveMemoryChunkAsync(string chunkId, SaveMemoryChunkRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync($"/api/memory/chunks/{Uri.EscapeDataString(chunkId)}", request, JsonOptions, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> DeleteMemoryChunkAsync(string chunkId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync($"/api/memory/chunks/{Uri.EscapeDataString(chunkId)}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> SaveMemoryNuggetAsync(string nuggetId, SaveMemoryNuggetRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync($"/api/memory/nuggets/{Uri.EscapeDataString(nuggetId)}", request, JsonOptions, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
+    }
+
+    public async Task<GenericMemoryActionResponse> DeleteMemoryNuggetAsync(string nuggetId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync($"/api/memory/nuggets/{Uri.EscapeDataString(nuggetId)}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<GenericMemoryActionResponse>(response, "Runtime did not return metadata.", cancellationToken);
     }
 
     public async Task<ProfileSummaryResponse> GetProfilesAsync(CancellationToken cancellationToken)
@@ -334,3 +398,5 @@ internal sealed class RuntimeApiClient
         return trimmed;
     }
 }
+
+

@@ -1,5 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SirThaddeus.UI.Avalonia.ViewModels"
+        xmlns:local="using:SirThaddeus.UI.Avalonia"
         x:Class="SirThaddeus.UI.Avalonia.MainWindow"
         Width="1060"
         Height="760"
@@ -30,7 +32,6 @@
           <Button x:Name="ConnectionStatusButton" Classes="headerBtn" Click="ConnectionStatusButton_Click">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <TextBlock x:Name="ConnectionStatusText" Text="Disconnected"/>
-              <TextBlock Text="v" Foreground="{StaticResource Overlay0Brush}"/>
             </StackPanel>
           </Button>
         </StackPanel>
@@ -102,15 +103,17 @@
       <Grid Grid.Column="1">
         <Grid x:Name="ChatView">
           <Grid RowDefinitions="Auto,*" RowSpacing="0">
-            <Border Background="{StaticResource MantleBrush}"
+            <Border x:Name="ChatActionBar"
+                    Background="{StaticResource MantleBrush}"
+                    IsVisible="False"
                     Padding="12,8"
                     BorderBrush="{StaticResource Surface0Brush}"
                     BorderThickness="0,0,0,1">
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="Copy Last" Classes="actionBtn" Click="CopyLastAssistantButton_Click"/>
-                <Button Content="Retry Last" Classes="actionBtn" Click="RetryLastPromptButton_Click"/>
+                <Button x:Name="CopyLastAssistantButton" Content="Copy Last" Classes="actionBtn" Click="CopyLastAssistantButton_Click"/>
+                <Button x:Name="RetryLastPromptButton" Content="Retry Last" Classes="actionBtn" Click="RetryLastPromptButton_Click"/>
                 <Button x:Name="ReadAloudButton" Content="Read Aloud" Classes="actionBtn" Click="ReadAloudButton_Click"/>
-                <Button Content="Sources" Classes="actionBtn" Click="ShowSourcesButton_Click"/>
+                <Button x:Name="SourcesButton" Content="Sources" Classes="actionBtn" Click="ShowSourcesButton_Click"/>
               </StackPanel>
             </Border>
 
@@ -135,21 +138,52 @@
                              Foreground="{StaticResource Subtext0Brush}"
                              HorizontalAlignment="Center"
                              Margin="0,0,0,24"/>
-                  <TextBlock Text="Memory and profile state is runtime-backed."
+                  <TextBlock Text="Hold to talk (Ctrl+Alt+M)"
                              FontSize="13"
                              Foreground="{StaticResource Overlay0Brush}"
                              HorizontalAlignment="Center"
                              Margin="0,0,0,4"/>
-                  <TextBlock Text="Attachments and playback are local client actions."
+                  <TextBlock Text="Command Palette (Ctrl+Space)"
                              FontSize="13"
                              Foreground="{StaticResource Overlay0Brush}"
                              HorizontalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBox x:Name="TranscriptBox"
-                         Classes="transcript"
-                         AcceptsReturn="True"
-                         VerticalAlignment="Stretch"/>
+                <ItemsControl x:Name="ChatMessagesList" Margin="16,16,16,60" Background="Transparent">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ChatMessageItem">
+                      <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="3"/>
+                          <ColumnDefinition Width="16"/>
+                          <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- Spines for role visual distinction -->
+                        <Border Grid.Column="0" Background="{StaticResource MauveBrush}" CornerRadius="4" VerticalAlignment="Stretch" IsVisible="{Binding IsAssistant}"/>
+                        <Border Grid.Column="0" Background="{StaticResource BlueBrush}" CornerRadius="4" VerticalAlignment="Stretch" IsVisible="{Binding IsUser}"/>
+                        <Border Grid.Column="0" Background="{StaticResource YellowBrush}" CornerRadius="4" VerticalAlignment="Stretch" IsVisible="{Binding IsSystem}"/>
+
+                        <StackPanel Grid.Column="2">
+                          <StackPanel Orientation="Horizontal" Margin="0,0,0,6" Spacing="8">
+                            <TextBlock Text="{Binding AuthorLabel}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Subtext0Brush}"/>
+                            <TextBlock Text="{Binding TimeDisplay}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                          </StackPanel>
+                          <TextBox Text="{Binding Content}"
+                                   FontSize="14"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Background="Transparent"
+                                   BorderThickness="0"
+                                   Padding="0"
+                                   TextWrapping="Wrap"
+                                   IsReadOnly="True"
+                                   IsTabStop="False"
+                                   Cursor="IBeam"
+                                   SelectionBrush="{StaticResource Surface1Brush}"/>
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </Grid>
             </ScrollViewer>
           </Grid>
@@ -418,7 +452,36 @@
         </Grid>
 
         <Grid x:Name="SettingsView" IsVisible="False" Background="{StaticResource BaseBrush}">
-          <TabControl x:Name="SettingsTabControl" TabStripPlacement="Left" Padding="0" Background="Transparent" SelectionChanged="SettingsTabControl_SelectionChanged">
+          <Grid RowDefinitions="Auto,*" RowSpacing="0">
+            <Border x:Name="SettingsHeaderBar"
+                    x:CompileBindings="False"
+                    Background="{StaticResource MantleBrush}"
+                    Padding="12,8"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                  <TextBlock Text="Unsaved settings will not reach the runtime until you save."
+                             FontSize="11"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             IsVisible="{Binding IsDirty}"/>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        x:Name="ReloadSettingsButton"
+                        Content="Reload"
+                        Classes="actionBtn"
+                        Click="ReloadSettingsButton_Click"/>
+                <Button Grid.Column="2"
+                        x:Name="SaveSettingsButton"
+                        Content="Save"
+                        Classes="actionBtn"
+                        IsEnabled="{Binding IsDirty}"
+                        Click="SaveSettingsButton_Click"/>
+              </Grid>
+            </Border>
+
+            <TabControl Grid.Row="1" x:Name="SettingsTabControl" TabStripPlacement="Left" Padding="0" Background="Transparent" SelectionChanged="SettingsTabControl_SelectionChanged"> 
             
             <TabItem Header="General">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -444,7 +507,28 @@
 
                   <TextBlock x:Name="RuntimeLaunchStateText" Text="Managed runtime: not running" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
 
-                  <Border Height="1" Background="{StaticResource Surface0Brush}"/>
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+
+                  <StackPanel x:Name="ConstraintsPanel" Spacing="14" x:CompileBindings="False">
+                    <TextBlock Text="RUNTIME CONSTRAINTS &amp; TOOL BUDGETS" FontSize="11" FontWeight="Bold" Foreground="{StaticResource RedBrush}"/>
+                    <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" RowSpacing="10" ColumnSpacing="12">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Max Tool Calls Per Turn" FontSize="12" VerticalAlignment="Center"/>
+                        <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding MaxToolCallsPerTurn}" Minimum="1" Maximum="100" HorizontalAlignment="Left" Width="140" FontSize="12" Padding="8,6"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Max Tool Calls Per Session" FontSize="12" VerticalAlignment="Center"/>
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxToolCallsPerSession}" Minimum="1" Maximum="10000" HorizontalAlignment="Left" Width="140" FontSize="12" Padding="8,6"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Max Web Pulls Per Turn" FontSize="12" VerticalAlignment="Center"/>
+                        <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding MaxWebPullsPerTurn}" Minimum="0" Maximum="25" HorizontalAlignment="Left" Width="140" FontSize="12" Padding="8,6"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Max File Ops Per Minute" FontSize="12" VerticalAlignment="Center"/>
+                        <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding MaxFileOpsPerMinute}" Minimum="0" Maximum="600" HorizontalAlignment="Left" Width="140" FontSize="12" Padding="8,6"/>
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
 
                   <TextBlock Text="INTERACTION" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MauveBrush}"/>
                   <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
@@ -470,8 +554,199 @@
               </ScrollViewer>
             </TabItem>
 
-            <TabItem x:Name="PermissionsTabItem" Header="Permissions">
-              <Grid Margin="24" RowDefinitions="Auto,*,Auto" RowSpacing="12">
+            <TabItem x:Name="LlmsTabItem" Header="LLMs" x:CompileBindings="False">
+              <ScrollViewer x:Name="LlmsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="32,24,32,24" MaxWidth="720" Spacing="14">
+                  <TextBlock Text="PRIMARY REASONING ENGINE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BlueBrush}"/>
+                  
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Presets:" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                    <Button x:Name="LmStudioPresetBtn" Content="LM Studio" Classes="actionBtn" Tag="http://localhost:1234"/>
+                    <Button x:Name="OllamaPresetBtn" Content="Ollama" Classes="actionBtn" Tag="http://localhost:11434"/>
+                    <Button x:Name="OpenAiPresetBtn" Content="OpenAI" Classes="actionBtn" Tag="https://api.openai.com"/>
+                  </StackPanel>
+
+                  <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LlmBaseUrl}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                    
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Model ID" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding LlmModel}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Discovery" FontSize="12" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                      <Button Content="Refresh Models" Classes="actionBtn" Click="RefreshPrimaryModelsButton_Click"/>
+                      <TextBlock Text="Queries GET /v1/models on the current base URL." FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Discovered Models" FontSize="12" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding AvailablePrimaryModels}" SelectedItem="{Binding LlmModel}" HorizontalAlignment="Stretch"/>
+                  </Grid>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+
+                  <TextBlock Text="GATEKEEPER (OPTIONAL)" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MauveBrush}"/>
+                  <TextBlock Text="Used for faster local verification of tools or small tasks." FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+                  
+                  <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Gatekeeper Base URL" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding GatekeeperBaseUrl}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                    
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Gatekeeper Model ID" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding GatekeeperModelId}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Effective URL" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding EffectiveGatekeeperBaseUrl}" FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Discovery" FontSize="12" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                      <Button Content="Refresh Gatekeeper" Classes="actionBtn" Click="RefreshGatekeeperModelsButton_Click"/>
+                      <TextBlock Text="Falls back to the primary base URL when left blank." FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Discovered Models" FontSize="12" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding AvailableGatekeeperModels}" SelectedItem="{Binding GatekeeperModelId}" HorizontalAlignment="Stretch"/>
+                  </Grid>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+
+                  <TextBlock Text="PARAMETERS" FontSize="11" FontWeight="Bold" Foreground="{StaticResource GreenBrush}"/>
+                  <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto" RowSpacing="10" ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Max Tokens" FontSize="12" VerticalAlignment="Center"/>
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding LlmMaxTokens}" Minimum="1" Maximum="32000" FontSize="12" Padding="8,6" HorizontalAlignment="Left" Width="140"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Temperature" FontSize="12" VerticalAlignment="Center"/>
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LlmTemperature}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F2" FontSize="12" Padding="8,6" HorizontalAlignment="Left" Width="140"/>
+                  </Grid>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="AudioTabItem" Header="Audio &amp; Voice" x:CompileBindings="False">
+              <ScrollViewer x:Name="AudioScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="32,24,32,24" MaxWidth="720" Spacing="14">
+                  <TextBlock Text="AUDIO DEVICES" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BlueBrush}"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <StackPanel Spacing="10">
+                      <TextBlock Text="Choose which local devices push-to-talk capture and read-aloud playback should use." FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                      <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Input Device" FontSize="12" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                  ItemsSource="{Binding AvailableInputDevices}"
+                                  SelectedItem="{Binding SelectedInputDevice}"
+                                  HorizontalAlignment="Stretch"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Output Device" FontSize="12" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1"
+                                  ItemsSource="{Binding AvailableOutputDevices}"
+                                  SelectedItem="{Binding SelectedOutputDevice}"
+                                  HorizontalAlignment="Stretch"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Input Gain" FontSize="12" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                          <NumericUpDown Value="{Binding InputGain}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F1" Width="140" FontSize="12" Padding="8,6"/>
+                          <TextBlock Text="{Binding InputGain, StringFormat={}{0:F1}x}" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource Overlay0Brush}"/>
+                        </StackPanel>
+                      </Grid>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Refresh Devices" Classes="actionBtn" Click="RefreshAudioDevicesButton_Click"/>
+                        <TextBlock Text="Refresh after plugging in or removing a headset, microphone, or speaker." FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+
+                  <TextBlock Text="VOICE PIPELINE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource PeachBrush}"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <StackPanel Spacing="10">
+                      <CheckBox Content="Enable Local VoiceHost" IsChecked="{Binding VoiceHostEnabled}" FontSize="12"/>
+                      <StackPanel Spacing="8" IsVisible="{Binding VoiceHostEnabled}">
+                        <TextBlock Text="VoiceHost URL" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBox Text="{Binding VoiceHostBaseUrl}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button Content="Refresh Health" Classes="actionBtn" Click="RefreshVoiceHostHealthButton_Click"/>
+                          <TextBlock Text="Polls the local /health endpoint while this tab is open." FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="10">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Status" FontSize="12" VerticalAlignment="Center"/>
+                          <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding VoiceHostStatusText}" FontSize="12" FontWeight="SemiBold"/>
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="ASR Ready" FontSize="12" VerticalAlignment="Center"/>
+                          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding VoiceHostAsrReady}" FontSize="12"/>
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="TTS Ready" FontSize="12" VerticalAlignment="Center"/>
+                          <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding VoiceHostTtsReady}" FontSize="12"/>
+                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Version" FontSize="12" VerticalAlignment="Center"/>
+                          <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding VoiceHostVersion}" FontSize="12"/>
+                        </Grid>
+                        <TextBlock Text="{Binding VoiceHostMessage}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+
+                  <TextBlock Text="TEXT-TO-SPEECH FORMAT" FontSize="11" FontWeight="Bold" Foreground="{StaticResource LavenderBrush}"/>
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                     <TextBlock Text="TTS Engine" FontSize="12" VerticalAlignment="Center"/>
+                     <ComboBox Grid.Column="1" ItemsSource="{Binding TtsEngineOptions}" SelectedItem="{Binding VoiceTtsEngine}" HorizontalAlignment="Stretch"/>
+                  </Grid>
+                  <TextBlock Text="{Binding VoiceSectionLabel}" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding VoiceSectionDescription}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <StackPanel Spacing="10">
+                      <StackPanel Spacing="6" IsVisible="{Binding IsWindowsEngine}">
+                        <TextBlock Text="Windows uses the system speech synthesizer. Voice id and model id are optional here." FontSize="12" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <StackPanel Spacing="8" IsVisible="{Binding IsPiperEngine}">
+                        <TextBlock Text="Piper Voice" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                          <ComboBox ItemsSource="{Binding AvailablePiperVoices}" SelectedItem="{Binding SelectedPiperVoice}" HorizontalAlignment="Stretch"/>
+                          <Button Grid.Column="1" Content="Refresh Voices" Classes="actionBtn" Click="RefreshTtsVoicesButton_Click"/>
+                        </Grid>
+                        <TextBlock Text="Choose an installed Piper voice, or pick a '(download)' entry to fetch it through VoiceHost." FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding PiperVoiceDownloadStatus}" FontSize="11" Foreground="{StaticResource LavenderBrush}" TextWrapping="Wrap" IsVisible="{Binding IsPiperStatusVisible}"/>
+                        <TextBlock Text="Piper Model ID (Optional)" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBox Text="{Binding VoiceTtsModelId}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                      </StackPanel>
+                      <StackPanel Spacing="8" IsVisible="{Binding IsKokoroEngine}">
+                        <TextBlock Text="Kokoro Voice" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                          <ComboBox ItemsSource="{Binding AvailableKokoroVoices}" SelectedItem="{Binding SelectedKokoroVoice}" HorizontalAlignment="Stretch"/>
+                          <Button Grid.Column="1" Content="Refresh Voices" Classes="actionBtn" Click="RefreshTtsVoicesButton_Click"/>
+                        </Grid>
+                        <TextBlock Text="Installed Kokoro voice packs are discovered locally. Leaving the saved voice blank falls back to the active personality preference." FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="Kokoro Model ID (Optional)" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBox Text="{Binding VoiceTtsModelId}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,8"/>
+                  <TextBlock Text="YOUTUBE INTEGRATION" FontSize="11" FontWeight="Bold" Foreground="{StaticResource RedBrush}"/>
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                       <TextBlock Grid.Row="0" Grid.Column="0" Text="ASR Provider" FontSize="12" VerticalAlignment="Center"/>
+                       <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding YouTubeAsrProviderOptions}" SelectedItem="{Binding YouTubeAsrProvider}" HorizontalAlignment="Stretch"/>
+                       
+                       <TextBlock Grid.Row="1" Grid.Column="0" Text="Model ID / Size" FontSize="12" VerticalAlignment="Center"/>
+                       <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding YouTubeAsrModelId}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+                       
+                       <TextBlock Grid.Row="2" Grid.Column="0" Text="Language Hint" FontSize="12" VerticalAlignment="Center"/>
+                       <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding YouTubeLanguageHint}" Classes="chatInput" FontSize="12" Padding="8,6"/>
+
+                       <TextBlock Grid.Row="3" Grid.Column="0" Text="Drafting Tone" FontSize="12" VerticalAlignment="Center"/>
+                       <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding YouTubeDraftToneOptions}" SelectedItem="{Binding YouTubeDraftTone}" HorizontalAlignment="Stretch"/>
+
+                       <TextBlock Grid.Row="4" Grid.Column="0" Text="Keep Audio Files" FontSize="12" VerticalAlignment="Center"/>
+                       <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding YouTubeKeepAudio}"/>
+                    </Grid>
+                  </Border>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="PermissionsTabItem" Header="Permissions" x:CompileBindings="False">
+              <Grid x:Name="PermissionsGrid" Margin="24" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="12">
                 <TextBlock x:Name="PermissionSummaryText"
                            Text="No pending permission requests."
                            FontSize="15"
@@ -501,6 +776,52 @@
                   <Button x:Name="DenyPermissionButton" Content="Deny"
                           Classes="denyBtn" IsEnabled="False"
                           Click="DenyPermissionButton_Click"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="3" Spacing="12">
+                  <Border Height="1" Background="{StaticResource Surface0Brush}" Margin="0,12"/>
+                  <TextBlock Text="MCP PERMISSION POLICIES" FontSize="11" FontWeight="Bold" Foreground="{StaticResource YellowBrush}"/>
+                  <TextBlock Text="Require confirmation before the local agent takes action in these capability groups." FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                  
+                  <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" Padding="16" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="200,*" RowSpacing="12">
+                      <TextBlock Grid.Row="0" Grid.Column="0" Text="Developer Override" FontSize="12" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="0" Grid.Column="1" SelectedItem="{Binding McpDeveloperOverride}" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="none"/>
+                        <ComboBoxItem Content="ask"/>
+                        <ComboBoxItem Content="always"/>
+                        <ComboBoxItem Content="off"/>
+                      </ComboBox>
+
+                      <TextBlock Grid.Row="1" Grid.Column="0" Text="Screen Capture" FontSize="12" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="1" Grid.Column="1" SelectedItem="{Binding McpScreen}" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="ask"/>
+                        <ComboBoxItem Content="always"/>
+                        <ComboBoxItem Content="off"/>
+                      </ComboBox>
+
+                      <TextBlock Grid.Row="2" Grid.Column="0" Text="File System (Read &amp; Write)" FontSize="12" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="2" Grid.Column="1" SelectedItem="{Binding McpFiles}" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="ask"/>
+                        <ComboBoxItem Content="always"/>
+                        <ComboBoxItem Content="off"/>
+                      </ComboBox>
+
+                      <TextBlock Grid.Row="3" Grid.Column="0" Text="System Commands" FontSize="12" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="3" Grid.Column="1" SelectedItem="{Binding McpSystem}" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="ask"/>
+                        <ComboBoxItem Content="always"/>
+                        <ComboBoxItem Content="off"/>
+                      </ComboBox>
+
+                      <TextBlock Grid.Row="4" Grid.Column="0" Text="Web Navigation &amp; Search" FontSize="12" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="4" Grid.Column="1" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="ask"/>
+                        <ComboBoxItem Content="always"/>
+                        <ComboBoxItem Content="off"/>
+                      </ComboBox>
+                    </Grid>
+                  </Border>
                 </StackPanel>
               </Grid>
             </TabItem>
@@ -543,26 +864,49 @@
                            FontSize="12"
                            Foreground="{StaticResource Overlay0Brush}"/>
 
-                <ListBox Grid.Row="2"
-                         x:Name="MemoryList"
-                         Background="{StaticResource MantleBrush}"
-                         BorderBrush="{StaticResource Surface0Brush}"
-                         BorderThickness="1">
-                  <ListBox.ItemTemplate>
-                    <DataTemplate>
-                      <Border Margin="6,4" Padding="10,8" Background="{StaticResource Surface0Brush}" CornerRadius="6">
-                        <StackPanel Spacing="4">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="{ReflectionBinding Kind}" FontSize="11" Foreground="{StaticResource BlueBrush}" FontWeight="SemiBold"/>
-                            <TextBlock Text="{ReflectionBinding UpdatedLabel}" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
-                          </StackPanel>
-                          <TextBlock Text="{ReflectionBinding Title}" FontWeight="SemiBold" FontSize="12"/>
-                          <TextBlock Text="{ReflectionBinding Detail}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap" MaxLines="3"/>
-                        </StackPanel>
-                      </Border>
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
+                <TabControl Grid.Row="2" Background="Transparent" Padding="0,10,0,0">
+                  <TabItem Header="Facts">
+                    <DataGrid x:Name="MemoryFactsList" AutoGenerateColumns="False" IsReadOnly="False" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" GridLinesVisibility="All" CellEditEnded="MemoryFactsList_CellEditEnded">
+                      <DataGrid.Columns>
+                        <DataGridTextColumn Header="Subject" Binding="{ReflectionBinding Subject}" Width="120" />
+                        <DataGridTextColumn Header="Predicate" Binding="{ReflectionBinding Predicate}" Width="100" />
+                        <DataGridTextColumn Header="Object" Binding="{ReflectionBinding Object}" Width="*" />
+                        <DataGridTextColumn Header="Confidence" Binding="{ReflectionBinding Confidence}" Width="80" />
+                        <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding ProfileId}" Width="100" />
+                      </DataGrid.Columns>
+                    </DataGrid>
+                  </TabItem>
+                  <TabItem Header="Events">
+                    <DataGrid x:Name="MemoryEventsList" AutoGenerateColumns="False" IsReadOnly="False" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" GridLinesVisibility="All" CellEditEnded="MemoryEventsList_CellEditEnded">
+                      <DataGrid.Columns>
+                        <DataGridTextColumn Header="Type" Binding="{ReflectionBinding Type}" Width="120" />
+                        <DataGridTextColumn Header="Title" Binding="{ReflectionBinding Title}" Width="*" />
+                        <DataGridTextColumn Header="Summary" Binding="{ReflectionBinding Summary}" Width="150" />
+                        <DataGridTextColumn Header="Confidence" Binding="{ReflectionBinding Confidence}" Width="80" />
+                        <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding ProfileId}" Width="100" />
+                      </DataGrid.Columns>
+                    </DataGrid>
+                  </TabItem>
+                  <TabItem Header="Chunks">
+                    <DataGrid x:Name="MemoryChunksList" AutoGenerateColumns="False" IsReadOnly="False" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" GridLinesVisibility="All" CellEditEnded="MemoryChunksList_CellEditEnded">
+                      <DataGrid.Columns>
+                        <DataGridTextColumn Header="Source Type" Binding="{ReflectionBinding SourceType}" Width="100" />
+                        <DataGridTextColumn Header="Source Ref" Binding="{ReflectionBinding SourceRef}" Width="120" />
+                        <DataGridTextColumn Header="Text" Binding="{ReflectionBinding Text}" Width="*" />
+                      </DataGrid.Columns>
+                    </DataGrid>
+                  </TabItem>
+                  <TabItem Header="Nuggets">
+                    <DataGrid x:Name="MemoryNuggetsList" AutoGenerateColumns="False" IsReadOnly="False" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" GridLinesVisibility="All" CellEditEnded="MemoryNuggetsList_CellEditEnded">
+                      <DataGrid.Columns>
+                        <DataGridTextColumn Header="Text" Binding="{ReflectionBinding Text}" Width="*" />
+                        <DataGridTextColumn Header="Tags" Binding="{ReflectionBinding Tags}" Width="120" />
+                        <DataGridTextColumn Header="Weight" Binding="{ReflectionBinding Weight}" Width="80" />
+                        <DataGridTextColumn Header="Pin Lvl" Binding="{ReflectionBinding PinLevel}" Width="60" />
+                      </DataGrid.Columns>
+                    </DataGrid>
+                  </TabItem>
+                </TabControl>
               </Grid>
             </TabItem>
 
@@ -615,43 +959,20 @@
                                 IsEnabled="False"
                                 Click="SetActiveProfileButton_Click"/>
                       </WrapPanel>
-                      <ListBox Grid.Row="2"
-                               x:Name="ProfilesList"
-                               SelectionChanged="ProfilesList_SelectionChanged"
-                               Background="Transparent"
-                               BorderThickness="0">
-                        <ListBox.Styles>
-                          <Style Selector="ListBoxItem">
-                            <Setter Property="Padding" Value="12,10"/>
-                            <Setter Property="Margin" Value="0,0,0,8"/>
-                            <Setter Property="CornerRadius" Value="8"/>
-                            <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
-                            <Setter Property="BorderBrush" Value="Transparent"/>
-                            <Setter Property="BorderThickness" Value="1"/>
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Cursor" Value="Hand"/>
-                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:selected">
-                            <Setter Property="Foreground" Value="White"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
-                            <Setter Property="BorderBrush" Value="{StaticResource BlueLightBrush}"/>
-                          </Style>
-                        </ListBox.Styles>
-                        <ListBox.ItemTemplate>
-                          <DataTemplate>
-                            <StackPanel Spacing="4">
-                              <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
-                              <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Opacity="0.72"/>
-                            </StackPanel>
-                          </DataTemplate>
-                        </ListBox.ItemTemplate>
-                      </ListBox>
+                      <DataGrid Grid.Row="2"
+                                x:Name="ProfilesList"
+                                SelectionChanged="ProfilesList_SelectionChanged"
+                                AutoGenerateColumns="False"
+                                IsReadOnly="True"
+                                Background="{StaticResource MantleBrush}"
+                                BorderBrush="{StaticResource Surface0Brush}"
+                                BorderThickness="1"
+                                GridLinesVisibility="All">
+                        <DataGrid.Columns>
+                          <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding DisplayName}" Width="160"/>
+                          <DataGridTextColumn Header="Details" Binding="{ReflectionBinding Meta}" Width="*"/>
+                        </DataGrid.Columns>
+                      </DataGrid>
                     </Grid>
                   </Border>
 
@@ -689,43 +1010,20 @@
                                 IsEnabled="False"
                                 Click="SetActivePersonalityButton_Click"/>
                       </WrapPanel>
-                      <ListBox Grid.Row="2"
-                               x:Name="PersonalitiesList"
-                               SelectionChanged="PersonalitiesList_SelectionChanged"
-                               Background="Transparent"
-                               BorderThickness="0">
-                        <ListBox.Styles>
-                          <Style Selector="ListBoxItem">
-                            <Setter Property="Padding" Value="12,10"/>
-                            <Setter Property="Margin" Value="0,0,0,8"/>
-                            <Setter Property="CornerRadius" Value="8"/>
-                            <Setter Property="Background" Value="{StaticResource Surface0Brush}"/>
-                            <Setter Property="BorderBrush" Value="Transparent"/>
-                            <Setter Property="BorderThickness" Value="1"/>
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Cursor" Value="Hand"/>
-                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{StaticResource Surface1Brush}"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:selected">
-                            <Setter Property="Foreground" Value="White"/>
-                          </Style>
-                          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
-                            <Setter Property="BorderBrush" Value="{StaticResource BlueLightBrush}"/>
-                          </Style>
-                        </ListBox.Styles>
-                        <ListBox.ItemTemplate>
-                          <DataTemplate>
-                            <StackPanel Spacing="4">
-                              <TextBlock Text="{ReflectionBinding DisplayName}" FontWeight="SemiBold" FontSize="12"/>
-                              <TextBlock Text="{ReflectionBinding Meta}" FontSize="11" Opacity="0.72"/>
-                            </StackPanel>
-                          </DataTemplate>
-                        </ListBox.ItemTemplate>
-                      </ListBox>
+                      <DataGrid Grid.Row="2"
+                                x:Name="PersonalitiesList"
+                                SelectionChanged="PersonalitiesList_SelectionChanged"
+                                AutoGenerateColumns="False"
+                                IsReadOnly="True"
+                                Background="{StaticResource MantleBrush}"
+                                BorderBrush="{StaticResource Surface0Brush}"
+                                BorderThickness="1"
+                                GridLinesVisibility="All">
+                        <DataGrid.Columns>
+                          <DataGridTextColumn Header="Personality" Binding="{ReflectionBinding DisplayName}" Width="160"/>
+                          <DataGridTextColumn Header="Details" Binding="{ReflectionBinding Meta}" Width="*"/>
+                        </DataGrid.Columns>
+                      </DataGrid>
                     </Grid>
                   </Border>
                 </Grid>
@@ -737,8 +1035,8 @@
                            TextWrapping="Wrap"/>
               </Grid>
             </TabItem>
-
-          </TabControl>
+            </TabControl>
+          </Grid>
         </Grid>
       </Grid>
 
@@ -826,7 +1124,8 @@
                 BorderBrush="{StaticResource Surface0Brush}"
                 BorderThickness="1"
                 CornerRadius="{StaticResource RadiusMd}"
-                Padding="10,8">
+                Padding="10,8"
+                IsVisible="False">
           <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
             <Border x:Name="PttStateBadge"
                     Background="{StaticResource Surface0Brush}"
@@ -855,22 +1154,30 @@
           </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+          <Button x:Name="AttachFileButton"
+                  Grid.Column="0"
+                  Content="+"
+                  Width="38"
+                  Classes="actionBtn"
+                  Click="AttachFileButton_Click"/>
           <TextBox x:Name="PromptBox"
+                   Grid.Column="1"
                    Watermark="Type a message... (Shift+Enter for new line)"
                    AcceptsReturn="True"
                    MinHeight="38"
                    MaxHeight="120"
                    TextWrapping="Wrap"
+                   KeyDown="PromptBox_KeyDown"
+                   TextChanged="PromptBox_TextChanged"
                    Classes="chatInput"/>
-          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="8">
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="8">
             <Button x:Name="PttHoldButton"
-                    Content="Hold Talk"
+                    Content="Hold"
                     Classes="actionBtn"
                     PointerPressed="PttHoldButton_PointerPressed"
                     PointerReleased="PttHoldButton_PointerReleased"
                     PointerCaptureLost="PttHoldButton_PointerCaptureLost"/>
-            <Button x:Name="AttachFileButton" Content="Attach" Classes="actionBtn" Click="AttachFileButton_Click"/>
             <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
             <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click"/>
           </StackPanel>
@@ -879,8 +1186,3 @@
     </Border>
   </Grid>
 </Window>
-
-
-
-
-

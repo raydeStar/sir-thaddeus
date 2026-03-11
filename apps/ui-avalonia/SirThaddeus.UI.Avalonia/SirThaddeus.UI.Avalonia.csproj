@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
@@ -11,6 +12,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\packages\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
+    <ProjectReference Include="..\..\..\packages\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\icons\sir-thaddeus.ico" Link="Assets\Icons\sir-thaddeus.ico" />
@@ -25,3 +28,4 @@
   </PropertyGroup>
 
 </Project>
+

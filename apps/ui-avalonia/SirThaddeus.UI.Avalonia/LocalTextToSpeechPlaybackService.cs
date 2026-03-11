@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using NAudio.Wave;
 
 namespace SirThaddeus.UI.Avalonia;
 
 internal sealed class LocalTextToSpeechPlaybackService
 {
+    public int OutputDeviceNumber { get; set; } = -1;
+
     public async Task SpeakAsync(string text, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -16,14 +19,38 @@ internal sealed class LocalTextToSpeechPlaybackService
             throw new PlatformNotSupportedException("Read aloud is currently implemented for Windows only.");
         }
 
-        const string script = "$text = [Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Speak($text);";
+        var tempWavPath = Path.Combine(Path.GetTempPath(), $"sir-thaddeus-tts-{Guid.NewGuid():N}.wav");
+        try
+        {
+            await RenderSpeechAsync(text, tempWavPath, cancellationToken);
+            await PlayWaveFileAsync(tempWavPath, cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempWavPath))
+                {
+                    File.Delete(tempWavPath);
+                }
+            }
+            catch
+            {
+                // Best effort cleanup only.
+            }
+        }
+    }
+
+    private static async Task RenderSpeechAsync(string text, string outputPath, CancellationToken cancellationToken)
+    {
+        const string script = "$text = [Console]::In.ReadToEnd(); $path = $args[0]; Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; try { $s.SetOutputToWaveFile($path); $s.Speak($text); } finally { $s.Dispose(); }";
 
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = "powershell",
-                Arguments = $"-NoProfile -Command \"{script}\"",
+                Arguments = $"-NoProfile -Command \"{script}\" \"{outputPath}\"",
                 UseShellExecute = false,
                 RedirectStandardInput = true,
                 RedirectStandardError = true,
@@ -33,7 +60,7 @@ internal sealed class LocalTextToSpeechPlaybackService
 
         if (!process.Start())
         {
-            throw new InvalidOperationException("Unable to start local speech playback process.");
+            throw new InvalidOperationException("Unable to start local speech rendering process.");
         }
 
         using var cancellationRegistration = cancellationToken.Register(static state =>
@@ -50,27 +77,56 @@ internal sealed class LocalTextToSpeechPlaybackService
         catch (OperationCanceledException)
         {
             TryKillProcess(process);
-            try
-            {
-                await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(1));
-            }
-            catch
-            {
-                // Best effort cleanup only.
-            }
-
             throw;
         }
 
         if (process.ExitCode != 0)
         {
             var error = await process.StandardError.ReadToEndAsync();
-            if (string.IsNullOrWhiteSpace(error))
-            {
-                error = "Unknown speech playback error.";
-            }
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Unknown speech rendering error." : error.Trim());
+        }
+    }
 
-            throw new InvalidOperationException(error.Trim());
+    private async Task PlayWaveFileAsync(string wavePath, CancellationToken cancellationToken)
+    {
+        using var reader = new AudioFileReader(wavePath);
+        using var output = new WaveOutEvent { DeviceNumber = OutputDeviceNumber };
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        output.PlaybackStopped += (_, args) =>
+        {
+            if (args.Exception is not null)
+            {
+                completion.TrySetException(args.Exception);
+            }
+            else
+            {
+                completion.TrySetResult();
+            }
+        };
+
+        using var cancellationRegistration = cancellationToken.Register(static state =>
+        {
+            try
+            {
+                ((WaveOutEvent)state!).Stop();
+            }
+            catch
+            {
+                // Best effort cancellation only.
+            }
+        }, output);
+
+        output.Init(reader);
+        output.Play();
+
+        try
+        {
+            await completion.Task.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
     }
 

@@ -17,6 +17,11 @@ internal sealed class NAudioMicrophoneCaptureService : IMicrophoneCaptureService
 
     public bool IsCapturing => _waveIn is not null;
 
+    public int DeviceNumber { get; set; } = -1;
+
+    
+    public double InputGain { get; set; } = 1.0;
+
     public async Task StartCaptureAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -39,6 +44,7 @@ internal sealed class NAudioMicrophoneCaptureService : IMicrophoneCaptureService
 
             _waveIn = new WaveInEvent
             {
+                DeviceNumber = DeviceNumber,
                 WaveFormat = new WaveFormat(16000, 16, 1),
                 BufferMilliseconds = 50,
                 NumberOfBuffers = 3
@@ -160,13 +166,34 @@ internal sealed class NAudioMicrophoneCaptureService : IMicrophoneCaptureService
                 return;
             }
 
-            _writer?.Write(args.Buffer, 0, args.BytesRecorded);
+            var buffer = args.Buffer;
+            var count = args.BytesRecorded;
+            if (count > 0 && Math.Abs(InputGain - 1.0) > 0.01)
+            {
+                buffer = ApplyGain(args.Buffer, count, InputGain);
+            }
+
+            _writer?.Write(buffer, 0, count);
             _writer?.Flush();
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private static byte[] ApplyGain(byte[] source, int length, double gain)
+    {
+        var result = new byte[length];
+        for (var i = 0; i + 1 < length; i += 2)
+        {
+            short sample = (short)(source[i] | (source[i + 1] << 8));
+            var amplified = Math.Clamp((int)(sample * gain), short.MinValue, short.MaxValue);
+            result[i] = (byte)(amplified & 0xFF);
+            result[i + 1] = (byte)((amplified >> 8) & 0xFF);
+        }
+
+        return result;
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs args)
@@ -257,3 +284,5 @@ internal sealed class NAudioMicrophoneCaptureService : IMicrophoneCaptureService
         }
     }
 }
+
+
