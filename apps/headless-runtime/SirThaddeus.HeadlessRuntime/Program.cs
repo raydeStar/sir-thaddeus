@@ -27,18 +27,63 @@ var settingsUndoStack = new Stack<AppSettings>();
 
 using var audit = JsonLineAuditLogger.CreateDefault();
 using var searxngLauncher = new SearxngHostLauncher();
-await EnsureManagedSearxngAsync(settings, options.EnableTools, searxngLauncher, audit, CancellationToken.None);
+var searxngStartupGate = new SemaphoreSlim(1, 1);
+
+Task EnsureManagedSearxngSerializedAsync(AppSettings currentSettings, CancellationToken cancellationToken)
+    => EnsureManagedSearxngSerializedCoreAsync(currentSettings, cancellationToken);
+
+async Task EnsureManagedSearxngSerializedCoreAsync(AppSettings currentSettings, CancellationToken cancellationToken)
+{
+    await searxngStartupGate.WaitAsync(cancellationToken);
+    try
+    {
+        await EnsureManagedSearxngAsync(currentSettings, options.EnableTools, searxngLauncher, audit, cancellationToken);
+    }
+    finally
+    {
+        searxngStartupGate.Release();
+    }
+}
+
+void QueueManagedSearxngUpdate(AppSettings currentSettings)
+{
+    _ = EnsureManagedSearxngSerializedAsync(currentSettings, CancellationToken.None);
+}
+
+if (options.ServerMode)
+{
+    QueueManagedSearxngUpdate(settings);
+}
+else
+{
+    await EnsureManagedSearxngSerializedAsync(settings, CancellationToken.None);
+}
 
 using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
 using var gatekeeperLlm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
 
-var mcp = await CreateMcpClientAsync(options, settings, audit, CancellationToken.None);
+var mcp = await RuntimeMcpClientFactory.CreateAsync(
+    enableTools: options.EnableTools,
+    allowDegradedStartup: options.ServerMode,
+    overrideServerPath: options.McpServerPath,
+    settings,
+    audit,
+    baseDirectory: Directory.GetCurrentDirectory(),
+    clientName: "HeadlessRuntime",
+    clientVersion: "0.1.0",
+    cancellationToken: CancellationToken.None);
 await using var mcpScope = mcp.Scope;
 ConsolePermissionGate? permissionGate = null;
 ApiPermissionGate? apiPermissionGate = null;
 
+var toolsAvailable = mcp.ToolsAvailable;
+if (options.EnableTools && !toolsAvailable)
+{
+    Console.WriteLine(mcp.Message);
+}
+
 IMcpToolClient agentMcp = mcp.Client;
-if (options.EnableTools)
+if (toolsAvailable)
 {
     IToolPermissionGate toolPermissionGate;
     if (options.ServerMode)
@@ -87,7 +132,7 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
         gatekeeperLlm: gatekeeperLlm)
     {
         ActiveProfileId = currentSettings.ActiveProfileId,
-        MemoryEnabled = options.EnableTools && currentSettings.Memory.Enabled,
+        MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
         UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
         UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
         PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem()
@@ -113,12 +158,7 @@ if (options.ServerMode)
         updatedSettings =>
         {
             settings = updatedSettings;
-            EnsureManagedSearxngAsync(
-                settings,
-                options.EnableTools,
-                searxngLauncher,
-                audit,
-                CancellationToken.None).GetAwaiter().GetResult();
+            QueueManagedSearxngUpdate(settings);
         },
         audit,
         apiPermissionGate,
@@ -126,7 +166,7 @@ if (options.ServerMode)
     return;
 }
 
-PrintBanner(settings, options, handles);
+PrintBanner(settings, toolsAvailable, handles, options.EnableTools ? mcp.Message : null);
 PrintHelpHint();
 
 var cancellation = new CancellationTokenSource();
@@ -180,13 +220,13 @@ while (!cancellation.IsCancellationRequested)
     if (input.Equals("/who", StringComparison.OrdinalIgnoreCase) ||
         input.Equals("/whoami", StringComparison.OrdinalIgnoreCase))
     {
-        PrintRuntimeIdentity(settings, options, handles, personalityStore);
+        PrintRuntimeIdentity(settings, toolsAvailable, handles, personalityStore);
         continue;
     }
 
     if (input.Equals("/w", StringComparison.OrdinalIgnoreCase))
     {
-        PrintRuntimeIdentity(settings, options, handles, personalityStore);
+        PrintRuntimeIdentity(settings, toolsAvailable, handles, personalityStore);
         continue;
     }
 
@@ -198,13 +238,13 @@ while (!cancellation.IsCancellationRequested)
 
     if (input.Equals("/status", StringComparison.OrdinalIgnoreCase))
     {
-        await PrintStatusAsync(settings, options, orchestrator, cancellation.Token);
+        await PrintStatusAsync(settings, options, orchestrator, toolsAvailable, mcp.Message, cancellation.Token);
         continue;
     }
 
     if (input.Equals("/doctor", StringComparison.OrdinalIgnoreCase))
     {
-        await RunDoctorAsync(settings, options, orchestrator, cancellation.Token);
+        await RunDoctorAsync(settings, options, orchestrator, toolsAvailable, mcp.Message, cancellation.Token);
         continue;
     }
 
@@ -278,25 +318,11 @@ while (!cancellation.IsCancellationRequested)
     }
 }
 
-static async Task<(IMcpToolClient Client, IAsyncDisposable Scope)> CreateMcpClientAsync(
-    HeadlessOptions options,
+static void PrintBanner(
     AppSettings settings,
-    IAuditLogger audit,
-    CancellationToken cancellationToken)
-{
-    if (!options.EnableTools)
-        return (new NoToolsMcpClient(), AsyncNoop.Instance);
-
-    var serverPath = string.IsNullOrWhiteSpace(options.McpServerPath)
-        ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
-        : Path.GetFullPath(options.McpServerPath.Trim());
-    var env = RuntimeMcpEnvironmentBuilder.Build(settings);
-    var client = new StdioMcpToolClient(serverPath, env, "HeadlessRuntime", "0.1.0", audit);
-    await client.StartAsync(cancellationToken);
-    return (client, client);
-}
-
-static void PrintBanner(AppSettings settings, HeadlessOptions options, (string User, string Assistant) handles)
+    bool toolsAvailable,
+    (string User, string Assistant) handles,
+    string? toolsMessage)
 {
     Console.WriteLine("  ____  _        _____ _               _     _                 ");
     Console.WriteLine(" / ___|(_)_ __  |_   _| |__   __ _  __| | __| | ___ _   _ ___ ");
@@ -306,7 +332,12 @@ static void PrintBanner(AppSettings settings, HeadlessOptions options, (string U
     Console.WriteLine();
     Console.WriteLine($"Model: {settings.Llm.Model}");
     Console.WriteLine($"LLM:   {settings.Llm.BaseUrl}");
-    Console.WriteLine($"Tools: {(options.EnableTools ? "enabled" : "disabled")}");
+    Console.WriteLine($"Tools: {(toolsAvailable ? "enabled" : "disabled")}");
+    if (!toolsAvailable && !string.IsNullOrWhiteSpace(toolsMessage))
+    {
+        Console.WriteLine($"Note:  {toolsMessage}");
+    }
+
     Console.WriteLine($"Chat:  {handles.User} <-> {handles.Assistant}");
     Console.WriteLine();
 }
@@ -332,6 +363,8 @@ static async Task PrintStatusAsync(
     AppSettings settings,
     HeadlessOptions options,
     AgentOrchestrator orchestrator,
+    bool toolsAvailable,
+    string toolsMessage,
     CancellationToken cancellationToken)
 {
     var (llmReachable, llmDetail) = await CheckHttpEndpointReachableAsync(settings.Llm.BaseUrl, cancellationToken);
@@ -339,9 +372,11 @@ static async Task PrintStatusAsync(
         ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
         : Path.GetFullPath(options.McpServerPath.Trim());
     var mcpExists = File.Exists(mcpPath);
-    var toolInfo = options.EnableTools
+    var toolInfo = !options.EnableTools
+        ? "disabled"
+        : toolsAvailable
         ? await TryGetToolCountStatusAsync(orchestrator, cancellationToken)
-        : "disabled";
+        : $"unavailable ({toolsMessage})";
 
     Console.WriteLine("Status");
     Console.WriteLine($"LLM endpoint: {(llmReachable ? "reachable" : "unreachable")} ({settings.Llm.BaseUrl})");
@@ -357,6 +392,8 @@ static async Task RunDoctorAsync(
     AppSettings settings,
     HeadlessOptions options,
     AgentOrchestrator orchestrator,
+    bool toolsAvailable,
+    string toolsMessage,
     CancellationToken cancellationToken)
 {
     var findings = new List<string>();
@@ -372,16 +409,22 @@ static async Task RunDoctorAsync(
     var mcpPath = string.IsNullOrWhiteSpace(options.McpServerPath)
         ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
         : Path.GetFullPath(options.McpServerPath.Trim());
+    if (options.EnableTools && !toolsAvailable)
+    {
+        findings.Add($"Tool startup degraded: {toolsMessage}");
+        recommendations.Add("Check MCP server launch path and startup health, then restart the runtime.");
+    }
+
     if (options.EnableTools && !File.Exists(mcpPath))
     {
         findings.Add($"MCP executable missing: {mcpPath}");
         recommendations.Add("Run ./dev/terminal.ps1 without --NoBuild to rebuild MCP artifacts.");
     }
 
-    var toolStatus = options.EnableTools
+    var toolStatus = toolsAvailable
         ? await TryGetToolCountStatusAsync(orchestrator, cancellationToken)
         : "disabled";
-    if (options.EnableTools && toolStatus.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
+    if (toolsAvailable && toolStatus.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
     {
         findings.Add($"Tool handshake issue: {toolStatus}");
         recommendations.Add("Check MCP server launch path and permissions, then restart terminal runtime.");
@@ -1488,7 +1531,7 @@ static void ListUserProfiles(AppSettings settings)
 
 static void PrintRuntimeIdentity(
     AppSettings settings,
-    HeadlessOptions options,
+    bool toolsAvailable,
     (string User, string Assistant) handles,
     PersonalityProfileStore personalityStore)
 {
@@ -1507,7 +1550,7 @@ static void PrintRuntimeIdentity(
     Console.WriteLine($"Persona:   {activePersonalityId} (alias: {personalityAlias})");
     Console.WriteLine($"Model:     {settings.Llm.Model}");
     Console.WriteLine($"LLM:       {settings.Llm.BaseUrl}");
-    Console.WriteLine($"Tools:     {(options.EnableTools ? "enabled" : "disabled")}");
+    Console.WriteLine($"Tools:     {(toolsAvailable ? "enabled" : "disabled")}");
 }
 
 static (string User, string Assistant) ResolvePromptHandles(
@@ -1727,21 +1770,6 @@ file sealed record HeadlessOptions(
 
         return new HeadlessOptions(enableTools, mcpServerPath, showHelp, serverMode, serverPort);
     }
-}
-
-file sealed class NoToolsMcpClient : IMcpToolClient
-{
-    public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
-
-    public Task<string> CallToolAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
-        => Task.FromResult($"Error: Tool '{toolName}' is unavailable in no-tools mode.");
-}
-
-file sealed class AsyncNoop : IAsyncDisposable
-{
-    public static readonly AsyncNoop Instance = new();
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 file sealed class ConsolePermissionGate : IToolPermissionGate
