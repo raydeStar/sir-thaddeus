@@ -50,13 +50,25 @@ public static class RuntimeMcpEnvironmentBuilder
                 : settings.Weather.UserAgent.Trim();
 
         var webModeRaw = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
-        var webMode = webModeRaw is "auto" or "searxng" or "ddg_html" or "google_news" or "manual"
-            ? webModeRaw
-            : "auto";
+        var webMode = webModeRaw switch
+        {
+            "api" => "search_api",
+            "search_api" => "search_api",
+            "auto" or "searxng" or "ddg_html" or "google_news" or "manual" => webModeRaw,
+            _ => "auto"
+        };
         env["WEBSEARCH_MODE"] = webMode;
         env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(settings.WebSearch.SearxngBaseUrl)
             ? "http://localhost:8080"
             : settings.WebSearch.SearxngBaseUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiProvider))
+            env["WEBSEARCH_API_PROVIDER"] = settings.WebSearch.SearchApiProvider.Trim();
+        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiKey))
+            env["WEBSEARCH_API_KEY"] = settings.WebSearch.SearchApiKey.Trim();
+        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiBaseUrl))
+            env["WEBSEARCH_API_BASE_URL"] = settings.WebSearch.SearchApiBaseUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiEngine))
+            env["WEBSEARCH_API_ENGINE"] = settings.WebSearch.SearchApiEngine.Trim();
         env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
         env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
 

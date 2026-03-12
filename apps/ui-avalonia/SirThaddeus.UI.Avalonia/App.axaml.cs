@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using System.ComponentModel;
 
 namespace SirThaddeus.UI.Avalonia;
@@ -29,8 +30,31 @@ public partial class App : Application
             var mainWindow = new MainWindow();
             desktop.MainWindow = mainWindow;
             desktop.Exit += (_, _) => DisposeTray();
+            var startupOptions = AppStartupOptions.Current;
 
-            ConfigureTray(mainWindow);
+            if (startupOptions.HeadlessMode)
+            {
+                mainWindow.ShowInTaskbar = false;
+                mainWindow.WindowState = WindowState.Minimized;
+            }
+
+            if (startupOptions.SmokeTestMode)
+            {
+                MinimizeToTrayEnabled = false;
+                mainWindow.ConfigureTrayUi(trayAvailable: false, minimizeToTrayEnabled: false);
+
+                Dispatcher.UIThread.Post(
+                    () =>
+                    {
+                        _isExiting = true;
+                        desktop.Shutdown(0);
+                    },
+                    DispatcherPriority.ApplicationIdle);
+            }
+            else
+            {
+                ConfigureTray(mainWindow);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

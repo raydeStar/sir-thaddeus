@@ -65,7 +65,13 @@ public static class WebSearchTools
         () => new WebSearchRouter(
             mode: Environment.GetEnvironmentVariable("WEBSEARCH_MODE") ?? "auto",
             searxngBaseUrl: Environment.GetEnvironmentVariable("WEBSEARCH_SEARXNG_URL")
-                            ?? "http://localhost:8080"));
+                            ?? "http://localhost:8080",
+            searchApiKey: Environment.GetEnvironmentVariable("WEBSEARCH_API_KEY")
+                            ?? "",
+            searchApiBaseUrl: Environment.GetEnvironmentVariable("WEBSEARCH_API_BASE_URL")
+                            ?? "https://www.searchapi.io/api/v1/search",
+            searchApiEngine: Environment.GetEnvironmentVariable("WEBSEARCH_API_ENGINE")
+                            ?? "google"));
 
     [McpServerTool, Description(
         "Searches the web and returns rich summaries of the top results. " +
@@ -191,7 +197,12 @@ public static class WebSearchTools
             : VetResultsByQuery(query, dedupedResults, extractions, urlsToRead);
 
         // ── Phase 3: Format output (text for LLM + JSON for UI) ──────
-        return FormatResults(query, vettedResults, extractions, urlsToRead);
+        return FormatResults(
+            query,
+            searchResult.Provider,
+            vettedResults,
+            extractions,
+            urlsToRead);
     }
 
     /// <summary>
@@ -394,6 +405,7 @@ public static class WebSearchTools
 
     private static string FormatResults(
         string query,
+        string provider,
         IReadOnlyList<SearchResult> results,
         List<ContentExtractor.ExtractionResult> extractions,
         List<string> originalUrls)
@@ -417,6 +429,8 @@ public static class WebSearchTools
                       "Lead with the bottom line, then provide detail. No URLs. " +
                       "ONLY state facts found in the sources below. " +
                       "If a detail is not in the sources, do NOT guess or make it up.");
+        if (!string.IsNullOrWhiteSpace(provider))
+            sb.AppendLine($"Provider: {provider}");
         sb.AppendLine();
 
         var included = 0;

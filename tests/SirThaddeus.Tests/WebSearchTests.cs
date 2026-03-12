@@ -6,7 +6,7 @@ namespace SirThaddeus.Tests;
 // ─────────────────────────────────────────────────────────────────────────
 // Web Search Unit Tests
 //
-// Covers: DDG HTML parser, SearxNG JSON parser, router fallback logic,
+// Covers: DDG HTML parser, SearxNG/SearchApi JSON parsers, router fallback logic,
 // and edge cases (empty queries, timeouts, malformed responses).
 //
 // Tests that require network access are separated and can be skipped
@@ -212,6 +212,74 @@ public class SearxngProviderTests
     }
 }
 
+public class SearchApiProviderTests
+{
+    [Fact]
+    public async Task ParsesJsonResponse()
+    {
+        var json = """
+            {
+              "organic_results": [
+                {
+                  "title": "SearchApi Result One",
+                  "link": "https://example.com/article-one",
+                  "snippet": "Snippet one.",
+                  "domain": "example.com"
+                },
+                {
+                  "title": "SearchApi Result Two",
+                  "link": "https://another.org/post",
+                  "snippet": "Snippet two.",
+                  "domain": "another.org"
+                }
+              ]
+            }
+            """;
+
+        var handler = new FakeHttpHandler(json);
+        var http = new HttpClient(handler);
+        var provider = new SearchApiProvider(apiKey: "test-key", httpClient: http);
+
+        var result = await provider.SearchAsync("test", new WebSearchOptions { MaxResults = 5 });
+
+        Assert.Equal("SearchApi", result.Provider);
+        Assert.Equal(2, result.Results.Count);
+        Assert.Equal("SearchApi Result One", result.Results[0].Title);
+        Assert.Equal("https://example.com/article-one", result.Results[0].Url);
+        Assert.Equal("example.com", result.Results[0].Source);
+    }
+
+    [Fact]
+    public async Task MissingKey_ReturnsError()
+    {
+        var provider = new SearchApiProvider(apiKey: "", httpClient: new HttpClient(new FakeHttpHandler("{}")));
+
+        var result = await provider.SearchAsync("test", new WebSearchOptions());
+
+        Assert.Empty(result.Results);
+        Assert.Contains("Search API key is not configured", result.Errors);
+    }
+
+    [Theory]
+    [InlineData("day", "time_period=last_day")]
+    [InlineData("week", "time_period=last_week")]
+    [InlineData("month", "time_period=last_month")]
+    public async Task Recency_IncludesTimePeriodParameter(string recency, string expectedParam)
+    {
+        var handler = new CapturingHttpHandler("""
+            { "organic_results": [{ "title": "Test", "link": "https://example.com", "snippet": "Snippet" }] }
+            """);
+        var http = new HttpClient(handler);
+        var provider = new SearchApiProvider(apiKey: "test-key", httpClient: http);
+
+        await provider.SearchAsync("test", new WebSearchOptions { MaxResults = 1, Recency = recency });
+
+        Assert.NotNull(handler.LastRequestUrl);
+        Assert.Contains(expectedParam, handler.LastRequestUrl);
+        Assert.Equal("Bearer test-key", handler.LastAuthorization);
+    }
+}
+
 public class WebSearchRouterTests
 {
     [Fact]
@@ -240,6 +308,103 @@ public class WebSearchRouterTests
     {
         using var router = new WebSearchRouter();
         Assert.Equal("WebSearchRouter", router.Name);
+    }
+
+    [Fact]
+    public async Task AutoMode_PrefersSearxng_OverSearchApi()
+    {
+        var searxng = new StubProvider(
+            "SearxNG",
+            available: true,
+            results: OneResult("SearxNG", "https://searx.example/article"));
+        var searchApi = new StubProvider(
+            "SearchApi",
+            available: true,
+            results: OneResult("SearchApi", "https://api.example/article"));
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
+        var googleNews = new StubProvider("GoogleNews", available: true, results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("florist nearby", new WebSearchOptions());
+
+        Assert.Equal("SearxNG", result.Provider);
+        Assert.Equal(1, searxng.SearchCallCount);
+        Assert.Equal(0, searchApi.SearchCallCount);
+        Assert.Equal(0, ddg.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task AutoMode_FallsBackToSearchApi_WhenSearxngUnavailable()
+    {
+        var searxng = new StubProvider("SearxNG", available: false);
+        var searchApi = new StubProvider(
+            "SearchApi",
+            available: true,
+            results: OneResult("SearchApi", "https://api.example/article"));
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
+        var googleNews = new StubProvider("GoogleNews", available: true, results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("what happened at microsoft build", new WebSearchOptions());
+
+        Assert.Equal("SearchApi", result.Provider);
+        Assert.Equal(0, ddg.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task AutoMode_DoesNotUseDdg_WhenSearxngAndSearchApiAreUnavailable()
+    {
+        var searxng = new StubProvider("SearxNG", available: false);
+        var searchApi = new StubProvider("SearchApi", available: false);
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
+        var googleNews = new StubProvider(
+            "GoogleNews",
+            available: true,
+            results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("technology outlook", new WebSearchOptions());
+
+        Assert.Equal("GoogleNews", result.Provider);
+        Assert.Equal(0, ddg.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task SearchApiMode_UsesHostedFallbackOnly()
+    {
+        var searxng = new StubProvider("SearxNG", available: true, results: OneResult("SearxNG", "https://searx.example/article"));
+        var searchApi = new StubProvider(
+            "SearchApi",
+            available: true,
+            results: OneResult("SearchApi", "https://api.example/article"));
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
+        var googleNews = new StubProvider("GoogleNews", available: true, results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("search_api", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("latest framework release", new WebSearchOptions());
+
+        Assert.Equal("SearchApi", result.Provider);
+        Assert.Equal(0, searxng.SearchCallCount);
+        Assert.Equal(0, ddg.SearchCallCount);
+        Assert.Equal(0, googleNews.SearchCallCount);
+    }
+
+    private static SearchResults OneResult(string provider, string url)
+    {
+        return new SearchResults
+        {
+            Provider = provider,
+            Results =
+            [
+                new SearchResult
+                {
+                    Title = provider + " title",
+                    Url = url,
+                    Snippet = "snippet",
+                    Source = new Uri(url).Host
+                }
+            ]
+        };
     }
 }
 
@@ -758,6 +923,7 @@ public class CapturingHttpHandler : HttpMessageHandler
 
     public string? LastRequestUrl { get; private set; }
     public string? LastRequestBody { get; private set; }
+    public string? LastAuthorization { get; private set; }
 
     public CapturingHttpHandler(string responseBody) => _responseBody = responseBody;
 
@@ -765,6 +931,7 @@ public class CapturingHttpHandler : HttpMessageHandler
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         LastRequestUrl = request.RequestUri?.ToString();
+        LastAuthorization = request.Headers.Authorization?.ToString();
 
         if (request.Content is not null)
             LastRequestBody = await request.Content.ReadAsStringAsync(cancellationToken);
@@ -774,6 +941,40 @@ public class CapturingHttpHandler : HttpMessageHandler
             Content = new StringContent(_responseBody)
         };
     }
+}
+
+public sealed class StubProvider : IWebSearchProvider
+{
+    private readonly SearchResults _results;
+    private readonly bool _available;
+
+    public StubProvider(string name, bool available, SearchResults? results = null)
+    {
+        Name = name;
+        _available = available;
+        _results = results ?? new SearchResults
+        {
+            Provider = name,
+            Results = [],
+            Errors = available ? [] : [$"{name} unavailable"]
+        };
+    }
+
+    public string Name { get; }
+
+    public int SearchCallCount { get; private set; }
+
+    public Task<SearchResults> SearchAsync(
+        string query,
+        WebSearchOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        SearchCallCount++;
+        return Task.FromResult(_results);
+    }
+
+    public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(_available);
 }
 
 /// <summary>

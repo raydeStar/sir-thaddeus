@@ -222,7 +222,7 @@ public partial class MainWindow : Window
 
         _initialConnectAttempted = true;
         TryStartGlobalPushToTalkHotkey();
-        if (_uiSettings.AutoConnectOnLaunch)
+        if (_uiSettings.AutoConnectOnLaunch && !AppStartupOptions.Current.SmokeTestMode)
         {
             await EnsureRuntimeConnectedAsync(
                 allowStartRuntime: _uiSettings.AutoStartRuntime,

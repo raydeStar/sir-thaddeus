@@ -322,6 +322,10 @@ public static class SettingsManager
                     defaults.WebSearch.SearxngStartupTimeoutMs,
                     min: 2_000,
                     max: 180_000),
+                SearchApiProvider = NormalizeSearchApiProvider(webSearch.SearchApiProvider, defaults.WebSearch.SearchApiProvider),
+                SearchApiKey = OptionalString(webSearch.SearchApiKey),
+                SearchApiBaseUrl = StringOrFallback(webSearch.SearchApiBaseUrl, defaults.WebSearch.SearchApiBaseUrl),
+                SearchApiEngine = NormalizeSearchApiEngine(webSearch.SearchApiEngine, defaults.WebSearch.SearchApiEngine),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
                 MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
             },
@@ -512,11 +516,30 @@ public static class SettingsManager
         {
             "auto" => "auto",
             "searxng" => "searxng",
+            "search_api" => "search_api",
+            "api" => "search_api",
             "ddg_html" => "ddg_html",
             "google_news" => "google_news",
             "manual" => "manual",
             _ => fallback
         };
+    }
+
+    private static string NormalizeSearchApiProvider(string? value, string fallback)
+    {
+        return (value ?? "").Trim().ToLowerInvariant() switch
+        {
+            "" => fallback,
+            "searchapi" => "searchapi",
+            _ => fallback
+        };
+    }
+
+    private static string NormalizeSearchApiEngine(string? value, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? fallback
+            : value.Trim().ToLowerInvariant();
     }
 
     private static string NormalizeWeatherProviderMode(string? value, string fallback)

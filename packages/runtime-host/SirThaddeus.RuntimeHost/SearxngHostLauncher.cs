@@ -334,9 +334,17 @@ public sealed class SearxngHostLauncher : IDisposable
     private static string NormalizeMode(string mode)
     {
         var normalized = (mode ?? "auto").Trim().ToLowerInvariant();
-        return normalized is "auto" or "searxng" or "ddg_html" or "google_news" or "manual"
-            ? normalized
-            : "auto";
+        return normalized switch
+        {
+            "auto" => "auto",
+            "searxng" => "searxng",
+            "search_api" => "search_api",
+            "api" => "search_api",
+            "ddg_html" => "ddg_html",
+            "google_news" => "google_news",
+            "manual" => "manual",
+            _ => "auto"
+        };
     }
 
     private static List<LaunchCandidate> BuildLaunchCandidates(WebSearchSettings settings, Uri baseUri)
@@ -463,6 +471,7 @@ public sealed class SearxngHostLauncher : IDisposable
         yield return Path.Combine(repoRoot, "apps", "searxng");
         yield return Path.Combine(repoRoot, "apps", "searxng", "package");
         yield return Path.Combine(repoRoot, "apps", "searxng", "dist");
+        yield return Path.Combine(repoRoot, "artifacts", "searxng", "win-x64", "package");
         yield return Path.Combine(repoRoot, "artifacts", "stage", "win-x64", "search");
     }
 
