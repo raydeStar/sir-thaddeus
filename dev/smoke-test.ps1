@@ -178,6 +178,15 @@ if (-not $uiExecutable) {
     Fail "UI executable missing from package root (expected SirThaddeus.UI.Avalonia.exe or SirThaddeus.DesktopRuntime.exe)"
 }
 
+$headlessRuntimeExecutable = Resolve-PackagePath -Primary "headless/SirThaddeus.HeadlessRuntime.exe" -Legacy "SirThaddeus.HeadlessRuntime.exe"
+if ($headlessRuntimeExecutable) {
+    $sizeMB = [math]::Round((Get-Item $headlessRuntimeExecutable).Length / 1MB, 1)
+    Pass "SirThaddeus.HeadlessRuntime.exe present (${sizeMB} MB)"
+}
+else {
+    Fail "Headless runtime missing from package (expected headless/SirThaddeus.HeadlessRuntime.exe)"
+}
+
 # Required support files
 $requiredFiles = @(
     "README_FIRST_RUN.md"
@@ -219,22 +228,6 @@ $voiceAssets = @(
     @{ Path = "voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; LegacyPath = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
     @{ Path = "voice/stt-models/base/model.bin";                        LegacyPath = "bin/voice/stt-models/base/model.bin";                        Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
-
-# Auto-detect lite packages (none of the heavyweight voice bundles are present)
-# and downgrade these checks to warnings.
-if ($voiceAssetsRequired) {
-    $detectedVoiceAssets = 0
-    foreach ($asset in $voiceAssets) {
-        if (Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath) {
-            $detectedVoiceAssets++
-        }
-    }
-
-    if ($detectedVoiceAssets -eq 0) {
-        Warn "Lite package detected (no bundled voice assets); enabling runtime-asset mode for smoke."
-        $voiceAssetsRequired = $false
-    }
-}
 
 foreach ($asset in $voiceAssets) {
     $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
@@ -284,7 +277,7 @@ foreach ($asset in $searchPayloadChecks) {
 }
 
 if ($detectedSearchPayload -eq 0) {
-    Warn "Bundled SearXNG payload not found; web search will use fallback providers only"
+    Fail "Bundled SearXNG payload not found"
 }
 else {
     foreach ($asset in $searchPayloadChecks) {

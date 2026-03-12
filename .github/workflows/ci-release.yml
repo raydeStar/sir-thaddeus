@@ -90,13 +90,21 @@ jobs:
         run: |
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ github.ref_name }}"
 
+      - name: Smoke test packaged zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-*.zip" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) { Write-Error "No zip found in artifacts/release"; exit 1 }
+          ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
+
       - name: Upload release package artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-package-assets
           path: |
             artifacts/release/*.zip
-            artifacts/release/*.zip.sha256.txt
+            artifacts/release/*.sha256.txt
           if-no-files-found: error
 
   publish:
@@ -121,4 +129,4 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/*.zip
-            release-assets/*.zip.sha256.txt
+            release-assets/*.sha256.txt

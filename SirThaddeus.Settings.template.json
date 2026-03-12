@@ -23,6 +23,10 @@
     "searxngLaunchCommand": "auto",
     "searxngLaunchArguments": "auto",
     "searxngStartupTimeoutMs": 120000,
+    "searchApiProvider": "searchapi",
+    "searchApiKey": "",
+    "searchApiBaseUrl": "https://www.searchapi.io/api/v1/search",
+    "searchApiEngine": "google",
     "timeoutMs": 8000,
     "maxResults": 5
   },

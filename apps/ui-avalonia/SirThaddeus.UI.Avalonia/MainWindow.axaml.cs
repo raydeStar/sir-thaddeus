@@ -161,6 +161,12 @@ public partial class MainWindow : Window
             BeginVoiceHostLifecycleTransition(_backendSettings.VoiceHostEnabled);
         }
 
+        if (string.Equals(e.PropertyName, nameof(SettingsViewModel.VoiceHostBaseUrl), StringComparison.Ordinal) &&
+            _backendSettings.VoiceHostEnabled)
+        {
+            BeginVoiceHostLifecycleTransition(enabled: true, restartManagedProcess: true);
+        }
+
         if (!ReferenceEquals(SettingsTabControl.SelectedItem, AudioTabItem))
         {
             if (string.Equals(e.PropertyName, nameof(SettingsViewModel.VoiceHostEnabled), StringComparison.Ordinal) &&
@@ -328,6 +334,11 @@ public partial class MainWindow : Window
         {
             _voiceHostLauncher.StopManagedVoiceHost();
             return;
+        }
+
+        if (restartManagedProcess)
+        {
+            _voiceHostLauncher.StopManagedVoiceHost();
         }
 
         var cts = new CancellationTokenSource();

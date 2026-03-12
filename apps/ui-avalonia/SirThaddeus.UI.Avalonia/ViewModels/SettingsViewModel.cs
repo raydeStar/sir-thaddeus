@@ -1397,6 +1397,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     private void ApplySnapshot(AppSettings settings, string statusText)
     {
+        var priorSettings = _appSettings;
         _appSettings = settings;
         IsDirty = false;
         StatusText = statusText;
@@ -1404,6 +1405,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RefreshVoiceCatalogs();
         InitializeVoiceHostHealthState();
         OnPropertyChanged(string.Empty);
+        if (priorSettings.Voice.VoiceHostEnabled != settings.Voice.VoiceHostEnabled)
+        {
+            OnPropertyChanged(nameof(VoiceHostEnabled));
+        }
+
+        if (!string.Equals(priorSettings.Voice.VoiceHostBaseUrl, settings.Voice.VoiceHostBaseUrl, StringComparison.Ordinal) &&
+            priorSettings.Voice.VoiceHostEnabled == settings.Voice.VoiceHostEnabled)
+        {
+            OnPropertyChanged(nameof(VoiceHostBaseUrl));
+        }
+
         OnPropertyChanged(nameof(EffectiveGatekeeperBaseUrl));
         OnPropertyChanged(nameof(IsPiperEngine));
         OnPropertyChanged(nameof(IsKokoroEngine));
@@ -1541,8 +1553,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         string? ErrorCode,
         string? Message);
 }
-
-
 
 
 

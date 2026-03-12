@@ -105,7 +105,7 @@ jobs:
           name: build-package-assets-${{ github.ref_name }}
           path: |
             artifacts/release/*.zip
-            artifacts/release/*.zip.sha256.txt
+            artifacts/release/*.sha256.txt
           if-no-files-found: error
 
   smoke-test:
@@ -194,4 +194,4 @@ jobs:
           make_latest: false
           files: |
             release-assets/*.zip
-            release-assets/*.zip.sha256.txt
+            release-assets/*.sha256.txt

@@ -115,8 +115,12 @@ router -> agent -> MCP tools -> providers -> response scoring.
     "model": "local-model"
   },
   "webSearch": {
-    "mode": "ddg_html",
+    "mode": "auto",
     "searxngBaseUrl": "http://localhost:8080",
+    "searchApiProvider": "searchapi",
+    "searchApiKey": "",
+    "searchApiBaseUrl": "https://www.searchapi.io/api/v1/search",
+    "searchApiEngine": "google",
     "timeoutMs": 8000,
     "maxResults": 5
   },
@@ -132,7 +136,8 @@ router -> agent -> MCP tools -> providers -> response scoring.
 ```
 
 Notes:
-- If you have no local SearxNG running, prefer `"webSearch.mode": "ddg_html"` for predictable non-empty results.
+- `auto` prefers local SearxNG first, then the hosted Search API when `searchApiKey` is configured, then Google News for news-style queries.
+- If you have no local SearxNG running, configure `webSearch.searchApiKey` so auto mode has a general-purpose fallback.
 - If `deepDive.placesApiKey` is missing, place lookups degrade to web fallback and often return lower confidence.
 
 2. Validate external dependencies before running:

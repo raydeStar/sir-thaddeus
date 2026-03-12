@@ -12,7 +12,7 @@ param(
 
     [switch]$SkipPreflight,
 
-    [switch]$FullBundle
+    [switch]$LiteBundle
 )
 
 Set-StrictMode -Version Latest
@@ -93,7 +93,7 @@ $archiveStem = "sir-thaddeus-$Runtime-$archiveToken"
 $archiveName = "$archiveStem.zip"
 $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
-$binaryChecksumsPath = Join-Path $releaseDir "$archiveStem-binaries.sha256.txt"
+$contentsChecksumsPath = Join-Path $releaseDir "$archiveStem-contents.sha256.txt"
 
 $firstRunReadmeSource = Join-Path $RepoRoot "README_FIRST_RUN.md"
 $settingsTemplateSource = Join-Path $RepoRoot "SirThaddeus.Settings.template.json"
@@ -102,7 +102,7 @@ Write-Section "Package Settings"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  Runtime       : $Runtime"
 Write-Host "  SelfContained : $effectiveSelfContained"
-Write-Host "  Bundle profile: $(if ($FullBundle) { 'full' } else { 'lite' })"
+Write-Host "  Bundle profile: $(if ($LiteBundle) { 'lite' } else { 'full' })"
 if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     Write-Host "  Version       : <timestamp>"
 }
@@ -121,8 +121,8 @@ if (-not $SkipPreflight) {
     }
 }
 
-$includeOptionalBundledAssets = $FullBundle.IsPresent
-$strictVoiceAssetGate = ($Configuration -eq "Release") -and $includeOptionalBundledAssets
+$includeOptionalBundledAssets = -not $LiteBundle.IsPresent
+$strictVoiceAssetGate = $Configuration -eq "Release"
 
 # -- Verify Piper TTS assets ---------------------------------------------------
 # Assets are fetched from GitHub Releases via dev/fetch-assets.ps1 (CI)
@@ -168,12 +168,14 @@ Write-Section "Publish Artifacts"
 $projects = @(
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj",
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj",
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj",
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
 )
 
 $projectStageSubdirs = @{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = ""
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = ""
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = "headless"
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = ""
 }
 
@@ -185,6 +187,9 @@ $projectFrameworkOverrides = @{
         windows = "net10.0-windows10.0.19041.0"
     }
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
+        default = "net10.0"
+    }
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = @{
         default = "net10.0"
     }
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = @{
@@ -219,6 +224,51 @@ function Resolve-PublishFramework([string]$ProjectPath, [string]$TargetRuntime) 
     return $null
 }
 
+function Copy-DirectoryContents([string]$SourceRoot, [string]$DestinationRoot) {
+    if (-not (Test-Path $SourceRoot)) {
+        throw "Source directory not found: $SourceRoot"
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
+
+    @(Get-ChildItem -Path $SourceRoot -Recurse -Force) | ForEach-Object {
+        $relativePath = $_.FullName.Substring($SourceRoot.Length).TrimStart('\')
+        $destinationPath = Join-Path $DestinationRoot $relativePath
+
+        if ($_.PSIsContainer) {
+            New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
+            return
+        }
+
+        $destinationParent = Split-Path $destinationPath -Parent
+        if (-not (Test-Path $destinationParent)) {
+            New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+        }
+
+        Copy-Item -Path $_.FullName -Destination $destinationPath -Force -ErrorAction Stop
+    }
+}
+
+function Test-SearxngPayloadRoot([string]$CandidateRoot, [ref]$MissingPath) {
+    $requiredPaths = @(
+        "start-searxng.ps1",
+        "runtime\python\python.exe",
+        "source\searxng-upstream\searx\webapp.py",
+        "deps\site-packages\flask\__init__.py"
+    )
+
+    foreach ($relativePath in $requiredPaths) {
+        $candidatePath = Join-Path $CandidateRoot $relativePath
+        if (-not (Test-Path $candidatePath)) {
+            $MissingPath.Value = $candidatePath
+            return $false
+        }
+    }
+
+    $MissingPath.Value = $null
+    return $true
+}
+
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
@@ -238,6 +288,7 @@ foreach ($project in $projects) {
 
     $publishArgs = @(
         "publish", $project,
+        "-m:1",
         "-c", $Configuration,
         "-r", $Runtime,
         "--self-contained", $selfContainedValue,
@@ -325,29 +376,56 @@ foreach ($project in $projects) {
 }
 
 $searchStageDir = Join-Path $stageDir "search"
-$searchSidecarStaged = Test-Path $searchStageDir
-if (-not $searchSidecarStaged) {
-    $rawSearxngPayloadCandidates = @(
-        (Join-Path $RepoRoot "apps/searxng/dist"),
-        (Join-Path $RepoRoot "apps/searxng/package"),
-        (Join-Path $RepoRoot "artifacts/searxng/$Runtime")
-    )
+$searchPayloadRequired = $Configuration -eq "Release"
+$searchSidecarStaged = $false
+$searchStageFailures = @()
+$rawSearxngPayloadCandidates = @(
+    (Join-Path $RepoRoot "apps/searxng/package"),
+    (Join-Path $RepoRoot "artifacts/searxng/$Runtime/package"),
+    (Join-Path $RepoRoot "apps/searxng/dist")
+)
 
-    foreach ($candidate in $rawSearxngPayloadCandidates) {
-        if (-not (Test-Path $candidate)) {
-            continue
+foreach ($candidate in $rawSearxngPayloadCandidates) {
+    if (-not (Test-Path $candidate)) {
+        continue
+    }
+
+    $missingSearchPath = $null
+    if (-not (Test-SearxngPayloadRoot -CandidateRoot $candidate -MissingPath ([ref]$missingSearchPath))) {
+        Write-Host "  WARN: skipping invalid search payload candidate $candidate (missing $missingSearchPath)" -ForegroundColor Yellow
+        continue
+    }
+
+    try {
+        if (Test-Path $searchStageDir) {
+            Remove-Item -Path $searchStageDir -Recurse -Force
         }
 
-        New-Item -ItemType Directory -Force -Path $searchStageDir | Out-Null
-        Copy-Item -Path (Join-Path $candidate "*") -Destination $searchStageDir -Recurse -Force
+        Copy-DirectoryContents -SourceRoot $candidate -DestinationRoot $searchStageDir
         Write-Host "  Staged: search/ payload from $candidate"
         $searchSidecarStaged = $true
         break
     }
+    catch {
+        $message = $_.Exception.Message
+        $searchStageFailures += "${candidate}: $message"
+        Write-Host "  WARN: failed to stage search payload from $candidate ($message)" -ForegroundColor Yellow
+    }
 }
 
 if (-not $searchSidecarStaged) {
-    Write-Host "  Note: no bundled SearXNG sidecar payload found." -ForegroundColor DarkGray
+    $detail = if ($searchStageFailures.Count -gt 0) {
+        " Tried candidates: " + ($searchStageFailures -join "; ")
+    }
+    else {
+        ""
+    }
+
+    Assert-OrWarn `
+        -Condition $false `
+        -ErrorMessage "Bundled SearXNG sidecar payload not found or could not be staged.$detail" `
+        -WarnMessage "Bundled SearXNG sidecar payload not found or could not be staged.$detail" `
+        -Required $searchPayloadRequired
 }
 
 if ($includeOptionalBundledAssets) {
@@ -538,11 +616,11 @@ if ($pdbFiles.Count -gt 0) {
 
 Write-Section "Archive + Checksums"
 
-foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath)) {
+foreach ($p in @($archivePath, $checksumPath, $contentsChecksumsPath)) {
     if (Test-Path $p) { Remove-Item $p -Force }
 }
 
-# ── Package zip (lite by default; use -FullBundle for vendored assets) ─────
+# ── Package zip (full by default; use -LiteBundle to trim optional assets) ─────
 $sourcePath = $stageDir
 if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
 Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
@@ -553,18 +631,21 @@ $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 $fullSizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
 Write-Host "  Full archive: $archiveName (${fullSizeMB} MB)"
 
-$binaries = Get-ChildItem -Path $stageDir -File
-$binaryLines = foreach ($file in $binaries) {
+$stageRootPrefix = $stageDir
+if ($stageRootPrefix -notmatch '\\$') { $stageRootPrefix += '\' }
+$stagedFiles = Get-ChildItem -Path $stageDir -File -Recurse | Sort-Object FullName
+$contentLines = foreach ($file in $stagedFiles) {
     $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256
-    "$($hash.Hash) *$($file.Name)"
+    $relativePath = $file.FullName.Substring($stageRootPrefix.Length).Replace('\', '/')
+    "$($hash.Hash) *$relativePath"
 }
-$binaryLines | Out-File -FilePath $binaryChecksumsPath -Encoding ASCII -Force
+$contentLines | Out-File -FilePath $contentsChecksumsPath -Encoding ASCII -Force
 
 Write-Section "Done"
 Write-Host "  Publish dir  : $publishDir"
 Write-Host "  Stage dir    : $stageDir"
 Write-Host "  Full archive : $archivePath  (${fullSizeMB} MB)"
 Write-Host "  Checksums    : $checksumPath"
-Write-Host "  Binary SHA   : $binaryChecksumsPath"
+Write-Host "  Contents SHA : $contentsChecksumsPath"
 
 exit 0

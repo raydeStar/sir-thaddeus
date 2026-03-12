@@ -23,6 +23,8 @@ Use the packaging script to run the preflight gate, publish all runtime binaries
 archive the output, and emit SHA-256 checksums.
 
 ```powershell
+.\dev\fetch-assets.ps1
+.\dev\build-searxng-package.ps1
 .\dev\release-package.ps1
 ```
 
@@ -40,11 +42,11 @@ Useful variants:
 
 Outputs:
 
-- publish directory: `.\artifacts\publish\win-x64\`
+- publish directories: `.\artifacts\publish\<project>\win-x64\`
 - staged package directory: `.\artifacts\stage\win-x64\`
 - zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip`
 - zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
-- per-binary checksums: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-binaries.sha256.txt`
+- package contents checksum manifest: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-contents.sha256.txt`
 
 ### Voice backend assets
 
@@ -58,6 +60,17 @@ run it manually or let the build scripts handle it:
 
 End users get these assets automatically during the first-run onboarding wizard.
 
+### Bundled SearXNG sidecar
+
+CI workflows run `dev\build-searxng-package.ps1` automatically before packaging. For local release builds,
+prepare or refresh the bundled `search/` payload manually:
+
+```powershell
+.\dev\build-searxng-package.ps1
+```
+
+Release packaging now fails if a valid bundled SearXNG payload cannot be staged.
+
 ### Required ZIP contents
 
 - `SirThaddeus.UI.Avalonia.exe` (primary app executable)
@@ -70,6 +83,7 @@ End users get these assets automatically during the first-run onboarding wizard.
 
 - `SirThaddeus.Settings.template.json` (starter settings template)
 - matching `.zip.sha256.txt` checksum file distributed beside the ZIP
+- matching `-contents.sha256.txt` manifest for all packaged files
 
 ## 3) Smoke test checklist
 
@@ -101,9 +115,10 @@ Recommended:
 
 1. Attach the generated `.zip` package and matching `.sha256.txt` file.
 2. Include:
-   - release notes
-   - pinned SDK/runtime notes
-   - checksum/hash for the archive
+    - release notes
+    - pinned SDK/runtime notes
+    - checksum/hash for the archive
+    - package contents checksum manifest
 3. Keep the previous known-good package available for rollback.
 
 Tag-based GitHub release flow:

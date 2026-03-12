@@ -32,5 +32,5 @@ Date: 2026-03-05
 - Legacy desktop UI project has been removed from solution default build in this pass; source still exists on disk for controlled retirement.
 - Smoke validation now passes against a freshly built Avalonia package (`SirThaddeus.UI.Avalonia.exe`) with VoiceHost `/health` responsiveness and UI launch gate.
 - Regression gate (5 tests): `CasualChat_NoToolCalls`, `WebLookup_CallsToolThenSummarizes`, `Executor_GrantsPermission_ExecutesTool`, `Executor_DeniesPermission_ReturnsFailure`, `SelfMemoryQuestion_ReturnsStoredFactsSummary`.
-- Packaging defaults now use a lite profile (no bundled voice runtime/models/wheels and no `.playwright` runtime payload) to reduce zip size; full offline bundle remains available via `./dev/release-package.ps1 -FullBundle`.
+- Packaging defaults now use a full bundled Windows profile so the release zip includes the packaged headless runtime, voice assets, and SearXNG sidecar; a smaller developer package remains available via `./dev/release-package.ps1 -LiteBundle`.
 - Avalonia STOP ALL now performs best-effort backend teardown (`HeadlessRuntime`, `McpServer`, `VoiceHost`, `voice-backend`) and then forces app shutdown.

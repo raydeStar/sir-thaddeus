@@ -21,6 +21,21 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
+function Try-SyncLegacyPackageDir([string]$SourceDir, [string]$LegacyDir) {
+    try {
+        if (Test-Path $LegacyDir) {
+            Remove-Item -Path $LegacyDir -Recurse -Force
+        }
+
+        New-Item -ItemType Directory -Force -Path $LegacyDir | Out-Null
+        Copy-Item -Path (Join-Path $SourceDir "*") -Destination $LegacyDir -Recurse -Force
+        Write-Host "  Legacy mirror : $LegacyDir"
+    }
+    catch {
+        Write-Host "  WARN: unable to refresh legacy package dir at $LegacyDir ($($_.Exception.Message))" -ForegroundColor Yellow
+    }
+}
+
 function Apply-WindowsCompatPatch([string]$SourceRoot) {
     $valkeyDbPath = Join-Path $SourceRoot "searx\valkeydb.py"
     if (-not (Test-Path $valkeyDbPath)) {
@@ -62,7 +77,8 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
 $sourceExtractDir = Join-Path $repoRoot "artifacts\searxng\$Runtime\source"
-$packageDir = Join-Path $repoRoot "apps\searxng\package"
+$packageDir = Join-Path $repoRoot "artifacts\searxng\$Runtime\package"
+$legacyPackageDir = Join-Path $repoRoot "apps\searxng\package"
 $sourceArchivePath = Join-Path $repoRoot "artifacts\searxng\$Runtime\searxng-source.tar.gz"
 $downloadUrl = "https://codeload.github.com/searxng/searxng/tar.gz/$SearxngRef"
 
@@ -78,45 +94,63 @@ if ($Force) {
             Remove-Item -Path $path -Recurse -Force
         }
     }
+
+    try {
+        if (Test-Path $legacyPackageDir) {
+            Remove-Item -Path $legacyPackageDir -Recurse -Force
+        }
+    }
+    catch {
+        Write-Host "  WARN: unable to clear legacy package dir at $legacyPackageDir ($($_.Exception.Message))" -ForegroundColor Yellow
+    }
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $sourceExtractDir -Parent) | Out-Null
 
 Write-Section "Fetch Upstream Source"
-Invoke-WebRequest -Uri $downloadUrl -OutFile $sourceArchivePath
-if (-not (Test-Path $sourceArchivePath)) {
-    Fail "Failed to download SearXNG source archive from $downloadUrl."
+$resolvedCommit = $SearxngRef
+$sourcePayloadDir = Join-Path $sourceExtractDir "searxng-$resolvedCommit"
+
+if ((-not $Force) -and (Test-Path (Join-Path $sourcePayloadDir "searx\webapp.py"))) {
+    Write-Host "  Reusing cached upstream source from $sourcePayloadDir"
+}
+else {
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $sourceArchivePath
+    if (-not (Test-Path $sourceArchivePath)) {
+        Fail "Failed to download SearXNG source archive from $downloadUrl."
+    }
+
+    $archiveEntries = @(tar -tf $sourceArchivePath)
+    if ($LASTEXITCODE -ne 0 -or $archiveEntries.Count -eq 0) {
+        Fail "Failed to inspect the downloaded SearXNG source archive." $LASTEXITCODE
+    }
+
+    $archiveRoot = ($archiveEntries | Select-Object -First 1).TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($archiveRoot)) {
+        Fail "Could not determine the root directory in the downloaded SearXNG archive."
+    }
+
+    New-Item -ItemType Directory -Force -Path $sourceExtractDir | Out-Null
+    $archivePaths = @(
+        "$archiveRoot/searx",
+        "$archiveRoot/searxng_extra",
+        "$archiveRoot/setup.py",
+        "$archiveRoot/requirements.txt",
+        "$archiveRoot/requirements-dev.txt",
+        "$archiveRoot/requirements-server.txt",
+        "$archiveRoot/README.rst",
+        "$archiveRoot/LICENSE",
+        "$archiveRoot/babel.cfg"
+    )
+
+    tar -xf $sourceArchivePath -C $sourceExtractDir @archivePaths
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Failed to extract the required SearXNG source files." $LASTEXITCODE
+    }
+
+    $sourcePayloadDir = Join-Path $sourceExtractDir $archiveRoot
 }
 
-$archiveEntries = @(tar -tf $sourceArchivePath)
-if ($LASTEXITCODE -ne 0 -or $archiveEntries.Count -eq 0) {
-    Fail "Failed to inspect the downloaded SearXNG source archive." $LASTEXITCODE
-}
-
-$archiveRoot = ($archiveEntries | Select-Object -First 1).TrimEnd('/')
-if ([string]::IsNullOrWhiteSpace($archiveRoot)) {
-    Fail "Could not determine the root directory in the downloaded SearXNG archive."
-}
-
-New-Item -ItemType Directory -Force -Path $sourceExtractDir | Out-Null
-$archivePaths = @(
-    "$archiveRoot/searx",
-    "$archiveRoot/searxng_extra",
-    "$archiveRoot/setup.py",
-    "$archiveRoot/requirements.txt",
-    "$archiveRoot/requirements-dev.txt",
-    "$archiveRoot/requirements-server.txt",
-    "$archiveRoot/README.rst",
-    "$archiveRoot/LICENSE",
-    "$archiveRoot/babel.cfg"
-)
-
-tar -xf $sourceArchivePath -C $sourceExtractDir @archivePaths
-if ($LASTEXITCODE -ne 0) {
-    Fail "Failed to extract the required SearXNG source files." $LASTEXITCODE
-}
-
-$sourcePayloadDir = Join-Path $sourceExtractDir $archiveRoot
 $resolvedCommit = $SearxngRef
 Write-Host "  Upstream commit: $resolvedCommit"
 if (-not (Test-Path (Join-Path $sourcePayloadDir "searx\webapp.py"))) {
@@ -186,6 +220,8 @@ $upstreamInfo = [ordered]@{
 $upstreamInfo | ConvertTo-Json | Set-Content -Path (Join-Path $packageDir "upstream.json") -Encoding ASCII
 
 $packageFileCount = @(Get-ChildItem -Path $packageDir -Recurse -File).Count
+Try-SyncLegacyPackageDir -SourceDir $packageDir -LegacyDir $legacyPackageDir
+
 Write-Section "Done"
 Write-Host "  Package root : $packageDir"
 Write-Host "  Commit       : $resolvedCommit"

@@ -124,7 +124,7 @@ jobs:
           name: promote-release-assets
           path: |
             artifacts/release/*.zip
-            artifacts/release/*.zip.sha256.txt
+            artifacts/release/*.sha256.txt
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────
@@ -233,4 +233,4 @@ jobs:
           make_latest: true
           files: |
             release-assets/*.zip
-            release-assets/*.zip.sha256.txt
+            release-assets/*.sha256.txt

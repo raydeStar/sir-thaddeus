@@ -14,7 +14,80 @@ $DebugMode = $args -contains "--debug"
 $TerminalMode = $args -contains "--terminal"
 $ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" })
 
+function Test-ProjectAssetsPresent {
+    param([string]$ProjectPath)
+
+    $projectDir = Split-Path -Parent $ProjectPath
+    $assetsPath = Join-Path $projectDir "obj\project.assets.json"
+    return Test-Path $assetsPath
+}
+
+function Invoke-ProjectBuild {
+    param(
+        [string]$ProjectPath,
+        [string]$Label
+    )
+
+    $buildArgs = @("build", $ProjectPath, "-m:1", "-v", "q")
+    if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+        $buildArgs += "--no-restore"
+    }
+
+    & dotnet @buildArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      Retrying $Label build with verbose output..." -ForegroundColor DarkYellow
+
+        $retryArgs = @("build", $ProjectPath, "-m:1", "-v", "m")
+        if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+            $retryArgs += "--no-restore"
+        }
+
+        & dotnet @retryArgs
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nERROR: $Label build failed." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+
+function Stop-RepoOwnedPortListeners {
+    param(
+        [string]$RepoRootPath,
+        [int[]]$Ports
+    )
+
+    foreach ($port in $Ports) {
+        $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+
+        foreach ($pid in $listeners) {
+            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            if (-not $proc) {
+                continue
+            }
+
+            $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction SilentlyContinue
+            $details = @(
+                $proc.ProcessName,
+                $processInfo.ExecutablePath,
+                $processInfo.CommandLine
+            ) -join " "
+
+            if ($details -like "*$RepoRootPath*" -or $details -like "*SirThaddeus*" -or $details -like "*voice-backend*") {
+                Write-Host "      Releasing port $port from PID $pid ($($proc.ProcessName))..." -ForegroundColor DarkGray
+                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                Write-Host "      Leaving unrelated listener on port ${port}: PID $pid ($($proc.ProcessName))." -ForegroundColor DarkYellow
+            }
+        }
+    }
+}
+
 function Stop-ExistingInstances {
+    param([string]$RepoRootPath)
+
     Write-Host "`n[0/5] Stopping any existing instances of Sir Thaddeus..." -ForegroundColor Yellow
     $processesToKill = @("SirThaddeus.McpServer", "SirThaddeus.VoiceHost", "SirThaddeus.HeadlessRuntime", "SirThaddeus.UI.Avalonia")
     foreach ($procName in $processesToKill) {
@@ -24,15 +97,12 @@ function Stop-ExistingInstances {
             Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
         }
     }
-    
-    # Also clean up TCP ports if they are still held (e.g. by node or python backends if they got orphaned)
-    foreach ($p in @(8001, 17845)) {
-        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
-        if ($conn) { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }
-    }
+
+    # Release orphaned listeners, but only when they belong to this repo/toolchain.
+    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRootPath -Ports @(8001, 17845)
 }
 
-Stop-ExistingInstances
+Stop-ExistingInstances -RepoRootPath $RepoRoot
 
 function Ensure-LocalVoiceAssets {
     param([string]$RepoRootPath)
@@ -113,14 +183,20 @@ function Ensure-LocalSearxngSidecar {
     param([string]$RepoRootPath)
 
     $buildScript = Join-Path $RepoRootPath "dev/build-searxng-package.ps1"
-    $packageRoot = Join-Path $RepoRootPath "apps/searxng/package"
-    $startScript = Join-Path $packageRoot "start-searxng.ps1"
-    $pythonExe = Join-Path $packageRoot "runtime/python/python.exe"
-    $depsRoot = Join-Path $packageRoot "deps/site-packages"
-    $sourceRoot = Join-Path $packageRoot "source/searxng-upstream/searx/webapp.py"
+    $packageRoots = @(
+        (Join-Path $RepoRootPath "artifacts/searxng/win-x64/package"),
+        (Join-Path $RepoRootPath "apps/searxng/package")
+    )
 
-    if ((Test-Path $startScript) -and (Test-Path $pythonExe) -and (Test-Path $depsRoot) -and (Test-Path $sourceRoot)) {
-        return
+    foreach ($packageRoot in $packageRoots) {
+        $startScript = Join-Path $packageRoot "start-searxng.ps1"
+        $pythonExe = Join-Path $packageRoot "runtime/python/python.exe"
+        $depsRoot = Join-Path $packageRoot "deps/site-packages"
+        $sourceRoot = Join-Path $packageRoot "source/searxng-upstream/searx/webapp.py"
+
+        if ((Test-Path $startScript) -and (Test-Path $pythonExe) -and (Test-Path $depsRoot) -and (Test-Path $sourceRoot)) {
+            return
+        }
     }
 
     if (-not (Test-Path $buildScript)) {
@@ -137,7 +213,7 @@ function Ensure-LocalSearxngSidecar {
 
 # 1. Bootstrap (Restores dependencies, validates SDK)
 Write-Host "`n[1/5] Bootstrapping environment..." -ForegroundColor Yellow
-& "$PSScriptRoot\bootstrap.ps1"
+& "$PSScriptRoot\bootstrap.ps1" -SkipRestore
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nERROR: Bootstrap failed. Cannot start application." -ForegroundColor Red
     exit $LASTEXITCODE
@@ -152,29 +228,17 @@ Ensure-LocalSearxngSidecar -RepoRootPath $RepoRoot
 # 3. Build VoiceHost & MCP Server (UI/terminal hosts don't directly reference them)
 Write-Host "`n[3/5] Building VoiceHost..." -ForegroundColor Yellow
 $VoiceHostPath = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
-& dotnet build $VoiceHostPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: VoiceHost build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+Invoke-ProjectBuild -ProjectPath $VoiceHostPath -Label "VoiceHost"
 
 Write-Host "`n[4/5] Building MCP Server..." -ForegroundColor Yellow
 $McpServerPath = Join-Path $RepoRoot "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"
-& dotnet build $McpServerPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: MCP Server build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+Invoke-ProjectBuild -ProjectPath $McpServerPath -Label "MCP Server"
 
 # 5. Preparation & Execution
 if ($DebugMode) {
     Write-Host "`n[5/5] DEBUG MODE: Cleaning up existing background processes..." -ForegroundColor Cyan
     Stop-Process -Name "SirThaddeus.VoiceHost" -Force -ErrorAction SilentlyContinue
-    
-    foreach ($p in @(8001, 17845)) {
-        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
-        if ($conn) { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }
-    }
+    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRoot -Ports @(8001, 17845)
 
     Write-Host "      Launching backend services in separate windows..." -ForegroundColor Cyan
     
@@ -224,11 +288,7 @@ else {
 }
 
 # Keep startup snappy: rely on normal incremental build.
-& dotnet build $ProjectPath -v q
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: startup project build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+Invoke-ProjectBuild -ProjectPath $ProjectPath -Label "startup project"
 
 try {
     & dotnet run --project $ProjectPath --no-build -- $ForwardArgs
