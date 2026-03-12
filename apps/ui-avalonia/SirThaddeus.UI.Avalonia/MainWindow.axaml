@@ -1168,7 +1168,6 @@
                    MinHeight="38"
                    MaxHeight="120"
                    TextWrapping="Wrap"
-                   KeyDown="PromptBox_KeyDown"
                    TextChanged="PromptBox_TextChanged"
                    Classes="chatInput"/>
           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="8">

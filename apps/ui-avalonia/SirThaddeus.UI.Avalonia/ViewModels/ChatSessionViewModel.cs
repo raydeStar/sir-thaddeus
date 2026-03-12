@@ -10,6 +10,7 @@ public class ChatMessageItem : INotifyPropertyChanged
     private string _role = string.Empty;
     private string _content = string.Empty;
     private DateTimeOffset _timestamp = DateTimeOffset.Now;
+    private bool _isPending;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -31,6 +32,21 @@ public class ChatMessageItem : INotifyPropertyChanged
     {
         get => _content;
         set { _content = value; OnPropertyChanged(nameof(Content)); }
+    }
+
+    public bool IsPending
+    {
+        get => _isPending;
+        set
+        {
+            if (_isPending == value)
+            {
+                return;
+            }
+
+            _isPending = value;
+            OnPropertyChanged(nameof(IsPending));
+        }
     }
 
     public void AppendContent(string delta)
@@ -93,6 +109,26 @@ public class ChatSessionItem : INotifyPropertyChanged
         MarkUpdated();
     }
 
+    public void AddPendingAssistantMessage(string text = "Thinking...")
+    {
+        var last = Messages.LastOrDefault();
+        if (last is not null && last.Role == "assistant" && last.IsPending)
+        {
+            last.Content = text;
+        }
+        else
+        {
+            Messages.Add(new ChatMessageItem
+            {
+                Role = "assistant",
+                Content = text,
+                IsPending = true
+            });
+        }
+
+        MarkUpdated();
+    }
+
     public void AppendToLastAssistantMessage(string delta)
     {
         if (string.IsNullOrEmpty(delta))
@@ -103,12 +139,32 @@ public class ChatSessionItem : INotifyPropertyChanged
         var last = Messages.LastOrDefault();
         if (last != null && last.Role == "assistant")
         {
-            last.AppendContent(delta);
+            if (last.IsPending)
+            {
+                last.Content = delta;
+                last.IsPending = false;
+            }
+            else
+            {
+                last.AppendContent(delta);
+            }
         }
         else
         {
             AddMessage("assistant", delta);
         }
+        MarkUpdated();
+    }
+
+    public void ClearPendingAssistantMessage()
+    {
+        var last = Messages.LastOrDefault();
+        if (last is null || last.Role != "assistant" || !last.IsPending)
+        {
+            return;
+        }
+
+        Messages.Remove(last);
         MarkUpdated();
     }
 

@@ -88,6 +88,7 @@ public partial class MainWindow : Window
         _chatHistory.Add(_currentSession);
         ChatHistoryList.ItemsSource = _chatHistory;
         ChatMessagesList.ItemsSource = _currentSession.Messages;
+        PromptBox.AddHandler(KeyDownEvent, PromptBox_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         LmStudioPresetBtn.Click += LlmPreset_Click;
         OllamaPresetBtn.Click += LlmPreset_Click;
@@ -770,6 +771,7 @@ public partial class MainWindow : Window
             var run = await _runtimeApiClient.StartRunAsync(runtimePrompt, CancellationToken.None);
             _activeRunId = run.RunId;
             _assistantBuffersByRunId[run.RunId] = new StringBuilder();
+            _currentSession.AddPendingAssistantMessage();
             UpdateComposerState();
             StartEventStream(run.RunId);
             PromptBox.Text = string.Empty;
@@ -1158,6 +1160,15 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
         UpdateChatActionState();
         UpdateComposerState();
         UpdateConversationTitle();
+        ScrollChatToBottom();
+    }
+
+    private void ScrollChatToBottom()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            ChatScroller.Offset = new Vector(ChatScroller.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
     }
 
     private void BumpSessionToTop(ChatSessionItem session)
@@ -1213,7 +1224,14 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
         }
         catch (Exception ex)
         {
-            await Dispatcher.UIThread.InvokeAsync(() => AppendTranscript($"[error] Event stream failed: {ex.Message}"));
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _currentSession.ClearPendingAssistantMessage();
+                _assistantBuffersByRunId.Remove(runId);
+                _activeRunId = null;
+                AppendTranscript($"[error] Event stream failed: {ex.Message}");
+                UpdateComposerState();
+            });
         }
     }
 
@@ -1274,6 +1292,7 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
                 UpdateComposerState();
                 break;
             case RuntimeEventTypes.RunFailed:
+                _currentSession.ClearPendingAssistantMessage();
                 _assistantBuffersByRunId.Remove(envelope.RunId);
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
@@ -2037,17 +2056,30 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
 
     private void PromptBox_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (!_uiSettings.SendOnEnter ||
-            e.Key != Key.Enter ||
-            e.KeyModifiers.HasFlag(KeyModifiers.Shift) ||
-            e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
-            e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        if (!ShouldSendPromptOnKeyDown(e))
         {
             return;
         }
 
         e.Handled = true;
         SendButton_Click(sender, new RoutedEventArgs());
+    }
+
+    private bool ShouldSendPromptOnKeyDown(KeyEventArgs e)
+    {
+        if (!_uiSettings.SendOnEnter)
+        {
+            return false;
+        }
+
+        if (e.Key is not (Key.Enter or Key.Return))
+        {
+            return false;
+        }
+
+        return !e.KeyModifiers.HasFlag(KeyModifiers.Shift) &&
+               !e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+               !e.KeyModifiers.HasFlag(KeyModifiers.Alt);
     }
 
     private void UpdateComposerState()
@@ -2073,7 +2105,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     private void SyncLastMessageCacheFromCurrentSession()
     {
         _lastUserPrompt = _currentSession.Messages.LastOrDefault(m => m.Role == "user")?.Content;
-        _lastAssistantMessage = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant")?.Content;
+        _lastAssistantMessage = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant" && !m.IsPending)?.Content;
         _lastAssistantSources = string.IsNullOrWhiteSpace(_lastAssistantMessage)
             ? Array.Empty<string>()
             : ExtractUrls(_lastAssistantMessage);
