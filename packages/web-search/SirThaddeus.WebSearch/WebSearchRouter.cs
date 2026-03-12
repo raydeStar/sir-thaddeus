@@ -125,31 +125,39 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
+        var diagnostics = new List<SearchDiagnosticEntry>();
         await ProbeProvidersAsync(ct);
+        diagnostics.Add(BuildProbeDiagnostic(_searxng.Name, _searxngAvailable));
+        diagnostics.Add(BuildProbeDiagnostic(_searchApi.Name, _searchApiAvailable));
 
         if (_searxngAvailable == true)
         {
             var result = await _searxng.SearchAsync(query, options, ct);
+            result = AttachSearchDiagnostic(result, _searxng.Name, "search", diagnostics);
             if (result.Results.Count > 0)
                 return result;
 
             // SearxNG was available during probing but failed to deliver
             // results. Force the next request to probe again.
             InvalidateProbeCache();
+            diagnostics = [.. result.Diagnostics];
         }
 
         if (_searchApiAvailable == true)
         {
             var result = await _searchApi.SearchAsync(query, options, ct);
+            result = AttachSearchDiagnostic(result, _searchApi.Name, "search", diagnostics);
             if (result.Results.Count > 0)
                 return result;
 
             // Search API returned no usable results or errored out.
             // Mark it stale so the next request re-probes.
             _searchApiAvailable = false;
+            diagnostics = [.. result.Diagnostics];
         }
 
-        return await SearchWithGoogleNewsAsync(query, options, ct);
+        var fallback = await _googleNews.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(fallback, _googleNews.Name, "fallback", diagnostics);
     }
 
     /// <summary>
@@ -209,7 +217,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             };
         }
 
-        return result;
+        return AttachSearchDiagnostic(result, _searxng.Name, "search");
     }
 
     private async Task<SearchResults> SearchWithSearchApiAsync(
@@ -217,7 +225,8 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        return await _searchApi.SearchAsync(query, options, ct);
+        var result = await _searchApi.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(result, _searchApi.Name, "search");
     }
 
     private async Task<SearchResults> SearchWithDdgAsync(
@@ -225,7 +234,8 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        return await _ddg.SearchAsync(query, options, ct);
+        var result = await _ddg.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(result, _ddg.Name, "search");
     }
 
     private async Task<SearchResults> SearchWithGoogleNewsAsync(
@@ -233,7 +243,8 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        return await _googleNews.SearchAsync(query, options, ct);
+        var result = await _googleNews.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(result, _googleNews.Name, "search");
     }
 
     private static SearchResults ManualModeResult()
@@ -244,6 +255,64 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             Results = [],
             Errors = ["Search is in manual mode. Paste URLs directly and use BrowserNavigate to read them."]
         };
+    }
+
+    private static SearchResults AttachSearchDiagnostic(
+        SearchResults result,
+        string providerName,
+        string phase,
+        IReadOnlyList<SearchDiagnosticEntry>? prefixDiagnostics = null)
+    {
+        var diagnostics = new List<SearchDiagnosticEntry>();
+        if (prefixDiagnostics is not null && prefixDiagnostics.Count > 0)
+            diagnostics.AddRange(prefixDiagnostics);
+        if (result.Diagnostics.Count > 0)
+            diagnostics.AddRange(result.Diagnostics);
+
+        diagnostics.Add(new SearchDiagnosticEntry
+        {
+            Provider = providerName,
+            Phase = phase,
+            Outcome = DetermineOutcome(result),
+            Message = BuildDiagnosticMessage(result),
+            ResultCount = result.Results.Count
+        });
+
+        return result with { Diagnostics = diagnostics };
+    }
+
+    private static SearchDiagnosticEntry BuildProbeDiagnostic(string providerName, bool? available)
+    {
+        var outcome = available == true ? "available" : "unavailable";
+        return new SearchDiagnosticEntry
+        {
+            Provider = providerName,
+            Phase = "probe",
+            Outcome = outcome,
+            Message = $"probe returned {outcome}",
+            ResultCount = 0
+        };
+    }
+
+    private static string DetermineOutcome(SearchResults result)
+    {
+        if (result.Results.Count > 0)
+            return "results";
+
+        if (result.Errors.Count > 0)
+            return "error";
+
+        return "no_results";
+    }
+
+    private static string BuildDiagnosticMessage(SearchResults result)
+    {
+        if (result.Errors.Count == 0)
+            return result.Results.Count > 0
+                ? $"returned {result.Results.Count} result(s)"
+                : "returned no results";
+
+        return string.Join("; ", result.Errors);
     }
 
     public void Dispose()

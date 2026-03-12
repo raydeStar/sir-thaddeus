@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.Platform.Storage;
+using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using System.Collections.ObjectModel;
@@ -15,6 +16,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.UI.Avalonia.ViewModels;
 
 namespace SirThaddeus.UI.Avalonia;
@@ -42,6 +44,9 @@ public partial class MainWindow : Window
     private string? _lastAssistantMessage;
     private IReadOnlyList<string> _lastAssistantSources = Array.Empty<string>();
     private readonly Dictionary<string, StringBuilder> _assistantBuffersByRunId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _toolCallsInCurrentRun = new();
+    private static readonly Regex MarkdownBoldRegex = new(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
+    private static readonly Regex MarkdownUnderscoreBoldRegex = new(@"__(.+?)__", RegexOptions.Compiled);
     private readonly LocalTextToSpeechPlaybackService _ttsPlaybackService = new();
     private readonly IMicrophoneCaptureService _microphoneCaptureService = new NAudioMicrophoneCaptureService();
     private readonly VoiceHostLauncher _voiceHostLauncher = new();
@@ -76,10 +81,11 @@ public partial class MainWindow : Window
         ApplyUiSettingsToControls();
 
         SettingsHeaderBar.DataContext = _backendSettings;
+        SettingsTabControl.DataContext = _backendSettings;
 
         LlmsScrollViewer.DataContext = _backendSettings;
         AudioScrollViewer.DataContext = _backendSettings;
-        PermissionsGrid.DataContext = _backendSettings;
+        PermissionsTabItem.DataContext = _backendSettings;
         ConstraintsPanel.DataContext = _backendSettings;
         _backendSettings.PropertyChanged += BackendSettings_PropertyChanged;
         _transcriptionService = new LocalAsrHttpTranscriptionService(() => _backendSettings.VoiceHostBaseUrl);
@@ -266,6 +272,7 @@ public partial class MainWindow : Window
             {
                 var persisted = await _runtimeApiClient.SaveSettingsAsync(snapshot, CancellationToken.None);
                 _backendSettings.ApplySavedSnapshot(persisted, "Settings saved and applied to the connected runtime.");
+                await RefreshSearchStatusAsync();
                 AppendTranscript("[system] Settings saved and applied to the connected runtime.");
                 return;
             }
@@ -273,6 +280,9 @@ public partial class MainWindow : Window
             SettingsManager.Save(snapshot);
             var localPersisted = SettingsManager.Load();
             _backendSettings.ApplySavedSnapshot(localPersisted, "Settings saved locally. Connect or restart the runtime to apply them.");
+            _backendSettings.ResetSearchHealthState(
+                "Not connected",
+                "Settings saved locally. Connect the runtime to inspect live web-search and MCP health.");
             AppendTranscript("[system] Settings saved locally.");
         }
         catch (Exception ex)
@@ -282,6 +292,9 @@ public partial class MainWindow : Window
                 SettingsManager.Save(snapshot);
                 var localPersisted = SettingsManager.Load();
                 _backendSettings.ApplySavedSnapshot(localPersisted, "Settings saved locally. Runtime sync failed; reconnect to apply them.");
+                _backendSettings.ResetSearchHealthState(
+                    "Unavailable",
+                    "Settings saved locally, but runtime sync failed. Reconnect to inspect live web-search and MCP health.");
                 AppendTranscript("[error] Runtime settings sync failed: " + ex.Message);
                 AppendTranscript("[system] Settings saved locally.");
             }
@@ -423,6 +436,11 @@ public partial class MainWindow : Window
             _backendSettings.StartVoiceHostHealthPolling();
             _ = _backendSettings.RefreshVoiceHostHealthAsync();
         }
+        else if (ReferenceEquals(tabControl.SelectedItem, SearchTabItem))
+        {
+            _backendSettings.StopVoiceHostHealthPolling();
+            _ = RefreshSearchStatusAsync();
+        }
         else
         {
             _backendSettings.StopVoiceHostHealthPolling();
@@ -444,6 +462,14 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object? sender, KeyEventArgs e)
     {
+        // Escape hides the window (like WPF Close)
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            e.Handled = true;
+            Hide();
+            return;
+        }
+
         if (OperatingSystem.IsWindows() &&
             ShouldUseWindowScopedPttHotkey() &&
             e.Key == Key.Escape &&
@@ -681,10 +707,7 @@ public partial class MainWindow : Window
         EmptyHero.IsVisible = true;
 
         PromptBox.Text = string.Empty;
-        PermissionSummaryText.Text = "No pending permission requests.";
-        PermissionPayloadBox.Text = string.Empty;
-        ApprovePermissionButton.IsEnabled = false;
-        DenyPermissionButton.IsEnabled = false;
+        ResetPermissionRequestUi();
 
         _attachedDocument = null;
         UpdateAttachmentUi();
@@ -946,6 +969,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Interrupt TTS if currently speaking (WPF parity)
+        if (_readAloudActive)
+        {
+            _readAloudCancellation?.Cancel();
+            _readAloudActive = false;
+        }
+
         await _pttGate.WaitAsync();
         try
         {
@@ -1059,7 +1089,36 @@ public partial class MainWindow : Window
             await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
         }
     }
-private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
+
+    private async void RefreshSearchStatusButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await RefreshSearchStatusAsync();
+    }
+
+    private async Task RefreshSearchStatusAsync()
+    {
+        if (_runtimeApiClient is null)
+        {
+            _backendSettings.ResetSearchHealthState(
+                "Disconnected",
+                "Connect the runtime to inspect live web-search and MCP health.");
+            return;
+        }
+
+        try
+        {
+            var snapshot = await _runtimeApiClient.GetSearchStatusAsync(CancellationToken.None);
+            _backendSettings.ApplySearchStatus(snapshot);
+        }
+        catch (Exception ex)
+        {
+            _backendSettings.ResetSearchHealthState(
+                "Unavailable",
+                "Search status refresh failed: " + ex.Message);
+        }
+    }
+
+    private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     {
         await RefreshAuditAsync();
     }
@@ -1121,6 +1180,108 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
     private async void DenyPermissionButton_Click(object? sender, RoutedEventArgs e)
     {
         await SubmitPermissionDecisionAsync(false);
+    }
+
+    // ---------------------------------------------------------------
+    // Permission Request UI helpers
+    // ---------------------------------------------------------------
+
+    private void ShowPermissionRequest(ToolRequestedPayload request)
+    {
+        var (category, description, warning) = ClassifyTool(request.ToolName);
+
+        PermToolNameText.Text = request.ToolName ?? "(unknown tool)";
+        PermCategoryText.Text = category;
+        PermDescriptionText.Text = description;
+        PermDetailsText.Text = FormatPermissionDetails(request.ToolName, request.Reason, request.ArgumentsJson);
+        PermWarningText.Text = warning;
+
+        PermissionPayloadBox.Text = request.ArgumentsJson;
+
+        SetPermissionButtonsEnabled(true);
+
+        PermissionRequestCard.IsVisible = true;
+        PermissionIdleCard.IsVisible = false;
+    }
+
+    private void ResetPermissionRequestUi()
+    {
+        PermissionRequestCard.IsVisible = false;
+        PermissionIdleCard.IsVisible = true;
+        PermissionSummaryText.Text = "No pending permission requests.";
+        PermissionPayloadBox.Text = string.Empty;
+        SetPermissionButtonsEnabled(false);
+    }
+
+    private void SetPermissionButtonsEnabled(bool enabled)
+    {
+        ApprovePermissionButton.IsEnabled = enabled;
+        DenyPermissionButton.IsEnabled = enabled;
+        AllowSessionButton.IsEnabled = enabled;
+        AllowAlwaysButton.IsEnabled = enabled;
+    }
+
+    private static string FormatPermissionDetails(string? toolName, string? reason, string? argsJson)
+    {
+        // Prefer the reason/purpose field, fall back to args JSON
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            var cleaned = reason;
+            if (toolName is not null)
+            {
+                var prefixFull = $"Use tool '{toolName}'.";
+                var prefixArgs = $"Use '{toolName}': ";
+                if (cleaned.Equals(prefixFull, StringComparison.Ordinal))
+                    return string.IsNullOrWhiteSpace(argsJson) ? "(no additional details)" : argsJson;
+                if (cleaned.StartsWith(prefixArgs, StringComparison.Ordinal))
+                    cleaned = cleaned[prefixArgs.Length..];
+            }
+
+            return cleaned;
+        }
+
+        return string.IsNullOrWhiteSpace(argsJson) ? "(no additional details)" : argsJson;
+    }
+
+    private static (string Category, string Description, string Warning) ClassifyTool(string? toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return ("Unknown", "Perform an action", "Sir Thaddeus is requesting access to a tool on your behalf.");
+
+        var lower = toolName.ToLowerInvariant();
+
+        // Memory
+        if (lower.Contains("memory_retrieve") || lower.Contains("memory_list"))
+            return ("Memory Read", "Retrieve stored memories and facts",
+                "This tool will read from your local memory database.");
+        if (lower.Contains("memory_store") || lower.Contains("memory_update") || lower.Contains("memory_delete"))
+            return ("Memory Write", "Store, update, or delete memories",
+                "This tool will store or modify data in your local memory database.");
+
+        // Screen
+        if (lower.Contains("screen") || lower.Contains("screenshot") || lower.Contains("active_window"))
+            return ("Screen Reading", "Read content visible on your screen",
+                "This tool will capture what is currently visible on your screen.");
+
+        // File system
+        if (lower.Contains("file_read") || lower.Contains("file_write") || lower.Contains("file_list") || lower.Contains("file_"))
+            return ("File System Access", "Read or write files on your computer",
+                "This tool can read or write files on your computer. Review the path before allowing.");
+
+        // System execute
+        if (lower.Contains("system_execute") || lower.Contains("execute") || lower.Contains("shell") || lower.Contains("powershell"))
+            return ("System Command Execution", "Run commands on your system",
+                "This tool can run commands on your system. Review the details carefully before allowing.");
+
+        // Web
+        if (lower.Contains("web_search") || lower.Contains("browser") || lower.Contains("navigate") ||
+            lower.Contains("weather") || lower.Contains("places_lookup") || lower.Contains("feed_fetch") ||
+            lower.Contains("status_check") || lower.Contains("holidays"))
+            return ("Web Access", "Search the web and navigate to pages",
+                "This tool will make an outbound internet request on your behalf.");
+
+        return ("Agent Tool", "Perform a privileged operation",
+            "Sir Thaddeus is requesting access to a tool on your behalf. Choose how to proceed.");
     }
 
     private void AppendTranscript(string line)
@@ -1288,12 +1449,59 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
                     DisplayBriefing(completed.Briefing, recordHistory: true, activateTab: true);
                 }
 
+                // Extract thought/reasoning content and update the last assistant message.
+                if (!string.IsNullOrWhiteSpace(_lastAssistantMessage))
+                {
+                    var parts = ParseAssistantDisplayParts(_lastAssistantMessage);
+                    var lastMsg = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant");
+                    if (lastMsg is not null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(parts.ThinkingText))
+                        {
+                            lastMsg.ThoughtContent = parts.ThinkingText;
+                            lastMsg.Content = StripMarkdownFormatting(parts.DisplayText);
+                        }
+                        else
+                        {
+                            // Always strip markdown bold/italic and clean LLM output markers.
+                            lastMsg.Content = StripMarkdownFormatting(parts.DisplayText);
+                        }
+
+                        // Stash the user prompt so the context menu "Retry" can resubmit it.
+                        if (!string.IsNullOrWhiteSpace(_lastUserPrompt))
+                        {
+                            lastMsg.RetryPrompt = _lastUserPrompt;
+                        }
+                    }
+                }
+
+                // Emit consolidated tool summary as an inline footer on the assistant message.
+                if (_toolCallsInCurrentRun.Count > 0)
+                {
+                    var toolNames = string.Join(", ", _toolCallsInCurrentRun.Distinct());
+                    var iterations = completed?.ToolLoopIterations ?? 0;
+                    var summary = $"\u21B3 tools called: {_toolCallsInCurrentRun.Count} ({toolNames}) \u00B7 {iterations} round-trip(s)";
+
+                    // Attach to the last assistant message as a subtle footer.
+                    var assistantMsg = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant");
+                    if (assistantMsg is not null)
+                    {
+                        assistantMsg.ToolSummary = summary;
+                    }
+
+                    _toolCallsInCurrentRun.Clear();
+                }
+
+                // Safety: clear any orphaned pending "Thinking..." message.
+                _currentSession.ClearPendingAssistantMessage();
+
                 _activeRunId = null;
                 UpdateComposerState();
                 break;
             case RuntimeEventTypes.RunFailed:
                 _currentSession.ClearPendingAssistantMessage();
                 _assistantBuffersByRunId.Remove(envelope.RunId);
+                _toolCallsInCurrentRun.Clear();
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
@@ -1304,11 +1512,10 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
                 if (request is not null)
                 {
                     _pendingPermissionRequestId = request.RequestId;
-                    PermissionSummaryText.Text = $"Permission requested for {request.ToolName}";
-                    PermissionPayloadBox.Text = request.ArgumentsJson;
-                    ApprovePermissionButton.IsEnabled = true;
-                    DenyPermissionButton.IsEnabled = true;
-                    AppendTranscript($"[system] Permission requested: {request.ToolName}");
+                    _toolCallsInCurrentRun.Add(request.ToolName);
+                    ShowPermissionRequest(request);
+                    // Don't clutter chat with individual permission messages.
+                    // A consolidated tool activity summary is emitted at RunCompleted.
 
                     if (_uiSettings.AutoSwitchToPermissions)
                     {
@@ -1320,15 +1527,9 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
             case RuntimeEventTypes.ToolApproved:
             case RuntimeEventTypes.ToolDenied:
                 var decision = ReadPayload<ToolDecisionPayload>(envelope.Payload);
-                PermissionSummaryText.Text = "No pending permission requests.";
-                PermissionPayloadBox.Text = string.Empty;
                 _pendingPermissionRequestId = null;
-                ApprovePermissionButton.IsEnabled = false;
-                DenyPermissionButton.IsEnabled = false;
-                if (decision is not null)
-                {
-                    AppendTranscript($"[system] Permission {(decision.Approved ? "approved" : "denied")} for {decision.ToolName}");
-                }
+                ResetPermissionRequestUi();
+                // Suppressed: individual approval/denial messages no longer clutter chat.
                 break;
             default:
                 break;
@@ -1350,9 +1551,12 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
                 approved,
                 CancellationToken.None);
 
-            AppendTranscript(applied
-                ? $"[system] Permission decision submitted ({(approved ? "approve" : "deny")})."
-                : "[system] Permission decision rejected by runtime.");
+            // Suppressed: don't clutter chat with individual decision messages.
+            // The consolidated tool summary is added to the assistant message at RunCompleted.
+            if (!applied)
+            {
+                AppendTranscript("[system] Permission decision rejected by runtime.");
+            }
 
             SetActiveView(ChatTabButton);
         }
@@ -1475,6 +1679,17 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
                 ? "Managed runtime: running"
                 : "Managed runtime: external";
 
+            if (ReferenceEquals(SettingsTabControl.SelectedItem, SearchTabItem))
+            {
+                _ = RefreshSearchStatusAsync();
+            }
+            else
+            {
+                _backendSettings.ResetSearchHealthState(
+                    "Connected",
+                    "Runtime connected. Open Search or click Refresh Search Status to inspect live web-search and MCP health.");
+            }
+
             UpdateHeaderConnectionControls();
             UpdateActionDrawerSummary();
             UpdateComposerState();
@@ -1540,6 +1755,9 @@ private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
             SettingsRuntimeText.Text = "Runtime: not connected";
         }
 
+        _backendSettings.ResetSearchHealthState(
+            "Disconnected",
+            "Connect the runtime to inspect live web-search and MCP health.");
         UpdateRuntimeLaunchStatusText();
         UpdateHeaderConnectionControls();
         UpdateActionDrawerSummary();
@@ -1925,6 +2143,129 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
     }
 
+    // ── Per-message context menu handlers ────────────────────────────
+
+    private async void CopyMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem) return;
+        if (menuItem.Parent is not ContextMenu ctx) return;
+        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+        {
+            AppendTranscript("[error] Clipboard is unavailable on this platform.");
+            return;
+        }
+
+        await clipboard.SetTextAsync(msg.Content);
+        AppendTranscript("[system] Copied message to clipboard.");
+    }
+
+    private void RetryMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem) return;
+        if (menuItem.Parent is not ContextMenu ctx) return;
+        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        if (msg is null) return;
+
+        var prompt = !string.IsNullOrWhiteSpace(msg.RetryPrompt) ? msg.RetryPrompt : _lastUserPrompt;
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            AppendTranscript("[system] Nothing to retry.");
+            return;
+        }
+
+        PromptBox.Text = prompt;
+        PromptBox.CaretIndex = prompt.Length;
+        SendButton_Click(sender, e);
+    }
+
+    private async void ReadAloudMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (sender is not MenuItem menuItem) return;
+        if (menuItem.Parent is not ContextMenu ctx) return;
+        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
+
+        if (_readAloudActive)
+        {
+            await RequestVoiceCancelAsync("read aloud message context");
+            return;
+        }
+
+        using var readAloudCancellation = new CancellationTokenSource();
+        _readAloudCancellation = readAloudCancellation;
+        _readAloudActive = true;
+        MarkReadAloudStarted(msg.Content.Length);
+
+        try
+        {
+            await _ttsPlaybackService.SpeakAsync(msg.Content, readAloudCancellation.Token);
+            MarkReadAloudCompleted(msg.Content.Length);
+            AppendTranscript("[system] Read aloud complete.");
+        }
+        catch (OperationCanceledException) when (readAloudCancellation.IsCancellationRequested)
+        {
+            MarkPushToTalkCanceled("Read aloud canceled.", "Local speech playback was stopped.");
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Read aloud failed: " + ex.Message);
+            MarkPushToTalkFailure("Read aloud failed.", ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_readAloudCancellation, readAloudCancellation))
+                _readAloudCancellation = null;
+            _readAloudActive = false;
+            ReadAloudButton.Content = "Read Aloud";
+        }
+    }
+
+    // ── Audit log file / folder handlers ─────────────────────────────
+
+    private void OpenAuditLogFile_Click(object? sender, RoutedEventArgs e)
+    {
+        var path = SirThaddeus.AuditLog.JsonLineAuditLogger.GetDefaultPath();
+        if (!System.IO.File.Exists(path))
+        {
+            AppendTranscript("[system] Audit log file not found: " + path);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Failed to open audit log: " + ex.Message);
+        }
+    }
+
+    private void OpenAuditLogFolder_Click(object? sender, RoutedEventArgs e)
+    {
+        var path = SirThaddeus.AuditLog.JsonLineAuditLogger.GetDefaultPath();
+        var folder = System.IO.Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(folder) || !System.IO.Directory.Exists(folder))
+        {
+            AppendTranscript("[system] Audit log folder not found.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Failed to open audit folder: " + ex.Message);
+        }
+    }
+
     private async void AttachFileButton_Click(object? sender, RoutedEventArgs e)
     {
         var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
@@ -2087,7 +2428,9 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         var hasPrompt = !string.IsNullOrWhiteSpace(PromptBox.Text);
         var runActive = !string.IsNullOrWhiteSpace(_activeRunId);
         SendButton.IsEnabled = hasPrompt && !runActive;
+        SendButton.IsVisible = !runActive;
         StopButton.IsEnabled = runActive;
+        StopButton.IsVisible = runActive;
     }
 
     private void UpdateChatActionState()
@@ -2258,6 +2601,237 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         public string Meta { get; }
 
         public bool IsActive { get; }
+    }
+
+    // ---------------------------------------------------------------
+    // Thought / Reasoning Extraction (ported from WPF)
+    // ---------------------------------------------------------------
+
+    private static readonly Regex TaggedThinkingRegex = new(
+        @"<(?<tag>think|thinking|reasoning)>(?<body>[\s\S]*?)</\k<tag>>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex NumberedReasoningLeadRegex = new(
+        @"^\d+[\.\)]\s*(analy(?:ze|sis)?|reason(?:ing)?|think(?:ing)?|thought|consult|plan|approach|breakdown)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex NumberedLineRegex = new(
+        @"^\d+[\.\)]\s+",
+        RegexOptions.Compiled);
+
+    private sealed record AssistantDisplayParts(string DisplayText, string ThinkingText);
+
+    private static AssistantDisplayParts ParseAssistantDisplayParts(string text)
+    {
+        var cleaned = CleanLlmOutput(text);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return new AssistantDisplayParts(cleaned, "");
+
+        if (TryExtractTaggedThinking(cleaned, out var taggedDisplay, out var taggedThinking))
+            return new AssistantDisplayParts(taggedDisplay, taggedThinking);
+
+        if (TryExtractStructuredThinkingPreamble(cleaned, out var structuredDisplay, out var structuredThinking))
+            return new AssistantDisplayParts(structuredDisplay, structuredThinking);
+
+        return new AssistantDisplayParts(cleaned, "");
+    }
+
+    private static string CleanLlmOutput(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var lines = text.Split('\n');
+        var cleaned = lines
+            .Where(line =>
+            {
+                var trimmed = line.Trim();
+                if (IsLikelyInternalMarkerLine(trimmed))
+                    return false;
+
+                if (trimmed.StartsWith('[') && trimmed.EndsWith(']') &&
+                    (trimmed.Contains("END OF", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.Contains("INSTRUCTIONS", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.Contains("REFERENCE DATA", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.Contains("ASSISTANT RESPONSE", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.StartsWith("[Action:", StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.StartsWith("[action:", StringComparison.OrdinalIgnoreCase)))
+                    return false;
+
+                return true;
+            });
+
+        return string.Join('\n', cleaned).Trim();
+    }
+
+    private static bool IsLikelyInternalMarkerLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        if (!line.StartsWith('[') || !line.EndsWith(']'))
+            return false;
+
+        var marker = line[1..^1].Trim();
+        if (marker.StartsWith("/", StringComparison.Ordinal))
+            marker = marker[1..].Trim();
+
+        if (string.IsNullOrWhiteSpace(marker))
+            return false;
+
+        if (marker.Contains("TOOL", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("INSTRUCTION", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("REFERENCE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("PROFILE", StringComparison.OrdinalIgnoreCase) ||
+            marker.Contains("MEMORY", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var normalized = marker.Replace("/", "", StringComparison.Ordinal).Trim();
+        if (normalized.Length == 0)
+            return false;
+
+        return normalized.All(c =>
+            char.IsUpper(c) || char.IsDigit(c) || c == '_' || c == '-' || c == ' ');
+    }
+
+    private static bool TryExtractTaggedThinking(
+        string text, out string displayText, out string thinkingText)
+    {
+        displayText = text;
+        thinkingText = "";
+
+        var match = TaggedThinkingRegex.Match(text);
+        if (!match.Success)
+            return false;
+
+        var thought = match.Groups["body"].Value.Trim();
+        var visible = text.Remove(match.Index, match.Length).Trim();
+
+        if (string.IsNullOrWhiteSpace(visible) || string.IsNullOrWhiteSpace(thought))
+            return false;
+
+        displayText = visible;
+        thinkingText = thought;
+        return true;
+    }
+
+    private static bool TryExtractStructuredThinkingPreamble(
+        string text, out string displayText, out string thinkingText)
+    {
+        displayText = text;
+        thinkingText = "";
+
+        var normalized = (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        var start = Array.FindIndex(lines, line => !string.IsNullOrWhiteSpace(line));
+        if (start < 0)
+            return false;
+
+        var lead = lines[start].Trim();
+        if (!LooksLikeThinkingLead(lead))
+            return false;
+
+        var sawReasoningLine = false;
+        var splitIndex = -1;
+
+        for (var i = start; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                if (sawReasoningLine)
+                    continue;
+                continue;
+            }
+
+            if (IsReasoningLine(trimmed))
+            {
+                sawReasoningLine = true;
+                continue;
+            }
+
+            if (sawReasoningLine)
+            {
+                splitIndex = i;
+                break;
+            }
+
+            return false;
+        }
+
+        if (!sawReasoningLine || splitIndex <= start || splitIndex >= lines.Length)
+            return false;
+
+        var thought = string.Join('\n', lines[start..splitIndex]).Trim();
+        var visible = string.Join('\n', lines[splitIndex..]).Trim();
+        if (string.IsNullOrWhiteSpace(thought) || string.IsNullOrWhiteSpace(visible))
+            return false;
+
+        displayText = visible;
+        thinkingText = thought;
+        return true;
+    }
+
+    /// <summary>
+    /// Strips common Markdown formatting (bold, italic, inline code) from LLM output
+    /// so the plain TextBox displays clean, readable text.
+    /// </summary>
+    private static string StripMarkdownFormatting(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // **bold** and __bold__
+        text = MarkdownBoldRegex.Replace(text, "$1");
+        text = MarkdownUnderscoreBoldRegex.Replace(text, "$1");
+
+        // *italic* and _italic_ (single markers, only if not inside a word)
+        text = Regex.Replace(text, @"(?<!\w)\*([^*]+?)\*(?!\w)", "$1");
+        text = Regex.Replace(text, @"(?<!\w)_([^_]+?)_(?!\w)", "$1");
+
+        // `inline code` — just remove the backticks
+        text = Regex.Replace(text, @"`([^`]+?)`", "$1");
+
+        // ### Headings — strip leading hashes
+        text = Regex.Replace(text, @"^#{1,6}\s+", "", RegexOptions.Multiline);
+
+        return text;
+    }
+
+    private static bool LooksLikeThinkingLead(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        var lower = line.ToLowerInvariant();
+        return lower.StartsWith("thought for ", StringComparison.Ordinal) ||
+               lower.StartsWith("analysis:", StringComparison.Ordinal) ||
+               lower.StartsWith("reasoning:", StringComparison.Ordinal) ||
+               lower.StartsWith("thinking:", StringComparison.Ordinal) ||
+               lower.StartsWith("let me think", StringComparison.Ordinal) ||
+               NumberedReasoningLeadRegex.IsMatch(line);
+    }
+
+    private static bool IsReasoningLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return true;
+
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith("- ", StringComparison.Ordinal) ||
+            trimmed.StartsWith("* ", StringComparison.Ordinal) ||
+            trimmed.StartsWith("\u2022 ", StringComparison.Ordinal) ||
+            NumberedLineRegex.IsMatch(trimmed))
+            return true;
+
+        if (trimmed.EndsWith(':') && trimmed.Length <= 120)
+            return true;
+
+        var lower = trimmed.ToLowerInvariant();
+        return lower.Contains("analyze", StringComparison.Ordinal) ||
+               lower.Contains("analysis", StringComparison.Ordinal) ||
+               lower.Contains("reasoning", StringComparison.Ordinal) ||
+               lower.Contains("consult memory", StringComparison.Ordinal) ||
+               lower.Contains("step-by-step", StringComparison.Ordinal);
     }
 
 

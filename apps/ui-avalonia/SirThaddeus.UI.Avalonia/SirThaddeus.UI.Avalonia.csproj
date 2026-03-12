@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
     <ProjectReference Include="..\..\..\packages\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
     <ProjectReference Include="..\..\..\packages\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
+    <ProjectReference Include="..\..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\icons\sir-thaddeus.ico" Link="Assets\Icons\sir-thaddeus.ico" />

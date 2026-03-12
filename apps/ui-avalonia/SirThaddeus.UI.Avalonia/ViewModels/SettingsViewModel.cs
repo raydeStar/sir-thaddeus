@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using SirThaddeus.Config;
+using SirThaddeus.Contracts;
 using SirThaddeus.UI.Avalonia;
 
 namespace SirThaddeus.UI.Avalonia.ViewModels;
@@ -33,6 +34,28 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _voiceHostTtsReady;
     private string _voiceHostVersion = "";
     private string _voiceHostMessage = "";
+    private string _searchStatusText = "Unknown";
+    private string _searchStatusMessage = "Connect the runtime to inspect web search and MCP health.";
+    private string _searchLastCheckedText = "";
+    private string _searchSearxngStatusText = "Unknown";
+    private string _searchSearxngMessage = "";
+    private bool _searchSearxngReachable;
+    private bool _searchSearxngManaged;
+    private string _searchSearxngLastLaunchStatus = "";
+    private string _searchSearchApiStatusText = "Unknown";
+    private string _searchSearchApiMessage = "";
+    private string _searchMcpStatusText = "Unknown";
+    private string _searchMcpMessage = "";
+    private string _searchMcpServerPath = "";
+    private string _searchWebPermissionEffective = "";
+    private bool _searchLiveSearchAvailable;
+    private bool _searchMcpToolsAvailable;
+    private string _searchLastProviderStatusText = "None";
+    private string _searchLastProviderText = "";
+    private string _searchLastQueryText = "";
+    private string _searchLastPathText = "";
+    private string _searchLastFailureText = "";
+    private string _searchLastProviderCheckedText = "";
     private string _piperVoiceDownloadStatus = "";
     private bool _isPiperVoiceDownloading;
     private AudioDeviceOption? _selectedInputDevice;
@@ -46,6 +69,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         LoadAudioDevices();
         RefreshVoiceCatalogs();
         InitializeVoiceHostHealthState();
+        ResetSearchHealthState("Unknown", "Connect the runtime to inspect web search and MCP health.");
     }
 
     public string LlmBaseUrl
@@ -472,6 +496,458 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    public string[] WebSearchModeOptions => ["auto", "searxng", "search_api", "google_news", "ddg_html", "manual"];
+
+    public bool WebSearchEnabled
+    {
+        get => !string.Equals(WebSearchMode, "manual", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value == WebSearchEnabled)
+            {
+                return;
+            }
+
+            WebSearchMode = value ? "auto" : "manual";
+        }
+    }
+
+    public string WebSearchMode
+    {
+        get => NormalizeWebSearchMode(_appSettings.WebSearch.Mode);
+        set
+        {
+            var normalized = NormalizeWebSearchMode(value);
+            if (!string.Equals(_appSettings.WebSearch.Mode, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { Mode = normalized }
+                };
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(WebSearchEnabled));
+                MarkDirty();
+            }
+        }
+    }
+
+    public string SearxngBaseUrl
+    {
+        get => _appSettings.WebSearch.SearxngBaseUrl;
+        set
+        {
+            if (_appSettings.WebSearch.SearxngBaseUrl != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { SearxngBaseUrl = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public bool SearxngAutoStart
+    {
+        get => _appSettings.WebSearch.SearxngAutoStart;
+        set
+        {
+            if (_appSettings.WebSearch.SearxngAutoStart != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { SearxngAutoStart = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public string SearchApiKey
+    {
+        get => _appSettings.WebSearch.SearchApiKey;
+        set
+        {
+            if (_appSettings.WebSearch.SearchApiKey != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { SearchApiKey = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public string SearchApiBaseUrl
+    {
+        get => _appSettings.WebSearch.SearchApiBaseUrl;
+        set
+        {
+            if (_appSettings.WebSearch.SearchApiBaseUrl != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { SearchApiBaseUrl = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public string SearchApiEngine
+    {
+        get => _appSettings.WebSearch.SearchApiEngine;
+        set
+        {
+            if (_appSettings.WebSearch.SearchApiEngine != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { SearchApiEngine = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public int WebSearchTimeoutMs
+    {
+        get => _appSettings.WebSearch.TimeoutMs;
+        set
+        {
+            if (_appSettings.WebSearch.TimeoutMs != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { TimeoutMs = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public int WebSearchMaxResults
+    {
+        get => _appSettings.WebSearch.MaxResults;
+        set
+        {
+            if (_appSettings.WebSearch.MaxResults != value)
+            {
+                _appSettings = _appSettings with
+                {
+                    WebSearch = _appSettings.WebSearch with { MaxResults = value }
+                };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public string SearchStatusText
+    {
+        get => _searchStatusText;
+        private set
+        {
+            if (!string.Equals(_searchStatusText, value, StringComparison.Ordinal))
+            {
+                _searchStatusText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchStatusMessage
+    {
+        get => _searchStatusMessage;
+        private set
+        {
+            if (!string.Equals(_searchStatusMessage, value, StringComparison.Ordinal))
+            {
+                _searchStatusMessage = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastCheckedText
+    {
+        get => _searchLastCheckedText;
+        private set
+        {
+            if (!string.Equals(_searchLastCheckedText, value, StringComparison.Ordinal))
+            {
+                _searchLastCheckedText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool SearchLiveSearchAvailable
+    {
+        get => _searchLiveSearchAvailable;
+        private set
+        {
+            if (_searchLiveSearchAvailable != value)
+            {
+                _searchLiveSearchAvailable = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SearchLiveSearchAvailableText));
+            }
+        }
+    }
+
+    public string SearchLiveSearchAvailableText => SearchLiveSearchAvailable ? "Yes" : "No";
+
+    public string SearchSearxngStatusText
+    {
+        get => _searchSearxngStatusText;
+        private set
+        {
+            if (!string.Equals(_searchSearxngStatusText, value, StringComparison.Ordinal))
+            {
+                _searchSearxngStatusText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchSearxngMessage
+    {
+        get => _searchSearxngMessage;
+        private set
+        {
+            if (!string.Equals(_searchSearxngMessage, value, StringComparison.Ordinal))
+            {
+                _searchSearxngMessage = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool SearchSearxngReachable
+    {
+        get => _searchSearxngReachable;
+        private set
+        {
+            if (_searchSearxngReachable != value)
+            {
+                _searchSearxngReachable = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SearchSearxngReachableText));
+            }
+        }
+    }
+
+    public string SearchSearxngReachableText => SearchSearxngReachable ? "Yes" : "No";
+
+    public bool SearchSearxngManaged
+    {
+        get => _searchSearxngManaged;
+        private set
+        {
+            if (_searchSearxngManaged != value)
+            {
+                _searchSearxngManaged = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SearchSearxngManagedText));
+            }
+        }
+    }
+
+    public string SearchSearxngManagedText => SearchSearxngManaged ? "Yes" : "No";
+
+    public string SearchSearxngLastLaunchStatus
+    {
+        get => _searchSearxngLastLaunchStatus;
+        private set
+        {
+            if (!string.Equals(_searchSearxngLastLaunchStatus, value, StringComparison.Ordinal))
+            {
+                _searchSearxngLastLaunchStatus = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchSearchApiStatusText
+    {
+        get => _searchSearchApiStatusText;
+        private set
+        {
+            if (!string.Equals(_searchSearchApiStatusText, value, StringComparison.Ordinal))
+            {
+                _searchSearchApiStatusText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchSearchApiMessage
+    {
+        get => _searchSearchApiMessage;
+        private set
+        {
+            if (!string.Equals(_searchSearchApiMessage, value, StringComparison.Ordinal))
+            {
+                _searchSearchApiMessage = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchMcpStatusText
+    {
+        get => _searchMcpStatusText;
+        private set
+        {
+            if (!string.Equals(_searchMcpStatusText, value, StringComparison.Ordinal))
+            {
+                _searchMcpStatusText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchMcpMessage
+    {
+        get => _searchMcpMessage;
+        private set
+        {
+            if (!string.Equals(_searchMcpMessage, value, StringComparison.Ordinal))
+            {
+                _searchMcpMessage = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchMcpServerPath
+    {
+        get => _searchMcpServerPath;
+        private set
+        {
+            if (!string.Equals(_searchMcpServerPath, value, StringComparison.Ordinal))
+            {
+                _searchMcpServerPath = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool SearchMcpToolsAvailable
+    {
+        get => _searchMcpToolsAvailable;
+        private set
+        {
+            if (_searchMcpToolsAvailable != value)
+            {
+                _searchMcpToolsAvailable = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SearchMcpToolsAvailableText));
+            }
+        }
+    }
+
+    public string SearchMcpToolsAvailableText => SearchMcpToolsAvailable ? "Yes" : "No";
+
+    public string SearchWebPermissionEffective
+    {
+        get => _searchWebPermissionEffective;
+        private set
+        {
+            if (!string.Equals(_searchWebPermissionEffective, value, StringComparison.Ordinal))
+            {
+                _searchWebPermissionEffective = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastProviderStatusText
+    {
+        get => _searchLastProviderStatusText;
+        private set
+        {
+            if (!string.Equals(_searchLastProviderStatusText, value, StringComparison.Ordinal))
+            {
+                _searchLastProviderStatusText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastProviderText
+    {
+        get => _searchLastProviderText;
+        private set
+        {
+            if (!string.Equals(_searchLastProviderText, value, StringComparison.Ordinal))
+            {
+                _searchLastProviderText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastQueryText
+    {
+        get => _searchLastQueryText;
+        private set
+        {
+            if (!string.Equals(_searchLastQueryText, value, StringComparison.Ordinal))
+            {
+                _searchLastQueryText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastPathText
+    {
+        get => _searchLastPathText;
+        private set
+        {
+            if (!string.Equals(_searchLastPathText, value, StringComparison.Ordinal))
+            {
+                _searchLastPathText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastFailureText
+    {
+        get => _searchLastFailureText;
+        private set
+        {
+            if (!string.Equals(_searchLastFailureText, value, StringComparison.Ordinal))
+            {
+                _searchLastFailureText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string SearchLastProviderCheckedText
+    {
+        get => _searchLastProviderCheckedText;
+        private set
+        {
+            if (!string.Equals(_searchLastProviderCheckedText, value, StringComparison.Ordinal))
+            {
+                _searchLastProviderCheckedText = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     public ObservableCollection<AudioDeviceOption> AvailableInputDevices { get; } = [];
     public ObservableCollection<AudioDeviceOption> AvailableOutputDevices { get; } = [];
 
@@ -517,6 +993,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             }
         }
     }
+
+    // -- MCP Permission ComboBox option sources --
+    public static string[] PermissionOptions { get; } = ["ask", "always", "off"];
+    public static string[] DeveloperOverrideOptions { get; } = ["none", "ask", "always", "off"];
+
     public string McpDeveloperOverride
     {
         get => _appSettings.Mcp.Permissions.DeveloperOverride;
@@ -966,8 +1447,80 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                     ttsReady: false,
                     status: "Unreachable",
                     version: "",
-                    message: ex.Message));
+                message: ex.Message));
         }
+    }
+
+    public void ResetSearchHealthState(string status, string message)
+    {
+        ApplySearchHealthState(
+            status: status,
+            message: message,
+            liveSearchAvailable: false,
+            checkedAtText: "",
+            searxngStatus: "Unknown",
+            searxngMessage: "",
+            searxngReachable: false,
+            searxngManaged: false,
+            searxngLastLaunchStatus: "",
+            searchApiStatus: "Unknown",
+            searchApiMessage: "",
+            mcpStatus: "Unknown",
+            mcpMessage: "",
+            mcpServerPath: "",
+            mcpToolsAvailable: false,
+            webPermission: "",
+            lastProviderStatus: "None",
+            lastProvider: "",
+            lastQuery: "",
+            lastPath: "",
+            lastFailure: "",
+            lastProviderCheckedText: "");
+    }
+
+    public void ApplySearchStatus(SearchStatusResponse snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var checkedAt = snapshot.CheckedAtUtc == default
+            ? ""
+            : snapshot.CheckedAtUtc.ToLocalTime().ToString("g");
+        var requestedQuery = snapshot.LastProviderTrace.RequestedQuery;
+        var effectiveQuery = snapshot.LastProviderTrace.EffectiveQuery;
+        var lastQuery = !string.IsNullOrWhiteSpace(requestedQuery) &&
+                        !string.IsNullOrWhiteSpace(effectiveQuery) &&
+                        !string.Equals(requestedQuery, effectiveQuery, StringComparison.Ordinal)
+            ? requestedQuery + " -> " + effectiveQuery
+            : !string.IsNullOrWhiteSpace(requestedQuery)
+                ? requestedQuery
+                : effectiveQuery;
+        var lastProviderCheckedAt = snapshot.LastProviderTrace.RecordedAtUtc == default
+            ? ""
+            : snapshot.LastProviderTrace.RecordedAtUtc.ToLocalTime().ToString("g");
+
+        ApplySearchHealthState(
+            status: snapshot.EffectiveStatus,
+            message: snapshot.EffectiveMessage,
+            liveSearchAvailable: snapshot.LiveSearchAvailable,
+            checkedAtText: checkedAt,
+            searxngStatus: snapshot.Searxng.Status,
+            searxngMessage: snapshot.Searxng.Message,
+            searxngReachable: snapshot.Searxng.Reachable,
+            searxngManaged: snapshot.Searxng.ManagedByRuntime,
+            searxngLastLaunchStatus: snapshot.Searxng.LastLaunchStatus,
+            searchApiStatus: snapshot.SearchApi.Status,
+            searchApiMessage: snapshot.SearchApi.Message,
+            mcpStatus: snapshot.Mcp.Status,
+            mcpMessage: snapshot.Mcp.Message,
+            mcpServerPath: snapshot.Mcp.ServerPath,
+            mcpToolsAvailable: snapshot.Mcp.ToolsAvailable,
+            webPermission: snapshot.WebPermission,
+            lastProviderStatus: snapshot.LastProviderTrace.Status,
+            lastProvider: snapshot.LastProviderTrace.Provider,
+            lastQuery: lastQuery,
+            lastPath: snapshot.LastProviderTrace.PathSummary,
+            lastFailure: snapshot.LastProviderTrace.Failure,
+            lastProviderCheckedText: lastProviderCheckedAt);
     }
 
     public AppSettings BuildPersistableSnapshot()
@@ -1016,6 +1569,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                     MemoryRead = NormalizePermission(McpMemoryRead, latest.Mcp.Permissions.MemoryRead),
                     MemoryWrite = NormalizePermission(McpMemoryWrite, latest.Mcp.Permissions.MemoryWrite)
                 }
+            },
+            WebSearch = latest.WebSearch with
+            {
+                Mode = NormalizeWebSearchMode(WebSearchMode),
+                SearxngBaseUrl = NormalizeBaseUrl(SearxngBaseUrl, latest.WebSearch.SearxngBaseUrl),
+                SearxngAutoStart = SearxngAutoStart,
+                SearchApiKey = NormalizeString(SearchApiKey),
+                SearchApiBaseUrl = NormalizeBaseUrl(SearchApiBaseUrl, latest.WebSearch.SearchApiBaseUrl),
+                SearchApiEngine = NormalizeStringOrFallback(SearchApiEngine, latest.WebSearch.SearchApiEngine),
+                TimeoutMs = Math.Clamp(WebSearchTimeoutMs, 1_000, 120_000),
+                MaxResults = Math.Clamp(WebSearchMaxResults, 1, 20)
             },
             ToolBudgets = new ToolBudgetSettings
             {
@@ -1395,6 +1959,54 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         VoiceHostMessage = message;
     }
 
+    private void ApplySearchHealthState(
+        string status,
+        string message,
+        bool liveSearchAvailable,
+        string checkedAtText,
+        string searxngStatus,
+        string searxngMessage,
+        bool searxngReachable,
+        bool searxngManaged,
+        string searxngLastLaunchStatus,
+        string searchApiStatus,
+        string searchApiMessage,
+        string mcpStatus,
+        string mcpMessage,
+        string mcpServerPath,
+        bool mcpToolsAvailable,
+        string webPermission,
+        string lastProviderStatus,
+        string lastProvider,
+        string lastQuery,
+        string lastPath,
+        string lastFailure,
+        string lastProviderCheckedText)
+    {
+        SearchStatusText = status;
+        SearchStatusMessage = message;
+        SearchLiveSearchAvailable = liveSearchAvailable;
+        SearchLastCheckedText = checkedAtText;
+        SearchSearxngStatusText = searxngStatus;
+        SearchSearxngMessage = searxngMessage;
+        SearchSearxngReachable = searxngReachable;
+        SearchSearxngManaged = searxngManaged;
+        SearchSearxngLastLaunchStatus = searxngLastLaunchStatus;
+        SearchSearchApiStatusText = searchApiStatus;
+        SearchSearchApiMessage = searchApiMessage;
+        SearchMcpStatusText = mcpStatus;
+        SearchMcpMessage = mcpMessage;
+        SearchMcpServerPath = mcpServerPath;
+        SearchMcpToolsAvailable = mcpToolsAvailable;
+        SearchWebPermissionEffective = webPermission;
+        SearchLastProviderStatusText = lastProviderStatus;
+        SearchLastProviderText = lastProvider;
+        SearchLastQueryText = lastQuery;
+        SearchLastPathText = lastPath;
+        SearchLastFailureText = lastFailure;
+        SearchLastProviderCheckedText = lastProviderCheckedText;
+    }
+
     private void ApplySnapshot(AppSettings settings, string statusText)
     {
         var priorSettings = _appSettings;
@@ -1537,6 +2149,22 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         };
     }
 
+    private static string NormalizeWebSearchMode(string? value)
+    {
+        var normalized = NormalizeToken(value, "auto");
+        return normalized switch
+        {
+            "auto" => "auto",
+            "searxng" => "searxng",
+            "search_api" => "search_api",
+            "api" => "search_api",
+            "google_news" => "google_news",
+            "ddg_html" => "ddg_html",
+            "manual" => "manual",
+            _ => "auto"
+        };
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -1553,9 +2181,3 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         string? ErrorCode,
         string? Message);
 }
-
-
-
-
-
-

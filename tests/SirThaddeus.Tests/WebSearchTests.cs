@@ -352,6 +352,34 @@ public class WebSearchRouterTests
     }
 
     [Fact]
+    public async Task AutoMode_RecordsProviderProbeAndFallbackDiagnostics()
+    {
+        var searxng = new StubProvider("SearxNG", available: false);
+        var searchApi = new StubProvider(
+            "SearchApi",
+            available: true,
+            results: OneResult("SearchApi", "https://api.example/article"));
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
+        var googleNews = new StubProvider("GoogleNews", available: true, results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("latest local headlines", new WebSearchOptions());
+
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "SearxNG" &&
+            d.Phase == "probe" &&
+            d.Outcome == "unavailable");
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "SearchApi" &&
+            d.Phase == "probe" &&
+            d.Outcome == "available");
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "SearchApi" &&
+            d.Phase == "search" &&
+            d.Outcome == "results");
+    }
+
+    [Fact]
     public async Task AutoMode_DoesNotUseDdg_WhenSearxngAndSearchApiAreUnavailable()
     {
         var searxng = new StubProvider("SearxNG", available: false);

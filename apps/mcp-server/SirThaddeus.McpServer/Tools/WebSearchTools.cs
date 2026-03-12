@@ -119,6 +119,7 @@ public static class WebSearchTools
         // ── Phase 1: Search ──────────────────────────────────────────
         var queryBundle = QueryBundleBuilder.Build(query);
         var aggregatedResults = new List<SearchResult>();
+        var aggregatedErrors = new List<string>();
         var providerLog = new List<object>();
         var providersUsed = new List<string>();
 
@@ -135,12 +136,21 @@ public static class WebSearchTools
                 cancellationToken);
 
             aggregatedResults.AddRange(bundleResult.Results);
+            aggregatedErrors.AddRange(bundleResult.Errors);
             providerLog.Add(new
             {
                 query = bundledQuery,
                 provider = bundleResult.Provider,
                 resultCount = bundleResult.Results.Count,
-                errors = bundleResult.Errors
+                errors = bundleResult.Errors,
+                diagnostics = bundleResult.Diagnostics.Select(d => new
+                {
+                    provider = d.Provider,
+                    phase = d.Phase,
+                    outcome = d.Outcome,
+                    message = d.Message,
+                    resultCount = d.ResultCount
+                }).ToArray()
             });
             providersUsed.Add(bundleResult.Provider);
         }
@@ -149,7 +159,17 @@ public static class WebSearchTools
         {
             Provider = string.Join(", ", providersUsed.Distinct(StringComparer.OrdinalIgnoreCase)),
             Results = aggregatedResults,
-            Errors = []
+            Errors = aggregatedErrors
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+        };
+        var searchDiagnostics = new
+        {
+            query,
+            recency,
+            provider = searchResult.Provider,
+            bundles = providerLog.ToArray()
         };
 
         if (searchResult.Results.Count == 0)
@@ -160,6 +180,9 @@ public static class WebSearchTools
             foreach (var err in searchResult.Errors)
                 sb.AppendLine($"Warning: {err}");
             sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
+            sb.AppendLine();
+            sb.AppendLine(SourcesDelimiter);
+            sb.AppendLine(SerializeSourcesPayload(Array.Empty<object>(), searchDiagnostics));
             return sb.ToString();
         }
 
@@ -202,7 +225,8 @@ public static class WebSearchTools
             searchResult.Provider,
             vettedResults,
             extractions,
-            urlsToRead);
+            urlsToRead,
+            searchDiagnostics);
     }
 
     /// <summary>
@@ -408,7 +432,8 @@ public static class WebSearchTools
         string provider,
         IReadOnlyList<SearchResult> results,
         List<ContentExtractor.ExtractionResult> extractions,
-        List<string> originalUrls)
+        List<string> originalUrls,
+        object searchDiagnostics)
     {
         var sb = new StringBuilder();
         var strictNewsMode = LooksLikeNewsQuery(query);
@@ -527,10 +552,7 @@ public static class WebSearchTools
             });
         }
 
-        sb.AppendLine(JsonSerializer.Serialize(sources, new JsonSerializerOptions
-        {
-            WriteIndented = false
-        }));
+        sb.AppendLine(SerializeSourcesPayload(sources, searchDiagnostics));
 
         return sb.ToString();
     }
@@ -583,8 +605,28 @@ public static class WebSearchTools
             })
             .ToArray();
 
-        sb.AppendLine(JsonSerializer.Serialize(sources));
+        sb.AppendLine(SerializeSourcesPayload(sources, new
+        {
+            query,
+            recency = "any",
+            provider = "existence_gate",
+            bundles = Array.Empty<object>()
+        }));
         return sb.ToString();
+    }
+
+    private static string SerializeSourcesPayload(
+        IReadOnlyCollection<object> sources,
+        object searchDiagnostics)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            sources,
+            searchDiagnostics
+        }, new JsonSerializerOptions
+        {
+            WriteIndented = false
+        });
     }
 
     /// <summary>

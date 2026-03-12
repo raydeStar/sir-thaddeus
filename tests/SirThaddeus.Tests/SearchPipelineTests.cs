@@ -1597,9 +1597,9 @@ public class SearchPipelineGoldenTests
             summaryText: "Here are local headlines.");
 
         var searchResult =
-            "1. Local update\n" +
+            "1. Rexburg, ID budget update\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://example.com/local\",\"title\":\"Local update\"}]";
+            "[{\"url\":\"https://example.com/local\",\"title\":\"Rexburg, ID budget update\",\"excerpt\":\"City officials in Rexburg, ID approved the latest budget after public comment.\"}]";
 
         var mcp = new FakeMcpClient((tool, args) =>
         {
@@ -1674,6 +1674,274 @@ public class SearchPipelineGoldenTests
         Assert.Contains("I couldn't find usable live local news results", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("I cannot access real-time data", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("built-in reasoning", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_SummaryCapabilityClaim_IsRewrittenFromLiveSources()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText:
+                "I cant access your local news feed or browse the web for real-time events. " +
+                "I only have access to the documents and snippets provided in our conversation history, " +
+                "and I can use my internal knowledge base instead.");
+
+        var payload =
+            "1. Olympia school board approves budget after heated meeting\n" +
+            "2. Port of Olympia cleanup project enters next phase\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/olympia-budget\",\"title\":\"Olympia school board approves budget after heated meeting\",\"domain\":\"example.com\",\"excerpt\":\"Officials approved the next district budget after a lengthy public comment period.\"}," +
+            "{\"url\":\"https://example.com/port-cleanup\",\"title\":\"Port of Olympia cleanup project enters next phase\",\"domain\":\"example.com\",\"excerpt\":\"Crews are moving into the next stage of the waterfront cleanup effort this week.\"}]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("browse the web", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("internal knowledge base", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Olympia school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("SEARCH_RESPONSE_SANITIZED"), evt =>
+            evt.Result == "unsupported_capability_claim");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_FiltersOutNonLocalHeadlines_WhenLocalMatchesExist()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"","type":"none","hint":""}""", FinishReason = "stop" };
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local news in Olympia, WA","recency":"day"}""", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = messages.Last().Content,
+                FinishReason = "stop"
+            };
+        });
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "2. Iran says Strait of Hormuz will remain closed\n" +
+            "3. Olympia school board approves budget after heated meeting\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/detroit\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"example.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}," +
+            "{\"url\":\"https://example.com/hormuz\",\"title\":\"Iran says Strait of Hormuz will remain closed\",\"domain\":\"example.com\",\"excerpt\":\"CNN reports the new Iranian leader said the strait would stay closed.\"}," +
+            "{\"url\":\"https://example.com/olympia-budget\",\"title\":\"Olympia school board approves budget after heated meeting\",\"domain\":\"example.com\",\"excerpt\":\"Officials approved the next district budget after a lengthy public comment period in Olympia.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Olympia school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Hormuz", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "city");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_NonLocalHeadlinesOnly_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "2. Iran says Strait of Hormuz will remain closed\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/detroit\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"example.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}," +
+            "{\"url\":\"https://example.com/hormuz\",\"title\":\"Iran says Strait of Hormuz will remain closed\",\"domain\":\"example.com\",\"excerpt\":\"CNN reports the new Iranian leader said the strait would stay closed.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results for Olympia, WA", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "none");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_RemoteHeadlineFromLocalOutlet_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.theolympian.com/news/nation-world/article123.html\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"theolympian.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results for Olympia, WA", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "none");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_RetryBudgetExceeded_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var audit = new TestAuditLogger();
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (args.Contains("rexburg, id news today", StringComparison.OrdinalIgnoreCase))
+                return "No results found for Rexburg, ID news today";
+
+            if (args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase))
+                return """{"error":"tool_budget_exceeded","budget":"max_web_pulls_per_turn","limit":3,"tool":"web_search"}""";
+
+            return "";
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Web search failed before returning results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_QUERY_RETRY_ABORTED"), evt =>
+            evt.Result == "tool_budget_exceeded");
+    }
+
+    [Fact]
+    public async Task News_WebSearchProviderTrace_RecordsSearxngFallbackDetails()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "Here are local headlines.");
+
+        var payload =
+            "1. Local update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            """{"sources":[{"url":"https://example.com/local","title":"Local update","domain":"example.com"}],"searchDiagnostics":{"query":"Rexburg, ID news today","recency":"day","provider":"GoogleNews","bundles":[{"query":"Rexburg, ID news today","provider":"GoogleNews","resultCount":1,"errors":[],"diagnostics":[{"provider":"SearxNG","phase":"probe","outcome":"unavailable","message":"probe returned unavailable","resultCount":0},{"provider":"SearchApi","phase":"probe","outcome":"unavailable","message":"probe returned unavailable","resultCount":0},{"provider":"GoogleNews","phase":"fallback","outcome":"results","message":"returned 1 result(s)","resultCount":1}]}]}}""";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        var trace = Assert.Single(audit.GetByAction("WEB_SEARCH_PROVIDER_TRACE"));
+        var pathSummary = Assert.IsType<string>(trace.Details!["path_summary"]);
+        Assert.Contains("SearxNG:probe=unavailable", pathSummary, StringComparison.Ordinal);
+        Assert.Equal("GoogleNews", Assert.IsType<string>(trace.Details["provider"]));
     }
 
     [Theory]

@@ -60,6 +60,12 @@ internal sealed class RuntimeApiClient
         return entries ?? [];
     }
 
+    public async Task<SearchStatusResponse> GetSearchStatusAsync(CancellationToken cancellationToken)
+    {
+        return await _httpClient.GetFromJsonAsync<SearchStatusResponse>("/api/search/status", JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Runtime did not return search status.");
+    }
+
     public async Task<MemoryBrowseResponse> GetMemoryAsync(string? filter, int take, CancellationToken cancellationToken)
     {
         var clampedTake = Math.Clamp(take, 1, 200);

@@ -38,6 +38,13 @@ public enum LookupModeHint
 
 public sealed class SearchOrchestrator
 {
+    private enum SummaryFallbackKind
+    {
+        Generic = 0,
+        News = 1,
+        FactFind = 2
+    }
+
     private readonly ILlmClient       _llm;
     private readonly IMcpToolClient   _mcp;
     private readonly IAuditLogger     _audit;
@@ -76,6 +83,78 @@ public sealed class SearchOrchestrator
     private const int MaxTokensWebSummaryRetry = 2048;
     private const int MinRichContentLength = 1500;
     private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
+    private static readonly string[] UnsupportedCapabilityClaimMarkers =
+    [
+        "cant access",
+        "can't access",
+        "cannot access",
+        "cant browse",
+        "browse the web",
+        "browse live news feeds",
+        "web access tools",
+        "direct web access",
+        "real-time data",
+        "real-time events",
+        "knowledge is static",
+        "internal knowledge base",
+        "conversation history",
+        "documents and snippets",
+        "shared memory context"
+    ];
+    private static readonly Dictionary<string, string> StateCodeToName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["AL"] = "Alabama",
+        ["AK"] = "Alaska",
+        ["AZ"] = "Arizona",
+        ["AR"] = "Arkansas",
+        ["CA"] = "California",
+        ["CO"] = "Colorado",
+        ["CT"] = "Connecticut",
+        ["DE"] = "Delaware",
+        ["FL"] = "Florida",
+        ["GA"] = "Georgia",
+        ["HI"] = "Hawaii",
+        ["ID"] = "Idaho",
+        ["IL"] = "Illinois",
+        ["IN"] = "Indiana",
+        ["IA"] = "Iowa",
+        ["KS"] = "Kansas",
+        ["KY"] = "Kentucky",
+        ["LA"] = "Louisiana",
+        ["ME"] = "Maine",
+        ["MD"] = "Maryland",
+        ["MA"] = "Massachusetts",
+        ["MI"] = "Michigan",
+        ["MN"] = "Minnesota",
+        ["MS"] = "Mississippi",
+        ["MO"] = "Missouri",
+        ["MT"] = "Montana",
+        ["NE"] = "Nebraska",
+        ["NV"] = "Nevada",
+        ["NH"] = "New Hampshire",
+        ["NJ"] = "New Jersey",
+        ["NM"] = "New Mexico",
+        ["NY"] = "New York",
+        ["NC"] = "North Carolina",
+        ["ND"] = "North Dakota",
+        ["OH"] = "Ohio",
+        ["OK"] = "Oklahoma",
+        ["OR"] = "Oregon",
+        ["PA"] = "Pennsylvania",
+        ["RI"] = "Rhode Island",
+        ["SC"] = "South Carolina",
+        ["SD"] = "South Dakota",
+        ["TN"] = "Tennessee",
+        ["TX"] = "Texas",
+        ["UT"] = "Utah",
+        ["VT"] = "Vermont",
+        ["VA"] = "Virginia",
+        ["WA"] = "Washington",
+        ["WV"] = "West Virginia",
+        ["WI"] = "Wisconsin",
+        ["WY"] = "Wyoming",
+        ["DC"] = "District of Columbia"
+    };
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
@@ -291,6 +370,17 @@ public sealed class SearchOrchestrator
 
         // ── 4. Parse results into SourceItems ────────────────────────
         var sources = ParseSourcesFromToolResult(toolResult);
+        /* if (isLocalNews)
+        {
+            summaryInput = BuildSummaryInputFromSources(
+                "[Web search results â€” use these facts to answer the user's question]",
+                sources);
+        }
+            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
+            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
+        */
+        var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
+                          LocalNewsSignalRegex.IsMatch(userMessage);
         var isMarketQuoteRequest =
             MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
             MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
@@ -308,6 +398,13 @@ public sealed class SearchOrchestrator
         }
 
         // ── 5. Story clustering ──────────────────────────────────────
+        if (isLocalNews)
+        {
+            sources = FilterSourcesForLocalNews(sources);
+            if (sources.Count == 0)
+                return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
+        }
+
         var clusters = StoryClustering.Cluster(sources);
         Session.LastClusters = clusters;
 
@@ -324,8 +421,16 @@ public sealed class SearchOrchestrator
         var summaryInput = "[Web search results — use these facts to answer the user's question]\n" +
                            StripSourcesJson(toolResult);
 
+        /*
         var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
                           LocalNewsSignalRegex.IsMatch(userMessage);
+        */
+        if (isLocalNews)
+        {
+            summaryInput = BuildSummaryInputFromSources(
+                "[Web search results â€” use these facts to answer the user's question]",
+                sources);
+        }
 
         var instruction = isMarketQuoteRequest
             ? memoryPackText + FinanceQuoteSummaryInstruction
@@ -335,7 +440,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             summaryInput, instruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.News, sources, ct);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -588,7 +693,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             sb.ToString(), instruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.FactFind, sources, ct);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -730,7 +835,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             summaryInput, memoryPackText + DeepDiveInstruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.Generic, null, ct);
     }
 
     // ── Branch: MoreSources ──────────────────────────────────────────
@@ -788,10 +893,11 @@ public sealed class SearchOrchestrator
         }
 
         // Append new results to session (don't replace)
+        var relatedSources = new List<SourceItem>();
         if (!string.IsNullOrWhiteSpace(toolResult))
         {
-            var newSources = ParseSourcesFromToolResult(toolResult);
-            Session.AppendResults(newSources, DateTimeOffset.UtcNow);
+            relatedSources = ParseSourcesFromToolResult(toolResult);
+            Session.AppendResults(relatedSources, DateTimeOffset.UtcNow);
         }
 
         // Build summary input
@@ -814,7 +920,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             sb.ToString(), memoryPackText + instruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.News, relatedSources, ct);
     }
 
     /// <summary>
@@ -956,6 +1062,7 @@ public sealed class SearchOrchestrator
         }
 
         var lastResult = toolResult;
+        var lastNoResultsPayload = toolResult;
         foreach (var candidate in BuildLocalNewsRetryCandidates(query))
         {
             _audit.Append(new AuditEvent
@@ -980,6 +1087,27 @@ public sealed class SearchOrchestrator
 
             if (HasUsableSearchResults(lastResult))
                 return lastResult;
+
+            if (LooksLikeNoResultsPayload(lastResult))
+                lastNoResultsPayload = lastResult;
+
+            if (WebToolFailureMapper.IsBudgetExceeded(lastResult, out var budgetName, out var limit))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "LOCAL_NEWS_QUERY_RETRY_ABORTED",
+                    Result = "tool_budget_exceeded",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["budget"] = budgetName,
+                        ["limit"] = limit,
+                        ["query"] = candidate.Query,
+                        ["recency"] = candidate.Recency
+                    }
+                });
+                return lastNoResultsPayload;
+            }
         }
 
         return lastResult;
@@ -1094,6 +1222,14 @@ public sealed class SearchOrchestrator
             Success   = toolOk
         });
 
+        WriteWebSearchTrace(
+            query,
+            effectiveQuery,
+            recency,
+            toolName,
+            toolOk,
+            toolResult);
+
         return toolResult;
     }
 
@@ -1133,6 +1269,220 @@ public sealed class SearchOrchestrator
                 Success = false
             });
             return null;
+        }
+    }
+
+    private void WriteWebSearchTrace(
+        string requestedQuery,
+        string effectiveQuery,
+        string recency,
+        string toolName,
+        bool toolOk,
+        string toolResult)
+    {
+        var sources = ParseSourcesFromToolResult(toolResult);
+        /*
+        /*
+        /*
+                "[Web search results â€” use these facts to answer the user's question]",
+                sources);
+        }
+        if (isLocalNews)
+        {
+            summaryInput = BuildSummaryInputFromSources(
+                "[Web search results â€” use these facts to answer the user's question]",
+                sources);
+        }
+        */
+        var diagnostics = TryParseSearchDiagnostics(toolResult);
+        var failureDetected = WebToolFailureMapper.TryParseStructuredError(
+            toolResult,
+            out var failureCode,
+            out var failureMessage);
+
+        var details = new Dictionary<string, object>
+        {
+            ["requested_query"] = requestedQuery,
+            ["effective_query"] = effectiveQuery,
+            ["recency"] = recency,
+            ["tool_name"] = toolName,
+            ["tool_ok"] = toolOk,
+            ["source_count"] = sources.Count,
+            ["no_results"] = LooksLikeNoResultsPayload(toolResult)
+        };
+
+        if (!string.Equals(requestedQuery, effectiveQuery, StringComparison.Ordinal))
+            details["query_rewritten"] = true;
+
+        if (failureDetected)
+        {
+            details["failure_code"] = failureCode;
+            details["failure_message"] = failureMessage;
+        }
+
+        if (diagnostics is not null)
+        {
+            details["provider"] = diagnostics.Provider;
+            details["path_summary"] = BuildSearchPathSummary(diagnostics);
+            details["bundles"] = diagnostics.Bundles.Select(bundle => new
+            {
+                query = bundle.Query,
+                provider = bundle.Provider,
+                resultCount = bundle.ResultCount,
+                errors = bundle.Errors,
+                steps = bundle.Steps.Select(step => new
+                {
+                    provider = step.Provider,
+                    phase = step.Phase,
+                    outcome = step.Outcome,
+                    message = step.Message,
+                    resultCount = step.ResultCount
+                }).ToArray()
+            }).ToArray();
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "WEB_SEARCH_PROVIDER_TRACE",
+            Result = diagnostics?.Provider ??
+                     (failureDetected ? "failure" :
+                      LooksLikeNoResultsPayload(toolResult) ? "no_results" :
+                      toolOk ? "ok" : "tool_error"),
+            Details = details
+        });
+    }
+
+    private static string BuildSearchPathSummary(SearchToolDiagnostics diagnostics)
+    {
+        var parts = new List<string>();
+        foreach (var bundle in diagnostics.Bundles)
+        {
+            foreach (var step in bundle.Steps)
+            {
+                var segment = $"{step.Provider}:{step.Phase}={step.Outcome}";
+                if (!string.IsNullOrWhiteSpace(step.Message))
+                    segment += $" ({step.Message})";
+                parts.Add(segment);
+            }
+        }
+
+        return parts.Count == 0 ? diagnostics.Provider : string.Join("; ", parts);
+    }
+
+    private static SearchToolDiagnostics? TryParseSearchDiagnostics(string toolResult)
+    {
+        if (!TryParseSourcesPayload(toolResult, out var root))
+            return null;
+
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("searchDiagnostics", out var diagnosticsElement) ||
+            diagnosticsElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var provider = diagnosticsElement.TryGetProperty("provider", out var providerEl)
+            ? providerEl.GetString() ?? ""
+            : "";
+        var bundles = new List<SearchToolBundleDiagnostics>();
+
+        if (diagnosticsElement.TryGetProperty("bundles", out var bundlesEl) &&
+            bundlesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var bundleEl in bundlesEl.EnumerateArray())
+            {
+                if (bundleEl.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var query = bundleEl.TryGetProperty("query", out var queryEl)
+                    ? queryEl.GetString() ?? ""
+                    : "";
+                var bundleProvider = bundleEl.TryGetProperty("provider", out var bundleProviderEl)
+                    ? bundleProviderEl.GetString() ?? ""
+                    : "";
+                var resultCount = bundleEl.TryGetProperty("resultCount", out var resultCountEl) &&
+                                  resultCountEl.TryGetInt32(out var parsedResultCount)
+                    ? parsedResultCount
+                    : 0;
+                var errors = new List<string>();
+                if (bundleEl.TryGetProperty("errors", out var errorsEl) &&
+                    errorsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var errorEl in errorsEl.EnumerateArray())
+                    {
+                        if (errorEl.ValueKind == JsonValueKind.String &&
+                            !string.IsNullOrWhiteSpace(errorEl.GetString()))
+                        {
+                            errors.Add(errorEl.GetString()!);
+                        }
+                    }
+                }
+
+                var steps = new List<SearchToolStepDiagnostics>();
+                if (bundleEl.TryGetProperty("diagnostics", out var stepsEl) &&
+                    stepsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var stepEl in stepsEl.EnumerateArray())
+                    {
+                        if (stepEl.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        steps.Add(new SearchToolStepDiagnostics(
+                            Provider: stepEl.TryGetProperty("provider", out var stepProviderEl)
+                                ? stepProviderEl.GetString() ?? ""
+                                : "",
+                            Phase: stepEl.TryGetProperty("phase", out var phaseEl)
+                                ? phaseEl.GetString() ?? ""
+                                : "",
+                            Outcome: stepEl.TryGetProperty("outcome", out var outcomeEl)
+                                ? outcomeEl.GetString() ?? ""
+                                : "",
+                            Message: stepEl.TryGetProperty("message", out var messageEl)
+                                ? messageEl.GetString() ?? ""
+                                : "",
+                            ResultCount: stepEl.TryGetProperty("resultCount", out var stepResultCountEl) &&
+                                         stepResultCountEl.TryGetInt32(out var parsedStepResultCount)
+                                ? parsedStepResultCount
+                                : 0));
+                    }
+                }
+
+                bundles.Add(new SearchToolBundleDiagnostics(
+                    Query: query,
+                    Provider: bundleProvider,
+                    ResultCount: resultCount,
+                    Errors: errors,
+                    Steps: steps));
+            }
+        }
+
+        return new SearchToolDiagnostics(provider, bundles);
+    }
+
+    private static bool TryParseSourcesPayload(string toolResult, out JsonElement root)
+    {
+        root = default;
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return false;
+
+        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        if (delimIdx < 0)
+            return false;
+
+        var jsonPart = toolResult[(delimIdx + SourcesJsonDelimiter.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(jsonPart))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonPart);
+            root = doc.RootElement.Clone();
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1476,6 +1826,8 @@ public sealed class SearchOrchestrator
         string instruction,
         IReadOnlyList<ChatMessage> history,
         List<ToolCallRecord> toolCallsMade,
+        SummaryFallbackKind fallbackKind,
+        IReadOnlyList<SourceItem>? sources,
         CancellationToken ct)
     {
         // Repeat the user's original request at the tail of the summary
@@ -1585,6 +1937,22 @@ public sealed class SearchOrchestrator
         // Strip template garbage
         text = StripTemplateTokens(text);
         text = SearchResponseFormatter.Normalize(text);
+        if (LooksLikeUnsupportedCapabilityClaim(text))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_RESPONSE_SANITIZED",
+                Result = "unsupported_capability_claim",
+                Details = new Dictionary<string, object>
+                {
+                    ["fallback_kind"] = fallbackKind.ToString(),
+                    ["source_count"] = sources?.Count ?? 0
+                }
+            });
+
+            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources);
+        }
         if (string.IsNullOrWhiteSpace(text))
             text = "I wasn't able to generate a clean answer — try rephrasing?";
 
@@ -1684,24 +2052,28 @@ public sealed class SearchOrchestrator
     internal static List<SourceItem> ParseSourcesFromToolResult(string toolResult)
     {
         var sources = new List<SourceItem>();
-        if (string.IsNullOrWhiteSpace(toolResult))
-            return sources;
-
-        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
-        if (delimIdx < 0)
-            return sources;
-
-        var jsonPart = toolResult[(delimIdx + SourcesJsonDelimiter.Length)..].Trim();
-        if (string.IsNullOrWhiteSpace(jsonPart))
+        if (!TryParseSourcesPayload(toolResult, out var root))
             return sources;
 
         try
         {
-            using var doc = JsonDocument.Parse(jsonPart);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            JsonElement itemsElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = root;
+            }
+            else if (root.ValueKind == JsonValueKind.Object &&
+                     root.TryGetProperty("sources", out var sourcesElement) &&
+                     sourcesElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = sourcesElement;
+            }
+            else
+            {
                 return sources;
+            }
 
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var item in itemsElement.EnumerateArray())
             {
                 var url   = item.TryGetProperty("url", out var u)   ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t)  ? t.GetString() : "";
@@ -1976,6 +2348,267 @@ public sealed class SearchOrchestrator
             : "I found some results but couldn't generate a clean summary.";
     }
 
+    private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources)
+    {
+        var location = BuildLocalNewsLocationTokens(UserLocationHint);
+        if (location is null)
+            return sources.ToList();
+
+        var cityMatches = sources
+            .Where(source => IsLocalNewsCityMatch(source, location))
+            .ToList();
+        if (cityMatches.Count > 0)
+        {
+            AppendLocalNewsFilterAudit("city", sources.Count, cityMatches.Count);
+            return cityMatches;
+        }
+
+        var stateMatches = sources
+            .Where(source => IsLocalNewsStateMatch(source, location))
+            .ToList();
+        if (stateMatches.Count > 0)
+        {
+            AppendLocalNewsFilterAudit("state", sources.Count, stateMatches.Count);
+            return stateMatches;
+        }
+
+        AppendLocalNewsFilterAudit("none", sources.Count, 0);
+        return [];
+    }
+
+    private void AppendLocalNewsFilterAudit(string scope, int originalCount, int keptCount)
+    {
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCAL_NEWS_LOCALITY_FILTER",
+            Result = scope,
+            Details = new Dictionary<string, object>
+            {
+                ["location_hint"] = UserLocationHint ?? "",
+                ["original_count"] = originalCount,
+                ["kept_count"] = keptCount
+            }
+        });
+    }
+
+    private static string BuildSummaryInputFromSources(string header, IReadOnlyList<SourceItem> sources)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(header);
+
+        var index = 1;
+        foreach (var source in sources.Take(8))
+        {
+            var title = string.IsNullOrWhiteSpace(source.Title) ? source.Url : source.Title.Trim();
+            sb.Append(index++).Append(". ").AppendLine(title);
+
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+                sb.AppendLine("   " + source.Snippet.Trim());
+
+            if (!string.IsNullOrWhiteSpace(source.Domain))
+                sb.AppendLine("   Source: " + source.Domain.Trim());
+
+            if (source.PublishedAt.HasValue)
+                sb.AppendLine("   Published: " + source.PublishedAt.Value.ToString("O"));
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static LocalNewsLocationTokens? BuildLocalNewsLocationTokens(string? locationHint)
+    {
+        if (string.IsNullOrWhiteSpace(locationHint))
+            return null;
+
+        var parts = locationHint
+            .Split(',', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var cityPhrase = NormalizeLocalNewsText(parts.Length > 0 ? parts[0] : "");
+        var cityTokens = cityPhrase
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(token => token.Length >= 4)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var cityStem = cityTokens
+            .OrderByDescending(token => token.Length)
+            .Select(token => token.Length >= 6 ? token[..5] : "")
+            .FirstOrDefault(token => !string.IsNullOrWhiteSpace(token)) ?? "";
+
+        var (stateCode, stateName) = parts.Length > 1
+            ? NormalizeStateTokens(parts[1])
+            : ("", "");
+
+        if (string.IsNullOrWhiteSpace(cityPhrase) &&
+            string.IsNullOrWhiteSpace(stateCode) &&
+            string.IsNullOrWhiteSpace(stateName))
+        {
+            return null;
+        }
+
+        return new LocalNewsLocationTokens(
+            CityPhrase: cityPhrase,
+            CityTokens: cityTokens,
+            CityStem: cityStem,
+            StateCode: NormalizeLocalNewsText(stateCode),
+            StateName: stateName);
+    }
+
+    private static (string StateCode, string StateName) NormalizeStateTokens(string rawState)
+    {
+        var normalized = NormalizeLocalNewsText(rawState);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return ("", "");
+
+        if (normalized.Length == 2 &&
+            StateCodeToName.TryGetValue(normalized.ToUpperInvariant(), out var stateName))
+        {
+            return (normalized.ToUpperInvariant(), NormalizeLocalNewsText(stateName));
+        }
+
+        foreach (var entry in StateCodeToName)
+        {
+            var normalizedName = NormalizeLocalNewsText(entry.Value);
+            if (string.Equals(normalizedName, normalized, StringComparison.Ordinal))
+                return (entry.Key, normalizedName);
+        }
+
+        return ("", normalized);
+    }
+
+    private static bool IsLocalNewsCityMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+        if (ContainsNormalizedTerm(normalizedStory, location.CityPhrase))
+            return true;
+
+        return location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token));
+    }
+
+    private static bool IsLocalNewsStateMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+
+        return (!string.IsNullOrWhiteSpace(location.StateName) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateName)) ||
+               (!string.IsNullOrWhiteSpace(location.StateCode) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateCode));
+    }
+
+    private static string BuildLocalNewsStoryText(SourceItem source)
+    {
+        return NormalizeLocalNewsText($"{source.Title} {source.Snippet}");
+    }
+
+    private static bool ContainsNormalizedTerm(string normalizedText, string term)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedText) || string.IsNullOrWhiteSpace(term))
+            return false;
+
+        var paddedText = " " + normalizedText + " ";
+        var paddedTerm = " " + NormalizeLocalNewsText(term) + " ";
+        return paddedText.Contains(paddedTerm, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeLocalNewsText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        return Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9]+", " ").Trim();
+    }
+
+    private static bool LooksLikeUnsupportedCapabilityClaim(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalized = text.Replace('’', '\'').ToLowerInvariant();
+        return UnsupportedCapabilityClaimMarkers.Any(marker =>
+            normalized.Contains(marker, StringComparison.Ordinal));
+    }
+
+    private static string BuildCapabilityClaimFallback(
+        string summaryInput,
+        SummaryFallbackKind fallbackKind,
+        IReadOnlyList<SourceItem>? sources)
+    {
+        var lines = BuildSourceFallbackLines(
+            sources,
+            maxItems: fallbackKind == SummaryFallbackKind.FactFind ? 4 : 5);
+        if (lines.Count == 0)
+            return BuildExtractiveFallback(summaryInput);
+
+        var sb = new StringBuilder();
+        sb.AppendLine(fallbackKind switch
+        {
+            SummaryFallbackKind.News => "Here are the live results I found:",
+            SummaryFallbackKind.FactFind => "Here's the strongest evidence I found in the live results:",
+            _ => "Here are the retrieved live results:"
+        });
+
+        foreach (var line in lines)
+            sb.AppendLine("- " + line);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static List<string> BuildSourceFallbackLines(
+        IReadOnlyList<SourceItem>? sources,
+        int maxItems)
+    {
+        var lines = new List<string>();
+        if (sources is null || sources.Count == 0)
+            return lines;
+
+        foreach (var source in sources)
+        {
+            var headline = NormalizeSourceFallbackText(source.Title, 120);
+            var detail = NormalizeSourceFallbackText(source.Snippet, 220);
+
+            if (string.IsNullOrWhiteSpace(headline) &&
+                string.IsNullOrWhiteSpace(detail))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(headline))
+                headline = NormalizeSourceFallbackText(source.Domain, 80);
+
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                lines.Add(headline);
+            }
+            else if (string.IsNullOrWhiteSpace(headline) ||
+                     detail.StartsWith(headline, StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add(detail);
+            }
+            else
+            {
+                lines.Add($"{headline} - {detail}");
+            }
+
+            if (lines.Count >= maxItems)
+                break;
+        }
+
+        return lines;
+    }
+
+    private static string NormalizeSourceFallbackText(string? text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var normalized = Regex.Replace(text, @"\s+", " ").Trim();
+        if (normalized.Length > maxLength)
+            normalized = normalized[..Math.Max(0, maxLength - 3)].TrimEnd() + "...";
+
+        return normalized.Trim();
+    }
+
     private static bool LooksLikeNoResultsPayload(string toolResult)
     {
         if (string.IsNullOrWhiteSpace(toolResult))
@@ -2069,6 +2702,31 @@ public sealed class SearchOrchestrator
         string Query,
         string Recency,
         string Reason);
+
+    private sealed record LocalNewsLocationTokens(
+        string CityPhrase,
+        IReadOnlyList<string> CityTokens,
+        string CityStem,
+        string StateCode,
+        string StateName);
+
+    private sealed record SearchToolDiagnostics(
+        string Provider,
+        IReadOnlyList<SearchToolBundleDiagnostics> Bundles);
+
+    private sealed record SearchToolBundleDiagnostics(
+        string Query,
+        string Provider,
+        int ResultCount,
+        IReadOnlyList<string> Errors,
+        IReadOnlyList<SearchToolStepDiagnostics> Steps);
+
+    private sealed record SearchToolStepDiagnostics(
+        string Provider,
+        string Phase,
+        string Outcome,
+        string Message,
+        int ResultCount);
 
     private static string StripOfflineReasoningPrefix(string text)
     {

@@ -448,6 +448,9 @@ public sealed class SearxngHostLauncher : IDisposable
 
         foreach (var root in EnumerateBundledCandidateRoots())
         {
+            if (!HasUsableBundledScriptPayload(root))
+                continue;
+
             foreach (var fileName in candidateFileNames)
             {
                 var candidate = Path.Combine(root, fileName);
@@ -468,11 +471,35 @@ public sealed class SearxngHostLauncher : IDisposable
         if (string.IsNullOrWhiteSpace(repoRoot))
             yield break;
 
-        yield return Path.Combine(repoRoot, "apps", "searxng");
         yield return Path.Combine(repoRoot, "apps", "searxng", "package");
-        yield return Path.Combine(repoRoot, "apps", "searxng", "dist");
         yield return Path.Combine(repoRoot, "artifacts", "searxng", "win-x64", "package");
         yield return Path.Combine(repoRoot, "artifacts", "stage", "win-x64", "search");
+        yield return Path.Combine(repoRoot, "apps", "searxng", "dist");
+        yield return Path.Combine(repoRoot, "apps", "searxng");
+    }
+
+    private static bool HasUsableBundledScriptPayload(string root)
+    {
+        if (!File.Exists(Path.Combine(root, "start-searxng.ps1")))
+            return false;
+
+        if (!Directory.Exists(Path.Combine(root, "deps", "site-packages")))
+            return false;
+
+        if (!File.Exists(Path.Combine(root, "source", "searxng-upstream", "searx", "webapp.py")))
+            return false;
+
+        if (!File.Exists(Path.Combine(root, "settings.template.yml")))
+            return false;
+
+        return EnumerateBundledPythonCandidates(root).Any(File.Exists);
+    }
+
+    private static IEnumerable<string> EnumerateBundledPythonCandidates(string root)
+    {
+        yield return Path.Combine(root, "runtime", "python", "python.exe");
+        yield return Path.GetFullPath(Path.Combine(root, "..", "voice", "runtime", "python", "python.exe"));
+        yield return Path.GetFullPath(Path.Combine(root, "..", "..", "voice-backend", "runtime", "python", "python.exe"));
     }
 
     private static string? FindRepoRoot()

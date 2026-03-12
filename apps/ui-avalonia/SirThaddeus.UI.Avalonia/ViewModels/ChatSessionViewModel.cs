@@ -9,6 +9,9 @@ public class ChatMessageItem : INotifyPropertyChanged
 {
     private string _role = string.Empty;
     private string _content = string.Empty;
+    private string _thoughtContent = string.Empty;
+    private string _toolSummary = string.Empty;
+    private bool _isThoughtExpanded;
     private DateTimeOffset _timestamp = DateTimeOffset.Now;
     private bool _isPending;
 
@@ -24,7 +27,10 @@ public class ChatMessageItem : INotifyPropertyChanged
             OnPropertyChanged(nameof(IsUser));
             OnPropertyChanged(nameof(IsAssistant));
             OnPropertyChanged(nameof(IsSystem));
+            OnPropertyChanged(nameof(IsToolActivity));
+            OnPropertyChanged(nameof(IsStatus));
             OnPropertyChanged(nameof(AuthorLabel));
+            OnPropertyChanged(nameof(RoleLabel));
         }
     }
 
@@ -33,6 +39,52 @@ public class ChatMessageItem : INotifyPropertyChanged
         get => _content;
         set { _content = value; OnPropertyChanged(nameof(Content)); }
     }
+
+    /// <summary>
+    /// Model reasoning trace rendered in a collapsible expander.
+    /// </summary>
+    public string ThoughtContent
+    {
+        get => _thoughtContent;
+        set
+        {
+            _thoughtContent = value;
+            OnPropertyChanged(nameof(ThoughtContent));
+            OnPropertyChanged(nameof(HasThoughtContent));
+        }
+    }
+
+    /// <summary>True when this message has extracted thought text to display.</summary>
+    public bool HasThoughtContent => !string.IsNullOrWhiteSpace(_thoughtContent);
+
+    /// <summary>Expanded/collapsed state for the thought expander.</summary>
+    public bool IsThoughtExpanded
+    {
+        get => _isThoughtExpanded;
+        set { _isThoughtExpanded = value; OnPropertyChanged(nameof(IsThoughtExpanded)); }
+    }
+
+    /// <summary>
+    /// Compact tool-call summary shown as an inline footer on the message.
+    /// </summary>
+    public string ToolSummary
+    {
+        get => _toolSummary;
+        set
+        {
+            _toolSummary = value;
+            OnPropertyChanged(nameof(ToolSummary));
+            OnPropertyChanged(nameof(HasToolSummary));
+        }
+    }
+
+    /// <summary>True when this message has a tool summary footer to display.</summary>
+    public bool HasToolSummary => !string.IsNullOrWhiteSpace(_toolSummary);
+
+    /// <summary>
+    /// Original user prompt associated with this assistant response (for Retry).
+    /// </summary>
+    public string RetryPrompt { get; set; } = "";
 
     public bool IsPending
     {
@@ -58,7 +110,27 @@ public class ChatMessageItem : INotifyPropertyChanged
     public bool IsUser => Role == "user";
     public bool IsAssistant => Role == "assistant";
     public bool IsSystem => Role == "system";
-    public string AuthorLabel => Role switch { "user" => "You", "assistant" => "Sir Thaddeus", _ => "System" };
+    public bool IsToolActivity => Role == "tool";
+    public bool IsStatus => Role == "status";
+    public string AuthorLabel => Role switch
+    {
+        "user" => "You",
+        "assistant" => "Sir Thaddeus",
+        "tool" => "Tool Activity",
+        "status" => "System",
+        _ => "System"
+    };
+
+    /// <summary>Uppercase role tag for the message header.</summary>
+    public string RoleLabel => Role switch
+    {
+        "user" => "COMMAND",
+        "assistant" => "RESULT",
+        "tool" => "TOOL ACTIVITY",
+        "status" => "STATUS",
+        _ => ""
+    };
+
     public string TimeDisplay => _timestamp.ToString("t");
 
     private void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -136,17 +208,27 @@ public class ChatSessionItem : INotifyPropertyChanged
             return;
         }
 
-        var last = Messages.LastOrDefault();
-        if (last != null && last.Role == "assistant")
+        // Search backwards — system messages may have been inserted after the pending assistant msg.
+        ChatMessageItem? lastAssistant = null;
+        for (int i = Messages.Count - 1; i >= 0; i--)
         {
-            if (last.IsPending)
+            if (Messages[i].Role == "assistant")
             {
-                last.Content = delta;
-                last.IsPending = false;
+                lastAssistant = Messages[i];
+                break;
+            }
+        }
+
+        if (lastAssistant != null)
+        {
+            if (lastAssistant.IsPending)
+            {
+                lastAssistant.Content = delta;
+                lastAssistant.IsPending = false;
             }
             else
             {
-                last.AppendContent(delta);
+                lastAssistant.AppendContent(delta);
             }
         }
         else
@@ -158,14 +240,15 @@ public class ChatSessionItem : INotifyPropertyChanged
 
     public void ClearPendingAssistantMessage()
     {
-        var last = Messages.LastOrDefault();
-        if (last is null || last.Role != "assistant" || !last.IsPending)
+        for (int i = Messages.Count - 1; i >= 0; i--)
         {
-            return;
+            if (Messages[i].Role == "assistant" && Messages[i].IsPending)
+            {
+                Messages.RemoveAt(i);
+                MarkUpdated();
+                return;
+            }
         }
-
-        Messages.Remove(last);
-        MarkUpdated();
     }
 
     private void MarkUpdated()

@@ -6,6 +6,7 @@ using SirThaddeus.Agent;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
+using SirThaddeus.Contracts;
 using SirThaddeus.LlmClient;
 using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.PersonalityEngine.Profiles;
@@ -28,6 +29,16 @@ var settingsUndoStack = new Stack<AppSettings>();
 using var audit = JsonLineAuditLogger.CreateDefault();
 using var searxngLauncher = new SearxngHostLauncher();
 var searxngStartupGate = new SemaphoreSlim(1, 1);
+var searxngLastLaunchStatus = options.ServerMode ? "Queued" : "Pending";
+var searxngLastLaunchMessage = options.ServerMode
+    ? "SearxNG startup has been queued for the background runtime."
+    : "SearxNG startup has not run yet.";
+
+void RecordSearxngLaunchStatus(string status, string message)
+{
+    searxngLastLaunchStatus = string.IsNullOrWhiteSpace(status) ? "Unknown" : status.Trim();
+    searxngLastLaunchMessage = string.IsNullOrWhiteSpace(message) ? "" : message.Trim();
+}
 
 Task EnsureManagedSearxngSerializedAsync(AppSettings currentSettings, CancellationToken cancellationToken)
     => EnsureManagedSearxngSerializedCoreAsync(currentSettings, cancellationToken);
@@ -37,7 +48,13 @@ async Task EnsureManagedSearxngSerializedCoreAsync(AppSettings currentSettings, 
     await searxngStartupGate.WaitAsync(cancellationToken);
     try
     {
-        await EnsureManagedSearxngAsync(currentSettings, options.EnableTools, searxngLauncher, audit, cancellationToken);
+        await EnsureManagedSearxngAsync(
+            currentSettings,
+            options.EnableTools,
+            searxngLauncher,
+            audit,
+            RecordSearxngLaunchStatus,
+            cancellationToken);
     }
     finally
     {
@@ -141,6 +158,219 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
 
 var orchestrator = BuildOrchestrator(settings);
 
+string ResolveCurrentMcpServerPath(AppSettings currentSettings)
+{
+    return string.IsNullOrWhiteSpace(options.McpServerPath)
+        ? RuntimePathResolver.ResolveMcpServerPath(currentSettings.Mcp.ServerPath, Directory.GetCurrentDirectory())
+        : Path.GetFullPath(options.McpServerPath.Trim());
+}
+
+async Task<SearchTraceStatusDto> BuildLastProviderTraceAsync(CancellationToken ct)
+{
+    var events = await audit.ReadTailAsync(200, ct);
+    var trace = events.LastOrDefault(evt =>
+        string.Equals(evt.Action, "WEB_SEARCH_PROVIDER_TRACE", StringComparison.OrdinalIgnoreCase));
+    if (trace is null)
+    {
+        return new SearchTraceStatusDto(
+            Status: "None",
+            RequestedQuery: "",
+            EffectiveQuery: "",
+            Provider: "",
+            PathSummary: "",
+            Failure: "",
+            RecordedAtUtc: default);
+    }
+
+    var requestedQuery = ReadAuditDetail(trace, "requested_query");
+    var effectiveQuery = ReadAuditDetail(trace, "effective_query");
+    var provider = ReadAuditDetail(trace, "provider");
+    var pathSummary = ReadAuditDetail(trace, "path_summary");
+    var failureCode = ReadAuditDetail(trace, "failure_code");
+    var failureMessage = ReadAuditDetail(trace, "failure_message");
+    var failure = !string.IsNullOrWhiteSpace(failureCode) ? failureCode : failureMessage;
+
+    return new SearchTraceStatusDto(
+        Status: string.IsNullOrWhiteSpace(failure) ? "Recorded" : "Failure",
+        RequestedQuery: requestedQuery,
+        EffectiveQuery: effectiveQuery,
+        Provider: provider,
+        PathSummary: pathSummary,
+        Failure: failure,
+        RecordedAtUtc: trace.Timestamp);
+}
+
+async Task<SearchStatusResponse> BuildSearchStatusAsync(CancellationToken ct)
+{
+    var currentSettings = settings;
+    var mode = NormalizeWebSearchMode(currentSettings.WebSearch.Mode);
+    var webPermission = ToolGroupPolicy.ResolveEffectivePolicy(
+        "web",
+        ToolGroupPolicy.BuildSnapshot(currentSettings, isDebugBuild: false));
+
+    var searxngBaseUrl = NormalizeBaseUrl(currentSettings.WebSearch.SearxngBaseUrl, "http://localhost:8080");
+    var searxngBaseUrlValid = Uri.TryCreate(searxngBaseUrl, UriKind.Absolute, out var searxngBaseUri);
+    var searxngReachable = searxngBaseUrlValid &&
+                           searxngBaseUri is not null &&
+                           await ProbeSearchEndpointAsync(searxngBaseUri, ct);
+
+    string searxngStatus;
+    string searxngMessage;
+    if (mode is not ("auto" or "searxng"))
+    {
+        searxngStatus = "Skipped";
+        searxngMessage = $"webSearch.mode '{mode}' does not use SearxNG.";
+    }
+    else if (!searxngBaseUrlValid || searxngBaseUri is null)
+    {
+        searxngStatus = "Invalid URL";
+        searxngMessage = $"Invalid SearxNG base URL: {currentSettings.WebSearch.SearxngBaseUrl}";
+    }
+    else if (searxngReachable)
+    {
+        searxngStatus = "Ready";
+        searxngMessage = $"SearxNG responded at {searxngBaseUrl}.";
+    }
+    else if (!currentSettings.WebSearch.SearxngAutoStart)
+    {
+        searxngStatus = "Disabled";
+        searxngMessage = "SearxNG auto-start is disabled and the local endpoint is not reachable.";
+    }
+    else
+    {
+        searxngStatus = searxngLastLaunchStatus;
+        searxngMessage = searxngLastLaunchMessage;
+    }
+
+    var searchApiConfigured = !string.IsNullOrWhiteSpace(currentSettings.WebSearch.SearchApiKey);
+    var searchApiStatus = searchApiConfigured ? "Configured" : "Unconfigured";
+    var searchApiMessage = searchApiConfigured
+        ? "Hosted Search API fallback is configured."
+        : "No hosted Search API key is configured.";
+
+    var mcpServerPath = ResolveCurrentMcpServerPath(currentSettings);
+    var mcpToolsEnabled = options.EnableTools;
+    var mcpToolsAvailable = false;
+    var mcpStatus = mcpToolsEnabled ? "Unavailable" : "Disabled";
+    var mcpMessage = mcpToolsEnabled
+        ? mcp.Message
+        : "Runtime started without --tools, so MCP-backed web search is unavailable.";
+
+    if (mcpToolsEnabled && toolsAvailable)
+    {
+        try
+        {
+            var toolList = await mcp.Client.ListToolsAsync(ct);
+            mcpToolsAvailable = toolList.Count > 0;
+            mcpStatus = mcpToolsAvailable ? "Ready" : "Degraded";
+            mcpMessage = mcpToolsAvailable
+                ? $"MCP responded with {toolList.Count} tool(s)."
+                : "MCP responded but reported no tools.";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            mcpStatus = "Unreachable";
+            mcpMessage = ex.Message;
+        }
+    }
+
+    var effectiveStatus = "Ready";
+    var effectiveMessage = "Web search is ready.";
+
+    if (mode == "manual")
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "webSearch.mode is manual, so live web search is turned off.";
+    }
+    else if (webPermission == "off")
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "MCP web permission is off, so web search calls are blocked.";
+    }
+    else if (!mcpToolsEnabled)
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "Runtime started without --tools, so MCP-backed web search is unavailable.";
+    }
+    else if (!mcpToolsAvailable)
+    {
+        effectiveStatus = "Unavailable";
+        effectiveMessage = mcpMessage;
+    }
+    else
+    {
+        (effectiveStatus, effectiveMessage) = mode switch
+        {
+            "auto" when searxngReachable => (
+                "Ready",
+                "Auto mode is ready. SearxNG is reachable, with hosted Search API and Google News still available as fallback."),
+            "auto" when searchApiConfigured => (
+                "Ready",
+                "Auto mode is running in fallback mode. SearxNG is unavailable, so hosted Search API or Google News will be used."),
+            "auto" => (
+                "Ready",
+                "Auto mode is running in fallback mode. SearxNG is unavailable and hosted Search API is not configured, so Google News fallback is all that remains."),
+            "searxng" when searxngReachable => (
+                "Ready",
+                "SearxNG-only mode is ready."),
+            "searxng" => (
+                "Unavailable",
+                "SearxNG-only mode is configured, but the endpoint is not reachable."),
+            "search_api" when searchApiConfigured => (
+                "Ready",
+                "Hosted Search API mode is configured."),
+            "search_api" => (
+                "Unavailable",
+                "Hosted Search API mode is selected, but no API key is configured."),
+            "google_news" => (
+                "Ready",
+                "Google News-only mode is ready."),
+            "ddg_html" => (
+                "Degraded",
+                "DDG HTML mode is legacy and may be blocked upstream."),
+            _ => (
+                "Ready",
+                "Web search is ready.")
+        };
+    }
+
+    var lastProviderTrace = await BuildLastProviderTraceAsync(ct);
+
+    return new SearchStatusResponse(
+        LiveSearchAvailable: string.Equals(effectiveStatus, "Ready", StringComparison.OrdinalIgnoreCase),
+        EffectiveStatus: effectiveStatus,
+        EffectiveMessage: effectiveMessage,
+        SearchMode: mode,
+        WebPermission: webPermission,
+        Searxng: new SearchProviderStatusDto(
+            Status: searxngStatus,
+            Message: searxngMessage,
+            BaseUrl: searxngBaseUrl,
+            Reachable: searxngReachable,
+            ManagedByRuntime: searxngLauncher.IsManagedSearxngRunning,
+            AutoStartEnabled: currentSettings.WebSearch.SearxngAutoStart,
+            LastLaunchStatus: searxngLastLaunchStatus),
+        SearchApi: new HostedSearchApiStatusDto(
+            Status: searchApiStatus,
+            Message: searchApiMessage,
+            Provider: currentSettings.WebSearch.SearchApiProvider,
+            BaseUrl: currentSettings.WebSearch.SearchApiBaseUrl,
+            Engine: currentSettings.WebSearch.SearchApiEngine,
+            Configured: searchApiConfigured),
+        Mcp: new McpRuntimeStatusDto(
+            Status: mcpStatus,
+            Message: mcpMessage,
+            ServerPath: mcpServerPath,
+            ToolsEnabled: mcpToolsEnabled,
+            ToolsAvailable: mcpToolsAvailable),
+        LastProviderTrace: lastProviderTrace,
+        CheckedAtUtc: DateTimeOffset.UtcNow);
+}
+
 if (options.ServerMode)
 {
     using var serverCancellation = new CancellationTokenSource();
@@ -160,6 +390,7 @@ if (options.ServerMode)
             settings = updatedSettings;
             QueueManagedSearxngUpdate(settings);
         },
+        BuildSearchStatusAsync,
         audit,
         apiPermissionGate,
         serverCancellation.Token);
@@ -501,11 +732,13 @@ static async Task EnsureManagedSearxngAsync(
     bool toolsEnabled,
     SearxngHostLauncher launcher,
     IAuditLogger audit,
+    Action<string, string> recordLaunchStatus,
     CancellationToken cancellationToken)
 {
     if (!toolsEnabled)
     {
         launcher.StopManagedSearxng();
+        recordLaunchStatus("Disabled", "Runtime started without --tools, so SearxNG auto-start was skipped.");
         return;
     }
 
@@ -528,6 +761,7 @@ static async Task EnsureManagedSearxngAsync(
                 ["message"] = ex.Message
             }
         });
+        recordLaunchStatus("Exception", ex.Message);
         return;
     }
 
@@ -556,6 +790,8 @@ static async Task EnsureManagedSearxngAsync(
         }
     });
 
+    recordLaunchStatus(resultLabel, result.Message);
+
     if (result.Status is SearxngLaunchStatus.Started or SearxngLaunchStatus.AlreadyRunning)
     {
         Console.WriteLine($"SearxNG: {result.Message}");
@@ -567,6 +803,82 @@ static async Task EnsureManagedSearxngAsync(
         Console.WriteLine($"SearxNG: {result.Message}");
         Console.WriteLine("SearxNG-only mode is configured; web search will fail until SearxNG is reachable.");
     }
+}
+
+static async Task<bool> ProbeSearchEndpointAsync(Uri baseUri, CancellationToken cancellationToken)
+{
+    using var http = new HttpClient
+    {
+        BaseAddress = baseUri,
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    try
+    {
+        using var response = await http.GetAsync("/search?q=thaddeus&format=json", cancellationToken);
+        if (response.IsSuccessStatusCode)
+            return true;
+    }
+    catch
+    {
+        // Best effort probe only.
+    }
+
+    try
+    {
+        using var response = await http.GetAsync("/", cancellationToken);
+        return response.IsSuccessStatusCode;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static string NormalizeBaseUrl(string? value, string fallback)
+{
+    var raw = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    return raw.TrimEnd('/');
+}
+
+static string NormalizeWebSearchMode(string? value)
+{
+    var normalized = (value ?? "auto").Trim().ToLowerInvariant();
+    return normalized switch
+    {
+        "auto" => "auto",
+        "searxng" => "searxng",
+        "search_api" => "search_api",
+        "api" => "search_api",
+        "google_news" => "google_news",
+        "ddg_html" => "ddg_html",
+        "manual" => "manual",
+        _ => "auto"
+    };
+}
+
+static string ReadAuditDetail(AuditEvent auditEvent, string key)
+{
+    if (auditEvent.Details is null ||
+        !auditEvent.Details.TryGetValue(key, out var value) ||
+        value is null)
+    {
+        return "";
+    }
+
+    return value switch
+    {
+        string text => text,
+        JsonElement jsonElement => jsonElement.ValueKind switch
+        {
+            JsonValueKind.String => jsonElement.GetString() ?? "",
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            JsonValueKind.Number => jsonElement.ToString(),
+            _ => jsonElement.ToString()
+        },
+        _ => value.ToString() ?? ""
+    };
 }
 
 static void PrintHelp()

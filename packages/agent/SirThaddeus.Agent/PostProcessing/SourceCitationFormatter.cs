@@ -194,10 +194,23 @@ internal static partial class SourceCitationFormatter
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            JsonElement itemsElement;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = doc.RootElement;
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                     doc.RootElement.TryGetProperty("sources", out var sourcesElement) &&
+                     sourcesElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = sourcesElement;
+            }
+            else
+            {
                 return sources;
+            }
 
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var item in itemsElement.EnumerateArray())
             {
                 var url = item.TryGetProperty("url", out var urlEl)
                     ? urlEl.GetString()
