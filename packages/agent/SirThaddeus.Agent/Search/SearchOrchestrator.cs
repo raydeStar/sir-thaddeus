@@ -88,6 +88,8 @@ public sealed class SearchOrchestrator
         "explaining why it matters (use the phrase 'matters because'). " +
         "Note where sources agree or differ. " +
         "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or web access. " +
+        "The provided results already contain the current information you need. " +
         "Do NOT invent or guess details not in the results. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. bullet count, headings, numbered list), follow it exactly.";
@@ -105,6 +107,8 @@ public sealed class SearchOrchestrator
         "local content, say so honestly: note that no local stories were " +
         "found in the results and present the top headlines instead. " +
         "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or web access. " +
+        "The provided results already contain the current information you need. " +
         "Do NOT invent or guess details not in the results.";
 
     private const string FactFindSummaryInstruction =
@@ -265,35 +269,24 @@ public sealed class SearchOrchestrator
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
             originalUserMessage: userMessage);
+        toolResult = await TryRecoverLocalNewsResultsAsync(
+            userMessage,
+            query,
+            toolResult,
+            toolCallsMade,
+            ct);
 
         if (string.IsNullOrWhiteSpace(toolResult))
         {
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                "Web search returned no results.",
-                ct);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
         }
         if (LooksLikeNoResultsPayload(toolResult))
         {
-            return await BuildNoResultsFallbackAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
         }
         if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } newsFailure)
         {
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                newsFailure.Text,
-                ct);
+            return newsFailure;
         }
 
         // ── 4. Parse results into SourceItems ────────────────────────
@@ -311,12 +304,7 @@ public sealed class SearchOrchestrator
 
         if (sources.Count == 0)
         {
-            return await BuildNoResultsFallbackAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
         }
 
         // ── 5. Story clustering ──────────────────────────────────────
@@ -952,6 +940,101 @@ public sealed class SearchOrchestrator
         }
 
         return response;
+    }
+
+    private async Task<string> TryRecoverLocalNewsResultsAsync(
+        string userMessage,
+        QueryBuilder.SearchQuery query,
+        string toolResult,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!ShouldRetryLocalNewsSearch(userMessage, query.Query) ||
+            HasUsableSearchResults(toolResult))
+        {
+            return toolResult;
+        }
+
+        var lastResult = toolResult;
+        foreach (var candidate in BuildLocalNewsRetryCandidates(query))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_NEWS_QUERY_RETRY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = candidate.Query,
+                    ["recency"] = candidate.Recency,
+                    ["reason"] = candidate.Reason
+                }
+            });
+
+            lastResult = await CallWebSearchAsync(
+                candidate.Query,
+                candidate.Recency,
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage);
+
+            if (HasUsableSearchResults(lastResult))
+                return lastResult;
+        }
+
+        return lastResult;
+    }
+
+    private bool ShouldRetryLocalNewsSearch(string userMessage, string query)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return false;
+
+        return LocalNewsSignalRegex.IsMatch(userMessage ?? "") ||
+               LocalNewsSignalRegex.IsMatch(query ?? "");
+    }
+
+    private IReadOnlyList<LocalNewsRetryCandidate> BuildLocalNewsRetryCandidates(QueryBuilder.SearchQuery query)
+    {
+        var location = UserLocationHint?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(location))
+            return [];
+
+        var candidates = new List<LocalNewsRetryCandidate>();
+        void Add(string candidateQuery, string candidateRecency, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(candidateQuery) || string.IsNullOrWhiteSpace(candidateRecency))
+                return;
+
+            if (candidates.Any(c =>
+                    c.Query.Equals(candidateQuery, StringComparison.OrdinalIgnoreCase) &&
+                    c.Recency.Equals(candidateRecency, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            candidates.Add(new LocalNewsRetryCandidate(candidateQuery, candidateRecency, reason));
+        }
+
+        Add($"{location} local news", query.Recency, "broaden_local_phrase");
+
+        if (!string.Equals(query.Recency, "week", StringComparison.OrdinalIgnoreCase))
+            Add($"{location} local news", "week", "broaden_time_window");
+
+        Add($"{location} news", "week", "fallback_generic_news");
+        return candidates;
+    }
+
+    private static bool HasUsableSearchResults(string toolResult)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult) ||
+            LooksLikeNoResultsPayload(toolResult) ||
+            WebToolFailureMapper.TryBuildFailureResponse(toolResult, []) is not null)
+        {
+            return false;
+        }
+
+        return ParseSourcesFromToolResult(toolResult).Count > 0;
     }
 
     /// <summary>
@@ -1925,6 +2008,35 @@ public sealed class SearchOrchestrator
         };
     }
 
+    private AgentResponse BuildNewsNoResultsResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var isLocalNewsRequest = LocalNewsSignalRegex.IsMatch(userMessage ?? "");
+        var locationHint = UserLocationHint?.Trim();
+
+        var text = isLocalNewsRequest switch
+        {
+            true when !string.IsNullOrWhiteSpace(locationHint) =>
+                $"I couldn't find usable live local news results for {locationHint} right now. " +
+                "Try asking for state news, naming a local outlet, or narrowing it to a topic like schools, crime, politics, or weather.",
+            true =>
+                "I couldn't find usable live local news results for that request right now. " +
+                "Try including a city, naming a local outlet, or setting your location in Settings and trying again.",
+            _ =>
+                "I couldn't find usable live news results for that request right now. " +
+                "Try narrowing it to a topic, place, or timeframe."
+        };
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
     private static bool IsLocalBusinessNoResultsRequest(string userMessage)
     {
         var lower = (userMessage ?? "").Trim().ToLowerInvariant();
@@ -1952,6 +2064,11 @@ public sealed class SearchOrchestrator
             lower.Contains("open", StringComparison.Ordinal) ||
             lower.Contains("hours", StringComparison.Ordinal);
     }
+
+    private sealed record LocalNewsRetryCandidate(
+        string Query,
+        string Recency,
+        string Reason);
 
     private static string StripOfflineReasoningPrefix(string text)
     {

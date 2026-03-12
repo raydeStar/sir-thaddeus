@@ -1588,6 +1588,94 @@ public class SearchPipelineGoldenTests
         Assert.DoesNotContain("rexburg", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task News_LocalQuery_NoResults_RetriesBroaderLocationQuery()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "Here are local headlines.");
+
+        var searchResult =
+            "1. Local update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/local\",\"title\":\"Local update\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase))
+                return searchResult;
+
+            if (args.Contains("rexburg, id news today", StringComparison.OrdinalIgnoreCase))
+                return "No results found for Rexburg, ID news today";
+
+            return searchResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are local headlines.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_NoResults_ReturnsDeterministicNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"No results found for {args}";
+            }
+
+            return "";
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I cannot access real-time data", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("built-in reasoning", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("hello! can you get me the local news?",
                 """{"query":"hello","recency":"any"}""")]
