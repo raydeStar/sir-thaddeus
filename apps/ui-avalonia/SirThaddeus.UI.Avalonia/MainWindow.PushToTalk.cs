@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using System.Globalization;
@@ -20,6 +22,24 @@ public partial class MainWindow
     private void InitializePushToTalkUi()
     {
         _pttStatusTimer.Tick += PttStatusTimer_Tick;
+
+        // Wire pointer events with handledEventsToo so the Button's
+        // built-in click handling doesn't swallow our hold-to-talk logic.
+        PttHoldButton.AddHandler(
+            InputElement.PointerPressedEvent,
+            PttHoldButton_PointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        PttHoldButton.AddHandler(
+            InputElement.PointerReleasedEvent,
+            PttHoldButton_PointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        PttHoldButton.AddHandler(
+            InputElement.PointerCaptureLostEvent,
+            PttHoldButton_PointerCaptureLost,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
 
         if (OperatingSystem.IsWindows())
         {
@@ -61,12 +81,16 @@ public partial class MainWindow
             return;
         }
 
-        if (_globalPttHotkeyService?.IsRunning == true)
+        if (_globalPttHotkeyService is not null)
         {
-            return;
+            _globalPttHotkeyService.Pressed -= GlobalPttHotkeyService_Pressed;
+            _globalPttHotkeyService.Released -= GlobalPttHotkeyService_Released;
+            _globalPttHotkeyService.CancelRequested -= GlobalPttHotkeyService_CancelRequested;
+            _globalPttHotkeyService.Dispose();
+            _globalPttHotkeyService = null;
         }
 
-        _globalPttHotkeyService ??= new WindowsGlobalPushToTalkHotkeyService();
+        _globalPttHotkeyService = new WindowsGlobalPushToTalkHotkeyService(_backendSettings.PttChord, _backendSettings.ShutupChord);
         _globalPttHotkeyService.Pressed -= GlobalPttHotkeyService_Pressed;
         _globalPttHotkeyService.Released -= GlobalPttHotkeyService_Released;
         _globalPttHotkeyService.CancelRequested -= GlobalPttHotkeyService_CancelRequested;
@@ -95,23 +119,23 @@ public partial class MainWindow
             badgeKey: "Surface0Brush",
             headline: "Voice capture is not available on this platform yet.",
             detail: "The button and hotkey surface are kept in the UI so Linux/macOS can pick up native capture and hotkey backends in parallel.");
-        ReadAloudButton.Content = "Read Aloud";
+        SetVoiceChatStatus("Hold");
     }
 
     private void SetPushToTalkReadyState(string? globalFailureReason = null)
     {
-        var cancelBinding = _globalPttHotkeyService?.CancelBindingText ?? "Ctrl+Alt+Esc";
+        var pttBinding = _globalPttHotkeyService?.BindingText ?? _backendSettings.PttChord;
+        var cancelBinding = _globalPttHotkeyService?.CancelBindingText ?? _backendSettings.ShutupChord;
         var headline = _globalPttHotkeyService?.IsRunning == true
-            ? "Voice ready. Hold Talk or press Ctrl+Alt+M anywhere on Windows."
-            : "Voice ready. Hold Talk or press Ctrl+Alt+M while this window is focused.";
+            ? $"Voice ready. Hold Talk or press {pttBinding} anywhere on Windows."
+            : $"Voice ready. Hold Talk or press {pttBinding} while this window is focused.";
 
         var detail = _globalPttHotkeyService?.IsRunning == true
             ? $"Global hotkey active. Cancel: {cancelBinding}. Local ASR endpoint: {DescribeAsrEndpoint()}."
             : $"Global hotkey unavailable{(string.IsNullOrWhiteSpace(globalFailureReason) ? string.Empty : $": {globalFailureReason}")}. Focused hotkey fallback remains active, including cancel on {cancelBinding}. Local ASR endpoint: {DescribeAsrEndpoint()}.";
 
         UpdatePushToTalkUi("READY", "GreenBrush", headline, detail);
-        PttHoldButton.Content = "Hold Talk";
-        ReadAloudButton.Content = _readAloudActive ? "Stop Reading" : "Read Aloud";
+        SetVoiceChatStatus("Hold");
     }
 
     private void SetPushToTalkBusyTranscribing()
@@ -121,7 +145,7 @@ public partial class MainWindow
             badgeKey: "YellowBrush",
             headline: "Still transcribing the previous clip.",
             detail: $"Wait for the local ASR request to finish before starting another capture. Endpoint: {DescribeAsrEndpoint()}.");
-        PttHoldButton.Content = "Transcribing...";
+        SetVoiceChatStatus("Transcribing...");
     }
 
     private void MarkPushToTalkCaptureStarted(string source)
@@ -136,7 +160,7 @@ public partial class MainWindow
             badgeKey: "GreenBrush",
             headline: "Listening... release to transcribe.",
             detail: $"Source: {DescribeCaptureSource(source)} | Hold: 0.0s | ASR: {DescribeAsrEndpoint()}.");
-        PttHoldButton.Content = "Release";
+        SetVoiceChatStatus("Listening...");
     }
 
     private void MarkPushToTalkTranscribing(string source)
@@ -151,7 +175,7 @@ public partial class MainWindow
             badgeKey: "YellowBrush",
             headline: "Transcribing audio locally.",
             detail: $"Captured {FormatDuration(_pttLastCaptureDuration)} from {DescribeCaptureSource(source)}. Sending to {DescribeAsrEndpoint()}.");
-        PttHoldButton.Content = "Transcribing...";
+        SetVoiceChatStatus("Processing...");
     }
 
     private void MarkPushToTalkNoAudio()
@@ -161,7 +185,7 @@ public partial class MainWindow
             badgeKey: "RedBrush",
             headline: "No audio was captured.",
             detail: "The microphone stream ended without data. Try holding the button or hotkey a little longer.");
-        PttHoldButton.Content = "Hold Talk";
+        SetVoiceChatStatus("Hold");
     }
 
     private void MarkPushToTalkNoSpeech()
@@ -171,7 +195,7 @@ public partial class MainWindow
             badgeKey: "RedBrush",
             headline: "No speech was recognized.",
             detail: $"Captured {FormatDuration(_pttLastCaptureDuration)} but the local ASR backend returned empty text.");
-        PttHoldButton.Content = "Hold Talk";
+        SetVoiceChatStatus("Hold");
     }
 
     private void MarkPushToTalkTranscriptInserted(string transcript)
@@ -181,7 +205,7 @@ public partial class MainWindow
             badgeKey: "GreenBrush",
             headline: "Transcript inserted into the composer.",
             detail: $"{transcript.Length} chars from {FormatDuration(_pttLastCaptureDuration)} via {DescribeCaptureSource(_pttLastCaptureSource)}.");
-        PttHoldButton.Content = "Hold Talk";
+        SetVoiceChatStatus("Processing...");
     }
 
     private void MarkPushToTalkCanceled(string headline, string detail)
@@ -192,8 +216,7 @@ public partial class MainWindow
             badgeKey: "YellowBrush",
             headline: headline,
             detail: string.IsNullOrWhiteSpace(detail) ? "Voice work was canceled." : detail.Trim());
-        PttHoldButton.Content = "Hold Talk";
-        ReadAloudButton.Content = _readAloudActive ? "Stop Reading" : "Read Aloud";
+        SetVoiceChatStatus("Hold");
     }
 
     private void MarkPushToTalkFailure(string headline, string detail)
@@ -204,8 +227,7 @@ public partial class MainWindow
             badgeKey: "RedBrush",
             headline: headline,
             detail: string.IsNullOrWhiteSpace(detail) ? "Voice action failed." : detail.Trim());
-        PttHoldButton.Content = "Hold Talk";
-        ReadAloudButton.Content = _readAloudActive ? "Stop Reading" : "Read Aloud";
+        SetVoiceChatStatus("Hold");
     }
 
     private void MarkReadAloudStarted(int characterCount)
@@ -214,8 +236,8 @@ public partial class MainWindow
             stateText: "TTS",
             badgeKey: "YellowBrush",
             headline: "Reading aloud locally.",
-            detail: $"Queued {characterCount:N0} chars for Windows speech playback. Press Ctrl+Alt+Esc to stop.");
-        ReadAloudButton.Content = "Stop Reading";
+            detail: $"Queued {characterCount:N0} chars for Windows speech playback. Press {_backendSettings.ShutupChord} to stop.");
+        SetVoiceChatStatus("Speaking");
     }
 
     private void MarkReadAloudCompleted(int characterCount)
@@ -224,8 +246,8 @@ public partial class MainWindow
             stateText: "READY",
             badgeKey: "GreenBrush",
             headline: "Read aloud complete.",
-            detail: $"Played {characterCount:N0} chars locally. Cancel hotkey remains Ctrl+Alt+Esc.");
-        ReadAloudButton.Content = "Read Aloud";
+            detail: $"Played {characterCount:N0} chars locally. Cancel hotkey remains {_backendSettings.ShutupChord}.");
+        SetVoiceChatStatus("Hold");
     }
 
     private void UpdatePushToTalkUi(string stateText, string badgeKey, string headline, string detail)
@@ -334,7 +356,7 @@ public partial class MainWindow
         MarkPushToTalkCanceled(
             headline: "Voice cancel requested.",
             detail: $"Stopped {string.Join(", ", canceledTargets)} via {DescribeCaptureSource(source)}.");
-        AppendTranscript($"[system] Voice cancel requested via {DescribeCaptureSource(source)}.");
+        // No chat card — the button state change is sufficient feedback.
     }
 
     private async Task ClearPushToTalkTranscriptionAsync(CancellationTokenSource? cancellation)

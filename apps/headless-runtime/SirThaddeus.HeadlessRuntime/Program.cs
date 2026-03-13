@@ -152,7 +152,8 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
         MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
         UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
         UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
-        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem()
+        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem(),
+        MaxTokensBudget = currentSettings.Llm.MaxTokens
     };
 }
 

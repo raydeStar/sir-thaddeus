@@ -21,7 +21,7 @@
     <AvaloniaResource Include="..\..\..\assets\icons\sir-thaddeus-tray.ico" Link="Assets\Icons\sir-thaddeus-tray.ico" />
   </ItemGroup>
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

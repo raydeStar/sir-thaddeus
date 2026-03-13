@@ -353,6 +353,81 @@ public class RoutingAccuracyTests
         Assert.Empty(audit.GetByAction("LOOKUP_FLOOR_UPGRADE"));
     }
 
+    /// <summary>
+    /// Regression test: a search follow-up ("bring me up more info on the
+    /// bakers house and coffee co") must NOT be downgraded by the Footman.
+    /// The deterministic Tier-1 follow-up detection is authoritative when
+    /// HasRecentSearchResults is true.
+    /// </summary>
+    [Fact]
+    public async Task SearchFollowUp_IsNotDowngradedByFootman_WhenSessionHasRecentResults()
+    {
+        // Simulate a router that returns LookupSearch (as Tier-1 would
+        // when IsFollowUpMessage is true and HasRecentSearchResults is true).
+        var router = new FixedRouter(new RouterOutput
+        {
+            Intent = Intents.LookupSearch,
+            Confidence = 0.95,
+            NeedsWeb = true,
+            NeedsSearch = true,
+            NeedsBrowserAutomation = true,
+            RequiredCapabilities = [ToolCapability.WebSearch, ToolCapability.BrowserNavigate]
+        });
+
+        // Footman tries to downgrade to Chat — this must be blocked.
+        var footman = new FixedFootmanRouter(new RoutingDecision
+        {
+            NextState = AgentState.Chat,
+            ContextPolicy = ContextPolicy.ChatSessionSnapshot,
+            Confidence = 0.88,
+            Abstain = false,
+            ReasonCode = "test_chat_downgrade"
+        });
+
+        var webSearchPayload =
+            "1. Baker's House and Coffee Co - Local bakery and coffee shop\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/bakers-house\",\"title\":\"Baker's House\"}]";
+
+        var llm = new FakeLlmClient((messages, tools) => new LlmResponse
+        {
+            IsComplete = true,
+            Content = "Baker's House and Coffee Co is a local bakery.",
+            FinishReason = "stop"
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "web_search" or "WebSearch" => webSearchPayload,
+                "browser_navigate" or "BrowserNavigate" => "Full article content about Baker's House.",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: router,
+            footmanRouter: footman);
+
+        var result = await agent.ProcessAsync(
+            "bring me up more info on the bakers house and coffee co");
+
+        // The Footman should NOT be called because the deterministic
+        // follow-up detection bypasses it for LookupSearch.
+        Assert.False(footman.Called,
+            "Footman should be bypassed for LookupSearch follow-ups");
+
+        // The query should reach the search orchestrator and succeed.
+        Assert.True(result.Success);
+    }
+
     private sealed class FixedRouter : IRouter
     {
         private readonly RouterOutput _route;

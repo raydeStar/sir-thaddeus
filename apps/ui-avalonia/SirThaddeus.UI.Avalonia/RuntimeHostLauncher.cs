@@ -171,30 +171,28 @@ internal sealed class RuntimeHostLauncher : IDisposable
     {
         var appBase = AppContext.BaseDirectory;
 
+        var repoRoot = FindRepoRoot();
+        if (repoRoot is not null)
+        {
+            var projectPath = Path.Combine(repoRoot, "apps", "headless-runtime", "SirThaddeus.HeadlessRuntime", "SirThaddeus.HeadlessRuntime.csproj");
+            if (File.Exists(projectPath))
+            {
+                return new RuntimeLaunchConfig("dotnet", $"run --project \"{projectPath}\" --", repoRoot);
+            }
+
+            var dllPath = Path.Combine(repoRoot, "apps", "headless-runtime", "SirThaddeus.HeadlessRuntime", "bin", "Debug", "net10.0", "SirThaddeus.HeadlessRuntime.dll");
+            if (File.Exists(dllPath))
+            {
+                return new RuntimeLaunchConfig("dotnet", $"\"{dllPath}\"", Path.GetDirectoryName(dllPath)!);
+            }
+        }
+
         foreach (var path in CandidateExecutablePaths(appBase))
         {
             if (File.Exists(path))
             {
                 return new RuntimeLaunchConfig(path, "", Path.GetDirectoryName(path)!);
             }
-        }
-
-        var repoRoot = FindRepoRoot();
-        if (repoRoot is null)
-        {
-            return null;
-        }
-
-        var dllPath = Path.Combine(repoRoot, "apps", "headless-runtime", "SirThaddeus.HeadlessRuntime", "bin", "Debug", "net10.0", "SirThaddeus.HeadlessRuntime.dll");
-        if (File.Exists(dllPath))
-        {
-            return new RuntimeLaunchConfig("dotnet", $"\"{dllPath}\"", Path.GetDirectoryName(dllPath)!);
-        }
-
-        var projectPath = Path.Combine(repoRoot, "apps", "headless-runtime", "SirThaddeus.HeadlessRuntime", "SirThaddeus.HeadlessRuntime.csproj");
-        if (File.Exists(projectPath))
-        {
-            return new RuntimeLaunchConfig("dotnet", $"run --no-build --project \"{projectPath}\" --", repoRoot);
         }
 
         return null;

@@ -125,14 +125,33 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string WebFollowUpWithRelatedInstruction = OrchestratorPrompts.WebFollowUpWithRelatedInstruction;
 
     // ── Token budget per intent ──────────────────────────────────────
-    // Tight caps reduce filler from small models while still leaving
-    // enough headroom for a substantive answer (lists, step-by-step).
-    private const int MaxTokensCasual         = 512;
-    private const int MaxTokensCasualRetry    = 2048;
+    // Configurable caps — when MaxTokensBudget is set from user
+    // settings the casual / retry ceilings scale accordingly.  The
+    // remaining per-intent caps stay fixed because they guard
+    // specialised LLM calls (routing, summaries) that don't benefit
+    // from a larger completion window.
+    private int _maxTokensCasual      = 512;
+    private int _maxTokensCasualRetry = 2048;
     private const int MaxTokensWebSummary     = 1024;
     private const int MaxTokensWebSummaryRetry = 2048;
     private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
+
+    /// <summary>
+    /// User-facing max-token budget for casual chat responses.
+    /// When set (e.g. from <c>LlmSettings.MaxTokens</c>), overrides
+    /// the default 512 cap and scales the truncation-retry ceiling
+    /// to <c>Max(budget, 2048)</c>.
+    /// </summary>
+    public int MaxTokensBudget
+    {
+        get => _maxTokensCasual;
+        set
+        {
+            _maxTokensCasual = value > 0 ? value : 512;
+            _maxTokensCasualRetry = Math.Max(_maxTokensCasual, 2048);
+        }
+    }
 
     // ── Logic puzzle decomposition scaffold ──────────────────────────
     private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
@@ -216,6 +235,35 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             _preferredUnits = NormalizeUnitPreference(value);
             _searchOrchestrator.PreferredUnits = _preferredUnits;
         }
+    }
+
+    /// <summary>
+    /// Seeds the conversation history with prior user/assistant turns
+    /// so multi-turn follow-ups work across stateless HTTP requests.
+    /// Call this <b>before</b> <see cref="ProcessAsync"/> to replay
+    /// the conversation context.  Only user and assistant messages
+    /// are accepted — system messages are silently skipped because
+    /// the constructor already seeds the system prompt.
+    /// </summary>
+    public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
+    {
+        foreach (var (role, content) in priorMessages)
+        {
+            if (string.IsNullOrWhiteSpace(content)) continue;
+
+            switch (role)
+            {
+                case "user":
+                    _history.Add(ChatMessage.User(content));
+                    break;
+                case "assistant":
+                    _history.Add(ChatMessage.Assistant(content));
+                    break;
+                // Skip system/tool — system prompt is already in _history[0].
+            }
+        }
+
+        TrimHistory();
     }
 
     /// <inheritdoc />
@@ -919,7 +967,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 InjectFewShotExamplesInPlace(messages, _personalityRuntime.Snapshot.Profile.Instructions.FewShotExamples);
 
                 var response = await CallLlmWithRetrySafe(
-                    messages, roundTrips, MaxTokensCasual, cancellationToken);
+                    messages, roundTrips, _maxTokensCasual, cancellationToken);
 
                 // ── Truncation recovery ──────────────────────────────
                 // If the LLM hit the token ceiling mid-sentence, retry
@@ -927,10 +975,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     LogEvent("CASUAL_TRUNCATED",
-                        $"Response truncated at {MaxTokensCasual} tokens — retrying with {MaxTokensCasualRetry}.");
+                        $"Response truncated at {_maxTokensCasual} tokens — retrying with {_maxTokensCasualRetry}.");
                     roundTrips++;
                     response = await CallLlmWithRetrySafe(
-                        messages, roundTrips, MaxTokensCasualRetry, cancellationToken);
+                        messages, roundTrips, _maxTokensCasualRetry, cancellationToken);
                 }
 
                 var text = _postProcessor.ProcessChatOnlyDraft(

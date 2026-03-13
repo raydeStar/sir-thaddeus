@@ -486,7 +486,7 @@ public sealed class SearchOrchestrator
             return new AgentResponse
             {
                 Text = "I need a location to search for local businesses. " +
-                       "You can set your location in **Settings → Profile**, " +
+                      "You can set your location in **Settings → Location**, " +
                        "or include a city in your request " +
                        "(e.g., \"florists in Portland, OR\").",
                 Success = true,
@@ -567,6 +567,12 @@ public sealed class SearchOrchestrator
 
         // Parse and record results.
         var sources = ParseSourcesFromToolResult(toolResult);
+        if (isLocalBusinessQuery)
+        {
+            var filteredSources = FilterSourcesForLocalBusinessRequest(userMessage ?? "", sources);
+            if (filteredSources.Count > 0)
+                sources = [.. filteredSources];
+        }
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
             sources,
@@ -599,6 +605,11 @@ public sealed class SearchOrchestrator
             sources, DateTimeOffset.UtcNow);
         Session.LastWasLocalBusinessDiscovery =
             IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+
+        if (isLocalBusinessQuery && sources.Count > 0)
+        {
+            return BuildLocalBusinessDiscoveryResponse(userMessage ?? "", sources, toolCallsMade);
+        }
 
         // tool result lacks rich content (snippet-only mode).
         var strippedContent = StripSourcesJson(toolResult);
@@ -719,13 +730,32 @@ public sealed class SearchOrchestrator
             var subject = ExtractFollowUpSubject(userMessage);
             if (!string.IsNullOrWhiteSpace(subject))
             {
+                // Resolve pronoun references ("this one", "that place")
+                // to a concrete entity from the prior search results.
+                if (IsPronounSubjectReference(subject) && Session.LastResults.Count > 0)
+                {
+                    subject = Session.LastResults[0].Title ?? subject;
+                }
+
+                // Enrich the subject with context from prior results so the
+                // briefing search query isn't ambiguous. "The West Olympia Woman"
+                // alone might match unrelated content; appending the matching
+                // result title/snippet forces the right interpretation
+                // (e.g. "The West Olympia Woman (Community-Supported Bread)").
+                var enriched = EnrichSubjectFromSession(subject);
+
                 _audit.Append(new AuditEvent
                 {
                     Actor  = "agent",
                     Action = "FOLLOWUP_PLACE_BRIEFING_REDIRECT",
-                    Result = subject
+                    Result = enriched,
+                    Details = new Dictionary<string, object>
+                    {
+                        ["raw_subject"]  = subject,
+                        ["enriched"]     = !string.Equals(subject, enriched, StringComparison.Ordinal)
+                    }
                 });
-                return await ExecuteDeepDiveBriefingAsync(subject, toolCallsMade, ct);
+                return await ExecuteDeepDiveBriefingAsync(enriched, toolCallsMade, ct);
             }
         }
 
@@ -748,15 +778,44 @@ public sealed class SearchOrchestrator
     /// <summary>
     /// Strips common follow-up prefixes to isolate the subject the user
     /// is asking about. "Tell me more about Left Bank Pastry" → "Left Bank Pastry".
+    /// Also handles inverted patterns like
+    /// "Left Bank Pastry -- can you tell me more about this one?" → "Left Bank Pastry".
     /// </summary>
-    private static string ExtractFollowUpSubject(string userMessage)
+    internal static string ExtractFollowUpSubject(string userMessage)
     {
         var trimmed = (userMessage ?? "").Trim();
 
         ReadOnlySpan<string> prefixes =
         [
+            // Long conversational prefixes first (order matters — first match wins)
+            "can you pull me up more info on ",
+            "can you pull me up more info about ",
+            "can you pull me up more on ",
+            "can you pull me up more about ",
+            "can you bring me up more info on ",
+            "can you bring me up more info about ",
+            "can you bring me up more on ",
+            "can you bring me up more about ",
+            "can you tell me more about ",
+            "can you tell me about ",
+            "pull me up more info on ",
+            "pull me up more info about ",
+            "pull me up more on ",
+            "pull me up more about ",
+            "pull me up more ",
+            "bring me up more info on ",
+            "bring me up more info about ",
+            "bring me up more on ",
+            "bring me up more about ",
+            "bring me up more ",
             "tell me more about ",
             "tell me about ",
+            "show me more about ",
+            "show me about ",
+            "more info on ",
+            "more info about ",
+            "more information on ",
+            "more information about ",
             "more about ",
             "more on ",
             "details on ",
@@ -767,10 +826,14 @@ public sealed class SearchOrchestrator
             "info about ",
             "information on ",
             "information about ",
-            "can you tell me about ",
-            "can you tell me more about ",
-            "show me more about ",
-            "show me about ",
+            "brief me on ",
+            "brief me about ",
+            "give me a brief on ",
+            "give me a brief about ",
+            "give me a brief for ",
+            "create a brief on ",
+            "create a brief about ",
+            "create a brief for ",
             "show me "
         ];
 
@@ -780,7 +843,179 @@ public sealed class SearchOrchestrator
                 return trimmed[prefix.Length..].TrimEnd('?', '.', '!');
         }
 
+        // Handle inverted "EntityName -- follow-up phrase" patterns.
+        // e.g. "New Olympia Flower Shop -- can you tell me more about this one?"
+        // The part before the separator is the entity name.
+        foreach (var sep in (ReadOnlySpan<string>)[" -- ", " — "])
+        {
+            var idx = trimmed.IndexOf(sep, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var afterSep = trimmed[(idx + sep.Length)..].Trim();
+                var afterLower = afterSep.ToLowerInvariant();
+
+                // Check if the part after the separator is conversational follow-up filler
+                if (IsFollowUpFiller(afterLower))
+                    return trimmed[..idx].Trim().TrimEnd('?', '.', '!');
+            }
+        }
+
         return trimmed;
+    }
+
+    /// <summary>
+    /// Returns true when the text is conversational follow-up filler such as
+    /// "can you tell me more about this one?" or "tell me more", indicating
+    /// the real subject is elsewhere in the message (e.g. before a separator).
+    /// </summary>
+    internal static bool IsFollowUpFiller(string lowerText)
+    {
+        ReadOnlySpan<string> fillerPhrases =
+        [
+            "can you tell me more",
+            "tell me more",
+            "can you pull me up more",
+            "pull me up more",
+            "can you bring me up more",
+            "bring me up more",
+            "more info",
+            "more information",
+            "more details",
+            "more about",
+            "what can you tell me",
+            "what do you know",
+            "give me a brief",
+            "brief me",
+            "create a brief",
+            "show me more",
+            "go deeper",
+            "dig into",
+            "elaborate",
+            "expand on"
+        ];
+
+        var stripped = lowerText.TrimEnd('?', '.', '!').Trim();
+        foreach (var filler in fillerPhrases)
+        {
+            if (stripped.StartsWith(filler, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true when the extracted subject is a pronoun reference
+    /// like "this one" or "that place" rather than an actual entity name.
+    /// </summary>
+    internal static bool IsPronounSubjectReference(string subject)
+    {
+        var lower = subject.Trim().ToLowerInvariant();
+        return lower is "this one" or "that one" or "this" or "that" or "it"
+            or "the first one" or "the second one" or "the third one"
+            or "the first" or "the second" or "the third"
+            or "that place" or "this place"
+            or "that business" or "this business"
+            or "that shop" or "this shop"
+            or "that store" or "this store"
+            or "that restaurant" or "this restaurant";
+    }
+
+    /// <summary>
+    /// Searches prior session results for a title that contains the subject
+    /// and returns the full title (which typically has disambiguating context
+    /// like "(Community-Supported Bread)" or "- Thai Restaurant"). Falls back
+    /// to the original subject if no match is found.
+    /// </summary>
+    private string EnrichSubjectFromSession(string subject)
+    {
+        if (Session.LastResults.Count == 0)
+            return subject;
+
+        var subjectLower = subject.ToLowerInvariant();
+
+        // Pass 1: Exact or substring match on source titles.
+        foreach (var result in Session.LastResults)
+        {
+            if (string.IsNullOrWhiteSpace(result.Title))
+                continue;
+
+            var titleLower = result.Title.ToLowerInvariant();
+
+            // Prior result title contains the subject → use the full title
+            // (e.g. "The West Olympia Woman (Community-Supported Bread)")
+            if (titleLower.Contains(subjectLower, StringComparison.Ordinal))
+            {
+                return result.Title.Trim();
+            }
+
+            // Subject contains the full title → still a match
+            if (subjectLower.Contains(titleLower, StringComparison.Ordinal))
+            {
+                // If the snippet adds useful context, append it
+                if (!string.IsNullOrWhiteSpace(result.Snippet) && result.Snippet.Length > 10)
+                {
+                    var snippetContext = result.Snippet.Length > 80
+                        ? result.Snippet[..80].Trim()
+                        : result.Snippet.Trim();
+                    return $"{result.Title} — {snippetContext}";
+                }
+                return result.Title.Trim();
+            }
+        }
+
+        // Pass 2: Strip common site-name suffixes (" | Yelp", " - Google
+        // Maps") from titles and retry. Search engines frequently append
+        // the site name, which breaks substring matching.
+        foreach (var result in Session.LastResults)
+        {
+            if (string.IsNullOrWhiteSpace(result.Title))
+                continue;
+
+            var cleaned = StripTitleSuffix(result.Title).ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(cleaned))
+                continue;
+
+            if (cleaned.Contains(subjectLower, StringComparison.Ordinal))
+                return StripTitleSuffix(result.Title).Trim();
+
+            if (subjectLower.Contains(cleaned, StringComparison.Ordinal))
+                return StripTitleSuffix(result.Title).Trim();
+        }
+
+        // No match in titles — try appending the original search query as context
+        // so the briefing search engine gets the right domain.
+        if (!string.IsNullOrWhiteSpace(Session.LastQuery) &&
+            !subjectLower.Contains(Session.LastQuery.ToLowerInvariant(), StringComparison.Ordinal))
+        {
+            return $"{subject} ({Session.LastQuery})";
+        }
+
+        return subject;
+    }
+
+    /// <summary>
+    /// Strips common site-name suffixes from search result titles.
+    /// "New Olympia Flower Shop | Yelp" → "New Olympia Flower Shop".
+    /// </summary>
+    internal static string StripTitleSuffix(string title)
+    {
+        // Ordered by specificity — try pipe first, then em-dash, then hyphen.
+        foreach (var sep in (ReadOnlySpan<string>)[" | ", " — ", " - "])
+        {
+            var idx = title.LastIndexOf(sep, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var candidate = title[..idx].Trim();
+                // Only strip if the suffix is short (looks like a site name)
+                // and the remaining part is substantial.
+                var suffix = title[(idx + sep.Length)..].Trim();
+                if (suffix.Length < 40 && candidate.Length > 3)
+                    return candidate;
+            }
+        }
+
+        return title;
     }
 
     // ── Branch: DeepDive ─────────────────────────────────────────────
@@ -971,6 +1206,9 @@ public sealed class SearchOrchestrator
             recency: "any",
             results: sourceItems,
             now: now);
+
+        Session.LastWasLocalBusinessDiscovery =
+            IntentFeatureExtractor.HasLocalBusinessProximitySignals(userMessage.ToLowerInvariant());
 
         return new AgentResponse
         {
@@ -2639,6 +2877,159 @@ public sealed class SearchOrchestrator
             ToolCallsMade = toolCallsMade.ToList(),
             LlmRoundTrips = 0
         };
+    }
+
+    private AgentResponse BuildLocalBusinessDiscoveryResponse(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
+        var location = UserLocationHint?.Trim();
+        var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" nearby in {location}";
+        var topSources = sources.Take(5).ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine(topSources.Count == 1
+            ? $"Here are the {businessLabel}{locText} results I found (1 clearly relevant match):"
+            : $"Here are some {businessLabel}{locText}:");
+        sb.AppendLine();
+
+        foreach (var source in topSources)
+        {
+            sb.Append("- **");
+            sb.Append(source.Title);
+            sb.Append("**");
+
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+            {
+                sb.Append(": ");
+                sb.Append(TrimSentence(source.Snippet, 180));
+            }
+
+            if (!string.IsNullOrWhiteSpace(source.Domain))
+            {
+                sb.Append(" (source: ");
+                sb.Append(source.Domain);
+                sb.Append(')');
+            }
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine();
+        sb.Append("If you want, I can bring up more info on any one of these ");
+        sb.Append(businessLabel);
+        sb.Append('.');
+
+        return new AgentResponse
+        {
+            Text = sb.ToString(),
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessRequest(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources)
+    {
+        if (sources.Count == 0)
+            return sources;
+
+        var keywords = GetLocalBusinessMatchKeywords(userMessage);
+        if (keywords.Count == 0)
+            return sources;
+
+        var filtered = sources
+            .Where(source => LocalBusinessSourceMatches(source, keywords))
+            .ToList();
+
+        return filtered;
+    }
+
+    private static bool LocalBusinessSourceMatches(SourceItem source, IReadOnlyList<string> keywords)
+    {
+        var haystack = $"{source.Title} {source.Snippet} {source.Domain}";
+        foreach (var keyword in keywords)
+        {
+            if (haystack.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<string> GetLocalBusinessMatchKeywords(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+
+        if (lower.Contains("bakery", StringComparison.Ordinal) || lower.Contains("bakeries", StringComparison.Ordinal))
+            return ["bakery", "bakeries", "bread", "pastry", "pastries", "patisserie", "cake", "cakes", "donut", "donuts"];
+
+        if (lower.Contains("restaurant", StringComparison.Ordinal))
+            return ["restaurant", "restaurants", "eatery", "bistro", "diner", "grill", "cafe"];
+
+        if (lower.Contains("florist", StringComparison.Ordinal))
+            return ["florist", "floral", "flower"];
+
+        if (lower.Contains("salon", StringComparison.Ordinal))
+            return ["salon", "hair", "stylist", "barber"];
+
+        if (lower.Contains("coffee", StringComparison.Ordinal) || lower.Contains("cafe", StringComparison.Ordinal))
+            return ["coffee", "cafe", "espresso", "roastery"];
+
+        if (lower.Contains("pharmacy", StringComparison.Ordinal))
+            return ["pharmacy", "drugstore", "rx"];
+
+        if (lower.Contains("dentist", StringComparison.Ordinal))
+            return ["dentist", "dental", "orthodont"];
+
+        if (lower.Contains("grocery", StringComparison.Ordinal))
+            return ["grocery", "market", "supermarket"];
+
+        return [];
+    }
+
+    private static string GetRequestedLocalBusinessLabel(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+
+        if (lower.Contains("bakeries", StringComparison.Ordinal) || lower.Contains("bakery", StringComparison.Ordinal))
+            return "bakeries";
+        if (lower.Contains("restaurants", StringComparison.Ordinal) || lower.Contains("restaurant", StringComparison.Ordinal))
+            return "restaurants";
+        if (lower.Contains("florists", StringComparison.Ordinal) || lower.Contains("florist", StringComparison.Ordinal))
+            return "florists";
+        if (lower.Contains("coffee", StringComparison.Ordinal) || lower.Contains("cafe", StringComparison.Ordinal))
+            return "coffee shops";
+        if (lower.Contains("salon", StringComparison.Ordinal))
+            return "salons";
+
+        return "places";
+    }
+
+    private static string SingularizeBusinessLabel(string label)
+    {
+        return label switch
+        {
+            "bakeries" => "bakery",
+            "restaurants" => "restaurant",
+            "florists" => "florist",
+            "coffee shops" => "coffee shop",
+            "salons" => "salon",
+            _ => label.TrimEnd('s')
+        };
+    }
+
+    private static string TrimSentence(string text, int maxLen)
+    {
+        var cleaned = (text ?? "").Trim();
+        if (cleaned.Length <= maxLen)
+            return cleaned;
+
+        return cleaned[..maxLen].TrimEnd() + "…";
     }
 
     private AgentResponse BuildNewsNoResultsResponse(

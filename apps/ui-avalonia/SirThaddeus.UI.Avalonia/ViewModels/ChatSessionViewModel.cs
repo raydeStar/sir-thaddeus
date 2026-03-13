@@ -7,6 +7,18 @@ namespace SirThaddeus.UI.Avalonia.ViewModels;
 
 public class ChatMessageItem : INotifyPropertyChanged
 {
+    /// <summary>
+    /// When true, <see cref="TimeDisplay"/> uses 24-hour (HH:mm) format.
+    /// Set once from app settings at startup and whenever the user toggles the preference.
+    /// </summary>
+    public static bool Use24HourTime { get; set; }
+
+    /// <summary>
+    /// The display name shown for user messages (e.g. preferred name from active profile).
+    /// Defaults to "You" until a profile with a preferred name is loaded.
+    /// </summary>
+    public static string UserDisplayName { get; set; } = "You";
+
     private string _role = string.Empty;
     private string _content = string.Empty;
     private string _thoughtContent = string.Empty;
@@ -114,7 +126,7 @@ public class ChatMessageItem : INotifyPropertyChanged
     public bool IsStatus => Role == "status";
     public string AuthorLabel => Role switch
     {
-        "user" => "You",
+        "user" => UserDisplayName,
         "assistant" => "Sir Thaddeus",
         "tool" => "Tool Activity",
         "status" => "System",
@@ -131,7 +143,7 @@ public class ChatMessageItem : INotifyPropertyChanged
         _ => ""
     };
 
-    public string TimeDisplay => _timestamp.ToString("t");
+    public string TimeDisplay => _timestamp.ToString(Use24HourTime ? "HH:mm" : "t");
 
     private void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

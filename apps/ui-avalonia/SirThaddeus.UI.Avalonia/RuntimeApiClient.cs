@@ -16,9 +16,12 @@ internal sealed class RuntimeApiClient
         _httpClient = httpClient;
     }
 
-    public async Task<ChatStartResponse> StartRunAsync(string prompt, CancellationToken cancellationToken)
+    public async Task<ChatStartResponse> StartRunAsync(
+        string prompt,
+        CancellationToken cancellationToken,
+        IReadOnlyList<ChatHistoryMessage>? messages = null)
     {
-        var payload = new ChatRequest(prompt);
+        var payload = new ChatRequest(prompt, Messages: messages);
         using var response = await _httpClient.PostAsJsonAsync("/api/chat", payload, JsonOptions, cancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ChatStartResponse>(JsonOptions, cancellationToken))
@@ -40,6 +43,20 @@ internal sealed class RuntimeApiClient
 
         var body = await response.Content.ReadFromJsonAsync<CancelRunResponse>(JsonOptions, cancellationToken);
         return body?.Accepted == true;
+    }
+
+    /// <summary>Clears runtime session-level permission grants (called on "New Chat").</summary>
+    public async Task ClearSessionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _httpClient.PostAsync("/api/session/clear", null, cancellationToken);
+            // Fire-and-forget — if the runtime isn't connected, skip silently.
+        }
+        catch
+        {
+            // Silently ignore — runtime may not be connected yet.
+        }
     }
 
     public async Task<HealthResponse?> GetHealthAsync(CancellationToken cancellationToken)
@@ -299,11 +316,16 @@ internal sealed class RuntimeApiClient
             cancellationToken);
     }
 
-    public async Task<bool> SubmitPermissionDecisionAsync(string requestId, bool approved, CancellationToken cancellationToken)
+    public async Task<bool> SubmitPermissionDecisionAsync(
+        string requestId,
+        bool approved,
+        bool rememberForSession,
+        bool persistAsAlways,
+        CancellationToken cancellationToken)
     {
         using var response = await _httpClient.PostAsJsonAsync(
             $"/api/permissions/{Uri.EscapeDataString(requestId)}/decision",
-            new PermissionDecisionRequest(approved),
+            new PermissionDecisionRequest(approved, rememberForSession, persistAsAlways),
             JsonOptions,
             cancellationToken);
 

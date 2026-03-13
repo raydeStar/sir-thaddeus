@@ -699,6 +699,12 @@ internal static class RuntimeApiServer
             return Results.Json(response, JsonOptions);
         });
 
+        app.MapPost("/api/session/clear", () =>
+        {
+            permissionGate?.ClearSessionGrants();
+            return Results.Ok();
+        });
+
         app.MapPost("/api/chat", (ChatRequest request) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
@@ -716,6 +722,15 @@ internal static class RuntimeApiServer
                 try
                 {
                     var orchestrator = buildOrchestrator(getSettings());
+
+                    // Replay prior conversation turns so follow-up questions
+                    // have the context of the current chat session.
+                    if (request.Messages is { Count: > 0 })
+                    {
+                        orchestrator.SeedHistory(
+                            request.Messages.Select(m => (m.Role, m.Content)));
+                    }
+
                     var response = await orchestrator.ProcessAsync(request.Prompt, state.CancellationToken);
                     state.Append(RuntimeEventTypes.TokenDelta, new TokenDeltaPayload(response.Text, 0));
                     state.Append(RuntimeEventTypes.RunCompleted, new RunCompletedPayload(response.Text, 0, ToBriefingDto(response.DeepDiveBriefing)));
@@ -755,7 +770,37 @@ internal static class RuntimeApiServer
                 return Results.NotFound();
             }
 
-            var applied = permissionGate.TryApplyDecision(requestId, request.Approved);
+            var applied = permissionGate.TryApplyDecision(requestId, request.Approved, request.RememberForSession, request.PersistAsAlways);
+
+            // "Allow always" → persist the group policy to settings.json
+            if (applied && request.Approved && request.PersistAsAlways)
+            {
+                var toolGroup = permissionGate.GetLastResolvedGroup(requestId);
+                if (toolGroup is not null)
+                {
+                    var currentSettings = getSettings();
+                    var perms = currentSettings.Mcp.Permissions;
+                    var updatedPerms = toolGroup switch
+                    {
+                        "screen"      => perms with { Screen      = "always" },
+                        "files"       => perms with { Files       = "always" },
+                        "system"      => perms with { System      = "always" },
+                        "web"         => perms with { Web         = "always" },
+                        "memoryRead"  => perms with { MemoryRead  = "always" },
+                        "memoryWrite" => perms with { MemoryWrite = "always" },
+                        _             => perms
+                    };
+                    if (!ReferenceEquals(perms, updatedPerms))
+                    {
+                        var updatedSettings = currentSettings with
+                        {
+                            Mcp = currentSettings.Mcp with { Permissions = updatedPerms }
+                        };
+                        PersistSettings(updatedSettings);
+                    }
+                }
+            }
+
             return Results.Json(new PermissionDecisionResponse(requestId, applied), JsonOptions);
         });
 
@@ -1414,6 +1459,13 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pending = new(StringComparer.OrdinalIgnoreCase);
     private volatile PolicySnapshot _snapshot;
 
+    // Session-level grant cache: group → true. Cleared on new conversation session.
+    private readonly ConcurrentDictionary<string, bool> _sessionGrants = new(StringComparer.OrdinalIgnoreCase);
+
+    // Tracks which tool group each pending request belongs to, so the
+    // decision endpoint can persist "always" against the correct group.
+    private readonly ConcurrentDictionary<string, string> _requestGroupMap = new(StringComparer.OrdinalIgnoreCase);
+
     public ApiPermissionGate(AppSettings initialSettings, Func<string?> currentRunIdAccessor)
     {
         _snapshot = ToolGroupPolicy.BuildSnapshot(initialSettings, isDebugBuild: false);
@@ -1426,6 +1478,16 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
     public void UpdateSettings(AppSettings settings)
     {
         _snapshot = ToolGroupPolicy.BuildSnapshot(settings, isDebugBuild: false);
+    }
+
+    /// <summary>Clears session-level grants (call on "New Chat" / conversation reset).</summary>
+    public void ClearSessionGrants() => _sessionGrants.Clear();
+
+    /// <summary>Returns the tool group for a recently-resolved request id (for "always" persistence).</summary>
+    public string? GetLastResolvedGroup(string requestId)
+    {
+        _requestGroupMap.TryRemove(requestId, out var group);
+        return group;
     }
 
     public Task<ToolPermissionResult> CheckAsync(string toolName, string argumentsJson, CancellationToken ct)
@@ -1444,13 +1506,29 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
             return Task.FromResult(ToolPermissionResult.NotRequired());
         }
 
-        return WaitForDecisionAsync(canonical, argumentsJson, ct);
+        // Session-level grant: skip prompting for groups the user already approved this session.
+        if (_sessionGrants.TryGetValue(group, out var granted) && granted)
+        {
+            return Task.FromResult(ToolPermissionResult.NotRequired());
+        }
+
+        return WaitForDecisionAsync(canonical, group, argumentsJson, ct);
     }
 
-    public bool TryApplyDecision(string requestId, bool approved)
+    public bool TryApplyDecision(string requestId, bool approved, bool rememberForSession = false, bool persistAsAlways = false)
     {
         if (_pending.TryRemove(requestId, out var tcs))
         {
+            // Cache the session grant if requested (before signalling the TCS
+            // so subsequent CheckAsync calls in the same run benefit immediately).
+            if (approved && (rememberForSession || persistAsAlways))
+            {
+                if (_requestGroupMap.TryGetValue(requestId, out var group))
+                {
+                    _sessionGrants[group] = true;
+                }
+            }
+
             tcs.TrySetResult(approved);
             return true;
         }
@@ -1460,6 +1538,7 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
 
     private async Task<ToolPermissionResult> WaitForDecisionAsync(
         string canonicalToolName,
+        string group,
         string argumentsJson,
         CancellationToken cancellationToken)
     {
@@ -1468,6 +1547,7 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
         var reason = ToolGroupPolicy.BuildRedactedPurpose(canonicalToolName, argumentsJson);
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[requestId] = tcs;
+        _requestGroupMap[requestId] = group;
 
         Requested?.Invoke(runId, new ToolRequestedPayload(
             RequestId: requestId,
@@ -1485,6 +1565,7 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
         catch (OperationCanceledException)
         {
             _pending.TryRemove(requestId, out _);
+            _requestGroupMap.TryRemove(requestId, out _);
             Resolved?.Invoke(runId, new ToolDecisionPayload(requestId, canonicalToolName, false));
             return ToolPermissionResult.Deny("Cancelled");
         }

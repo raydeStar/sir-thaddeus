@@ -143,6 +143,39 @@
         <Setter Property="RenderTransform" Value="scale(0.97)"/>
     </Style>
 
+    <!-- PTT Button State Classes -->
+    <Style Selector="Button.pttListening">
+        <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.pttListening:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource SapphireBrush}"/>
+    </Style>
+
+    <Style Selector="Button.pttProcessing">
+        <Setter Property="Background" Value="{StaticResource YellowBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.pttProcessing:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource YellowBrush}"/>
+    </Style>
+
+    <Style Selector="Button.pttSpeaking">
+        <Setter Property="Background" Value="{StaticResource GreenBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.pttSpeaking:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource GreenBrush}"/>
+    </Style>
+
+    <Style Selector="Button.pttResponding">
+        <Setter Property="Background" Value="{StaticResource BlueBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.pttResponding:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource SapphireBrush}"/>
+    </Style>
+
     <!-- Approve Button (Green) -->
     <Style Selector="Button.approveBtn">
         <Setter Property="Background"      Value="{StaticResource GreenBrush}"/>

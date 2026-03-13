@@ -83,7 +83,7 @@ public sealed partial class AgentOrchestrator
 
         roundTrips++;
         var screenResponse = await CallLlmWithRetrySafe(
-            messages, roundTrips, MaxTokensCasual, cancellationToken);
+            messages, roundTrips, _maxTokensCasual, cancellationToken);
 
         var screenText = _postProcessor.ProcessChatOnlyDraft(
             screenResponse.Content ?? "[No response]",

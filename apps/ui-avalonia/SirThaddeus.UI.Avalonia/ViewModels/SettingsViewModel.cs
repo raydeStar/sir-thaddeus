@@ -65,6 +65,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public SettingsViewModel()
     {
         _appSettings = SettingsManager.Load();
+        ChatMessageItem.Use24HourTime = _appSettings.Ui.Use24HourTime;
         StatusText = "Settings loaded.";
         LoadAudioDevices();
         RefreshVoiceCatalogs();
@@ -274,6 +275,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             }
         }
     }
+
+    /// <summary>Snapshot of the current voice settings for TTS callers.</summary>
+    public VoiceSettings GetVoiceSettingsSnapshot() => _appSettings.Voice;
 
     public bool IsPiperEngine => VoiceTtsEngine.Equals("piper", StringComparison.OrdinalIgnoreCase);
     public bool IsKokoroEngine => VoiceTtsEngine.Equals("kokoro", StringComparison.OrdinalIgnoreCase);
@@ -994,6 +998,119 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    public string PttChord
+    {
+        get => _appSettings.Audio.PttChord;
+        set
+        {
+            var normalized = NormalizeHotkeyChord(value, "Ctrl+Alt+M");
+            if (!string.Equals(_appSettings.Audio.PttChord, normalized, StringComparison.Ordinal))
+            {
+                _appSettings = _appSettings with { Audio = _appSettings.Audio with { PttChord = normalized } };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public string ShutupChord
+    {
+        get => _appSettings.Audio.ShutupChord;
+        set
+        {
+            var normalized = NormalizeHotkeyChord(value, "Ctrl+Alt+Escape");
+            if (!string.Equals(_appSettings.Audio.ShutupChord, normalized, StringComparison.Ordinal))
+            {
+                _appSettings = _appSettings with { Audio = _appSettings.Audio with { ShutupChord = normalized } };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    // -- Display settings --
+
+    public string Location
+    {
+        get => _appSettings.GetEffectiveUserLocation(_appSettings.ActiveProfileId).GetResolvedLabel() ?? "";
+        set
+        {
+            var normalized = NormalizeString(value);
+            var current = _appSettings.GetEffectiveUserLocation(_appSettings.ActiveProfileId).GetResolvedLabel() ?? "";
+            if (string.Equals(current, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var mode = string.IsNullOrWhiteSpace(normalized) ? "unset" : "manual";
+            var updatedAt = mode == "manual" ? DateTimeOffset.UtcNow.ToString("O") : "";
+
+            var normalizedLocation = new LocationSettings
+            {
+                Mode = mode,
+                Value = normalized,
+                UpdatedAt = updatedAt,
+                Enabled = mode == "manual",
+                Label = normalized,
+                Timezone = "",
+                Latitude = null,
+                Longitude = null
+            };
+
+            var activeProfileKey = AppSettings.NormalizeLocationProfileKey(_appSettings.ActiveProfileId);
+            var locationsByProfile = new Dictionary<string, LocationSettings>(
+                _appSettings.UserProfile.LocationsByProfile,
+                StringComparer.OrdinalIgnoreCase)
+            {
+                [activeProfileKey] = normalizedLocation
+            };
+
+            _appSettings = _appSettings with
+            {
+                Location = normalizedLocation,
+                UserProfile = _appSettings.UserProfile with
+                {
+                    Location = normalizedLocation,
+                    LocationsByProfile = locationsByProfile
+                }
+            };
+
+            OnPropertyChanged();
+            MarkDirty();
+        }
+    }
+
+    public bool Use24HourTime
+    {
+        get => _appSettings.Ui.Use24HourTime;
+        set
+        {
+            if (_appSettings.Ui.Use24HourTime != value)
+            {
+                _appSettings = _appSettings with { Ui = _appSettings.Ui with { Use24HourTime = value } };
+                ChatMessageItem.Use24HourTime = value;
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
+    public static string[] PreferredUnitsOptions { get; } = ["imperial", "metric"];
+
+    public string PreferredUnits
+    {
+        get => _appSettings.Weather.PreferredUnits;
+        set
+        {
+            if (!string.Equals(_appSettings.Weather.PreferredUnits, value, StringComparison.Ordinal))
+            {
+                _appSettings = _appSettings with { Weather = _appSettings.Weather with { PreferredUnits = value } };
+                OnPropertyChanged();
+                MarkDirty();
+            }
+        }
+    }
+
     // -- MCP Permission ComboBox option sources --
     public static string[] PermissionOptions { get; } = ["ask", "always", "off"];
     public static string[] DeveloperOverrideOptions { get; } = ["none", "ask", "always", "off"];
@@ -1540,6 +1657,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             },
             Audio = latest.Audio with
             {
+                PttChord = NormalizeHotkeyChord(PttChord, latest.Audio.PttChord),
+                ShutupChord = NormalizeHotkeyChord(ShutupChord, latest.Audio.ShutupChord),
                 InputDeviceName = NormalizeString(SelectedInputDevice?.ProductName),
                 OutputDeviceName = NormalizeString(SelectedOutputDevice?.ProductName),
                 InputGain = Math.Clamp(InputGain, 0.0, 2.0)
@@ -1588,7 +1707,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 MaxToolCallsPerSession = Math.Max(1, MaxToolCallsPerSession),
                 MaxWebPullsPerTurn = Math.Max(0, MaxWebPullsPerTurn),
                 MaxFileOpsPerMinute = Math.Max(0, MaxFileOpsPerMinute)
-            }.Normalize()
+            }.Normalize(),
+            Ui = latest.Ui with
+            {
+                Use24HourTime = Use24HourTime
+            },
+            Weather = latest.Weather with
+            {
+                PreferredUnits = PreferredUnits
+            }
         };
     }
 
@@ -1637,6 +1764,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
 
         RefreshVoiceCatalogs();
+        OnPropertyChanged(nameof(Location));
         OnPropertyChanged(nameof(SelectedKokoroVoice));
     }
 
@@ -2011,6 +2139,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         var priorSettings = _appSettings;
         _appSettings = settings;
+        ChatMessageItem.Use24HourTime = settings.Ui.Use24HourTime;
         IsDirty = false;
         StatusText = statusText;
         LoadAudioDevices();
@@ -2113,6 +2242,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     private static string NormalizeStringOrFallback(string? value, string fallback)
+    {
+        var normalized = NormalizeString(value);
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
+    private static string NormalizeHotkeyChord(string? value, string fallback)
     {
         var normalized = NormalizeString(value);
         return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;

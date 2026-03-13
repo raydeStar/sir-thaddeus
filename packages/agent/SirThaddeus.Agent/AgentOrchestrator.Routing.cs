@@ -113,6 +113,16 @@ public sealed partial class AgentOrchestrator
             return false;
         }
 
+        // LookupSearch follow-ups are validated by Tier-1 via
+        // IsFollowUpMessage + HasRecentSearchResults. The deterministic
+        // session context is authoritative — skip the Footman to prevent
+        // stochastic downgrades from losing web_search on follow-ups.
+        if (route.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) &&
+            Search.SearchModeRouter.IsFollowUpMessage(lowerIncoming))
+        {
+            return false;
+        }
+
         if (IsLookupIntent(route.Intent))
             return true;
 
@@ -147,6 +157,14 @@ public sealed partial class AgentOrchestrator
             IsLookupFloorEligiblePrompt(lowerIncoming) &&
             webEvidence.ShouldLookup &&
             webEvidence.Score >= 2.8)
+        {
+            return true;
+        }
+
+        // LookupSearch is set by the deterministic follow-up path
+        // (IsFollowUpMessage + HasRecentSearchResults). The session
+        // context is authoritative — never let the Footman downgrade it.
+        if (baseRoute.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

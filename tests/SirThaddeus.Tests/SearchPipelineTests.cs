@@ -80,6 +80,54 @@ public class SearchModeRouterTests
     }
 
     [Fact]
+    public void FollowUpWithLocalBusinessEntity_StillClassifiesAsFollowUp_WhenExplicitPhrasePresent()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "bring me up more info on the godairyfree restaurant",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void LocalBusinessShowMeQuery_IsNotForcedIntoFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "show me bakeries near me",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.NotEqual(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void FollowUp_MoreOnPhrase_ClassifiesAsFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "can you bring me up more on The West Olympia Woman",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void FollowUp_BringMeUp_ClassifiesAsFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "bring me up more on the moonrise bakery",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
     public void FollowUpBranch_MoreSources_DetectedCorrectly()
     {
         Assert.Equal(FollowUpBranch.MoreSources,
@@ -2409,6 +2457,51 @@ public class LocalBusinessDetectionTests
         Assert.Equal(expected, result);
     }
 
+    [Fact]
+    public async Task LocalBakeryDiscovery_FiltersIrrelevantGuideResults()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.theolympian.com/west-olympia-woman\",\"title\":\"The West Olympia Woman (Community-Supported Bread)\",\"domain\":\"theolympian.com\",\"snippet\":\"She has been baking out of her home for years and sells community-supported bread.\"}," +
+            "{\"url\":\"https://example.com/dairy-free-guide\",\"title\":\"Washington Dairy-Free Restaurant Guide\",\"domain\":\"example.com\",\"snippet\":\"A statewide guide to dairy-free restaurants and dessert options.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring up some local bakeries, please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("bakeries nearby", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("West Olympia Woman", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dairy-Free Restaurant Guide", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("can you tell me about some florists nearby")]   // discovery, not specific-place
     [InlineData("florists nearby")]                              // discovery
@@ -2439,6 +2532,7 @@ public class LocalBusinessDetectionTests
     [InlineData("brief me on the new bakery downtown")]
     [InlineData("briefing on walmart hours")]
     [InlineData("briefing for trader joe's")]
+    [InlineData("can you pull me up more info on new olympia flower shop")]
     public void LooksLikeDeepDiveLookup_MatchesBriefingSignals(string input)
     {
         var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
@@ -2453,6 +2547,71 @@ public class LocalBusinessDetectionTests
     {
         var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
         Assert.False(result, $"Expected no deep dive match for: {input}");
+    }
+
+    // ── ExtractFollowUpSubject tests ─────────────────────────────────
+
+    [Theory]
+    [InlineData("tell me more about Left Bank Pastry", "Left Bank Pastry")]
+    [InlineData("can you tell me more about New Olympia Flower Shop?", "New Olympia Flower Shop")]
+    [InlineData("can you pull me up more info on new olympia flower shop?", "new olympia flower shop")]
+    [InlineData("more info on Target", "Target")]
+    [InlineData("show me Trader Joe's", "Trader Joe's")]
+    [InlineData("brief me on the new bakery downtown", "the new bakery downtown")]
+    [InlineData("give me a brief on french market", "french market")]
+    [InlineData("create a brief about Target", "Target")]
+    public void ExtractFollowUpSubject_PrefixStripping_Works(string input, string expected)
+    {
+        var result = SearchOrchestrator.ExtractFollowUpSubject(input);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("New Olympia Flower Shop -- can you tell me more about this one?", "New Olympia Flower Shop")]
+    [InlineData("Left Bank Pastry -- tell me more", "Left Bank Pastry")]
+    [InlineData("Target — more info please?", "Target")]
+    [InlineData("Trader Joe's -- what can you tell me about this?", "Trader Joe's")]
+    [InlineData("The West Olympia Woman -- give me a brief", "The West Olympia Woman")]
+    public void ExtractFollowUpSubject_SeparatorPattern_ExtractsEntityName(string input, string expected)
+    {
+        var result = SearchOrchestrator.ExtractFollowUpSubject(input);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("this one", true)]
+    [InlineData("that one", true)]
+    [InlineData("this place", true)]
+    [InlineData("that restaurant", true)]
+    [InlineData("the first one", true)]
+    [InlineData("Left Bank Pastry", false)]
+    [InlineData("Target in Olympia", false)]
+    public void IsPronounSubjectReference_ClassifiesCorrectly(string subject, bool expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.IsPronounSubjectReference(subject));
+    }
+
+    [Theory]
+    [InlineData("New Olympia Flower Shop | Yelp", "New Olympia Flower Shop")]
+    [InlineData("Target — Google Maps", "Target")]
+    [InlineData("Left Bank Pastry - TripAdvisor", "Left Bank Pastry")]
+    [InlineData("Plain Title", "Plain Title")]
+    public void StripTitleSuffix_StripsCommonSiteSuffixes(string title, string expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.StripTitleSuffix(title));
+    }
+
+    [Theory]
+    [InlineData("can you tell me more about this one?", true)]
+    [InlineData("tell me more", true)]
+    [InlineData("more info please", true)]
+    [InlineData("give me a brief on it", true)]
+    [InlineData("elaborate on that", true)]
+    [InlineData("some random search query", false)]
+    [InlineData("new olympia flower shop", false)]
+    public void IsFollowUpFiller_ClassifiesCorrectly(string text, bool expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.IsFollowUpFiller(text.ToLowerInvariant()));
     }
 }
 

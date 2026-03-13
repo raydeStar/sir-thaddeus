@@ -45,9 +45,10 @@ public partial class MainWindow : Window
     private IReadOnlyList<string> _lastAssistantSources = Array.Empty<string>();
     private readonly Dictionary<string, StringBuilder> _assistantBuffersByRunId = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _toolCallsInCurrentRun = new();
+    private bool _voiceInitiatedRun;
     private static readonly Regex MarkdownBoldRegex = new(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
     private static readonly Regex MarkdownUnderscoreBoldRegex = new(@"__(.+?)__", RegexOptions.Compiled);
-    private readonly LocalTextToSpeechPlaybackService _ttsPlaybackService = new();
+    private readonly LocalTextToSpeechPlaybackService _ttsPlaybackService;
     private readonly IMicrophoneCaptureService _microphoneCaptureService = new NAudioMicrophoneCaptureService();
     private readonly VoiceHostLauncher _voiceHostLauncher = new();
     private readonly LocalAsrHttpTranscriptionService _transcriptionService;
@@ -55,6 +56,7 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _pttGate = new(1, 1);
     private bool _pttCaptureActive;
     private bool _pttHotkeyDown;
+    private bool _pttInterruptTapArmed;
     private int _pttSessionCounter;
 
     private readonly ObservableCollection<MemoryFactRowViewModel> _memoryFacts = [];
@@ -88,6 +90,9 @@ public partial class MainWindow : Window
         PermissionsTabItem.DataContext = _backendSettings;
         ConstraintsPanel.DataContext = _backendSettings;
         _backendSettings.PropertyChanged += BackendSettings_PropertyChanged;
+        _ttsPlaybackService = new LocalTextToSpeechPlaybackService(
+            () => _backendSettings.VoiceHostBaseUrl,
+            () => _backendSettings.GetVoiceSettingsSnapshot());
         _transcriptionService = new LocalAsrHttpTranscriptionService(() => _backendSettings.VoiceHostBaseUrl);
         ApplyAudioPreferences();
         _currentSession = new ChatSessionItem("New Chat");
@@ -114,7 +119,6 @@ public partial class MainWindow : Window
         if (!OperatingSystem.IsWindows())
         {
             PttHoldButton.IsEnabled = false;
-            ReadAloudButton.IsEnabled = false;
             SetPushToTalkPlatformUnavailable();
         }
 
@@ -174,6 +178,13 @@ public partial class MainWindow : Window
             BeginVoiceHostLifecycleTransition(enabled: true, restartManagedProcess: true);
         }
 
+        if (string.Equals(e.PropertyName, nameof(SettingsViewModel.PttChord), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(SettingsViewModel.ShutupChord), StringComparison.Ordinal))
+        {
+            TryStartGlobalPushToTalkHotkey();
+            SetPushToTalkReadyState();
+        }
+
         if (!ReferenceEquals(SettingsTabControl.SelectedItem, AudioTabItem))
         {
             if (string.Equals(e.PropertyName, nameof(SettingsViewModel.VoiceHostEnabled), StringComparison.Ordinal) &&
@@ -219,6 +230,7 @@ public partial class MainWindow : Window
 
         _runtimeLauncher.Dispose();
         DisposePushToTalkUi();
+        _ttsPlaybackService.Dispose();
         _transcriptionService.Dispose();
         _microphoneCaptureService.Dispose();
         _pttGate.Dispose();
@@ -235,6 +247,8 @@ public partial class MainWindow : Window
 
         _initialConnectAttempted = true;
         TryStartGlobalPushToTalkHotkey();
+        BeginVoiceHostLifecycleTransition(_backendSettings.VoiceHostEnabled);
+
         if (_uiSettings.AutoConnectOnLaunch && !AppStartupOptions.Current.SmokeTestMode)
         {
             await EnsureRuntimeConnectedAsync(
@@ -472,9 +486,7 @@ public partial class MainWindow : Window
 
         if (OperatingSystem.IsWindows() &&
             ShouldUseWindowScopedPttHotkey() &&
-            e.Key == Key.Escape &&
-            e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
-            e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+            IsConfiguredHotkeyDown(e, _backendSettings.ShutupChord))
         {
             e.Handled = true;
             _ = RequestVoiceCancelAsync("window cancel hotkey");
@@ -482,11 +494,16 @@ public partial class MainWindow : Window
         }
 
         if (ShouldUseWindowScopedPttHotkey() &&
-            e.Key == Key.M &&
-            e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
-            e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+            IsConfiguredHotkeyDown(e, _backendSettings.PttChord))
         {
             e.Handled = true;
+
+            if (IsVoiceResponseActive())
+            {
+                _ = RequestVoiceCancelAsync("window ptt interrupt hotkey");
+                return;
+            }
+
             if (!_pttHotkeyDown)
             {
                 _pttHotkeyDown = true;
@@ -538,7 +555,9 @@ public partial class MainWindow : Window
 
     private void Window_KeyUp(object? sender, KeyEventArgs e)
     {
-        if (ShouldUseWindowScopedPttHotkey() && e.Key == Key.M && _pttHotkeyDown)
+        if (ShouldUseWindowScopedPttHotkey() &&
+            _pttHotkeyDown &&
+            IsConfiguredHotkeyTriggerKey(e.Key, _backendSettings.PttChord))
         {
             _pttHotkeyDown = false;
             e.Handled = true;
@@ -699,6 +718,10 @@ public partial class MainWindow : Window
         _lastAssistantMessage = null;
         _lastAssistantSources = Array.Empty<string>();
 
+        // Clear runtime session-level permission grants so "Allow for session"
+        // doesn't carry over to a brand-new conversation.
+        _ = _runtimeApiClient?.ClearSessionAsync(CancellationToken.None);
+
         _currentSession = new ChatSessionItem("New Chat");
         _chatHistory.Insert(0, _currentSession);
         ChatHistoryList.SelectedItem = _currentSession;
@@ -756,17 +779,26 @@ public partial class MainWindow : Window
 
     private async void SendButton_Click(object? sender, RoutedEventArgs e)
     {
-        var connected = await EnsureRuntimeConnectedAsync(
-            allowStartRuntime: _uiSettings.AutoStartRuntime,
-            appendTranscriptOnFailure: true);
-        if (!connected || _runtimeApiClient is null)
+        var prompt = PromptBox.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
         {
             UpdateComposerState();
             return;
         }
 
-        var prompt = PromptBox.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(prompt))
+        PromptBox.Text = string.Empty;
+        await SubmitPromptAsync(prompt, voiceInitiated: false);
+    }
+
+    /// <summary>
+    /// Core submission logic used by both the Send button and PTT auto-submit.
+    /// </summary>
+    private async Task SubmitPromptAsync(string prompt, bool voiceInitiated)
+    {
+        var connected = await EnsureRuntimeConnectedAsync(
+            allowStartRuntime: _uiSettings.AutoStartRuntime,
+            appendTranscriptOnFailure: true);
+        if (!connected || _runtimeApiClient is null)
         {
             UpdateComposerState();
             return;
@@ -790,9 +822,29 @@ public partial class MainWindow : Window
             }
 
             _lastUserPrompt = prompt;
+            _voiceInitiatedRun = voiceInitiated;
+
+            // Snapshot prior conversation turns so the runtime can seed the
+            // orchestrator's sliding-window history for multi-turn context.
+            var priorMessages = _currentSession.Messages
+                .Where(m => !m.IsPending
+                    && (m.Role is "user" or "assistant")
+                    && !string.IsNullOrWhiteSpace(m.Content))
+                .Select(m => new ChatHistoryMessage(m.Role, m.Content))
+                .ToList();
+
             AppendTranscript($"[user] {prompt}");
-            var run = await _runtimeApiClient.StartRunAsync(runtimePrompt, CancellationToken.None);
+            var run = await _runtimeApiClient.StartRunAsync(
+                runtimePrompt,
+                CancellationToken.None,
+                priorMessages.Count > 0 ? priorMessages : null);
             _activeRunId = run.RunId;
+
+            if (voiceInitiated)
+            {
+                SetVoiceChatStatus("Responding...");
+            }
+
             _assistantBuffersByRunId[run.RunId] = new StringBuilder();
             _currentSession.AddPendingAssistantMessage();
             UpdateComposerState();
@@ -802,6 +854,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            _voiceInitiatedRun = false;
             AppendTranscript($"[error] {ex.Message}");
             UpdateComposerState();
         }
@@ -941,6 +994,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (IsVoiceResponseActive())
+        {
+            _pttInterruptTapArmed = true;
+            e.Handled = true;
+            _ = RequestVoiceCancelAsync("button tap interrupt");
+            return;
+        }
+
         e.Pointer.Capture(PttHoldButton);
         e.Handled = true;
         _ = BeginPushToTalkAsync("button");
@@ -948,6 +1009,13 @@ public partial class MainWindow : Window
 
     private void PttHoldButton_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_pttInterruptTapArmed)
+        {
+            _pttInterruptTapArmed = false;
+            e.Handled = true;
+            return;
+        }
+
         if (e.Pointer.Captured == PttHoldButton)
         {
             e.Pointer.Capture(null);
@@ -959,6 +1027,12 @@ public partial class MainWindow : Window
 
     private void PttHoldButton_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
+        if (_pttInterruptTapArmed)
+        {
+            _pttInterruptTapArmed = false;
+            return;
+        }
+
         _ = EndPushToTalkAsync("capture_lost");
     }
 
@@ -969,11 +1043,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Interrupt TTS if currently speaking (WPF parity)
-        if (_readAloudActive)
+        // Pressing PTT while a response is active acts as a shutup interrupt.
+        if (IsVoiceResponseActive())
         {
-            _readAloudCancellation?.Cancel();
-            _readAloudActive = false;
+            await RequestVoiceCancelAsync($"{source} interrupt");
+            return;
         }
 
         await _pttGate.WaitAsync();
@@ -993,7 +1067,7 @@ public partial class MainWindow : Window
             await _microphoneCaptureService.StartCaptureAsync(CancellationToken.None);
             _pttCaptureActive = true;
             MarkPushToTalkCaptureStarted(source);
-            AppendTranscript($"[system] PTT listening ({source}).");
+            // Button state CSS class already shows listening — no chat card needed.
         }
         catch (Exception ex)
         {
@@ -1071,7 +1145,18 @@ public partial class MainWindow : Window
                 : existing.TrimEnd() + " " + transcript;
             PromptBox.CaretIndex = PromptBox.Text.Length;
             MarkPushToTalkTranscriptInserted(transcript);
-            AppendTranscript($"[voice] {transcript}");
+
+            // Auto-submit the transcribed text (WPF parity).
+            var fullPrompt = PromptBox.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(fullPrompt))
+            {
+                PromptBox.Text = string.Empty;
+                // Await the transcription cleanup before submitting.
+                await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+                transcriptionCancellation = null; // Prevent double-dispose in finally.
+                await SubmitPromptAsync(fullPrompt, voiceInitiated: true);
+                return;
+            }
         }
         catch (OperationCanceledException) when (transcriptionCancellation?.IsCancellationRequested == true)
         {
@@ -1174,12 +1259,22 @@ public partial class MainWindow : Window
 
     private async void ApprovePermissionButton_Click(object? sender, RoutedEventArgs e)
     {
-        await SubmitPermissionDecisionAsync(true);
+        await SubmitPermissionDecisionAsync(approved: true, rememberForSession: false, persistAsAlways: false);
     }
 
     private async void DenyPermissionButton_Click(object? sender, RoutedEventArgs e)
     {
-        await SubmitPermissionDecisionAsync(false);
+        await SubmitPermissionDecisionAsync(approved: false, rememberForSession: false, persistAsAlways: false);
+    }
+
+    private async void AllowSessionButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await SubmitPermissionDecisionAsync(approved: true, rememberForSession: true, persistAsAlways: false);
+    }
+
+    private async void AllowAlwaysButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await SubmitPermissionDecisionAsync(approved: true, rememberForSession: false, persistAsAlways: true);
     }
 
     // ---------------------------------------------------------------
@@ -1307,6 +1402,10 @@ public partial class MainWindow : Window
         {
             _currentSession.AddMessage("system", line[9..]);
         }
+        else if (line.StartsWith("[status] "))
+        {
+            _currentSession.AddMessage("status", line[9..]);
+        }
         else if (line.StartsWith("[error] "))
         {
             _currentSession.AddMessage("system", line);
@@ -1322,6 +1421,185 @@ public partial class MainWindow : Window
         UpdateComposerState();
         UpdateConversationTitle();
         ScrollChatToBottom();
+    }
+
+    private static readonly string[] PttStateClasses = ["pttListening", "pttProcessing", "pttSpeaking", "pttResponding"];
+
+    private void SetVoiceChatStatus(string state, string? _detail = null)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(state) ? "Hold" : state.Trim();
+
+        // Choose icon + CSS class based on state
+        string icon;
+        string? cssClass;
+        switch (trimmed)
+        {
+            case "Listening...":
+                icon = "🎙";
+                cssClass = "pttListening";
+                break;
+            case "Processing...":
+            case "Transcribing...":
+                icon = "⏳";
+                cssClass = "pttProcessing";
+                break;
+            case "Speaking":
+                icon = "🔊";
+                cssClass = "pttSpeaking";
+                break;
+            case "Responding...":
+                icon = "💬";
+                cssClass = "pttResponding";
+                break;
+            default: // "Hold" and fallback
+                icon = "🎙";
+                cssClass = null;
+                break;
+        }
+
+        PttHoldButton.Content = $"{icon}  {trimmed}";
+
+        // Toggle CSS classes instead of setting local Background/Foreground values
+        foreach (var cls in PttStateClasses)
+        {
+            PttHoldButton.Classes.Set(cls, cls == cssClass);
+        }
+    }
+
+    private bool IsVoiceResponseActive()
+    {
+        return _readAloudActive || !string.IsNullOrWhiteSpace(_activeRunId);
+    }
+
+    private static bool IsConfiguredHotkeyDown(KeyEventArgs e, string chord)
+    {
+        if (!TryParseUiChord(chord, out var triggerKey, out var modifiers))
+        {
+            return false;
+        }
+
+        return e.Key == triggerKey && ModifiersMatch(e.KeyModifiers, modifiers);
+    }
+
+    private static bool IsConfiguredHotkeyTriggerKey(Key key, string chord)
+    {
+        return TryParseUiChord(chord, out var triggerKey, out _) && key == triggerKey;
+    }
+
+    private static bool ModifiersMatch(KeyModifiers actual, KeyModifiers expected)
+    {
+        var flags = KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift | KeyModifiers.Meta;
+        return (actual & flags) == (expected & flags);
+    }
+
+    private static bool TryParseUiChord(string? chord, out Key triggerKey, out KeyModifiers modifiers)
+    {
+        triggerKey = Key.None;
+        modifiers = KeyModifiers.None;
+
+        if (string.IsNullOrWhiteSpace(chord))
+        {
+            return false;
+        }
+
+        var parts = chord.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            var token = parts[i];
+            if (token.Equals("ctrl", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("control", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Control;
+            }
+            else if (token.Equals("alt", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Alt;
+            }
+            else if (token.Equals("shift", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Shift;
+            }
+            else if (token.Equals("win", StringComparison.OrdinalIgnoreCase) ||
+                     token.Equals("meta", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Meta;
+            }
+        }
+
+        return TryParseUiKey(parts[^1], out triggerKey);
+    }
+
+    private static bool TryParseUiKey(string token, out Key key)
+    {
+        key = Key.None;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        var normalized = token.Trim();
+
+        if ((normalized.StartsWith('F') || normalized.StartsWith('f')) &&
+            int.TryParse(normalized[1..], out var fn) &&
+            fn is >= 1 and <= 24)
+        {
+            key = (Key)((int)Key.F1 + (fn - 1));
+            return true;
+        }
+
+        if (normalized.Length == 1)
+        {
+            var ch = char.ToUpperInvariant(normalized[0]);
+            if (ch is >= 'A' and <= 'Z')
+            {
+                key = Enum.Parse<Key>(ch.ToString(), ignoreCase: true);
+                return true;
+            }
+
+            if (ch is >= '0' and <= '9')
+            {
+                key = (Key)((int)Key.D0 + (ch - '0'));
+                return true;
+            }
+        }
+
+        if (normalized.Equals("escape", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("esc", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Escape;
+            return true;
+        }
+
+        if (normalized.Equals("space", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Space;
+            return true;
+        }
+
+        if (normalized.Equals("enter", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Enter;
+            return true;
+        }
+
+        if (normalized.Equals("tab", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Tab;
+            return true;
+        }
+
+        if (normalized.Equals("backspace", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Back;
+            return true;
+        }
+
+        return false;
     }
 
     private void ScrollChatToBottom()
@@ -1494,14 +1772,29 @@ public partial class MainWindow : Window
 
                 // Safety: clear any orphaned pending "Thinking..." message.
                 _currentSession.ClearPendingAssistantMessage();
+                ScrollChatToBottom();
 
+                // Auto-TTS: speak the response if this run was voice-initiated.
+                var shouldAutoSpeak = _voiceInitiatedRun;
+                _voiceInitiatedRun = false;
                 _activeRunId = null;
                 UpdateComposerState();
+
+                if (shouldAutoSpeak && !string.IsNullOrWhiteSpace(_lastAssistantMessage))
+                {
+                    _ = AutoSpeakResponseAsync(_lastAssistantMessage);
+                }
+                else if (shouldAutoSpeak)
+                {
+                    SetVoiceChatStatus("Hold");
+                }
                 break;
             case RuntimeEventTypes.RunFailed:
                 _currentSession.ClearPendingAssistantMessage();
                 _assistantBuffersByRunId.Remove(envelope.RunId);
                 _toolCallsInCurrentRun.Clear();
+                _voiceInitiatedRun = false;
+                SetVoiceChatStatus("Hold");
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
@@ -1537,7 +1830,7 @@ public partial class MainWindow : Window
 
         UpdateActionDrawerSummary();
     }
-    private async Task SubmitPermissionDecisionAsync(bool approved)
+    private async Task SubmitPermissionDecisionAsync(bool approved, bool rememberForSession = false, bool persistAsAlways = false)
     {
         if (_runtimeApiClient is null || string.IsNullOrWhiteSpace(_pendingPermissionRequestId))
         {
@@ -1549,6 +1842,8 @@ public partial class MainWindow : Window
             var applied = await _runtimeApiClient.SubmitPermissionDecisionAsync(
                 _pendingPermissionRequestId,
                 approved,
+                rememberForSession,
+                persistAsAlways,
                 CancellationToken.None);
 
             // Suppressed: don't clutter chat with individual decision messages.
@@ -1693,6 +1988,10 @@ public partial class MainWindow : Window
             UpdateHeaderConnectionControls();
             UpdateActionDrawerSummary();
             UpdateComposerState();
+
+            // Load active profile so the user's preferred name shows in chat headers.
+            _ = RefreshProfilesAsync();
+
             return true;
         }
         catch
@@ -1967,6 +2266,16 @@ public partial class MainWindow : Window
             SelectProfile(response.ActiveProfileId ?? _profileItems.FirstOrDefault()?.ProfileId);
             SelectPersonality(response.ActivePersonalityId ?? _personalityItems.FirstOrDefault()?.Id);
             _backendSettings.ApplyActiveIdentity(response.ActiveProfileId, response.ActivePersonalityId);
+
+            // Resolve the active profile's preferred/display name for chat headers.
+            var activeProfile = response.Profiles.FirstOrDefault(p => p.IsActive)
+                                ?? response.Profiles.FirstOrDefault();
+            if (activeProfile is not null)
+            {
+                var name = activeProfile.PreferredName;
+                if (string.IsNullOrWhiteSpace(name)) name = activeProfile.DisplayName;
+                if (!string.IsNullOrWhiteSpace(name)) ChatMessageItem.UserDisplayName = name;
+            }
         }
         catch (Exception ex)
         {
@@ -2104,7 +2413,7 @@ public partial class MainWindow : Window
         {
             MarkPushToTalkCanceled(
                 headline: "Read aloud canceled.",
-                detail: "Local Windows speech playback was stopped before completion.");
+                detail: "Speech playback was stopped before completion.");
         }
         catch (Exception ex)
         {
@@ -2119,9 +2428,51 @@ public partial class MainWindow : Window
             }
 
             _readAloudActive = false;
-            ReadAloudButton.Content = "Read Aloud";
         }
     }
+
+    /// <summary>
+    /// Automatically speaks the assistant response after a voice-initiated run completes.
+    /// Fire-and-forget from RunCompleted — mirrors the WPF VoiceSessionOrchestrator auto-TTS.
+    /// </summary>
+    private async Task AutoSpeakResponseAsync(string text)
+    {
+        if (_readAloudActive || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        using var cts = new CancellationTokenSource();
+        _readAloudCancellation = cts;
+        _readAloudActive = true;
+        MarkReadAloudStarted(text.Length);
+
+        try
+        {
+            await _ttsPlaybackService.SpeakAsync(text, cts.Token);
+            MarkReadAloudCompleted(text.Length);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            MarkPushToTalkCanceled(
+                headline: "Auto-read canceled.",
+                detail: "Voice response playback was interrupted via VoiceHost.");
+        }
+        catch (Exception ex)
+        {
+            MarkPushToTalkFailure("Auto-read failed.", ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_readAloudCancellation, cts))
+            {
+                _readAloudCancellation = null;
+            }
+
+            _readAloudActive = false;
+        }
+    }
+
 private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_lastAssistantSources.Count == 0 && !string.IsNullOrWhiteSpace(_lastAssistantMessage))
@@ -2143,13 +2494,28 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
     }
 
-    // ── Per-message context menu handlers ────────────────────────────
+    // ── Per-message context/flyout menu handlers ─────────────────────
+
+    /// <summary>Resolves the ChatMessageItem from a MenuItem in either a ContextMenu or MenuFlyout.</summary>
+    private static ChatMessageItem? ResolveMessageFromMenuItem(object? sender)
+    {
+        if (sender is not MenuItem menuItem) return null;
+
+        // Try the MenuItem's own DataContext first (flyout inherits from DataTemplate item).
+        if (menuItem.DataContext is ChatMessageItem fromDc) return fromDc;
+
+        // Fall back to ContextMenu resolution (right-click menu).
+        if (menuItem.Parent is ContextMenu ctx)
+        {
+            return (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        }
+
+        return null;
+    }
 
     private async void CopyMessage_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem menuItem) return;
-        if (menuItem.Parent is not ContextMenu ctx) return;
-        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        var msg = ResolveMessageFromMenuItem(sender);
         if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
 
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
@@ -2165,12 +2531,12 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
 
     private void RetryMessage_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem menuItem) return;
-        if (menuItem.Parent is not ContextMenu ctx) return;
-        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        var msg = ResolveMessageFromMenuItem(sender);
         if (msg is null) return;
 
-        var prompt = !string.IsNullOrWhiteSpace(msg.RetryPrompt) ? msg.RetryPrompt : _lastUserPrompt;
+        var prompt = msg.IsUser ? msg.Content
+            : !string.IsNullOrWhiteSpace(msg.RetryPrompt) ? msg.RetryPrompt
+            : _lastUserPrompt;
         if (string.IsNullOrWhiteSpace(prompt))
         {
             AppendTranscript("[system] Nothing to retry.");
@@ -2184,10 +2550,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
 
     private async void ReadAloudMessage_Click(object? sender, RoutedEventArgs e)
     {
-        if (!OperatingSystem.IsWindows()) return;
-        if (sender is not MenuItem menuItem) return;
-        if (menuItem.Parent is not ContextMenu ctx) return;
-        var msg = (ctx.DataContext ?? (ctx.PlacementTarget as Control)?.DataContext) as ChatMessageItem;
+        var msg = ResolveMessageFromMenuItem(sender);
         if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
 
         if (_readAloudActive)
@@ -2209,7 +2572,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
         catch (OperationCanceledException) when (readAloudCancellation.IsCancellationRequested)
         {
-            MarkPushToTalkCanceled("Read aloud canceled.", "Local speech playback was stopped.");
+            MarkPushToTalkCanceled("Read aloud canceled.", "Speech playback was stopped.");
         }
         catch (Exception ex)
         {
@@ -2221,7 +2584,6 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
             if (ReferenceEquals(_readAloudCancellation, readAloudCancellation))
                 _readAloudCancellation = null;
             _readAloudActive = false;
-            ReadAloudButton.Content = "Read Aloud";
         }
     }
 
@@ -2435,14 +2797,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
 
     private void UpdateChatActionState()
     {
-        var hasMessages = _currentSession.Messages.Count > 0;
-        ChatActionBar.IsVisible = hasMessages;
-
-        var hasAssistantMessage = !string.IsNullOrWhiteSpace(_lastAssistantMessage);
-        CopyLastAssistantButton.IsEnabled = hasAssistantMessage;
-        RetryLastPromptButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastUserPrompt);
-        SourcesButton.IsEnabled = hasAssistantMessage;
-        ReadAloudButton.IsEnabled = OperatingSystem.IsWindows() && hasAssistantMessage;
+        // Actions are now per-message via triple-dot flyouts.
     }
 
     private void SyncLastMessageCacheFromCurrentSession()

@@ -8,8 +8,16 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        var appArgs = AppStartupOptions.Initialize(args);
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(appArgs);
+        try
+        {
+            var appArgs = AppStartupOptions.Initialize(args);
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(appArgs);
+        }
+        catch (Exception ex)
+        {
+            System.IO.File.WriteAllText("crash.log", ex.ToString());
+            throw;
+        }
     }
 
     public static AppBuilder BuildAvaloniaApp() =>

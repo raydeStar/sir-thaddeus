@@ -102,22 +102,9 @@
 
       <Grid Grid.Column="1">
         <Grid x:Name="ChatView">
-          <Grid RowDefinitions="Auto,*" RowSpacing="0">
-            <Border x:Name="ChatActionBar"
-                    Background="{StaticResource MantleBrush}"
-                    IsVisible="False"
-                    Padding="16,8"
-                    BorderBrush="{StaticResource Surface0Brush}"
-                    BorderThickness="0,0,0,1">
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
-                <Button x:Name="CopyLastAssistantButton" Content="Copy Last" Classes="actionBtn" Click="CopyLastAssistantButton_Click"/>
-                <Button x:Name="RetryLastPromptButton" Content="Retry Last" Classes="actionBtn" Click="RetryLastPromptButton_Click"/>
-                <Button x:Name="ReadAloudButton" Content="Read Aloud" Classes="actionBtn" Click="ReadAloudButton_Click"/>
-                <Button x:Name="SourcesButton" Content="Sources" Classes="actionBtn" Click="ShowSourcesButton_Click"/>
-              </StackPanel>
-            </Border>
+          <Grid RowDefinitions="*" RowSpacing="0">
 
-            <ScrollViewer Grid.Row="1"
+            <ScrollViewer Grid.Row="0"
                           x:Name="ChatScroller"
                           Background="{StaticResource BaseBrush}"
                           VerticalScrollBarVisibility="Auto"
@@ -192,13 +179,39 @@
                           <Border Grid.Column="0" Background="{StaticResource PeachBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsToolActivity}"/>
 
                           <StackPanel Grid.Column="1" Margin="16,14,16,14">
-                            <!-- Header row: Author + Role + Time -->
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8" Spacing="8">
-                              <TextBlock Text="{Binding AuthorLabel}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Subtext1Brush}"/>
-                              <TextBlock Text="{Binding RoleLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"
-                                         IsVisible="{Binding RoleLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                              <TextBlock Text="{Binding TimeDisplay}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
-                            </StackPanel>
+                            <!-- Header row: Author + Role + Time + Triple-dot menu -->
+                            <Grid Margin="0,0,0,8">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                              </Grid.ColumnDefinitions>
+                              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding AuthorLabel}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Subtext1Brush}"/>
+                                <TextBlock Text="{Binding RoleLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"
+                                           IsVisible="{Binding RoleLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                <TextBlock Text="{Binding TimeDisplay}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                              </StackPanel>
+                              <Button Grid.Column="1"
+                                      Content="⋯"
+                                      FontSize="14"
+                                      FontWeight="Bold"
+                                      Padding="6,0"
+                                      MinWidth="0"
+                                      MinHeight="0"
+                                      Background="Transparent"
+                                      Foreground="{StaticResource Overlay0Brush}"
+                                      BorderThickness="0"
+                                      Cursor="Hand"
+                                      VerticalAlignment="Center">
+                                <Button.Flyout>
+                                  <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                    <MenuItem Header="Copy" Click="CopyMessage_Click"/>
+                                    <MenuItem Header="Retry" Click="RetryMessage_Click" IsVisible="{Binding IsUser}"/>
+                                    <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
+                                  </MenuFlyout>
+                                </Button.Flyout>
+                              </Button>
+                            </Grid>
 
                             <!-- Thinking/Reasoning expander -->
                             <Border IsVisible="{Binding HasThoughtContent}"
@@ -210,34 +223,23 @@
                                 <Expander.Header>
                                   <TextBlock Text="Reasoning" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
                                 </Expander.Header>
-                                <TextBox Text="{Binding ThoughtContent}"
-                                         FontSize="12"
-                                         FontFamily="Cascadia Mono, Consolas, monospace"
-                                         LineHeight="18"
-                                         Foreground="{StaticResource Subtext0Brush}"
-                                         Background="Transparent"
-                                         BorderThickness="0"
-                                         Padding="0,6,0,0"
-                                         TextWrapping="Wrap"
-                                         IsReadOnly="True"
-                                         IsTabStop="False"
-                                         MaxHeight="300"/>
+                                <SelectableTextBlock Text="{Binding ThoughtContent}"
+                                                     FontSize="12"
+                                                     FontFamily="Cascadia Mono, Consolas, monospace"
+                                                     LineHeight="18"
+                                                     Foreground="{StaticResource Subtext0Brush}"
+                                                     Padding="0,6,0,0"
+                                                     TextWrapping="Wrap"
+                                                     MaxHeight="300"/>
                               </Expander>
                             </Border>
 
                             <!-- Message content -->
-                            <TextBox Text="{Binding Content}"
-                                     FontSize="14"
-                                     LineHeight="22"
-                                     Foreground="{StaticResource TextBrush}"
-                                     Background="Transparent"
-                                     BorderThickness="0"
-                                     Padding="0"
-                                     TextWrapping="Wrap"
-                                     IsReadOnly="True"
-                                     IsTabStop="False"
-                                     Cursor="IBeam"
-                                     SelectionBrush="{StaticResource Surface1Brush}"/>
+                            <SelectableTextBlock Text="{Binding Content}"
+                                                 FontSize="14"
+                                                 LineHeight="22"
+                                                 Foreground="{StaticResource TextBrush}"
+                                                 TextWrapping="Wrap"/>
 
                             <!-- Inline tool activity footer (compact, dim) -->
                             <TextBlock IsVisible="{Binding HasToolSummary}"
@@ -550,7 +552,7 @@
                 <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
 
                   <!-- Runtime Connection -->
-                  <StackPanel Spacing="10">
+                  <StackPanel Spacing="10" x:CompileBindings="False">
                     <TextBlock Text="RUNTIME" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
                       <StackPanel Spacing="14">
@@ -611,14 +613,55 @@
                   <StackPanel Spacing="10">
                     <TextBlock Text="SHORTCUTS" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
-                      <StackPanel Spacing="8">
+                      <StackPanel Spacing="10">
                         <TextBlock Text="Ctrl+1 Chat  &#x2022;  Ctrl+2 Briefing  &#x2022;  Ctrl+3 Settings" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
-                        <TextBlock Text="Ctrl+Alt+M hold to talk  &#x2022;  Ctrl+Alt+Esc cancel" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Push-to-talk chord" Classes="hint"/>
+                            <TextBox Text="{ReflectionBinding PttChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Text="Interrupt chord" Classes="hint"/>
+                            <TextBox Text="{ReflectionBinding ShutupChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                        </Grid>
                         <TextBlock Text="Voice and read-aloud are currently Windows-only." Classes="hint" Margin="0,4,0,0"/>
                       </StackPanel>
                     </Border>
                   </StackPanel>
 
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Location" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="LOCATION" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="Manual location for nearby searches (city/state, ZIP, or country)." Classes="hint"/>
+                        <TextBox Text="{ReflectionBinding Location}"
+                                 Watermark="e.g., Olympia, WA"
+                                 Classes="chatInput"
+                                 FontSize="13"
+                                 Padding="12,10"/>
+                        <Border Classes="separator" Margin="0,4,0,2"/>
+                        <TextBlock Text="Display" Classes="hint"/>
+                        <CheckBox Content="Use 24-hour time (military time)" IsChecked="{ReflectionBinding Use24HourTime}" Classes="settingsCheck"/>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" VerticalAlignment="Center">
+                          <TextBlock Text="Preferred units" Classes="formLabel" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1"
+                                    ItemsSource="{ReflectionBinding PreferredUnitsOptions}"
+                                    SelectedItem="{ReflectionBinding PreferredUnits}"
+                                    HorizontalAlignment="Left"
+                                    MinWidth="140"
+                                    FontSize="13"/>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
@@ -1099,10 +1142,10 @@
                                 Click="ApprovePermissionButton_Click"/>
                         <Button x:Name="AllowSessionButton" Content="Allow for session"
                                 Classes="allowSessionBtn" IsEnabled="False"
-                                Click="ApprovePermissionButton_Click"/>
+                                Click="AllowSessionButton_Click"/>
                         <Button x:Name="AllowAlwaysButton" Content="Allow always"
                                 Classes="allowAlwaysBtn" IsEnabled="False"
-                                Click="ApprovePermissionButton_Click"/>
+                                Click="AllowAlwaysButton_Click"/>
                       </StackPanel>
                     </StackPanel>
                   </Border>
@@ -1549,10 +1592,7 @@
           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="6">
             <Button x:Name="PttHoldButton"
                     Content="Hold Talk"
-                    Classes="actionBtn"
-                    PointerPressed="PttHoldButton_PointerPressed"
-                    PointerReleased="PttHoldButton_PointerReleased"
-                    PointerCaptureLost="PttHoldButton_PointerCaptureLost"/>
+                    Classes="actionBtn"/>
             <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
             <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click" IsVisible="False"/>
           </StackPanel>
