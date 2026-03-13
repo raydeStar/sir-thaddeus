@@ -89,8 +89,9 @@ public static class SearchModeRouter
         if (string.IsNullOrWhiteSpace(lower))
             return SearchMode.WebFactFind;
 
-        // ── 1. FOLLOW_UP: referential message + recent results ───────
-        if (session.HasRecentResults(now) && IsFollowUpMessage(lower))
+        // ── 1. FOLLOW_UP: explicit phrase OR referential cue + recent results
+        if (session.HasRecentResults(now) &&
+            (IsFollowUpMessage(lower) || IsReferential(lower)))
             return SearchMode.FollowUp;
 
         // ── 2. NEWS_AGGREGATE: news-intent triggers ──────────────────

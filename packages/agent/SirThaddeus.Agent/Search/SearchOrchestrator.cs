@@ -77,6 +77,8 @@ public sealed class SearchOrchestrator
 
     // ── Bounds ───────────────────────────────────────────────────────
     private const int DefaultMaxResults    = 5;
+    private const int LocalBusinessTargetResults = 10;
+    private const int LocalBusinessFetchMaxResults = 20;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 1024;
@@ -523,7 +525,8 @@ public sealed class SearchOrchestrator
         // ── 3. web_search via MCP ────────────────────────────────────
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
-            originalUserMessage: userMessage);
+            originalUserMessage: userMessage,
+            maxResults: isLocalBusinessQuery ? LocalBusinessFetchMaxResults : null);
 
         var isNoResults = string.IsNullOrWhiteSpace(toolResult) || 
                           LooksLikeNoResultsPayload(toolResult) || 
@@ -569,9 +572,10 @@ public sealed class SearchOrchestrator
         var sources = ParseSourcesFromToolResult(toolResult);
         if (isLocalBusinessQuery)
         {
-            var filteredSources = FilterSourcesForLocalBusinessRequest(userMessage ?? "", sources);
-            if (filteredSources.Count > 0)
-                sources = [.. filteredSources];
+            sources = [.. SelectLocalBusinessDiscoverySources(
+                userMessage ?? "",
+                sources,
+                LocalBusinessTargetResults)];
         }
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
@@ -608,7 +612,14 @@ public sealed class SearchOrchestrator
 
         if (isLocalBusinessQuery && sources.Count > 0)
         {
+            Session.RecordLocalBusinessCandidates(
+                GetRequestedLocalBusinessLabel(userMessage ?? ""),
+                sources);
             return BuildLocalBusinessDiscoveryResponse(userMessage ?? "", sources, toolCallsMade);
+        }
+        else
+        {
+            Session.ClearLocalBusinessCandidates();
         }
 
         // tool result lacks rich content (snippet-only mode).
@@ -727,16 +738,9 @@ public sealed class SearchOrchestrator
             (Session.LastMode == SearchMode.DeepDiveBriefing ||
              Session.LastWasLocalBusinessDiscovery))
         {
-            var subject = ExtractFollowUpSubject(userMessage);
+            var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
             if (!string.IsNullOrWhiteSpace(subject))
             {
-                // Resolve pronoun references ("this one", "that place")
-                // to a concrete entity from the prior search results.
-                if (IsPronounSubjectReference(subject) && Session.LastResults.Count > 0)
-                {
-                    subject = Session.LastResults[0].Title ?? subject;
-                }
-
                 // Enrich the subject with context from prior results so the
                 // briefing search query isn't ambiguous. "The West Olympia Woman"
                 // alone might match unrelated content; appending the matching
@@ -919,6 +923,117 @@ public sealed class SearchOrchestrator
             or "that shop" or "this shop"
             or "that store" or "this store"
             or "that restaurant" or "this restaurant";
+    }
+
+    private string ResolveLocalBusinessFollowUpSubject(string userMessage)
+    {
+        var extracted = ExtractFollowUpSubject(userMessage);
+        var candidates = Session.LastLocalBusinessCandidateTitles;
+
+        // Pronoun-style follow-ups should resolve to a deterministic anchor.
+        if (IsPronounSubjectReference(extracted))
+        {
+            var anchored = ResolveLocalBusinessAnchorTitle();
+            if (!string.IsNullOrWhiteSpace(anchored))
+                return anchored;
+        }
+
+        // If the user's raw message explicitly contains one of the candidate
+        // titles, use that exact candidate.
+        var explicitCandidate = FindExplicitCandidateMention(userMessage, candidates);
+        if (!string.IsNullOrWhiteSpace(explicitCandidate))
+            return explicitCandidate;
+
+        // If extraction produced a subject fragment, match it against known
+        // candidates by token overlap.
+        var bestByTokens = FindBestCandidateByTokenOverlap(extracted, candidates);
+        if (!string.IsNullOrWhiteSpace(bestByTokens))
+            return bestByTokens;
+
+        // Fall back to extracted content, then deterministic anchor.
+        if (!string.IsNullOrWhiteSpace(extracted))
+            return extracted;
+
+        return ResolveLocalBusinessAnchorTitle();
+    }
+
+    private string ResolveLocalBusinessAnchorTitle()
+    {
+        if (!string.IsNullOrWhiteSpace(Session.SelectedSourceId))
+        {
+            var selected = Session.LastResults.FirstOrDefault(
+                s => string.Equals(s.SourceId, Session.SelectedSourceId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(selected?.Title))
+                return selected!.Title.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(Session.LastLocalBusinessAnchorSourceId))
+        {
+            var anchored = Session.LastResults.FirstOrDefault(
+                s => string.Equals(s.SourceId, Session.LastLocalBusinessAnchorSourceId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(anchored?.Title))
+                return anchored!.Title.Trim();
+        }
+
+        if (Session.LastLocalBusinessCandidateTitles.Count > 0)
+            return Session.LastLocalBusinessCandidateTitles[0];
+
+        if (Session.LastResults.Count > 0 && !string.IsNullOrWhiteSpace(Session.LastResults[0].Title))
+            return Session.LastResults[0].Title.Trim();
+
+        return "";
+    }
+
+    private static string? FindExplicitCandidateMention(string userMessage, IReadOnlyList<string> candidates)
+    {
+        if (candidates.Count == 0)
+            return null;
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            if (userMessage.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string? FindBestCandidateByTokenOverlap(string subject, IReadOnlyList<string> candidates)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || candidates.Count == 0)
+            return null;
+
+        var subjectTokens = Regex.Matches(subject.ToLowerInvariant(), @"[a-z0-9']+")
+            .Select(m => m.Value)
+            .Where(t => t.Length > 2)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (subjectTokens.Count == 0)
+            return null;
+
+        string? best = null;
+        var bestScore = 0;
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            var candidateLower = candidate.ToLowerInvariant();
+            var score = subjectTokens.Count(t => candidateLower.Contains(t, StringComparison.Ordinal));
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        return bestScore > 0 ? best : null;
     }
 
     /// <summary>
@@ -1414,7 +1529,8 @@ public sealed class SearchOrchestrator
         string query, string recency,
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct,
-        string? originalUserMessage = null)
+        string? originalUserMessage = null,
+        int? maxResults = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
         effectiveQuery = InjectLocationForLocalBusinessQuery(effectiveQuery, originalUserMessage);
@@ -1425,7 +1541,7 @@ public sealed class SearchOrchestrator
         var args = JsonSerializer.Serialize(new
         {
             query = effectiveQuery,
-            maxResults = DefaultMaxResults,
+            maxResults = maxResults ?? DefaultMaxResults,
             recency
         });
 
@@ -2887,12 +3003,12 @@ public sealed class SearchOrchestrator
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
         var location = UserLocationHint?.Trim();
         var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" nearby in {location}";
-        var topSources = sources.Take(5).ToList();
+        var topSources = sources.Take(LocalBusinessTargetResults).ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine(topSources.Count == 1
             ? $"Here are the {businessLabel}{locText} results I found (1 clearly relevant match):"
-            : $"Here are some {businessLabel}{locText}:");
+            : $"Here are the top {topSources.Count} {businessLabel}{locText}:");
         sb.AppendLine();
 
         foreach (var source in topSources)
@@ -2931,22 +3047,51 @@ public sealed class SearchOrchestrator
         };
     }
 
-    private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessRequest(
+    private static IReadOnlyList<SourceItem> SelectLocalBusinessDiscoverySources(
         string userMessage,
-        IReadOnlyList<SourceItem> sources)
+        IReadOnlyList<SourceItem> sources,
+        int targetCount)
     {
         if (sources.Count == 0)
             return sources;
 
         var keywords = GetLocalBusinessMatchKeywords(userMessage);
         if (keywords.Count == 0)
-            return sources;
+            return sources.Take(Math.Max(1, targetCount)).ToList();
 
-        var filtered = sources
+        var strict = sources
             .Where(source => LocalBusinessSourceMatches(source, keywords))
             .ToList();
 
-        return filtered;
+        if (strict.Count >= targetCount)
+            return strict.Take(targetCount).ToList();
+
+        if (strict.Count == 0)
+            return sources.Take(Math.Max(1, targetCount)).ToList();
+
+        // When the provider only returned a small pool, keep precision over
+        // recall and avoid backfilling with likely-irrelevant generic guides.
+        if (sources.Count <= targetCount)
+            return strict;
+
+        var selected = new List<SourceItem>(strict);
+        var selectedIds = new HashSet<string>(
+            selected.Select(s => s.SourceId),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in sources)
+        {
+            if (selectedIds.Contains(source.SourceId))
+                continue;
+
+            selected.Add(source);
+            selectedIds.Add(source.SourceId);
+
+            if (selected.Count >= targetCount)
+                break;
+        }
+
+        return selected;
     }
 
     private static bool LocalBusinessSourceMatches(SourceItem source, IReadOnlyList<string> keywords)
@@ -3386,12 +3531,19 @@ public sealed class SearchOrchestrator
 
     private SearchMode ResolveMode(string userMessage, LookupModeHint modeHint, DateTimeOffset now)
     {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        var hasFollowUpSignals =
+            Session.HasRecentResults(now) &&
+            (SearchModeRouter.IsFollowUpMessage(lower) ||
+             (Session.LastWasLocalBusinessDiscovery && SearchModeRouter.IsReferential(lower)));
+
         return modeHint switch
         {
+            LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.News => SearchMode.NewsAggregate,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
-            _ => SearchModeRouter.Classify(userMessage, Session, now)
+            _ => SearchModeRouter.Classify(userMessage ?? "", Session, now)
         };
     }
 

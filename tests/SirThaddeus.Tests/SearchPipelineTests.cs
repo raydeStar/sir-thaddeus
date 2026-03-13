@@ -4,6 +4,7 @@ using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Tests;
 
@@ -931,6 +932,62 @@ public class SearchOrchestratorModeHintTests
         Assert.True(result.Success);
         Assert.False(result.SuppressSourceCardsUi);
         Assert.False(result.SuppressToolActivityUi);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FactHint_DoesNotOverrideFollowUpWithRecentLocalDiscovery()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/olympia-flower-farms\",\"title\":\"These Olympia Flower Farms\",\"domain\":\"example.com\",\"snippet\":\"Directory of Olympia flower farms and florists.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            "places_lookup" => "{\"name\":\"These Olympia Flower Farms\",\"address\":\"Olympia, WA\"}",
+            "PlacesLookup" => "{\"name\":\"These Olympia Flower Farms\",\"address\":\"Olympia, WA\"}",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var discovery = await orchestrator.ExecuteAsync(
+            "show me local florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(discovery.Success);
+        Assert.True(orchestrator.Session.LastWasLocalBusinessDiscovery);
+
+        var followUp = await orchestrator.ExecuteAsync(
+            "can you pull more info up on these olympia flower farms?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(followUp.Success);
+        Assert.NotNull(followUp.DeepDiveBriefing);
     }
 }
 
@@ -2500,6 +2557,75 @@ public class LocalBusinessDetectionTests
         Assert.Contains("bakeries nearby", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("West Olympia Woman", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Dairy-Free Restaurant Guide", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_TargetsTenResults_WithStrictThenBackfill()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var sourcesJson =
+            "[" +
+            "{\"url\":\"https://example.com/florist-1\",\"title\":\"Olympia Florist One\",\"domain\":\"example.com\",\"snippet\":\"Local florist and flower delivery\"}," +
+            "{\"url\":\"https://example.com/florist-2\",\"title\":\"Flower House Olympia\",\"domain\":\"example.com\",\"snippet\":\"Family flower shop\"}," +
+            "{\"url\":\"https://example.com/place-3\",\"title\":\"Olympia Directory 3\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-4\",\"title\":\"Olympia Directory 4\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-5\",\"title\":\"Olympia Directory 5\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-6\",\"title\":\"Olympia Directory 6\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-7\",\"title\":\"Olympia Directory 7\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-8\",\"title\":\"Olympia Directory 8\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-9\",\"title\":\"Olympia Directory 9\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-10\",\"title\":\"Olympia Directory 10\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-11\",\"title\":\"Olympia Directory 11\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-12\",\"title\":\"Olympia Directory 12\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-13\",\"title\":\"Olympia Directory 13\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-14\",\"title\":\"Olympia Directory 14\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-15\",\"title\":\"Olympia Directory 15\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-16\",\"title\":\"Olympia Directory 16\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-17\",\"title\":\"Olympia Directory 17\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-18\",\"title\":\"Olympia Directory 18\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-19\",\"title\":\"Olympia Directory 19\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-20\",\"title\":\"Olympia Directory 20\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-21\",\"title\":\"Olympia Directory 21\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-22\",\"title\":\"Olympia Directory 22\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}" +
+            "]";
+
+        var searchResult = "Top local results\n<!-- SOURCES_JSON -->\n" + sourcesJson;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("top 10 florists", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        var bulletCount = Regex.Matches(result.Text, "^- \\*\\*", RegexOptions.Multiline).Count;
+        Assert.Equal(10, bulletCount);
+
+        var webCall = mcp.Calls.FirstOrDefault(c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("\"maxResults\":20", webCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
