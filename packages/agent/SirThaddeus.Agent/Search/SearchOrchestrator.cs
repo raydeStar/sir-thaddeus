@@ -539,15 +539,24 @@ public sealed class SearchOrchestrator
                 isNoResults = true;
         }
 
+        // Browser SERP fallback is NOT used for local business discovery.
+        // browser_navigate extracts only raw text from a Google results
+        // page — no URLs, no structured source data — producing a single
+        // synthetic source titled "Google Search" which is useless for
+        // business listing presentation. Skip it and let the no-results
+        // handler give the user an honest message instead.
         if (isNoResults && isLocalBusinessQuery)
         {
-            _audit.Append(new AuditEvent { Actor = "search", Action = "SEARCH_FALLBACK", Result = "browser_navigate_local_business" });
-            var fallback = await CallBrowserSearchFallbackAsync(query.Query, toolCallsMade, ct);
-            if (!string.IsNullOrWhiteSpace(fallback))
+            _audit.Append(new AuditEvent
             {
-                toolResult = fallback!;
-                isNoResults = false;
-            }
+                Actor  = "search",
+                Action = "SKIP_BROWSER_FALLBACK",
+                Result = "local_business_discovery",
+                Details = new Dictionary<string, object>
+                {
+                    ["reason"] = "browser SERP scraping cannot produce structured business listings"
+                }
+            });
         }
 
         if (isNoResults)
@@ -3013,8 +3022,9 @@ public sealed class SearchOrchestrator
 
         foreach (var source in topSources)
         {
+            var displayTitle = StripTitleSuffix(source.Title);
             sb.Append("- **");
-            sb.Append(source.Title);
+            sb.Append(displayTitle);
             sb.Append("**");
 
             if (!string.IsNullOrWhiteSpace(source.Snippet))
@@ -3055,6 +3065,11 @@ public sealed class SearchOrchestrator
         if (sources.Count == 0)
             return sources;
 
+        // Filter out junk/synthetic sources that can't represent real businesses.
+        sources = sources.Where(s => !IsJunkBusinessSource(s)).ToList();
+        if (sources.Count == 0)
+            return [];
+
         var keywords = GetLocalBusinessMatchKeywords(userMessage);
         if (keywords.Count == 0)
             return sources.Take(Math.Max(1, targetCount)).ToList();
@@ -3092,6 +3107,36 @@ public sealed class SearchOrchestrator
         }
 
         return selected;
+    }
+
+    /// <summary>
+    /// Returns true for obviously synthetic or junk sources that should
+    /// never appear as a "business" in a local discovery response.
+    /// Examples: Google Search fallback pages, ad redirects.
+    /// </summary>
+    private static bool IsJunkBusinessSource(SourceItem source)
+    {
+        var title = (source.Title ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title))
+            return true;
+
+        // Synthetic fallback source from CallBrowserSearchFallbackAsync
+        if (title.Equals("Google Search", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Generic search engine / aggregator pages
+        if (title.StartsWith("Google", StringComparison.OrdinalIgnoreCase) &&
+            title.Length < 30)
+            return true;
+        if (title.StartsWith("Bing", StringComparison.OrdinalIgnoreCase) &&
+            title.Length < 30)
+            return true;
+
+        // Ad redirects / junk URLs
+        if (IsJunkUrl(source.Url))
+            return true;
+
+        return false;
     }
 
     private static bool LocalBusinessSourceMatches(SourceItem source, IReadOnlyList<string> keywords)

@@ -2628,6 +2628,102 @@ public class LocalBusinessDetectionTests
         Assert.Contains("\"maxResults\":20", webCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task LocalBusinessDiscovery_WebSearchNoResults_ReturnsNoResultsMessage()
+    {
+        // Regression: when web_search returns no results for a local
+        // business query, the pipeline used to fall through to a
+        // browser_navigate Google SERP fallback that produced a single
+        // fake source titled "Google Search". The fix skips the browser
+        // fallback entirely and returns an honest no-results message.
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local florists olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        // web_search returns the canonical no-results payload
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => "No results found for local florists olympia",
+            "WebSearch"  => "No results found for local florists olympia",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "hey thadds -- can you bring me up local florists?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Google Search", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        // browser_navigate should never have been called
+        Assert.DoesNotContain(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_JunkSourcesFiltered_ReturnsNoResultsMessage()
+    {
+        // Even if sources somehow include synthetic entries like
+        // "Google Search", the junk filter in
+        // SelectLocalBusinessDiscoverySources should strip them,
+        // leaving zero real sources and triggering the no-results path.
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local florists olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        // Only junk sources in the payload
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.google.com/search?q=florists\",\"title\":\"Google Search\",\"domain\":\"google.com\",\"snippet\":\"\"}," +
+            "{\"url\":\"https://www.bing.com/search?q=florists\",\"title\":\"Bing\",\"domain\":\"bing.com\",\"snippet\":\"\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch"  => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up local florists?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Google Search", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bing", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("can you tell me about some florists nearby")]   // discovery, not specific-place
     [InlineData("florists nearby")]                              // discovery
