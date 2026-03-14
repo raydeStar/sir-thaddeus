@@ -81,7 +81,7 @@ public partial class MainWindow
                 snapshot.Title,
                 snapshot.StatusLine,
                 snapshot.RecordedAt.LocalDateTime.ToString("g"),
-                snapshot.Confidence.ToUpperInvariant(),
+                FormatConfidenceLabel(snapshot.Confidence),
                 GetConfidenceBrush(snapshot.Confidence),
                 snapshot.Briefing));
         }
@@ -117,9 +117,7 @@ public partial class MainWindow
         BriefingHeroStatusText.Text = string.IsNullOrWhiteSpace(briefing.Hero.StatusLine)
             ? "Status unavailable."
             : briefing.Hero.StatusLine;
-        BriefingConfidenceText.Text = string.IsNullOrWhiteSpace(briefing.Hero.Confidence)
-            ? "UNKNOWN"
-            : briefing.Hero.Confidence.ToUpperInvariant();
+        BriefingConfidenceText.Text = FormatConfidenceLabel(briefing.Hero.Confidence);
         BriefingConfidenceBadge.Background = GetConfidenceBrush(briefing.Hero.Confidence);
         BriefingLastCheckedText.Text = FormatIsoTimestamp(briefing.Hero.LastCheckedIso);
         BriefingClosesText.Text = string.IsNullOrWhiteSpace(briefing.Hero.ClosesText)
@@ -263,6 +261,20 @@ public partial class MainWindow
         };
 
         return (IBrush?)this.FindResource(resourceKey) ?? Brushes.Gray;
+    }
+
+    /// <summary>
+    /// Maps raw confidence strings to compact, user-friendly labels.
+    /// </summary>
+    private static string FormatConfidenceLabel(string? confidence)
+    {
+        return confidence?.Trim().ToLowerInvariant() switch
+        {
+            "high" => "Verified",
+            "medium" => "Partial",
+            "low" => "Unverified",
+            _ => "Unknown"
+        };
     }
 
     private static string FormatIsoTimestamp(string? iso)

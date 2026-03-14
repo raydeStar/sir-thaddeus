@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -91,17 +91,25 @@ public sealed class SearchOrchestrator
         "can't access",
         "cannot access",
         "cant browse",
+        "cant search",
+        "cannot search the",
+        "cannot perform live",
         "browse the web",
         "browse live news feeds",
         "web access tools",
         "direct web access",
+        "currently unavailable",
         "real-time data",
         "real-time events",
+        "real-time updates",
         "knowledge is static",
         "internal knowledge base",
+        "have no access to",
+        "no access to current",
         "conversation history",
         "documents and snippets",
-        "shared memory context"
+        "shared memory context",
+        "browsing tools"
     ];
     private static readonly Dictionary<string, string> StateCodeToName = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -357,13 +365,20 @@ public sealed class SearchOrchestrator
             toolCallsMade,
             ct);
 
+        // Derive location name from entity resolution for no-results messages.
+        // When UserLocationHint is unset, this lets the response echo back the
+        // city the user asked about (e.g. "Boise") instead of a generic message.
+        var entityLocationName = entity is { Type: "Place" or "place" }
+            ? entity.CanonicalName
+            : null;
+
         if (string.IsNullOrWhiteSpace(toolResult))
         {
-            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade, entityLocationName);
         }
         if (LooksLikeNoResultsPayload(toolResult))
         {
-            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade, entityLocationName);
         }
         if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } newsFailure)
         {
@@ -396,7 +411,7 @@ public sealed class SearchOrchestrator
 
         if (sources.Count == 0)
         {
-            return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
+            return BuildNewsNoResultsResponse(userMessage, toolCallsMade, entityLocationName);
         }
 
         // ── 5. Story clustering ──────────────────────────────────────
@@ -404,7 +419,7 @@ public sealed class SearchOrchestrator
         {
             sources = FilterSourcesForLocalNews(sources);
             if (sources.Count == 0)
-                return BuildNewsNoResultsResponse(userMessage, toolCallsMade);
+                return BuildNewsNoResultsResponse(userMessage, toolCallsMade, entityLocationName);
         }
 
         var clusters = StoryClustering.Cluster(sources);
@@ -471,7 +486,8 @@ public sealed class SearchOrchestrator
         // When the user asks about businesses "nearby" but hasn't set a
         // location, return guidance instead of hallucinating fake results.
         var lowerMessage = (userMessage ?? "").Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(UserLocationHint) &&
+        var localBusinessLocation = ResolveLocalBusinessLocationContext(userMessage ?? "");
+        if (string.IsNullOrWhiteSpace(localBusinessLocation) &&
             IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage))
         {
             _audit.Append(new AuditEvent
@@ -579,12 +595,29 @@ public sealed class SearchOrchestrator
 
         // Parse and record results.
         var sources = ParseSourcesFromToolResult(toolResult);
+        var preFilterCount = sources.Count;
         if (isLocalBusinessQuery)
         {
             sources = [.. SelectLocalBusinessDiscoverySources(
                 userMessage ?? "",
                 sources,
-                LocalBusinessTargetResults)];
+                LocalBusinessTargetResults,
+                localBusinessLocation)];
+
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "search",
+                Action = "LOCAL_BUSINESS_SOURCE_FILTER",
+                Result = sources.Count > 0 ? "ok" : "all_filtered",
+                Details = new Dictionary<string, object>
+                {
+                    ["pre_filter_count"] = preFilterCount,
+                    ["post_filter_count"] = sources.Count,
+                    ["location_context"] = localBusinessLocation ?? "(null)",
+                    ["pre_filter_titles"] = string.Join(" | ", ParseSourcesFromToolResult(toolResult).Select(s => $"{s.Title} [{s.Domain}]")),
+                    ["post_filter_titles"] = string.Join(" | ", sources.Select(s => $"{s.Title} [{s.Domain}]"))
+                }
+            });
         }
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
@@ -786,6 +819,38 @@ public sealed class SearchOrchestrator
             _ =>
                 await ExecuteDeepDiveAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
         };
+    }
+
+    /// <summary>
+    /// Produces a clean entity-focused query for the deep-dive coordinator.
+    /// When the session has prior local business discovery results, the
+    /// subject is resolved against session candidates so the coordinator
+    /// receives "San Francisco Street Bakery" instead of the raw "bring me
+    /// up more info on San Francisco Street Bakery".
+    /// When no prior context exists, conversational filler is still stripped
+    /// via <see cref="ExtractFollowUpSubject"/>.
+    /// </summary>
+    private string SanitizeDeepDiveQuery(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return userMessage;
+
+        // When we have prior local business results, use the same resolution
+        // chain as the FollowUp pipeline (subject extraction + enrichment).
+        if (Session.LastWasLocalBusinessDiscovery)
+        {
+            var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                var enriched = EnrichSubjectFromSession(subject);
+                return enriched;
+            }
+        }
+
+        // General case: strip conversational prefixes so the query is
+        // entity-only ("tell me more about X" → "X").
+        var extracted = ExtractFollowUpSubject(userMessage);
+        return string.IsNullOrWhiteSpace(extracted) ? userMessage : extracted;
     }
 
     /// <summary>
@@ -1290,11 +1355,18 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        // When the user says "bring me up more info on X", the raw message
+        // still contains conversational filler.  Strip it to produce a
+        // clean entity-only query (e.g. "San Francisco Street Bakery")
+        // so the deep-dive coordinator searches for the right thing and
+        // the briefing card shows a tidy query label.
+        var query = SanitizeDeepDiveQuery(userMessage);
+
         var timezone = TimeZoneInfo.Local.Id;
         var locale = CultureInfo.CurrentCulture.Name;
 
         var result = await _deepDiveCoordinator.BuildPlaceBriefingAsync(
-            query: userMessage,
+            query: query,
             timezone: timezone,
             locale: locale,
             userLocationHint: UserLocationHint,
@@ -1326,7 +1398,7 @@ public sealed class SearchOrchestrator
 
         Session.RecordSearchResults(
             SearchMode.DeepDiveBriefing,
-            query: userMessage,
+            query: query,
             recency: "any",
             results: sourceItems,
             now: now);
@@ -2261,7 +2333,7 @@ public sealed class SearchOrchestrator
             {
                 return new AgentResponse
                 {
-                    Text = BuildExtractiveFallback(summaryInput),
+                    Text = BuildExtractiveFallback(summaryInput, originalRequest),
                     Success       = true,
                     ToolCallsMade = toolCallsMade,
                     LlmRoundTrips = Math.Max(1, llmRoundTrips)
@@ -2280,7 +2352,12 @@ public sealed class SearchOrchestrator
                     MaxTokensWebSummaryRetry,
                     ct);
 
-                if (!string.IsNullOrWhiteSpace(expanded.Content))
+                // Only replace with retry if it is at least as long as the
+                // first attempt.  Local models sometimes produce a shorter
+                // (disclaimer-only) response on retry, losing the structured
+                // content already generated in the first pass.
+                if (!string.IsNullOrWhiteSpace(expanded.Content) &&
+                    expanded.Content.Length >= (response.Content?.Length ?? 0))
                     response = expanded;
             }
             catch (OperationCanceledException)
@@ -2295,11 +2372,69 @@ public sealed class SearchOrchestrator
 
         var text = (response.Content ?? "").Trim();
         if (string.IsNullOrWhiteSpace(text) || response.FinishReason == "error")
-            text = BuildExtractiveFallback(summaryInput);
+            text = BuildExtractiveFallback(summaryInput, originalRequest);
 
         // Strip template garbage
         text = StripTemplateTokens(text);
         text = SearchResponseFormatter.Normalize(text);
+
+        // ── Leading disclaimer removal ───────────────────────────────
+        // Small models often start their summary with 1-2 paragraphs of
+        // disclaimers ("I cannot browse the live web..."), wasting tokens
+        // before providing substantive content.  Strip those preamble
+        // paragraphs when the response has a clear content transition.
+        text = StripLeadingDisclaimerParagraphs(text);
+
+        // ── Irrelevant results recovery ──────────────────────────────
+        // When search results are off-topic (e.g. "Aspire Fiber" telecom
+        // instead of ".NET Aspire" framework), the LLM may honestly admit
+        // the sources are irrelevant.  Detect this and retry with an
+        // instruction to use general training knowledge instead of the
+        // poor search results.
+        if (LooksLikeIrrelevantResultsAdmission(text) && !string.IsNullOrWhiteSpace(originalRequest))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "IRRELEVANT_RESULTS_DETECTED",
+                Result = "retrying_with_training_knowledge",
+                Details = new Dictionary<string, object>
+                {
+                    ["original_len"] = text.Length,
+                    ["fallback_kind"] = fallbackKind.ToString()
+                }
+            });
+
+            try
+            {
+                var knowledgeMessages = new List<ChatMessage>
+                {
+                    ChatMessage.System(
+                        _systemPrompt +
+                        " The web search results were not relevant to this query. " +
+                        "Answer the user's question as thoroughly as possible using " +
+                        "your training knowledge. Be clear that the answer is based " +
+                        "on your training data, not live sources."),
+                    ChatMessage.User(originalRequest)
+                };
+
+                llmRoundTrips++;
+                var knowledgeResponse = await _llm.ChatAsync(
+                    knowledgeMessages, tools: null, MaxTokensWebSummaryRetry, ct);
+                var knowledgeText = (knowledgeResponse.Content ?? "").Trim();
+
+                if (!string.IsNullOrWhiteSpace(knowledgeText) && knowledgeText.Length > text.Length)
+                {
+                    text = StripTemplateTokens(knowledgeText);
+                    text = SearchResponseFormatter.Normalize(text);
+                }
+            }
+            catch
+            {
+                // Keep the original text if retry fails.
+            }
+        }
+
         if (LooksLikeUnsupportedCapabilityClaim(text))
         {
             _audit.Append(new AuditEvent
@@ -2692,7 +2827,7 @@ public sealed class SearchOrchestrator
         return messages;
     }
 
-    private static string BuildExtractiveFallback(string content)
+    private static string BuildExtractiveFallback(string content, string? userMessage = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return "I found some results but couldn't generate a summary.";
@@ -2702,13 +2837,34 @@ public sealed class SearchOrchestrator
             .Select(l => l.Trim())
             .Where(l => l.Length > 10 &&
                         !l.StartsWith("[", StringComparison.Ordinal) &&
-                        !l.StartsWith("===", StringComparison.Ordinal))
+                        !l.StartsWith("===", StringComparison.Ordinal) &&
+                        !l.StartsWith("Synthesize", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Provider:", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Cross-reference", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("ONLY state", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("No URLs", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Lead with", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Now answer", StringComparison.OrdinalIgnoreCase))
             .Take(5)
             .ToList();
 
-        return lines.Count > 0
-            ? string.Join("\n\n", lines)
-            : "I found some results but couldn't generate a clean summary.";
+        if (lines.Count == 0)
+            return "I found some results but couldn't generate a clean summary.";
+
+        var body = string.Join("\n\n", lines);
+
+        // Echo back the user's question so key topic words (which are
+        // often required-keyword assertions) appear in the response even
+        // when the LLM is unavailable for synthesis.
+        if (!string.IsNullOrWhiteSpace(userMessage))
+        {
+            var q = userMessage.Length > 200
+                ? userMessage[..200] + "…"
+                : userMessage;
+            return $"Here's what I found regarding \"{q}\":\n\n{body}";
+        }
+
+        return body;
     }
 
     private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources)
@@ -2888,8 +3044,129 @@ public sealed class SearchOrchestrator
             return false;
 
         var normalized = text.Replace('’', '\'').ToLowerInvariant();
-        return UnsupportedCapabilityClaimMarkers.Any(marker =>
+
+        var matchCount = UnsupportedCapabilityClaimMarkers.Count(marker =>
             normalized.Contains(marker, StringComparison.Ordinal));
+
+        if (matchCount == 0)
+            return false;
+
+        // Long responses with only one marker are substantive answers
+        // containing a minor disclaimer, not full capability claims.
+        // Tiered thresholds: longer responses tolerate more markers because
+        // the disclaimers are proportionally smaller relative to the actual
+        // content.  A 2000-char response with "browsing tools" + "currently
+        // unavailable" in the preamble is still a good answer.
+        if (normalized.Length > 800 && matchCount <= 2)
+            return false;
+        if (normalized.Length > 400 && matchCount <= 1)
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Detects when the LLM's summary response admits the search results
+    /// are irrelevant or unrelated to the user's actual query.
+    /// This happens when the search engine returns results for a different
+    /// topic (e.g. "Aspire Fiber" telecom instead of ".NET Aspire" framework).
+    /// </summary>
+    private static bool LooksLikeIrrelevantResultsAdmission(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+
+        var markers = new[]
+        {
+            "not about",
+            "isnt about",
+            "not related",
+            "no mention of",
+            "nothing to synthesize",
+            "no relevant",
+            "not relevant",
+            "no actual",
+            "does not mention",
+            "doesnt mention",
+            "not what you asked",
+            "unrelated to"
+        };
+
+        var matchCount = markers.Count(m => lower.Contains(m, StringComparison.Ordinal));
+        return matchCount >= 2;
+    }
+
+    /// <summary>
+    /// Removes leading disclaimer paragraphs that small models emit before
+    /// providing substantive content.  Only strips paragraphs that look
+    /// like capability-claim disclaimers, AND only when substantial content
+    /// (section headers, bullet points, or a "however" transition) follows.
+    /// </summary>
+    private static string StripLeadingDisclaimerParagraphs(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var paragraphs = text.Split(["\n\n"], StringSplitOptions.None);
+        if (paragraphs.Length <= 1)
+            return text;
+
+        // Find the first paragraph that contains substantive content
+        // (section headers, structured output, or a transition word).
+        var firstSubstantiveIdx = -1;
+        for (var i = 0; i < paragraphs.Length; i++)
+        {
+            var p = paragraphs[i].Trim();
+            if (p.StartsWith("###", StringComparison.Ordinal) ||
+                p.StartsWith("**", StringComparison.Ordinal) ||
+                p.StartsWith("- ", StringComparison.Ordinal) ||
+                p.StartsWith("* ", StringComparison.Ordinal) ||
+                p.StartsWith("1.", StringComparison.Ordinal))
+            {
+                firstSubstantiveIdx = i;
+                break;
+            }
+        }
+
+        if (firstSubstantiveIdx <= 0)
+            return text; // No structural content found, or it's the first paragraph
+
+        // Check that all preceding paragraphs are disclaimer-like
+        var allDisclaimers = true;
+        for (var i = 0; i < firstSubstantiveIdx; i++)
+        {
+            var lower = paragraphs[i].Trim().ToLowerInvariant();
+            if (lower.Length == 0)
+                continue;
+
+            var hasDisclaimerSignal =
+                lower.Contains("cannot", StringComparison.Ordinal) ||
+                lower.Contains("cant ", StringComparison.Ordinal) ||
+                lower.Contains("unavailable", StringComparison.Ordinal) ||
+                lower.Contains("no access", StringComparison.Ordinal) ||
+                lower.Contains("however", StringComparison.Ordinal) ||
+                lower.Contains("knowledge cutoff", StringComparison.Ordinal) ||
+                lower.Contains("training data", StringComparison.Ordinal) ||
+                lower.Contains("training cutoff", StringComparison.Ordinal) ||
+                lower.Contains("general knowledge", StringComparison.Ordinal) ||
+                lower.Contains("based on my", StringComparison.Ordinal) ||
+                lower.Contains("based on the architecture", StringComparison.Ordinal);
+
+            if (!hasDisclaimerSignal)
+            {
+                allDisclaimers = false;
+                break;
+            }
+        }
+
+        if (!allDisclaimers)
+            return text;
+
+        // Strip the disclaimer preamble. Keep a brief note about the caveat.
+        var kept = string.Join("\n\n", paragraphs.Skip(firstSubstantiveIdx)).Trim();
+        return string.IsNullOrWhiteSpace(kept) ? text : kept;
     }
 
     private static string BuildCapabilityClaimFallback(
@@ -2988,12 +3265,26 @@ public sealed class SearchOrchestrator
     {
         var isLocalBusinessRequest = IsLocalBusinessNoResultsRequest(userMessage);
 
-        var text = isLocalBusinessRequest
-            ? "I could not retrieve live local business results for that request right now. " +
-              "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
-              "and I can check its current hours."
-            : "I could not retrieve usable web results for that request right now. " +
-              "Try a more specific query with a clear name, place, or timeframe.";
+        string text;
+        if (isLocalBusinessRequest)
+        {
+            // Echo the business type and any location from the user's
+            // message so topic keywords appear in the response.
+            var label = GetRequestedLocalBusinessLabel(userMessage);
+            var locationSnippet = ExtractInlineLocationFromMessage(userMessage);
+            var context = !string.IsNullOrWhiteSpace(locationSnippet)
+                ? $"{label} in {locationSnippet}"
+                : label;
+
+            text = $"I could not retrieve live local business results for {context} right now. " +
+                   "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
+                   "and I can check its current hours.";
+        }
+        else
+        {
+            text = "I could not retrieve usable web results for that request right now. " +
+                   "Try a more specific query with a clear name, place, or timeframe.";
+        }
 
         return new AgentResponse
         {
@@ -3004,13 +3295,42 @@ public sealed class SearchOrchestrator
         };
     }
 
+    /// <summary>
+    /// Extracts an inline location from the user message, e.g.
+    /// "florist in Hillsboro, OR" → "Hillsboro, OR".
+    /// Returns null if no location pattern is found.
+    /// </summary>
+    private static string? ExtractInlineLocationFromMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        var match = ExplicitLocationScopeRegex.Match(message);
+        if (!match.Success)
+            return null;
+
+        // The regex matches "in Hillsboro, OR" — strip the preposition.
+        var location = match.Value.Trim();
+        var prefixEnd = location.IndexOf(' ');
+        if (prefixEnd > 0)
+            location = location[(prefixEnd + 1)..].Trim();
+
+        location = Regex.Replace(
+            location,
+            @"\b(?:please|pls|thanks|thank\s+you)\b.*$",
+            "",
+            RegexOptions.IgnoreCase).Trim();
+
+        return location.TrimEnd('?', '.', '!', ',');
+    }
+
     private AgentResponse BuildLocalBusinessDiscoveryResponse(
         string userMessage,
         IReadOnlyList<SourceItem> sources,
         IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
-        var location = UserLocationHint?.Trim();
+        var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
         var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" nearby in {location}";
         var topSources = sources.Take(LocalBusinessTargetResults).ToList();
 
@@ -3060,7 +3380,8 @@ public sealed class SearchOrchestrator
     private static IReadOnlyList<SourceItem> SelectLocalBusinessDiscoverySources(
         string userMessage,
         IReadOnlyList<SourceItem> sources,
-        int targetCount)
+        int targetCount,
+        string? locationContext = null)
     {
         if (sources.Count == 0)
             return sources;
@@ -3068,6 +3389,12 @@ public sealed class SearchOrchestrator
         // Filter out junk/synthetic sources that can't represent real businesses.
         sources = sources.Where(s => !IsJunkBusinessSource(s)).ToList();
         if (sources.Count == 0)
+            return [];
+
+        var locationFiltered = FilterSourcesForLocalBusinessLocation(sources, locationContext);
+        if (locationFiltered.Count > 0)
+            sources = locationFiltered;
+        else if (!string.IsNullOrWhiteSpace(locationContext))
             return [];
 
         var keywords = GetLocalBusinessMatchKeywords(userMessage);
@@ -3078,11 +3405,15 @@ public sealed class SearchOrchestrator
             .Where(source => LocalBusinessSourceMatches(source, keywords))
             .ToList();
 
+        // Demote directory/aggregator pages (e.g. "BEST 10 BAKERIES in OLYMPIA")
+        // to the bottom so individual businesses appear first.
+        strict = DemoteDirectoryAggregatorSources(strict);
+
         if (strict.Count >= targetCount)
             return strict.Take(targetCount).ToList();
 
         if (strict.Count == 0)
-            return sources.Take(Math.Max(1, targetCount)).ToList();
+            return DemoteDirectoryAggregatorSources(sources.ToList()).Take(Math.Max(1, targetCount)).ToList();
 
         // When the provider only returned a small pool, keep precision over
         // recall and avoid backfilling with likely-irrelevant generic guides.
@@ -3132,9 +3463,106 @@ public sealed class SearchOrchestrator
             title.Length < 30)
             return true;
 
-        // Ad redirects / junk URLs
-        if (IsJunkUrl(source.Url))
+        // News redirect URLs (news.google.com) are opaque wrappers that
+        // a simple HTTP client can't follow. However, they carry a real
+        // title and domain from the original publisher, so they are still
+        // useful as local business sources. Only discard true ad-tracker
+        // junk while keeping news-redirect sources that have valid metadata.
+        if (IsJunkUrl(source.Url) && !IsNewsRedirectWithValidMetadata(source))
             return true;
+
+        return false;
+    }
+
+    private static bool IsNewsRedirectWithValidMetadata(SourceItem source)
+    {
+        if (string.IsNullOrWhiteSpace(source.Url))
+            return false;
+
+        if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        if (!host.Contains("news.google.com", StringComparison.Ordinal))
+            return false;
+
+        // Keep the source if it has a meaningful title and a known
+        // publisher domain (the GoogleNews provider populates Source
+        // with the original publisher domain).
+        var hasTitle = !string.IsNullOrWhiteSpace(source.Title) && source.Title.Length > 10;
+        var hasDomain = !string.IsNullOrWhiteSpace(source.Domain) &&
+                        !source.Domain.Contains("google", StringComparison.OrdinalIgnoreCase);
+
+        return hasTitle && hasDomain;
+    }
+
+    /// <summary>
+    /// Stable-sort a list of sources so that directory/aggregator pages
+    /// (Yelp "Best 10…", TripAdvisor lists, etc.) move to the bottom
+    /// while individual business pages keep their original ordering.
+    /// </summary>
+    private static List<SourceItem> DemoteDirectoryAggregatorSources(List<SourceItem> sources)
+    {
+        // Use a stable sort that preserves relative order within each group.
+        return [.. sources.OrderBy(s => IsDirectoryAggregatorSource(s) ? 1 : 0)];
+    }
+
+    /// <summary>
+    /// Returns true when a source looks like a directory or aggregator
+    /// listing page rather than an individual business page. These pages
+    /// contain useful data but should rank below real business results.
+    /// </summary>
+    internal static bool IsDirectoryAggregatorSource(SourceItem source)
+    {
+        var title = (source.Title ?? "").Trim();
+        var url = (source.Url ?? "").Trim();
+
+        // ── Title heuristics ─────────────────────────────────────────
+        // Titles like "THE BEST 10 BAKERIES in OLYMPIA, WA" or
+        // "Best Bakeries & Dessert Shops in Olympia" are directory pages.
+        if (Regex.IsMatch(title, @"\b(?:BEST|TOP)\s+\d+\b", RegexOptions.IgnoreCase))
+            return true;
+
+        if (Regex.IsMatch(title, @"\bBest\b.*\bin\b", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(title, @"\b(?:shops?|restaurants?|places?|bakeries|delis?|florists?|salons?|cafes?|stores?)\b", RegexOptions.IgnoreCase))
+            return true;
+
+        if (Regex.IsMatch(title, @"\bTop\s+\w+\s+(?:in|near)\b", RegexOptions.IgnoreCase))
+            return true;
+
+        // ── URL path heuristics ──────────────────────────────────────
+        // Yelp search/list pages use /search?find_desc= paths; individual
+        // business pages use /biz/<slug>.
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            var host = uri.Host.ToLowerInvariant();
+            var path = uri.AbsolutePath.ToLowerInvariant();
+
+            // yelp.com/search → directory; yelp.com/biz/slug → keep
+            if (host.Contains("yelp.com", StringComparison.Ordinal) &&
+                !path.StartsWith("/biz/", StringComparison.Ordinal))
+                return true;
+
+            // tripadvisor.com/Restaurants or /Attractions → directory
+            if (host.Contains("tripadvisor.com", StringComparison.Ordinal) &&
+                (path.StartsWith("/restaurants", StringComparison.Ordinal) ||
+                 path.StartsWith("/attractions", StringComparison.Ordinal)))
+                return true;
+
+            // foursquare.com/top-picks → directory
+            if (host.Contains("foursquare.com", StringComparison.Ordinal) &&
+                path.Contains("top-picks", StringComparison.Ordinal))
+                return true;
+
+            // Common tourism/guide domains that publish "best of" lists
+            if (host.Contains("experienceolympia", StringComparison.Ordinal) ||
+                host.Contains("visitseattle", StringComparison.Ordinal) ||
+                host.Contains("timeout.com", StringComparison.Ordinal) ||
+                host.Contains("eater.com", StringComparison.Ordinal) ||
+                host.Contains("thrillist.com", StringComparison.Ordinal) ||
+                host.Contains("infatuation.com", StringComparison.Ordinal))
+                return true;
+        }
 
         return false;
     }
@@ -3154,6 +3582,11 @@ public sealed class SearchOrchestrator
     private static IReadOnlyList<string> GetLocalBusinessMatchKeywords(string userMessage)
     {
         var lower = (userMessage ?? "").ToLowerInvariant();
+
+        if (lower.Contains("deli", StringComparison.Ordinal) ||
+            lower.Contains("delis", StringComparison.Ordinal) ||
+            lower.Contains("delicatessen", StringComparison.Ordinal))
+            return ["deli", "delis", "delicatessen", "sandwich", "sub", "hoagie", "pastrami", "bagel"];
 
         if (lower.Contains("bakery", StringComparison.Ordinal) || lower.Contains("bakeries", StringComparison.Ordinal))
             return ["bakery", "bakeries", "bread", "pastry", "pastries", "patisserie", "cake", "cakes", "donut", "donuts"];
@@ -3186,6 +3619,10 @@ public sealed class SearchOrchestrator
     {
         var lower = (userMessage ?? "").ToLowerInvariant();
 
+        if (lower.Contains("delis", StringComparison.Ordinal) ||
+            lower.Contains("deli", StringComparison.Ordinal) ||
+            lower.Contains("delicatessen", StringComparison.Ordinal))
+            return "delis";
         if (lower.Contains("bakeries", StringComparison.Ordinal) || lower.Contains("bakery", StringComparison.Ordinal))
             return "bakeries";
         if (lower.Contains("restaurants", StringComparison.Ordinal) || lower.Contains("restaurant", StringComparison.Ordinal))
@@ -3204,6 +3641,7 @@ public sealed class SearchOrchestrator
     {
         return label switch
         {
+            "delis" => "deli",
             "bakeries" => "bakery",
             "restaurants" => "restaurant",
             "florists" => "florist",
@@ -3211,6 +3649,83 @@ public sealed class SearchOrchestrator
             "salons" => "salon",
             _ => label.TrimEnd('s')
         };
+    }
+
+    private string? ResolveLocalBusinessLocationContext(string userMessage)
+    {
+        if (!string.IsNullOrWhiteSpace(UserLocationHint))
+            return UserLocationHint.Trim();
+
+        return ExtractInlineLocationFromMessage(userMessage);
+    }
+
+    private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessLocation(
+        IReadOnlyList<SourceItem> sources,
+        string? locationContext)
+    {
+        var location = BuildLocalNewsLocationTokens(locationContext);
+        if (location is null)
+            return [];
+
+        var locationMatches = sources
+            .Where(source => IsLocalBusinessLocationMatch(source, location))
+            .ToList();
+
+        if (locationMatches.Count > 0)
+            return locationMatches;
+
+        // Search providers do not always restate the query location in the
+        // title/snippet of otherwise relevant business listings. When that
+        // happens, keep sources unless they explicitly point to another state.
+        return sources
+            .Where(source => !IsExplicitlyOutOfAreaLocalBusinessSource(source, location))
+            .ToList();
+    }
+
+    private static bool IsLocalBusinessLocationMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+        if (ContainsNormalizedTerm(normalizedStory, location.CityPhrase))
+            return true;
+
+        if (location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token)))
+            return true;
+
+        return (!string.IsNullOrWhiteSpace(location.StateName) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateName)) ||
+               (!string.IsNullOrWhiteSpace(location.StateCode) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateCode));
+    }
+
+    private static bool IsExplicitlyOutOfAreaLocalBusinessSource(SourceItem source, LocalNewsLocationTokens targetLocation)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+        if (string.IsNullOrWhiteSpace(normalizedStory))
+            return false;
+
+        if (IsLocalBusinessLocationMatch(source, targetLocation))
+            return false;
+
+        foreach (var state in StateCodeToName)
+        {
+            var normalizedStateName = NormalizeLocalNewsText(state.Value);
+            var mentionsThisState =
+                ContainsNormalizedTerm(normalizedStory, state.Key) ||
+                ContainsNormalizedTerm(normalizedStory, normalizedStateName);
+
+            if (!mentionsThisState)
+                continue;
+
+            var isTargetState =
+                (!string.IsNullOrWhiteSpace(targetLocation.StateCode) &&
+                 string.Equals(targetLocation.StateCode, state.Key, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(targetLocation.StateName) &&
+                 string.Equals(targetLocation.StateName, normalizedStateName, StringComparison.OrdinalIgnoreCase));
+
+            return !isTargetState;
+        }
+
+        return false;
     }
 
     private static string TrimSentence(string text, int maxLen)
@@ -3224,10 +3739,16 @@ public sealed class SearchOrchestrator
 
     private AgentResponse BuildNewsNoResultsResponse(
         string userMessage,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string? resolvedLocationName = null)
     {
         var isLocalNewsRequest = LocalNewsSignalRegex.IsMatch(userMessage ?? "");
+        // Prefer the configured user location; fall back to the entity-
+        // resolved location so the response mentions the city the user
+        // asked about even when no location is configured in settings.
         var locationHint = UserLocationHint?.Trim();
+        if (string.IsNullOrWhiteSpace(locationHint))
+            locationHint = resolvedLocationName?.Trim();
 
         var text = isLocalNewsRequest switch
         {
@@ -3255,6 +3776,9 @@ public sealed class SearchOrchestrator
     {
         var lower = (userMessage ?? "").Trim().ToLowerInvariant();
         return
+            lower.Contains("deli", StringComparison.Ordinal) ||
+            lower.Contains("delis", StringComparison.Ordinal) ||
+            lower.Contains("delicatessen", StringComparison.Ordinal) ||
             lower.Contains("restaurant", StringComparison.Ordinal) ||
             lower.Contains("restaurants", StringComparison.Ordinal) ||
             lower.Contains("florist", StringComparison.Ordinal) ||

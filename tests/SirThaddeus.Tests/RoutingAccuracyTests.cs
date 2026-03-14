@@ -7,8 +7,14 @@ namespace SirThaddeus.Tests;
 
 public class RoutingAccuracyTests
 {
+    /// <summary>
+    /// After recalibration: a high-confidence LookupFact route (Tier 1)
+    /// runs through Footman, but the Footman's untyped downgrade to Chat
+    /// is blocked because it lacks a valid <see cref="FootmanBlockReason"/>.
+    /// The original LookupFact route proceeds, and web_search is called.
+    /// </summary>
     [Fact]
-    public async Task LookupRoute_HighConfidence_StillRunsFootmanArbitration()
+    public async Task LookupRoute_HighConfidence_FootmanDowngradeBlocked_WithoutTypedReason()
     {
         var router = new FixedRouter(new RouterOutput
         {
@@ -25,13 +31,19 @@ public class RoutingAccuracyTests
             ContextPolicy = ContextPolicy.ChatSessionSnapshot,
             Confidence = 0.9,
             Abstain = false,
-            ReasonCode = "test_override"
+            ReasonCode = "test_override",
+            BlockReason = FootmanBlockReason.Unknown
         });
+
+        var webSearchPayload =
+            "1. Database jokes compilation\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/jokes\",\"title\":\"DB Jokes\"}]";
 
         var llm = new FakeLlmClient((messages, tools) => new LlmResponse
         {
             IsComplete = true,
-            Content = "No web lookup needed.",
+            Content = "Why did the database administrator leave his wife? She had one-to-many relationships.",
             FinishReason = "stop"
         });
 
@@ -40,7 +52,8 @@ public class RoutingAccuracyTests
             {
                 "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
                 "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
-                "web_search" or "WebSearch" => "should not be called",
+                "web_search" or "WebSearch" => webSearchPayload,
+                "browser_navigate" or "BrowserNavigate" => "Content",
                 _ => "{}"
             },
             FakeMcpClient.StandardToolSet);
@@ -56,11 +69,11 @@ public class RoutingAccuracyTests
 
         var result = await agent.ProcessAsync("can you tell me a joke about databases?");
 
+        // Footman still runs (high-confidence Tier 1 without specific
+        // heuristic bypass), but its downgrade is blocked.
         Assert.True(footman.Called);
         Assert.True(result.Success);
-        Assert.DoesNotContain(mcp.Calls, c =>
-            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
-            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(audit.GetByAction("FOOTMAN_DOWNGRADE_BLOCKED"));
     }
 
     [Fact]

@@ -542,7 +542,7 @@ public sealed partial class AgentOrchestrator
         {
             LogEvent("AGENT_SUMMARY_FOLLOWUP_FALLBACK",
                 "LLM summary failed — building extractive fallback");
-            text = BuildExtractiveSummaryFromContent(fullText);
+            text = BuildExtractiveSummaryFromContent(fullText, userMessage);
         }
         else
         {
@@ -763,7 +763,7 @@ public sealed partial class AgentOrchestrator
         return null;
     }
 
-    private static string BuildExtractiveSummaryFromContent(string content)
+    private static string BuildExtractiveSummaryFromContent(string content, string? userMessage = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return "I fetched the source, but couldn't extract usable content.";
@@ -780,8 +780,20 @@ public sealed partial class AgentOrchestrator
         var bottomLine = lines[0];
         var details = string.Join('\n', lines.Skip(1).Take(4));
 
-        return string.IsNullOrWhiteSpace(details)
+        var body = string.IsNullOrWhiteSpace(details)
             ? $"Bottom line:\n{bottomLine}"
             : $"Bottom line:\n{bottomLine}\n\nDetails:\n{details}";
+
+        // Echo the user's question so key topic words appear in the
+        // response even when the LLM is unavailable for synthesis.
+        if (!string.IsNullOrWhiteSpace(userMessage))
+        {
+            var q = userMessage.Length > 200
+                ? userMessage[..200] + "\u2026"
+                : userMessage;
+            return $"Regarding \"{q}\":\n\n{body}";
+        }
+
+        return body;
     }
 }

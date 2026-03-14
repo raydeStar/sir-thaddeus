@@ -1,6 +1,6 @@
-id: web_local_florist_nearby
-name: Location - Is there a florist nearby?
-user_message: "Is there a florist nearby?"
+id: web_local_deli_nearby
+name: Location - Is there a deli nearby?
+user_message: "Is there a deli nearby?"
 allowed_tools:
   - memory_retrieve
   - places_lookup
@@ -20,19 +20,27 @@ assertions:
   require_no_hallucinated_citations: false
 expectations:
   required_keywords:
-    - florist
+    - deli
   forbidden_keywords:
     - error
     - timeout
     - as an ai
     - i can't
     - i cannot
+    - location services
     - could not retrieve
     - no results
     - unable to find
     - try naming one specific place
-    - location services
     - I need a location
     - set your location
-  max_response_chars: 2000
+  max_response_chars: 2200
 min_score: 7.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/Search/SearchOrchestrator.cs
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/Search/
+  tier3_targets:
+    - packages/

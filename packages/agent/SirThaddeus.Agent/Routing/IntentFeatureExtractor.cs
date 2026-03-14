@@ -963,6 +963,7 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
@@ -1033,6 +1034,7 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",

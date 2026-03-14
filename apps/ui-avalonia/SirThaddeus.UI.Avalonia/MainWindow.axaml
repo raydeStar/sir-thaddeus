@@ -349,8 +349,8 @@
                         <TextBlock x:Name="BriefingHeroTitleText" Text="Briefing title" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"/>
                         <TextBlock x:Name="BriefingHeroStatusText" Text="Status line" FontSize="14" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
                       </StackPanel>
-                      <Border x:Name="BriefingConfidenceBadge" Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="12,6" VerticalAlignment="Top">
-                        <TextBlock x:Name="BriefingConfidenceText" Text="UNKNOWN" FontSize="11" FontWeight="Bold" Foreground="{StaticResource BaseBrush}"/>
+                      <Border x:Name="BriefingConfidenceBadge" Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="10,4" VerticalAlignment="Top">
+                        <TextBlock x:Name="BriefingConfidenceText" Text="Unknown" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource CrustBrush}"/>
                       </Border>
                     </Grid>
 

@@ -198,6 +198,95 @@ public class FootmanRouterTests
         Assert.Contains("parse_", decision.ReasonCode);
     }
 
+    // ── BlockReason Parsing ──────────────────────────────────────────
+
+    [Fact]
+    public void ParseAndValidate_SafetyBlockReason_PopulatesBlockReason()
+    {
+        var router = CreateRouter("unused");
+        var json = """
+        {
+            "schemaVersion": 1,
+            "requestId": "br1",
+            "nextState": "Chat",
+            "contextPolicy": "ChatSessionSnapshot",
+            "confidence": 0.92,
+            "abstain": false,
+            "reasonCode": "safety_block"
+        }
+        """;
+
+        var decision = router.ParseAndValidate(json, "br1");
+
+        Assert.Equal(AgentState.Chat, decision.NextState);
+        Assert.Equal(FootmanBlockReason.SafetyBlock, decision.BlockReason);
+    }
+
+    [Fact]
+    public void ParseAndValidate_UnknownReasonCode_BlockReasonIsUnknown()
+    {
+        var router = CreateRouter("unused");
+        var json = """
+        {
+            "schemaVersion": 1,
+            "requestId": "br2",
+            "nextState": "SearchFact",
+            "confidence": 0.88,
+            "abstain": false,
+            "reasonCode": "greeting_detected"
+        }
+        """;
+
+        var decision = router.ParseAndValidate(json, "br2");
+
+        Assert.Equal(AgentState.SearchFact, decision.NextState);
+        Assert.Equal(FootmanBlockReason.Unknown, decision.BlockReason);
+    }
+
+    [Fact]
+    public void ParseAndValidate_LowConfidence_BlockReasonIsUnknown()
+    {
+        var router = CreateRouter("unused");
+        var json = """
+        {
+            "schemaVersion": 1,
+            "requestId": "br3",
+            "nextState": "Chat",
+            "confidence": 0.40,
+            "abstain": false,
+            "reasonCode": "safety_block"
+        }
+        """;
+
+        var decision = router.ParseAndValidate(json, "br3");
+
+        // Low confidence auto-fallback should set BlockReason to Unknown.
+        Assert.Equal(AgentState.Fallback, decision.NextState);
+        Assert.Equal(FootmanBlockReason.Unknown, decision.BlockReason);
+    }
+
+    [Fact]
+    public void ParseAndValidate_Abstain_PreservesBlockReason()
+    {
+        var router = CreateRouter("unused");
+        var json = """
+        {
+            "schemaVersion": 1,
+            "requestId": "br4",
+            "nextState": "Chat",
+            "confidence": 0.80,
+            "abstain": true,
+            "reasonCode": "ambiguous_intent"
+        }
+        """;
+
+        var decision = router.ParseAndValidate(json, "br4");
+
+        Assert.Equal(AgentState.Fallback, decision.NextState);
+        Assert.True(decision.Abstain);
+        Assert.Equal(FootmanBlockReason.AmbiguousIntent, decision.BlockReason);
+    }
+
     [Fact]
     public void ParseAndValidate_MissingContextPolicy_DefaultsFromState()
     {

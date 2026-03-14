@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
+    <ProjectReference Include="..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
     <ProjectReference Include="..\..\packages\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />

@@ -81,7 +81,7 @@ public sealed class ConversationSegmenter : IConversationSegmenter
         }
 
         if (spans.Count > 0)
-            return spans;
+            return MergeSpansSplitOnDottedTokens(text, spans);
 
         // Fallback: whole message as one span.
         var fallbackEnd = text.Length;
@@ -94,6 +94,74 @@ public sealed class ConversationSegmenter : IConversationSegmenter
         return fallbackEnd > fallbackStart
             ? [(fallbackStart, fallbackEnd)]
             : [];
+    }
+
+    /// <summary>
+    /// Recombines spans that were split on a period that is part of a dotted
+    /// token (e.g. ".NET", "U.S.", "Dr.") rather than a real sentence boundary.
+    /// A split point is considered a dotted-token artifact when the text
+    /// immediately after the period starts with a letter (no whitespace gap).
+    /// </summary>
+    private static IReadOnlyList<(int Start, int End)> MergeSpansSplitOnDottedTokens(
+        string text,
+        List<(int Start, int End)> spans)
+    {
+        if (spans.Count < 2)
+            return spans;
+
+        var merged = new List<(int Start, int End)> { spans[0] };
+        for (var i = 1; i < spans.Count; i++)
+        {
+            var prev = merged[^1];
+
+            // Look at the gap between the previous span's raw end (before
+            // whitespace trim) and the current span's raw start.  If the
+            // gap is exactly "." optionally followed by nothing before the
+            // next letter, the two chunks were part of one dotted token.
+            var gapStart = prev.End;
+            var gapEnd   = spans[i].Start;
+
+            // Walk backwards from the current span start to find the dot.
+            // The regex consumes the "." as part of group [.!?]+, so the
+            // gap in the original text should contain the separator.
+            var betweenStart = gapStart;
+            while (betweenStart < gapEnd && char.IsWhiteSpace(text[betweenStart]))
+                betweenStart++;
+
+            var isDottedToken = false;
+            if (betweenStart < text.Length && text[betweenStart] == '.')
+            {
+                // Check if the character directly after the dot is a letter
+                // (no whitespace gap → ".NET", not ". Next sentence").
+                var afterDot = betweenStart + 1;
+                if (afterDot < text.Length && char.IsLetter(text[afterDot]))
+                    isDottedToken = true;
+            }
+            // Also check the end of the raw regex match: the dot may have
+            // been consumed inside the preceding match. Look at text just
+            // before the current span.
+            if (!isDottedToken && gapEnd > 0)
+            {
+                var beforeCurrent = gapEnd - 1;
+                while (beforeCurrent > gapStart && char.IsWhiteSpace(text[beforeCurrent]))
+                    beforeCurrent--;
+                if (beforeCurrent >= 0 && text[beforeCurrent] == '.' &&
+                    gapEnd < text.Length && char.IsLetter(text[gapEnd]))
+                    isDottedToken = true;
+            }
+
+            if (isDottedToken)
+            {
+                // Merge: extend the previous span to cover the current one.
+                merged[^1] = (prev.Start, spans[i].End);
+            }
+            else
+            {
+                merged.Add(spans[i]);
+            }
+        }
+
+        return merged;
     }
 
     private static IReadOnlyList<ConversationSegment> BuildSegments(

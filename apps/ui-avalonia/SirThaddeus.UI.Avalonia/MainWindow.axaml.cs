@@ -41,13 +41,19 @@ public partial class MainWindow : Window
     private bool _stopAllInProgress;
     private AttachedDocumentContext? _attachedDocument;
     private string? _lastUserPrompt;
+    private string? _pendingUserPrompt;
     private string? _lastAssistantMessage;
     private IReadOnlyList<string> _lastAssistantSources = Array.Empty<string>();
     private readonly Dictionary<string, StringBuilder> _assistantBuffersByRunId = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _toolCallsInCurrentRun = new();
     private bool _voiceInitiatedRun;
+    private static readonly TimeSpan MarkdownRegexTimeout = TimeSpan.FromMilliseconds(75);
     private static readonly Regex MarkdownBoldRegex = new(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
     private static readonly Regex MarkdownUnderscoreBoldRegex = new(@"__(.+?)__", RegexOptions.Compiled);
+    private static readonly Regex MarkdownItalicAsteriskRegex = new(@"(?<!\w)\*([^*\r\n]+)\*(?!\w)", RegexOptions.Compiled, MarkdownRegexTimeout);
+    private static readonly Regex MarkdownItalicUnderscoreRegex = new(@"(?<!\w)_([^_\r\n]+)_(?!\w)", RegexOptions.Compiled, MarkdownRegexTimeout);
+    private static readonly Regex MarkdownInlineCodeRegex = new(@"`([^`\r\n]+)`", RegexOptions.Compiled, MarkdownRegexTimeout);
+    private static readonly Regex MarkdownHeadingRegex = new(@"^#{1,6}\s+", RegexOptions.Compiled | RegexOptions.Multiline, MarkdownRegexTimeout);
     private readonly LocalTextToSpeechPlaybackService _ttsPlaybackService;
     private readonly IMicrophoneCaptureService _microphoneCaptureService = new NAudioMicrophoneCaptureService();
     private readonly VoiceHostLauncher _voiceHostLauncher = new();
@@ -715,6 +721,7 @@ public partial class MainWindow : Window
         _pendingPermissionRequestId = null;
         _assistantBuffersByRunId.Clear();
         _lastUserPrompt = null;
+        _pendingUserPrompt = null;
         _lastAssistantMessage = null;
         _lastAssistantSources = Array.Empty<string>();
 
@@ -786,7 +793,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        PromptBox.Text = string.Empty;
+        // Don't clear PromptBox yet – SubmitPromptAsync will clear it on
+        // success, or leave the text visible as a pending prompt when offline.
         await SubmitPromptAsync(prompt, voiceInitiated: false);
     }
 
@@ -800,9 +808,15 @@ public partial class MainWindow : Window
             appendTranscriptOnFailure: true);
         if (!connected || _runtimeApiClient is null)
         {
+            // Store the prompt so it can be auto-sent when the runtime connects.
+            _pendingUserPrompt = prompt;
             UpdateComposerState();
             return;
         }
+
+        // Connection confirmed – clear any pending prompt and the input box.
+        _pendingUserPrompt = null;
+        PromptBox.Text = string.Empty;
 
         var runtimePrompt = prompt;
         if (_attachedDocument is not null)
@@ -849,7 +863,6 @@ public partial class MainWindow : Window
             _currentSession.AddPendingAssistantMessage();
             UpdateComposerState();
             StartEventStream(run.RunId);
-            PromptBox.Text = string.Empty;
             UpdateComposerState();
         }
         catch (Exception ex)
@@ -1991,6 +2004,17 @@ public partial class MainWindow : Window
 
             // Load active profile so the user's preferred name shows in chat headers.
             _ = RefreshProfilesAsync();
+
+            // If the user pressed Send while offline, auto-submit the pending prompt.
+            if (_pendingUserPrompt is not null)
+            {
+                var pending = _pendingUserPrompt;
+                _pendingUserPrompt = null;
+                Dispatcher.UIThread.Post(async () =>
+                {
+                    await SubmitPromptAsync(pending, voiceInitiated: false);
+                }, DispatcherPriority.Background);
+            }
 
             return true;
         }
@@ -3139,15 +3163,26 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         text = MarkdownBoldRegex.Replace(text, "$1");
         text = MarkdownUnderscoreBoldRegex.Replace(text, "$1");
 
-        // *italic* and _italic_ (single markers, only if not inside a word)
-        text = Regex.Replace(text, @"(?<!\w)\*([^*]+?)\*(?!\w)", "$1");
-        text = Regex.Replace(text, @"(?<!\w)_([^_]+?)_(?!\w)", "$1");
+        // Large model outputs with many bullet markers can make broad markdown
+        // regex passes expensive on the UI thread. Keep this transformation
+        // bounded and failure-safe.
+        try
+        {
+            // *italic* and _italic_ (single markers, only if not inside a word)
+            text = MarkdownItalicAsteriskRegex.Replace(text, "$1");
+            text = MarkdownItalicUnderscoreRegex.Replace(text, "$1");
 
-        // `inline code` — just remove the backticks
-        text = Regex.Replace(text, @"`([^`]+?)`", "$1");
+            // `inline code` — just remove the backticks
+            text = MarkdownInlineCodeRegex.Replace(text, "$1");
 
-        // ### Headings — strip leading hashes
-        text = Regex.Replace(text, @"^#{1,6}\s+", "", RegexOptions.Multiline);
+            // ### Headings — strip leading hashes
+            text = MarkdownHeadingRegex.Replace(text, "");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Fall back to lightweight cleanup so the UI still completes the turn.
+            text = text.Replace("`", "", StringComparison.Ordinal);
+        }
 
         return text;
     }

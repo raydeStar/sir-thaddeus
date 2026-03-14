@@ -2501,6 +2501,7 @@ public class LocalBusinessDetectionTests
     [InlineData("pharmacy in my area", true)]
     [InlineData("bakery around here", true)]
     [InlineData("bakeries nearby", true)]             // -ies plural
+    [InlineData("some local delis please", true)]     // deli keyword + local cue
     [InlineData("pharmacies near me", true)]          // -ies plural
     [InlineData("groceries near me", true)]           // -ies plural
     [InlineData("find me some bakeries nearby", true)]
@@ -2722,6 +2723,138 @@ public class LocalBusinessDetectionTests
         Assert.True(result.Success);
         Assert.DoesNotContain("Google Search", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Bing", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalDeliDiscovery_UsesInlineLocationContext_WhenNoManualLocationHint()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis in Essex County, New Jersey","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/nj-deli\",\"title\":\"Town Hall Deli - South Orange, NJ\",\"domain\":\"example.com\",\"snippet\":\"Popular Essex County deli with sandwiches and breakfast.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some local delis in Essex County, New Jersey please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("delis nearby in Essex County, New Jersey", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I need a location", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FiltersOutOutOfAreaResults_WhenLocationIsKnown()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/nj-deli\",\"title\":\"Millburn Deli - Millburn, NJ\",\"domain\":\"example.com\",\"snippet\":\"Beloved Essex County deli known for giant sandwiches.\"}," +
+            "{\"url\":\"https://example.com/dc-deli\",\"title\":\"Best Delis in Washington, D.C.\",\"domain\":\"example.com\",\"snippet\":\"A roundup of delis in the nation's capital.\"}," +
+            "{\"url\":\"https://example.com/va-deli\",\"title\":\"Sterling Deli Update - Sterling, Virginia\",\"domain\":\"example.com\",\"snippet\":\"Regional deli news in Northern Virginia.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Essex County, New Jersey"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some local delis please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Millburn Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Washington, D.C.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Sterling, Virginia", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_KeepsAmbiguousRelevantResults_WhenLocationIsKnown()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis near Olympia, WA","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/main-street-deli\",\"title\":\"Main Street Deli\",\"domain\":\"example.com\",\"snippet\":\"Classic sandwiches, soups, and lunch specials.\"}," +
+            "{\"url\":\"https://example.com/capitol-lunch\",\"title\":\"Capitol Lunch Counter\",\"domain\":\"example.com\",\"snippet\":\"Fresh bagels, hot pastrami, and daily deli specials.\"}," +
+            "{\"url\":\"https://example.com/market-deli\",\"title\":\"Farmhouse Market Deli\",\"domain\":\"example.com\",\"snippet\":\"Local deli counter with grab-and-go sandwiches.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up local delis?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Main Street Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Farmhouse Market Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

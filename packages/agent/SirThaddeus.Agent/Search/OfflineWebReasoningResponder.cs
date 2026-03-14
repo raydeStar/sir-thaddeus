@@ -8,7 +8,7 @@ namespace SirThaddeus.Agent.Search;
 /// </summary>
 internal static partial class OfflineWebReasoningResponder
 {
-    private const int MaxTokensOfflineAnswer = 420;
+    private const int MaxTokensOfflineAnswer = 1024;
     private const string OfflineReasoningInstruction =
         "\n\nLive web tools are unavailable for this turn. " +
         "Answer using general knowledge and careful reasoning only. " +
@@ -40,8 +40,8 @@ internal static partial class OfflineWebReasoningResponder
             var answer = CleanModelText(response.Content ?? "");
             if (string.IsNullOrWhiteSpace(answer))
                 answer = BuildDeterministicFallback(userMessage);
-            answer = Truncate(answer, 520);
-            var finalText = Truncate($"{prefix}\n\n{answer}".Trim(), 680);
+            answer = Truncate(answer, 1800);
+            var finalText = Truncate($"{prefix}\n\n{answer}".Trim(), 2000);
 
             return new AgentResponse
             {
@@ -55,7 +55,7 @@ internal static partial class OfflineWebReasoningResponder
         {
             var finalText = Truncate(
                 $"{prefix}\n\n{BuildDeterministicFallback(userMessage)}".Trim(),
-                680);
+                2000);
 
             return new AgentResponse
             {

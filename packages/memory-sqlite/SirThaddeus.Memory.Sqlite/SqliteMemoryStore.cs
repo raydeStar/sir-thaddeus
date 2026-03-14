@@ -502,7 +502,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             ? """
               SELECT event_id, profile_id, type, title, summary, when_iso,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                   dedupe_key, origin, created_at, updated_at, source_ref
+                                         dedupe_key, origin, created_at, updated_at, source_ref,
+                                         embedding, embedding_model, embedding_dims
               FROM   memory_events
               WHERE  is_deleted = 0
                 AND  (type LIKE @f OR title LIKE @f OR COALESCE(summary,'') LIKE @f)
@@ -512,7 +513,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             : """
               SELECT event_id, profile_id, type, title, summary, when_iso,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                   dedupe_key, origin, created_at, updated_at, source_ref
+                                         dedupe_key, origin, created_at, updated_at, source_ref,
+                                         embedding, embedding_model, embedding_dims
               FROM   memory_events
               WHERE  is_deleted = 0
               ORDER  BY when_iso DESC

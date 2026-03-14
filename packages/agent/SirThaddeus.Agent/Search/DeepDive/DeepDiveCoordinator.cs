@@ -572,9 +572,15 @@ public sealed partial class DeepDiveCoordinator
         var summaryBullets = DeepDiveWebExtractor.BuildSummaryBullets(extraction);
 
         // Derive the hero title from extracted business name or fall back to query.
+        // When web extraction pulled a name from an irrelevant article
+        // (e.g. "Our Strike" instead of "Starbucks"), it won't share any
+        // meaningful token with the cleaned query.  Fall back to the query
+        // so the correct business name always appears in the response.
+        var cleanedForTitle = CleanQueryForWebFallback(query);
         var heroTitle = !string.IsNullOrWhiteSpace(extraction.BusinessName)
+                        && ExtractedNameMatchesQuery(extraction.BusinessName!, cleanedForTitle)
             ? extraction.BusinessName!
-            : query;
+            : cleanedForTitle;
 
         // Build a meaningful status line from what we actually found.
         var closesText = hoursBullets.Count > 0 && !hoursBullets[0].Contains("could not", StringComparison.OrdinalIgnoreCase)
@@ -877,6 +883,42 @@ public sealed partial class DeepDiveCoordinator
             Url = url,
             FetchedIso = DateTimeOffset.UtcNow.ToString("O")
         };
+    }
+
+    /// <summary>
+    /// Returns true when the extracted business name shares at least one
+    /// significant word (3+ chars) with the cleaned query — indicating
+    /// the extraction came from a relevant source rather than an unrelated
+    /// article like "Our Strike" for a "Starbucks" query.
+    /// Uses whole-word matching to avoid false positives like "and" in "portland".
+    /// </summary>
+    internal static bool ExtractedNameMatchesQuery(string extractedName, string cleanedQuery)
+    {
+        if (string.IsNullOrWhiteSpace(extractedName) || string.IsNullOrWhiteSpace(cleanedQuery))
+            return false;
+
+        var nameTokens = extractedName
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim(',', '.', '?', '!', ':', ';', '"', '\'').ToLowerInvariant())
+            .Where(t => t.Length >= 3)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var queryTokens = cleanedQuery
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim(',', '.', '?', '!', ':', ';', '"', '\'').ToLowerInvariant())
+            .Where(t => t.Length >= 3)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Exclude stop words that appear everywhere and cause false positives
+        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the", "and", "for", "are", "but", "not", "you", "all",
+            "can", "had", "her", "his", "was", "one", "our", "out",
+            "has", "its", "how", "did", "get", "let", "say", "she",
+            "too", "use", "way", "who", "new", "now", "old", "see"
+        };
+
+        return nameTokens.Any(t => !stopWords.Contains(t) && queryTokens.Contains(t));
     }
 
     /// <summary>

@@ -486,7 +486,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // When the tripwire router didn't make a high-confidence
         // deterministic match (< 0.95), invoke the Footman for a
         // second opinion using a small, fast gatekeeper model.
+        // Authority boundaries are enforced by ActionTier — see
+        // ShouldRunFootmanForRoute and ShouldBlockFootmanLookupDowngrade.
         RoutingDecision? footmanDecision = null;
+        var actionTier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
         if (_footmanRouter is not null && ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
         {
             var features = RoutingFeatures.Extract(
@@ -511,28 +514,61 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
                     needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
 
-                if (ShouldBlockFootmanLookupDowngrade(lowerIncoming, route, footmanRoute, webEvidence))
+                if (ShouldBlockFootmanLookupDowngrade(
+                        lowerIncoming, route, footmanRoute, webEvidence,
+                        footmanDecision.BlockReason))
                 {
                     LogEvent("FOOTMAN_DOWNGRADE_BLOCKED",
                         $"baseIntent={route.Intent}, proposedIntent={footmanIntent}, " +
-                        $"reason={footmanDecision.ReasonCode}, webScore={webEvidence.Score:0.0}, " +
+                        $"reason={footmanDecision.ReasonCode}, blockReason={footmanDecision.BlockReason}, " +
+                        $"actionTier={actionTier}, webScore={webEvidence.Score:0.0}, " +
                         $"webReason={webEvidence.ReasonCode}");
+
+                    // ── Disagreement log (structured) ────────────────
+                    LogRouterDisagreement(
+                        userMessage, route, footmanIntent,
+                        footmanDecision, actionTier, "downgrade_blocked");
                 }
                 else
                 {
+                    // Check if this is a genuine disagreement even though
+                    // we accepted the Footman's decision.
+                    var isDisagreement = !string.Equals(
+                        route.Intent, footmanIntent, StringComparison.OrdinalIgnoreCase);
+
                     route = footmanRoute;
                     LogEvent("FOOTMAN_OVERRIDE",
                         $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
                         $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
-                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}");
+                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}, " +
+                        $"actionTier={actionTier}");
+
+                    if (isDisagreement)
+                    {
+                        LogRouterDisagreement(
+                            userMessage, routeBeforeFootman: new RouterOutput
+                            {
+                                Intent = routeIntentBeforeFootman,
+                                Confidence = routeConfidenceBeforeFootman,
+                                NeedsWeb = true, NeedsSearch = true
+                            },
+                            footmanIntent, footmanDecision, actionTier,
+                            "footman_accepted");
+                    }
                 }
             }
             else
             {
                 LogEvent("FOOTMAN_DEFERRED",
                     $"abstain={footmanDecision.Abstain}, confidence={footmanDecision.Confidence:F2}, " +
-                    $"reason={footmanDecision.ReasonCode} — keeping tripwire route");
+                    $"reason={footmanDecision.ReasonCode}, actionTier={actionTier} — keeping tripwire route");
             }
+        }
+        else
+        {
+            LogEvent("FOOTMAN_SKIPPED",
+                $"actionTier={actionTier}, intent={route.Intent}, " +
+                $"confidence={route.Confidence:F2}");
         }
 
         // ── Apply Footman context policy ─────────────────────────────
