@@ -81,6 +81,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
     private DateTimeOffset _lastFirstPrinciplesAt;
+    private string? _currentConversationId;
+    private string? _currentTurnTag;
 
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
@@ -385,8 +387,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     }
 
     /// <inheritdoc />
+    public Task<AgentResponse> ProcessAsync(
+        string userMessage,
+        CancellationToken cancellationToken = default)
+        => ProcessAsync(userMessage, conversationId: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<AgentResponse> ProcessAsync(
         string userMessage,
+        string? conversationId,
         CancellationToken cancellationToken = default)
     {
         var usageBaseline = CaptureUsageSnapshot();
@@ -399,6 +408,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";
+        _currentTurnTag = personalityTurnTag;
+        if (!IsMultiIntentBypassActive() || !string.IsNullOrWhiteSpace(conversationId))
+            _currentConversationId = string.IsNullOrWhiteSpace(conversationId)
+                ? null
+                : conversationId.Trim();
+
         var personalityTurnContext = _personalityRuntime.BuildTurnContext(userMessage);
         var personalityAnchor = _personalityRuntime.BuildAnchor(personalityTurnTag, userMessage);
         LogEvent(
@@ -427,6 +442,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
         {
             _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+            _autoMemoryExtractor.FireAndForgetConversationChunk(
+                userMessage,
+                _currentConversationId,
+                personalityTurnTag,
+                role: "user");
         }
 
         var toolCallsMade = new List<ToolCallRecord>();
@@ -447,6 +467,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // total turn latency.
         var memoryTask = SafeModeEnabled ? Task.FromResult(new MemoryContextResult()) : GetMemoryContextSafeAsync(
             userMessage,
+            _currentConversationId,
             cancellationToken);
 
         var slotStateBefore = _dialogueStore.Get();
@@ -696,7 +717,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 "Web search is currently blocked because Safe Mode is enabled. " +
                 "Disable Safe Mode in Runtime Safety to run web lookups.";
             LogEvent("WEB_LOOKUP_BLOCKED_SAFE_MODE", safeModeWebBlockMessage);
-            _history.Add(ChatMessage.Assistant(safeModeWebBlockMessage));
+            AppendAssistantMessage(safeModeWebBlockMessage);
 
             return AttachContextSnapshot(new AgentResponse
             {
@@ -740,7 +761,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 roundTrips);
             if (firstPrinciplesFollowUp is not null)
             {
-                _history.Add(ChatMessage.Assistant(firstPrinciplesFollowUp.Text));
+                AppendAssistantMessage(firstPrinciplesFollowUp.Text);
                 LogEvent("FIRST_PRINCIPLES_FOLLOWUP", firstPrinciplesFollowUp.Text);
                 return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
             }
@@ -753,7 +774,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var specialCaseText = deterministicSpecialCase.AnswerText;
                 _lastFirstPrinciplesRationale = deterministicSpecialCase.RationaleLines.Take(3).ToArray();
                 _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
-                _history.Add(ChatMessage.Assistant(specialCaseText));
+                AppendAssistantMessage(specialCaseText);
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={deterministicSpecialCase.TriggerRisk}, source={deterministicSpecialCase.TriggerSource}, why={deterministicSpecialCase.TriggerWhy}");
                 LogEvent("AGENT_RESPONSE", specialCaseText);
@@ -864,7 +885,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var lastAssistantText = _history.LastOrDefault(m => m.Role == "assistant")?.Content;
                 if (!string.Equals(lastAssistantText, utilityResponse.Text, StringComparison.Ordinal))
                 {
-                    _history.Add(ChatMessage.Assistant(utilityResponse.Text));
+                    AppendAssistantMessage(utilityResponse.Text);
                     LogEvent("AGENT_RESPONSE", utilityResponse.Text);
                 }
 
@@ -890,7 +911,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     contextualUserMessage);
                 _lastFirstPrinciplesRationale = guardrailsResult.RationaleLines.Take(3).ToArray();
                 _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
-                _history.Add(ChatMessage.Assistant(guardedText));
+                AppendAssistantMessage(guardedText);
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={guardrailsResult.TriggerRisk}, source={guardrailsResult.TriggerSource}, why={guardrailsResult.TriggerWhy}");
                 LogEvent(
@@ -916,7 +937,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     toolCallsMade,
                     roundTrips,
                     cancellationToken);
-                _history.Add(ChatMessage.Assistant(memorySummary.Text));
+                AppendAssistantMessage(memorySummary.Text);
                 LogEvent("AGENT_RESPONSE", memorySummary.Text);
                 return AttachContextSnapshot(memorySummary, usageBaseline);
             }
@@ -946,7 +967,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
-                    _history.Add(ChatMessage.Assistant(searchResponse.Text));
+                    AppendAssistantMessage(searchResponse.Text);
 
                 LogEvent("AGENT_RESPONSE", searchResponse.Text);
                 return AttachContextSnapshot(
@@ -1038,7 +1059,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         "Try a direct format like \"350F in C\".";
                     LogEvent("DETERMINISTIC_NO_WEB_ENFORCED",
                         "Suppressed chat fallback web search for deterministic route.");
-                    _history.Add(ChatMessage.Assistant(deterministicFallback));
+                    AppendAssistantMessage(deterministicFallback);
                     LogEvent("AGENT_RESPONSE", deterministicFallback);
                     return AttachContextSnapshot(new AgentResponse
                     {
@@ -1090,7 +1111,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LogEvent("CHAT_RESPONSE_EMPTY_NO_FALLBACK", "Returned local fallback message.");
                 }
 
-                _history.Add(ChatMessage.Assistant(text));
+                AppendAssistantMessage(text);
                 LogEvent("AGENT_RESPONSE", text);
 
                 return AttachContextSnapshot(new AgentResponse
@@ -1173,6 +1194,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _history.Add(ChatMessage.User(message));
         TrimHistory();
         LogEvent("AGENT_USER_MESSAGE", message);
+
+        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+        {
+            _autoMemoryExtractor.FireAndForgetConversationChunk(
+                message,
+                _currentConversationId,
+                _currentTurnTag ?? $"turn-{_turnSequence:000000}",
+                role: "user");
+        }
     }
 
     /// <summary>
@@ -1190,6 +1220,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public void AppendAssistantMessage(string message)
     {
         _history.Add(ChatMessage.Assistant(message));
+
+        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+        {
+            _autoMemoryExtractor.FireAndForgetConversationChunk(
+                message,
+                _currentConversationId,
+                _currentTurnTag ?? $"turn-{_turnSequence:000000}",
+                role: "assistant");
+        }
     }
 
     private static AgentResponse ApplySeasonEpisodeExistenceSanityGate(

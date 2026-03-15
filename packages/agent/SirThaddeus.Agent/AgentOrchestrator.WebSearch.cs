@@ -590,7 +590,7 @@ public sealed partial class AgentOrchestrator
             text = "I wasn't able to generate a clean answer for that. " +
                    "Could you try asking a different way?";
 
-        _history.Add(ChatMessage.Assistant(text));
+        AppendAssistantMessage(text);
         LogEvent("AGENT_RESPONSE", text);
 
         return new AgentResponse

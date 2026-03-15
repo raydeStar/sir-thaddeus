@@ -415,6 +415,77 @@ public class MemoryRetrieverTests
         Assert.Contains("conv-42", pack.PackText);
         Assert.Contains("conv-50", pack.PackText);
     }
+
+    [Fact]
+    public async Task ConversationScope_PrefersScopedCandidates_WhenPresent()
+    {
+        var store = new FakeMemoryStore
+        {
+            FactsToReturn =
+            [
+                new StoreCandidate<MemoryFact>(
+                    new MemoryFact
+                    {
+                        MemoryId = "f-global",
+                        Subject = "user",
+                        Predicate = "likes",
+                        Object = "tea",
+                        SourceRef = "conv:other",
+                        Sensitivity = Sensitivity.Public
+                    },
+                    0.95),
+                new StoreCandidate<MemoryFact>(
+                    new MemoryFact
+                    {
+                        MemoryId = "f-scoped",
+                        Subject = "user",
+                        Predicate = "likes",
+                        Object = "coffee",
+                        SourceRef = "conv:target",
+                        Sensitivity = Sensitivity.Public
+                    },
+                    0.70)
+            ]
+        };
+
+        var retriever = new MemoryRetriever(store);
+        var pack = await retriever.BuildMemoryPackAsync(
+            "likes",
+            new RetrievalContext { ConversationId = "target" });
+
+        Assert.Single(pack.Facts);
+        Assert.Equal("f-scoped", pack.Facts[0].MemoryId);
+    }
+
+    [Fact]
+    public async Task ConversationScope_FallsBackToGlobal_WhenNoScopedCandidates()
+    {
+        var store = new FakeMemoryStore
+        {
+            FactsToReturn =
+            [
+                new StoreCandidate<MemoryFact>(
+                    new MemoryFact
+                    {
+                        MemoryId = "f-global",
+                        Subject = "user",
+                        Predicate = "likes",
+                        Object = "tea",
+                        SourceRef = "conv:other",
+                        Sensitivity = Sensitivity.Public
+                    },
+                    0.95)
+            ]
+        };
+
+        var retriever = new MemoryRetriever(store);
+        var pack = await retriever.BuildMemoryPackAsync(
+            "likes",
+            new RetrievalContext { ConversationId = "target" });
+
+        Assert.Single(pack.Facts);
+        Assert.Equal("f-global", pack.Facts[0].MemoryId);
+    }
 }
 
 #endregion

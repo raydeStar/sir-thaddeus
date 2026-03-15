@@ -92,8 +92,12 @@ internal sealed class RuntimeApiClient
             path += $"&filter={Uri.EscapeDataString(filter.Trim())}";
         }
 
-        return await _httpClient.GetFromJsonAsync<MemoryBrowseResponse>(path, JsonOptions, cancellationToken)
-            ?? new MemoryBrowseResponse([], [], [], [], 0, 0, 0, 0);
+        using var response = await _httpClient.GetAsync(path, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await ReadRequiredJsonAsync<MemoryBrowseResponse>(
+            response,
+            "Runtime did not return memory data.",
+            cancellationToken);
     }
 
     public async Task<GenericMemoryActionResponse> SaveMemoryFactAsync(string memoryId, SaveMemoryFactRequest request, CancellationToken cancellationToken)

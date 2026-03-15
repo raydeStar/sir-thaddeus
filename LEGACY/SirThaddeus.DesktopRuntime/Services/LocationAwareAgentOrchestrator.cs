@@ -53,10 +53,16 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<AgentResponse> ProcessAsync(string userMessage, CancellationToken cancellationToken = default)
+    public Task<AgentResponse> ProcessAsync(string userMessage, CancellationToken cancellationToken = default)
+        => ProcessAsync(userMessage, conversationId: null, cancellationToken);
+
+    public async Task<AgentResponse> ProcessAsync(
+        string userMessage,
+        string? conversationId,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
-            return await _inner.ProcessAsync(userMessage, cancellationToken);
+            return await _inner.ProcessAsync(userMessage, conversationId, cancellationToken);
 
         var trimmed = userMessage.Trim();
         var lower = trimmed.ToLowerInvariant();
@@ -81,16 +87,16 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         {
             WritePendingState(PendingLocationState.None);
             if (LooksLikeProceedSignal(lower))
-                return await ContinuePendingQueryThroughWrapperAsync(pending.OriginalQuery, cancellationToken);
+                return await ContinuePendingQueryThroughWrapperAsync(pending.OriginalQuery, conversationId, cancellationToken);
 
-            return await ContinuePendingQueryThroughWrapperAsync(trimmed, cancellationToken);
+            return await ContinuePendingQueryThroughWrapperAsync(trimmed, conversationId, cancellationToken);
         }
 
         if (pending.Mode != PendingLocationMode.None)
-            return await HandlePendingStateAsync(trimmed, lower, pending, cancellationToken);
+            return await HandlePendingStateAsync(trimmed, lower, pending, conversationId, cancellationToken);
 
         if (!LooksLikeLocationDependentRequest(lower))
-            return await _inner.ProcessAsync(userMessage, cancellationToken);
+            return await _inner.ProcessAsync(userMessage, conversationId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(manualLocation))
         {
@@ -115,7 +121,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 $"Are you still at {manualLocation}? If yes, I will keep using that location.");
         }
 
-        return await _inner.ProcessAsync(userMessage, cancellationToken);
+        return await _inner.ProcessAsync(userMessage, conversationId, cancellationToken);
     }
 
     public void ResetConversation()
@@ -141,6 +147,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
         string message,
         string lower,
         PendingLocationState pending,
+        string? conversationId,
         CancellationToken cancellationToken)
     {
         if (pending.Mode == PendingLocationMode.AwaitingStaleConfirmation)
@@ -150,7 +157,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 var updated = _touchManualLocationTimestamp();
                 _applySettings(updated);
                 WritePendingState(PendingLocationState.None);
-                return await ContinuePendingQueryAsync(pending.OriginalQuery, cancellationToken);
+                return await ContinuePendingQueryAsync(pending.OriginalQuery, conversationId, cancellationToken);
             }
 
             if (IsNegative(lower))
@@ -169,7 +176,7 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 var updated = _saveManualLocation(newLocation);
                 _applySettings(updated);
                 WritePendingState(PendingLocationState.None);
-                return await ContinuePendingQueryAsync(pending.OriginalQuery, cancellationToken);
+                return await ContinuePendingQueryAsync(pending.OriginalQuery, conversationId, cancellationToken);
             }
 
             return BuildPromptResponse(
@@ -190,20 +197,26 @@ public sealed class LocationAwareAgentOrchestrator : IAgentOrchestrator
                 var updated = _saveManualLocation(manualLocation);
                 _applySettings(updated);
                 WritePendingState(PendingLocationState.None);
-                return await ContinuePendingQueryAsync(pending.OriginalQuery, cancellationToken);
+                return await ContinuePendingQueryAsync(pending.OriginalQuery, conversationId, cancellationToken);
             }
 
             return BuildManualLocationPromptResponse();
         }
 
-        return await _inner.ProcessAsync(message, cancellationToken);
+        return await _inner.ProcessAsync(message, conversationId, cancellationToken);
     }
 
-    private Task<AgentResponse> ContinuePendingQueryAsync(string originalQuery, CancellationToken cancellationToken)
-        => _inner.ProcessAsync(originalQuery, cancellationToken);
+    private Task<AgentResponse> ContinuePendingQueryAsync(
+        string originalQuery,
+        string? conversationId,
+        CancellationToken cancellationToken)
+        => _inner.ProcessAsync(originalQuery, conversationId, cancellationToken);
 
-    private Task<AgentResponse> ContinuePendingQueryThroughWrapperAsync(string originalQuery, CancellationToken cancellationToken)
-        => ProcessAsync(originalQuery, cancellationToken);
+    private Task<AgentResponse> ContinuePendingQueryThroughWrapperAsync(
+        string originalQuery,
+        string? conversationId,
+        CancellationToken cancellationToken)
+        => ProcessAsync(originalQuery, conversationId, cancellationToken);
 
     private static bool LooksLikeLocationDependentRequest(string lower)
     {

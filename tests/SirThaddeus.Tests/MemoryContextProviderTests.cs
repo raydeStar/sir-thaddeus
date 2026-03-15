@@ -1,6 +1,7 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
+using System.Text.Json;
 
 namespace SirThaddeus.Tests;
 
@@ -32,6 +33,7 @@ public class MemoryContextProviderTests
         var result = await provider.GetContextAsync(new MemoryContextRequest
         {
             UserMessage = "hey there",
+            ConversationId = "conv-123",
             MemoryEnabled = true,
             IsColdGreeting = true,
             ActiveProfileId = "user-1",
@@ -52,6 +54,11 @@ public class MemoryContextProviderTests
         Assert.Equal(1, result.Provenance.Nuggets);
         Assert.True(result.Provenance.HasProfile);
         Assert.Contains("[PROFILE]", result.Provenance.Summary, StringComparison.Ordinal);
+
+        Assert.Single(mcp.Calls);
+        using var argsDoc = JsonDocument.Parse(mcp.Calls[0].Args);
+        Assert.True(argsDoc.RootElement.TryGetProperty("conversationId", out var conversationId));
+        Assert.Equal("conv-123", conversationId.GetString());
     }
 
     [Fact]

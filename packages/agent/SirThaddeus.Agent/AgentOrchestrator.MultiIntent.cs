@@ -102,7 +102,7 @@ public sealed partial class AgentOrchestrator
             Deferred = executionPlan.Deferred
         });
 
-        _history.Add(ChatMessage.Assistant(composedText));
+        AppendAssistantMessage(composedText);
         LogEvent("SEGMENT_EXECUTION_SUMMARY",
             $"detected={segmentation.Segments.Count}, actionable={actionableSegments.Count}, " +
             $"executed={executionPlan.Executed.Count}, deferred={executionPlan.Deferred.Count}");

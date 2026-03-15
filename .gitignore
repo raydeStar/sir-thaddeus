@@ -120,3 +120,6 @@ tmp/
 /.codex-dotnet/
 /.codex-dotnet/.dotnet
 /external/searxng-upstream/
+
+# Local PowerShell analyzer cache accidentally generated under repo root
+Microsoft/Windows/PowerShell/ModuleAnalysisCache

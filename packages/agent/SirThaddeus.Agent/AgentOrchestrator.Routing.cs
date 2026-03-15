@@ -24,7 +24,10 @@ public sealed partial class AgentOrchestrator
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
     /// </summary>
-    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(string userMessage, CancellationToken cancellationToken)
+    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(
+        string userMessage,
+        string? conversationId,
+        CancellationToken cancellationToken)
     {
         if (!MemoryEnabled)
             return new MemoryContextResult();
@@ -35,6 +38,7 @@ public sealed partial class AgentOrchestrator
                 new MemoryContextRequest
                 {
                     UserMessage = userMessage,
+                    ConversationId = conversationId,
                     MemoryEnabled = MemoryEnabled,
                     IsColdGreeting = IsColdGreeting(userMessage),
                     ActiveProfileId = ActiveProfileId,
