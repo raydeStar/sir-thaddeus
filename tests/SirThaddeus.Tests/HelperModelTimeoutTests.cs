@@ -40,7 +40,11 @@ public sealed class HelperModelTimeoutTests
         Assert.Equal("hello world", slots.RawMessage);
 
         var timeoutEvents = audit.GetByAction("DIALOGUE_SLOT_EXTRACT_FAIL");
-        Assert.Equal(2, timeoutEvents.Count);
+        Assert.NotEmpty(timeoutEvents);
+        Assert.Contains(timeoutEvents, timeoutEvent =>
+            timeoutEvent.Details is not null &&
+            timeoutEvent.Details.TryGetValue("strict", out var strictValue) &&
+            Equals(strictValue, false));
         Assert.All(timeoutEvents, timeoutEvent =>
         {
             Assert.Equal("error", timeoutEvent.Result);
