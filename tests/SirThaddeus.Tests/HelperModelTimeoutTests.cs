@@ -1,6 +1,7 @@
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
+using System.Reflection;
 
 namespace SirThaddeus.Tests;
 
@@ -33,6 +34,19 @@ public sealed class HelperModelTimeoutTests
             new SlowFakeLlmClient(delayMs: 500),
             audit,
             timeout: TimeSpan.FromMilliseconds(20));
+
+        var retryMethod = typeof(SlotExtract).GetMethod(
+            "TryExtractWithRetryAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(retryMethod);
+
+        var retryTask = (Task<ExtractedSlots?>)retryMethod!.Invoke(
+            extractor,
+            ["hello world", new DialogueState(), CancellationToken.None])!;
+
+        var helperResult = await retryTask;
+        Assert.Null(helperResult);
 
         var slots = await extractor.RunAsync("hello world", new DialogueState());
 
