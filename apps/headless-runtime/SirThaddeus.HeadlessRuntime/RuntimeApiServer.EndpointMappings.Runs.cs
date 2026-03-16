@@ -15,6 +15,7 @@ internal static partial class RuntimeApiServer
     private static readonly IChecklistPlanner WorkflowChecklistPlanner = new ChecklistPlanner();
     private static readonly IConfidenceEvaluator WorkflowConfidenceEvaluator = new ConfidenceEvaluator();
     private static readonly IRetryPlanner WorkflowRetryPlanner = new RetryPlanner();
+    private static readonly IRetryGateEvaluator WorkflowRetryGateEvaluator = new RetryGateEvaluator();
     private static readonly IProgressNarrator WorkflowNarrator = new ProgressNarrator();
 
     private static void MapRunEndpoints(
@@ -234,13 +235,9 @@ internal static partial class RuntimeApiServer
                 PublishChecklist(runState, workflowState);
             }
 
-            var canRetry = features.ConstrainedRetryEnabled &&
-                           firstConfidence.ShouldRetry &&
-                           workflowState.RetriesUsed < workflowState.Envelope.MaxRetries &&
-                           workflowState.ToolCallsUsed < workflowState.Envelope.MaxToolCalls &&
-                           stopwatch.Elapsed < workflowState.Envelope.TimeBudget;
+            var retryGate = WorkflowRetryGateEvaluator.Evaluate(workflowState, firstConfidence, stopwatch.Elapsed);
 
-            if (canRetry)
+            if (features.ConstrainedRetryEnabled && retryGate.IsAllowed)
             {
                 var retryPlan = await WorkflowRetryPlanner.BuildRetryPlanAsync(workflowState, runState.CancellationToken);
                 var retryAction = retryPlan.FirstOrDefault();
@@ -297,6 +294,22 @@ internal static partial class RuntimeApiServer
                 workflowState.LatestConfidence = selectedConfidence;
                 workflowState.Evidence.Clear();
                 workflowState.Evidence.AddRange(retryState.Evidence);
+            }
+            else if (features.ConstrainedRetryEnabled && firstConfidence.ShouldRetry)
+            {
+                PublishProgressEvent(
+                    runState,
+                    "retry.skipped",
+                    retryGate.ReasonMessage,
+                    true,
+                    workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
+                    new Dictionary<string, string>
+                    {
+                        ["reason"] = retryGate.ReasonCode,
+                        ["remainingRetries"] = retryGate.RemainingRetries.ToString(),
+                        ["remainingToolCalls"] = retryGate.RemainingToolCalls.ToString(),
+                        ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString()
+                    });
             }
 
             completionReason = ResolveCompletionReason(

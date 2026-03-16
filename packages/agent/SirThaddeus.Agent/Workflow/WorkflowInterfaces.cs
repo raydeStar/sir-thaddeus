@@ -35,6 +35,11 @@ public interface IRetryPlanner
     Task<IReadOnlyList<PlannedAction>> BuildRetryPlanAsync(TaskRunState state, CancellationToken ct);
 }
 
+public interface IRetryGateEvaluator
+{
+    RetryGateDecision Evaluate(TaskRunState state, ConfidenceSnapshot confidence, TimeSpan elapsed);
+}
+
 public interface IProgressNarrator
 {
     Task<string?> BuildUpdateAsync(TaskRunState state, ProgressTrigger trigger, CancellationToken ct);

@@ -64,6 +64,16 @@ public sealed class ConfidenceSnapshot
     public string? RetryReason { get; init; }
 }
 
+public sealed class RetryGateDecision
+{
+    public bool IsAllowed { get; init; }
+    public string ReasonCode { get; init; } = string.Empty;
+    public string ReasonMessage { get; init; } = string.Empty;
+    public int RemainingRetries { get; init; }
+    public int RemainingToolCalls { get; init; }
+    public int RemainingTimeMs { get; init; }
+}
+
 public sealed class ProgressEvent
 {
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
