@@ -39,9 +39,10 @@ To create a smaller developer-oriented package that relies on runtime asset down
 Outputs:
 
 - Staged folder: `artifacts/stage/win-x64`
-- Zip archive: `artifacts/release/sir-thaddeus-win-x64-<version>.zip`
-- Archive checksum: `artifacts/release/sir-thaddeus-win-x64-<version>.zip.sha256.txt`
-- Package contents checksum manifest: `artifacts/release/sir-thaddeus-win-x64-<version>-contents.sha256.txt`
+- Full zip archive: `artifacts/release/sir-thaddeus-win-x64-<version>-full.zip`
+- Lite zip archive: `artifacts/release/sir-thaddeus-win-x64-<version>-lite.zip`
+- Archive checksums: `artifacts/release/sir-thaddeus-win-x64-<version>-<profile>.zip.sha256.txt`
+- Package contents checksum manifest: `artifacts/release/sir-thaddeus-win-x64-<version>-<profile>-contents.sha256.txt`
 
 Primary UI executable in package root:
 
@@ -72,14 +73,20 @@ The smoke gate validates:
 To test the Linux or macOS packaging script locally (requires `pwsh` on the host):
 
 ```powershell
-# Linux package (builds from any OS but produces .zip on Windows)
+# Linux package (full profile)
 pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -Version dev-local
 
-# macOS package
+# Linux package (lite profile)
+pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -LiteBundle -Version dev-local
+
+# macOS package (full profile)
 pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -Version dev-local
+
+# macOS package (lite profile)
+pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -LiteBundle -Version dev-local
 ```
 
-Outputs go to `artifacts/release/sir-thaddeus-<rid>-<version>.*`.
+Outputs go to `artifacts/release/sir-thaddeus-<rid>-<version>-<profile>.*`.
 
 ## Local runner modes
 
@@ -97,13 +104,13 @@ Start terminal/headless flow:
 
 ## CI/publish target notes
 
-Every tagged release and manual promote now builds **three packages in parallel** after preflight:
+Every tagged release and manual promote now builds **full + lite packages for each platform** in parallel after preflight:
 
 | Package | Runner | Format | Contents |
 |---|---|---|---|
-| `sir-thaddeus-win-x64-<ver>.zip` | `windows-latest` | zip | UI + Headless + MCP + VoiceHost + SearXNG sidecar + bundled voice/Python assets |
-| `sir-thaddeus-linux-x64-<ver>.tar.gz` | `ubuntu-latest` | tar.gz | UI + Headless + MCP (self-contained) + launcher.sh |
-| `sir-thaddeus-osx-arm64-<ver>.tar.gz` | `macos-latest` | tar.gz | UI + Headless + MCP (self-contained) + launch.command |
+| `sir-thaddeus-win-x64-<ver>-full.zip` + `...-lite.zip` | `windows-latest` | zip | Full: UI + Headless + MCP + VoiceHost + SearXNG + bundled voice/Python; Lite: reduced optional bundled payloads |
+| `sir-thaddeus-linux-x64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `ubuntu-latest` | tar.gz | Full: UI + Headless + MCP + VoiceHost + launcher; Lite: UI + Headless + MCP + launcher |
+| `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `macos-latest` | tar.gz | Full: UI + Headless + MCP + VoiceHost + launcher; Lite: UI + Headless + MCP + launcher |
 
 All three end up as GitHub Release assets.
 
@@ -116,9 +123,12 @@ Pushes to `dev` and `master` now publish separate rolling artifacts too:
 
 Each rolling release now carries:
 
-- `sir-thaddeus-win-x64-<branch>-<sha>.zip`
-- `sir-thaddeus-linux-x64-<branch>-<sha>.tar.gz`
-- `sir-thaddeus-osx-arm64-<branch>-<sha>.tar.gz`
+- `sir-thaddeus-win-x64-<branch>-<sha>-full.zip`
+- `sir-thaddeus-win-x64-<branch>-<sha>-lite.zip`
+- `sir-thaddeus-linux-x64-<branch>-<sha>-full.tar.gz`
+- `sir-thaddeus-linux-x64-<branch>-<sha>-lite.tar.gz`
+- `sir-thaddeus-osx-arm64-<branch>-<sha>-full.tar.gz`
+- `sir-thaddeus-osx-arm64-<branch>-<sha>-lite.tar.gz`
 
 GitHub's built-in `Source code (zip)` and `Source code (tar.gz)` entries are automatic repository snapshots for the release tag. They are not the packaged app artifacts and are expected to appear separately from the uploaded platform bundles.
 

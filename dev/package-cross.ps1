@@ -27,6 +27,10 @@
     Version label for archive naming. Tags ('refs/tags/v1.2.0') are
     unwrapped automatically. Falls back to a UTC timestamp.
 
+.PARAMETER LiteBundle
+    Produces a smaller package profile. Full profile includes VoiceHost;
+    lite profile excludes VoiceHost for size-sensitive distribution.
+
 .EXAMPLE
     pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -Version v1.2.0
     pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -Version v1.2.0
@@ -41,7 +45,9 @@ param(
 
     [switch]$SelfContained,
 
-    [string]$Version = ""
+    [string]$Version = "",
+
+    [switch]$LiteBundle
 )
 
 Set-StrictMode -Version Latest
@@ -80,6 +86,7 @@ $effectiveSelfContained = if ($PSBoundParameters.ContainsKey("SelfContained")) {
     $false
 }
 $selfContainedValue = if ($effectiveSelfContained) { "true" } else { "false" }
+$bundleProfile = if ($LiteBundle.IsPresent) { "lite" } else { "full" }
 
 $versionLabel = Get-VersionLabel $Version
 $archiveToken = if ([string]::IsNullOrWhiteSpace($versionLabel)) {
@@ -88,7 +95,7 @@ $archiveToken = if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     $versionLabel
 }
 
-$archiveStem     = "sir-thaddeus-$Runtime-$archiveToken"
+$archiveStem     = "sir-thaddeus-$Runtime-$archiveToken-$bundleProfile"
 $archiveName     = "$archiveStem.tar.gz"
 $checksumName    = "$archiveName.sha256.txt"
 $releaseDir      = Join-Path $RepoRoot "artifacts/release"
@@ -107,6 +114,7 @@ Write-Section "Package Settings"
 Write-Host "  Runtime       : $Runtime"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  SelfContained : $effectiveSelfContained"
+Write-Host "  Bundle profile: $bundleProfile"
 Write-Host "  Version       : $(if ($versionLabel) { $versionLabel } else { '<timestamp>' })"
 Write-Host "  Stage dir     : $stageDir"
 Write-Host "  Archive       : $archivePath"
@@ -117,6 +125,10 @@ $projects = [ordered]@{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"                   = ""
     "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = "headless"
     "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"               = ""
+}
+
+if (-not $LiteBundle.IsPresent) {
+    $projects["apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"] = ""
 }
 
 # ─── Publish ──────────────────────────────────────────────────────────────────
@@ -273,6 +285,10 @@ if (-not $IsWindows_Host) {
         (Join-Path $stageDir "SirThaddeus.McpServer")
     )
 
+    if (-not $LiteBundle.IsPresent) {
+        $execTargets += (Join-Path $stageDir "SirThaddeus.VoiceHost")
+    }
+
     foreach ($target in $execTargets) {
         if (Test-Path $target) {
             chmod +x $target 2>/dev/null
@@ -299,6 +315,10 @@ $requiredEntries = @(
     "headless/SirThaddeus.HeadlessRuntime",
     "README_FIRST_RUN.md"
 )
+
+if (-not $LiteBundle.IsPresent) {
+    $requiredEntries += "SirThaddeus.VoiceHost"
+}
 
 $structureOk = $true
 foreach ($entry in $requiredEntries) {
@@ -371,6 +391,7 @@ $sizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
 
 Write-Section "Done"
 Write-Host "  Runtime    : $Runtime"
+Write-Host "  Profile    : $bundleProfile"
 Write-Host "  Stage dir  : $stageDir"
 Write-Host "  Archive    : $archivePath  (${sizeMB} MB)"
 Write-Host "  Checksum   : $checksumPath"

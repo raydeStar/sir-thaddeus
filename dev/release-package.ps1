@@ -81,6 +81,7 @@ else {
 }
 
 $selfContainedValue = if ($effectiveSelfContained) { "true" } else { "false" }
+$bundleProfile = if ($LiteBundle.IsPresent) { "lite" } else { "full" }
 $versionLabel = Get-VersionLabel $Version
 $archiveToken = if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     Get-Date -Format "yyyyMMdd-HHmmss"
@@ -89,7 +90,7 @@ else {
     $versionLabel
 }
 
-$archiveStem = "sir-thaddeus-$Runtime-$archiveToken"
+$archiveStem = "sir-thaddeus-$Runtime-$archiveToken-$bundleProfile"
 $archiveName = "$archiveStem.zip"
 $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
@@ -628,8 +629,8 @@ Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -Compression
 $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 "$($zipHash.Hash) *$archiveName" | Out-File -FilePath $checksumPath -Encoding ASCII -Force
 
-$fullSizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
-Write-Host "  Full archive: $archiveName (${fullSizeMB} MB)"
+$archiveSizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
+Write-Host "  Bundle archive: $archiveName (${archiveSizeMB} MB)"
 
 $stageRootPrefix = $stageDir
 if ($stageRootPrefix -notmatch '\\$') { $stageRootPrefix += '\' }
@@ -644,7 +645,8 @@ $contentLines | Out-File -FilePath $contentsChecksumsPath -Encoding ASCII -Force
 Write-Section "Done"
 Write-Host "  Publish dir  : $publishDir"
 Write-Host "  Stage dir    : $stageDir"
-Write-Host "  Full archive : $archivePath  (${fullSizeMB} MB)"
+Write-Host "  Bundle       : $bundleProfile"
+Write-Host "  Archive      : $archivePath  (${archiveSizeMB} MB)"
 Write-Host "  Checksums    : $checksumPath"
 Write-Host "  Contents SHA : $contentsChecksumsPath"
 

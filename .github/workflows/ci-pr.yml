@@ -92,12 +92,13 @@ jobs:
         shell: pwsh
         run: ./dev/build-searxng-package.ps1
 
-      - name: Package build zip + checksums
+      - name: Package win-x64 full + lite build zips + checksums
         shell: pwsh
         run: |
           $branchName = "${{ github.ref_name }}"
           $shortSha = "${{ github.sha }}".Substring(0, 7)
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "$branchName-$shortSha"
+          ./dev/release-package.ps1 -SkipPreflight -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload Windows build package artifacts
         uses: actions/upload-artifact@v6
@@ -137,12 +138,13 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Package linux-x64 tar.gz
+      - name: Package linux-x64 full + lite tar.gz
         shell: pwsh
         run: |
           $branchName = "${{ github.ref_name }}"
           $shortSha = "${{ github.sha }}".Substring(0, 7)
           pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -Version "$branchName-$shortSha"
+          pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload Linux build package artifacts
         uses: actions/upload-artifact@v6
@@ -182,12 +184,13 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Package osx-arm64 tar.gz
+      - name: Package osx-arm64 full + lite tar.gz
         shell: pwsh
         run: |
           $branchName = "${{ github.ref_name }}"
           $shortSha = "${{ github.sha }}".Substring(0, 7)
           pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -Version "$branchName-$shortSha"
+          pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload macOS build package artifacts
         uses: actions/upload-artifact@v6
@@ -222,9 +225,9 @@ jobs:
       - name: Run smoke test on packaged zip
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-*.zip" |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-win-x64-*-full.zip" |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $zip) { Write-Error "No zip found in artifacts/release"; exit 1 }
+          if (-not $zip) { Write-Error "No win-x64 full zip found in artifacts/release"; exit 1 }
           ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
 
   publish:

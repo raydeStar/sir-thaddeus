@@ -100,17 +100,18 @@ jobs:
         shell: pwsh
         run: ./dev/build-searxng-package.ps1
 
-      - name: Package release zip + checksums
+      - name: Package win-x64 full + lite zips + checksums
         shell: pwsh
         run: |
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ github.ref_name }}"
+          ./dev/release-package.ps1 -SkipPreflight -SelfContained -LiteBundle -Version "${{ github.ref_name }}"
 
       - name: Smoke test packaged zip
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-win-x64-*.zip" |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-win-x64-*-full.zip" |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $zip) { Write-Error "No win-x64 zip found in artifacts/release"; exit 1 }
+          if (-not $zip) { Write-Error "No win-x64 full zip found in artifacts/release"; exit 1 }
           ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
 
       - name: Upload Windows package artifacts
@@ -149,10 +150,11 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Package linux-x64 tar.gz
+      - name: Package linux-x64 full + lite tar.gz
         shell: pwsh
         run: |
           pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -Version "${{ github.ref_name }}"
+          pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -LiteBundle -Version "${{ github.ref_name }}"
 
       - name: Upload Linux package artifacts
         uses: actions/upload-artifact@v6
@@ -190,10 +192,11 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Package osx-arm64 tar.gz
+      - name: Package osx-arm64 full + lite tar.gz
         shell: pwsh
         run: |
           pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -Version "${{ github.ref_name }}"
+          pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -LiteBundle -Version "${{ github.ref_name }}"
 
       - name: Upload macOS package artifacts
         uses: actions/upload-artifact@v6
