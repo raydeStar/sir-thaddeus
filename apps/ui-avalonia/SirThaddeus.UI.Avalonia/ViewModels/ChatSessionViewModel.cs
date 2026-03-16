@@ -5,6 +5,14 @@ using System.Linq;
 
 namespace SirThaddeus.UI.Avalonia.ViewModels;
 
+public sealed class WorkflowChecklistItemViewModel
+{
+    public string Id { get; init; } = string.Empty;
+    public int Order { get; init; }
+    public string State { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+}
+
 public class ChatMessageItem : INotifyPropertyChanged
 {
     /// <summary>

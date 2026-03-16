@@ -46,6 +46,11 @@ public partial class MainWindow : Window
     private IReadOnlyList<string> _lastAssistantSources = Array.Empty<string>();
     private readonly Dictionary<string, StringBuilder> _assistantBuffersByRunId = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _toolCallsInCurrentRun = new();
+    private readonly ObservableCollection<WorkflowChecklistItemViewModel> _workflowChecklistItems = [];
+    private string? _lastWorkflowNarration;
+    private string? _lastWorkflowChecklistStamp;
+    private string? _workflowConfidenceBand;
+    private int _workflowRetryCount;
     private bool _voiceInitiatedRun;
     private static readonly TimeSpan MarkdownRegexTimeout = TimeSpan.FromMilliseconds(75);
     private static readonly Regex MarkdownBoldRegex = new(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
@@ -105,6 +110,7 @@ public partial class MainWindow : Window
         _chatHistory.Add(_currentSession);
         ChatHistoryList.ItemsSource = _chatHistory;
         ChatMessagesList.ItemsSource = _currentSession.Messages;
+        WorkflowChecklistList.ItemsSource = _workflowChecklistItems;
         PromptBox.AddHandler(KeyDownEvent, PromptBox_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         LmStudioPresetBtn.Click += LlmPreset_Click;
@@ -837,6 +843,7 @@ public partial class MainWindow : Window
 
             _lastUserPrompt = prompt;
             _voiceInitiatedRun = voiceInitiated;
+            ResetWorkflowProgressUi();
 
             // Snapshot prior conversation turns so the runtime can seed the
             // orchestrator's sliding-window history for multi-turn context.
@@ -1741,6 +1748,23 @@ public partial class MainWindow : Window
                     DisplayBriefing(completed.Briefing, recordHistory: true, activateTab: true);
                 }
 
+                if (!string.IsNullOrWhiteSpace(completed?.ConfidenceBand) ||
+                    !string.IsNullOrWhiteSpace(completed?.CompletionReason))
+                {
+                    var confidenceText = string.IsNullOrWhiteSpace(completed?.ConfidenceBand)
+                        ? "n/a"
+                        : completed!.ConfidenceBand;
+                    var reasonText = string.IsNullOrWhiteSpace(completed?.CompletionReason)
+                        ? "unknown"
+                        : completed!.CompletionReason;
+                    _workflowConfidenceBand = confidenceText;
+                    UpdateWorkflowToolStrip();
+                    if (!string.IsNullOrWhiteSpace(WorkflowNarrationText.Text))
+                    {
+                        WorkflowNarrationText.Text = $"{WorkflowNarrationText.Text} ({reasonText})";
+                    }
+                }
+
                 // Extract thought/reasoning content and update the last assistant message.
                 if (!string.IsNullOrWhiteSpace(_lastAssistantMessage))
                 {
@@ -1781,6 +1805,8 @@ public partial class MainWindow : Window
                         assistantMsg.ToolSummary = summary;
                     }
 
+                    UpdateWorkflowToolStrip();
+
                     _toolCallsInCurrentRun.Clear();
                 }
 
@@ -1807,11 +1833,13 @@ public partial class MainWindow : Window
                 _currentSession.ClearPendingAssistantMessage();
                 _assistantBuffersByRunId.Remove(envelope.RunId);
                 _toolCallsInCurrentRun.Clear();
+                UpdateWorkflowToolStrip();
                 _voiceInitiatedRun = false;
                 SetVoiceChatStatus("Hold");
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
+                WorkflowProgressPanel.IsVisible = false;
                 UpdateComposerState();
                 break;
             case RuntimeEventTypes.ToolRequested:
@@ -1820,6 +1848,7 @@ public partial class MainWindow : Window
                 {
                     _pendingPermissionRequestId = request.RequestId;
                     _toolCallsInCurrentRun.Add(request.ToolName);
+                    UpdateWorkflowToolStrip();
                     ShowPermissionRequest(request);
                     // Don't clutter chat with individual permission messages.
                     // A consolidated tool activity summary is emitted at RunCompleted.
@@ -1838,11 +1867,87 @@ public partial class MainWindow : Window
                 ResetPermissionRequestUi();
                 // Suppressed: individual approval/denial messages no longer clutter chat.
                 break;
+            case RuntimeEventTypes.NarrationUpdated:
+                var narration = ReadPayload<NarrationUpdatedPayload>(envelope.Payload);
+                if (!string.IsNullOrWhiteSpace(narration?.Message) &&
+                    !string.Equals(_lastWorkflowNarration, narration.Message, StringComparison.Ordinal))
+                {
+                    _lastWorkflowNarration = narration.Message;
+                    WorkflowNarrationText.Text = narration.Message;
+                    WorkflowProgressPanel.IsVisible = true;
+                }
+                break;
+            case RuntimeEventTypes.ChecklistUpdated:
+                var checklist = ReadPayload<ChecklistUpdatedPayload>(envelope.Payload);
+                if (checklist is not null)
+                {
+                    var stamp = string.Join("|", checklist.Items.Select(i => $"{i.Order}:{i.State}"));
+                    if (!string.Equals(_lastWorkflowChecklistStamp, stamp, StringComparison.Ordinal))
+                    {
+                        _lastWorkflowChecklistStamp = stamp;
+                        _workflowChecklistItems.Clear();
+                        foreach (var item in checklist.Items.OrderBy(i => i.Order))
+                        {
+                            var stateTag = item.State switch
+                            {
+                                "Completed" => "[x]",
+                                "InProgress" => "[~]",
+                                "Failed" => "[!]",
+                                "Blocked" => "[-]",
+                                "Skipped" => "[>]",
+                                _ => "[ ]"
+                            };
+                            var label = string.IsNullOrWhiteSpace(item.StatusNote)
+                                ? $"{stateTag} {item.Title}"
+                                : $"{stateTag} {item.Title} — {item.StatusNote}";
+                            _workflowChecklistItems.Add(new WorkflowChecklistItemViewModel
+                            {
+                                Id = item.Id,
+                                Order = item.Order,
+                                State = item.State,
+                                Label = label
+                            });
+                        }
+
+                        WorkflowProgressPanel.IsVisible = _workflowChecklistItems.Count > 0;
+                    }
+                }
+                break;
+            case RuntimeEventTypes.ProgressEvent:
+                var progressEvent = ReadPayload<ProgressEventPayload>(envelope.Payload);
+                if (progressEvent?.UserVisible == true &&
+                    !string.IsNullOrWhiteSpace(progressEvent.Message))
+                {
+                    if (string.Equals(progressEvent.EventType, "retry.started", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _workflowRetryCount++;
+                        UpdateWorkflowToolStrip();
+                    }
+                }
+                break;
             default:
                 break;
         }
 
         UpdateActionDrawerSummary();
+    }
+
+    private void ResetWorkflowProgressUi()
+    {
+        _workflowChecklistItems.Clear();
+        _lastWorkflowNarration = null;
+        _lastWorkflowChecklistStamp = null;
+        _workflowConfidenceBand = null;
+        _workflowRetryCount = 0;
+        WorkflowNarrationText.Text = string.Empty;
+        WorkflowToolStripText.Text = string.Empty;
+        WorkflowProgressPanel.IsVisible = false;
+    }
+
+    private void UpdateWorkflowToolStrip()
+    {
+        var confidence = string.IsNullOrWhiteSpace(_workflowConfidenceBand) ? "n/a" : _workflowConfidenceBand;
+        WorkflowToolStripText.Text = $"Tools: {_toolCallsInCurrentRun.Count}   Retries: {_workflowRetryCount}   Confidence: {confidence}";
     }
     private async Task SubmitPermissionDecisionAsync(bool approved, bool rememberForSession = false, bool persistAsAlways = false)
     {

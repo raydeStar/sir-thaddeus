@@ -19,6 +19,9 @@ public sealed partial record AppSettings
 
     [JsonPropertyName("toolBudgets")]
     public ToolBudgetSettings ToolBudgets { get; init; } = new();
+
+    [JsonPropertyName("workflowFeatures")]
+    public WorkflowFeatureSettings WorkflowFeatures { get; init; } = new();
 }
 
 /// <summary>
@@ -75,4 +78,23 @@ public sealed record ToolBudgetSettings
         MaxWebPullsPerTurn = Math.Clamp(MaxWebPullsPerTurn, 0, 25),
         MaxFileOpsPerMinute = Math.Clamp(MaxFileOpsPerMinute, 0, 600)
     };
+}
+
+/// <summary>
+/// Feature flags for checklist/progress/confidence workflow rollout.
+/// Defaults are OFF for safe incremental adoption.
+/// </summary>
+public sealed record WorkflowFeatureSettings
+{
+    [JsonPropertyName("checklistProgressUiEnabled")]
+    public bool ChecklistProgressUiEnabled { get; init; }
+
+    [JsonPropertyName("confidenceScoringEnabled")]
+    public bool ConfidenceScoringEnabled { get; init; }
+
+    [JsonPropertyName("constrainedRetryEnabled")]
+    public bool ConstrainedRetryEnabled { get; init; }
+
+    [JsonPropertyName("taskRunAuditSnapshotsEnabled")]
+    public bool TaskRunAuditSnapshotsEnabled { get; init; }
 }

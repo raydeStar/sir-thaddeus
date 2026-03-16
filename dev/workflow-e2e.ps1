@@ -1,0 +1,185 @@
+#requires -Version 5.1
+
+param(
+    [int]$Port = 5391,
+    [string]$Prompt = "Can you get me details on GitHub pricing?",
+    [int]$TimeoutSec = 120,
+    [switch]$ExpectRetry
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Set-OrAddProperty {
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][object]$Value
+    )
+
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) {
+        $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value
+        return
+    }
+
+    $Object.$Name = $Value
+}
+
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+Set-Location $repoRoot
+
+$settingsPath = Join-Path $env:LOCALAPPDATA "SirThaddeus\settings.json"
+if (-not (Test-Path $settingsPath)) {
+    throw "settings.json not found at $settingsPath"
+}
+
+$settingsBackupPath = "$settingsPath.workflow-e2e.bak"
+Copy-Item -Path $settingsPath -Destination $settingsBackupPath -Force
+
+$runtimeProcess = $null
+$runtimeLogPath = Join-Path $repoRoot "artifacts\test-results\workflow-e2e-runtime.out.log"
+$runtimeErrPath = Join-Path $repoRoot "artifacts\test-results\workflow-e2e-runtime.err.log"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $runtimeLogPath) | Out-Null
+
+try {
+    $settings = Get-Content -Raw -Path $settingsPath | ConvertFrom-Json
+    $workflowFeaturesProp = $settings.PSObject.Properties['workflowFeatures']
+    if ($null -eq $workflowFeaturesProp -or $null -eq $workflowFeaturesProp.Value) {
+        $settings | Add-Member -MemberType NoteProperty -Name workflowFeatures -Value ([pscustomobject]@{})
+    }
+
+    Set-OrAddProperty -Object $settings.workflowFeatures -Name "checklistProgressUiEnabled" -Value $true
+    Set-OrAddProperty -Object $settings.workflowFeatures -Name "confidenceScoringEnabled" -Value $true
+    Set-OrAddProperty -Object $settings.workflowFeatures -Name "constrainedRetryEnabled" -Value $true
+    Set-OrAddProperty -Object $settings.workflowFeatures -Name "taskRunAuditSnapshotsEnabled" -Value $true
+
+    $settings | ConvertTo-Json -Depth 30 | Set-Content -Path $settingsPath -Encoding UTF8
+
+    Write-Host "Starting headless runtime on port $Port..." -ForegroundColor Cyan
+    $runtimeArgs = @(
+        "run",
+        "--project", "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj",
+        "--",
+        "--server",
+        "--port", "$Port",
+        "--tools"
+    )
+
+    $runtimeProcess = Start-Process -FilePath "dotnet" -ArgumentList $runtimeArgs -WorkingDirectory $repoRoot -RedirectStandardOutput $runtimeLogPath -RedirectStandardError $runtimeErrPath -PassThru
+
+    $healthUrl = "http://127.0.0.1:$Port/api/health"
+    $deadline = (Get-Date).AddSeconds(45)
+    $ready = $false
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $health = Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 2
+            if ($health.status -eq "ok") {
+                $ready = $true
+                break
+            }
+        }
+        catch {
+            Start-Sleep -Milliseconds 400
+        }
+    }
+
+    if (-not $ready) {
+        throw "Runtime health check failed at $healthUrl"
+    }
+
+    $chatBody = @{
+        prompt = $Prompt
+        conversationId = "workflow-e2e"
+        sessionId = "workflow-e2e"
+    } | ConvertTo-Json -Depth 10
+
+    $chatStart = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/chat" -ContentType "application/json" -Body $chatBody -TimeoutSec 30
+    if ([string]::IsNullOrWhiteSpace($chatStart.runId)) {
+        throw "Chat start did not return runId"
+    }
+
+    Write-Host "Run started: $($chatStart.runId)" -ForegroundColor Green
+
+    $eventsUrl = "http://127.0.0.1:$Port/api/runs/$($chatStart.runId)/events"
+    $stream = Invoke-WebRequest -Method Get -Uri $eventsUrl -TimeoutSec $TimeoutSec -UseBasicParsing
+    $lines = ($stream.Content -split "`r?`n")
+
+    $envelopes = @()
+    foreach ($line in $lines) {
+        if ($line -like "data:*") {
+            $json = $line.Substring(5).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($json)) {
+                $envelopes += ($json | ConvertFrom-Json)
+            }
+        }
+    }
+
+    if ($envelopes.Count -eq 0) {
+        throw "No runtime events were captured"
+    }
+
+    $eventTypes = @($envelopes | ForEach-Object { $_.eventType })
+    $requiredEventTypes = @("checklist.updated", "narration.updated", "run.completed")
+    foreach ($required in $requiredEventTypes) {
+        if (-not ($eventTypes -contains $required)) {
+            throw "Missing required event type: $required"
+        }
+    }
+
+    $completed = $envelopes | Where-Object { $_.eventType -eq "run.completed" } | Select-Object -Last 1
+    if ($null -eq $completed) {
+        throw "run.completed event missing"
+    }
+
+    $completionReason = $completed.payload.completionReason
+    $confidenceBand = $completed.payload.confidenceBand
+    $finalText = $completed.payload.finalText
+
+    if ([string]::IsNullOrWhiteSpace($completionReason)) {
+        throw "run.completed is missing completionReason"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($confidenceBand)) {
+        throw "run.completed is missing confidenceBand"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($finalText)) {
+        throw "run.completed is missing finalText"
+    }
+
+    $checklistCount = ($eventTypes | Where-Object { $_ -eq "checklist.updated" }).Count
+    $narrationCount = ($eventTypes | Where-Object { $_ -eq "narration.updated" }).Count
+    $progressEvents = @($envelopes | Where-Object { $_.eventType -eq "progress.event" })
+    $retryStarted = $progressEvents | Where-Object { $_.payload.eventType -eq "retry.started" } | Select-Object -First 1
+
+    if ($ExpectRetry -and $null -eq $retryStarted) {
+        throw "Expected retry.started progress event but none was observed"
+    }
+
+    if ($ExpectRetry -and [string]::IsNullOrWhiteSpace($completionReason)) {
+        throw "Retry scenario did not provide completionReason"
+    }
+
+    Write-Host "Workflow E2E passed." -ForegroundColor Green
+    Write-Host "  completionReason: $completionReason"
+    Write-Host "  confidenceBand:   $confidenceBand"
+    Write-Host "  checklist events: $checklistCount"
+    Write-Host "  narration events: $narrationCount"
+    Write-Host "  retry observed:   $([bool]$retryStarted)"
+    Write-Host "  runtime out log:  $runtimeLogPath"
+    Write-Host "  runtime err log:  $runtimeErrPath"
+}
+finally {
+    if ($runtimeProcess -and -not $runtimeProcess.HasExited) {
+        try {
+            Stop-Process -Id $runtimeProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+        }
+    }
+
+    if (Test-Path $settingsBackupPath) {
+        Move-Item -Path $settingsBackupPath -Destination $settingsPath -Force
+    }
+}

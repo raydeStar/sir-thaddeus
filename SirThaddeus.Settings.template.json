@@ -12,6 +12,12 @@
   "audio": {
     "ttsEnabled": true
   },
+  "workflowFeatures": {
+    "checklistProgressUiEnabled": false,
+    "confidenceScoringEnabled": false,
+    "constrainedRetryEnabled": false,
+    "taskRunAuditSnapshotsEnabled": false
+  },
   "memory": {
     "enabled": true,
     "dbPath": "auto"

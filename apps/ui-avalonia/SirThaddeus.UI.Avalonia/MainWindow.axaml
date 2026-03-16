@@ -102,9 +102,47 @@
 
       <Grid Grid.Column="1">
         <Grid x:Name="ChatView">
-          <Grid RowDefinitions="*" RowSpacing="0">
+          <Grid RowDefinitions="Auto,*" RowSpacing="0">
 
-            <ScrollViewer Grid.Row="0"
+            <Border x:Name="WorkflowProgressPanel"
+                    Grid.Row="0"
+                    IsVisible="False"
+                    Margin="24,16,24,8"
+                    Padding="12,10"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusMd}">
+              <StackPanel Spacing="8">
+                <TextBlock x:Name="WorkflowNarrationText"
+                           Text=""
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource Subtext1Brush}"
+                           TextWrapping="Wrap"/>
+
+                <ItemsControl x:Name="WorkflowChecklistList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
+                      <TextBlock FontSize="11"
+                                 Foreground="{StaticResource Overlay0Brush}"
+                                 TextWrapping="Wrap">
+                        <Run Text="• "/>
+                        <Run Text="{Binding Label}"/>
+                      </TextBlock>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock x:Name="WorkflowToolStripText"
+                           Text=""
+                           FontSize="10"
+                           Foreground="{StaticResource Overlay0Brush}"
+                           Opacity="0.8"/>
+              </StackPanel>
+            </Border>
+
+            <ScrollViewer Grid.Row="1"
                           x:Name="ChatScroller"
                           Background="{StaticResource BaseBrush}"
                           VerticalScrollBarVisibility="Auto"
