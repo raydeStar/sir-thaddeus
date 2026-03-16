@@ -14,6 +14,7 @@ internal static partial class RuntimeApiServer
     private static readonly ITaskClassifier WorkflowClassifier = new TaskClassifier();
     private static readonly IChecklistPlanner WorkflowChecklistPlanner = new ChecklistPlanner();
     private static readonly IConfidenceEvaluator WorkflowConfidenceEvaluator = new ConfidenceEvaluator();
+    private static readonly IRetryPlanner WorkflowRetryPlanner = new RetryPlanner();
     private static readonly IProgressNarrator WorkflowNarrator = new ProgressNarrator();
 
     private static void MapRunEndpoints(
@@ -241,6 +242,10 @@ internal static partial class RuntimeApiServer
 
             if (canRetry)
             {
+                var retryPlan = await WorkflowRetryPlanner.BuildRetryPlanAsync(workflowState, runState.CancellationToken);
+                var retryAction = retryPlan.FirstOrDefault();
+                var retryStrategy = retryAction?.RetryStrategy ?? "fallback_retry";
+
                 workflowState.RetriesUsed += 1;
                 workflowState.RuntimeState = TaskLifecycleState.Retrying;
                 PublishProgressEvent(
@@ -252,11 +257,12 @@ internal static partial class RuntimeApiServer
                     new Dictionary<string, string>
                     {
                         ["retry"] = workflowState.RetriesUsed.ToString(),
-                        ["reason"] = "confidence_below_threshold"
+                        ["reason"] = "confidence_below_threshold",
+                        ["strategy"] = retryStrategy
                     });
                 await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.RetryStarted, runState.CancellationToken);
 
-                var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text);
+                var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text, retryAction);
                 var retryResponse = await orchestrator.ProcessAsync(
                     retryPrompt,
                     conversationId,
@@ -471,12 +477,15 @@ internal static partial class RuntimeApiServer
         return CompletionReason.SuccessMediumConfidence;
     }
 
-    private static string BuildRetryPrompt(string originalPrompt, string firstAnswer)
+    private static string BuildRetryPrompt(string originalPrompt, string firstAnswer, PlannedAction? retryAction)
     {
+        if (retryAction is not null && !string.IsNullOrWhiteSpace(retryAction.Instruction))
+        {
+            return retryAction.Instruction;
+        }
+
         return $"{originalPrompt}\n\n" +
-               "The previous answer may be low-confidence. " +
-               "Re-check with the strongest available evidence path, resolve contradictions if present, " +
-               "and return a concise best-supported answer with explicit uncertainty wording when needed.\n\n" +
+               "The previous answer may be low-confidence. Re-check with stronger evidence and explicit caveats.\n\n" +
                $"Previous answer for verification:\n{firstAnswer}";
     }
 
