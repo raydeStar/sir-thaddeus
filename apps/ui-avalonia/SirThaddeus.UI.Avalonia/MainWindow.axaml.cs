@@ -851,6 +851,7 @@ public partial class MainWindow : Window
             var run = await _runtimeApiClient.StartRunAsync(
                 runtimePrompt,
                 CancellationToken.None,
+                _currentSession.ConversationId,
                 priorMessages.Count > 0 ? priorMessages : null);
             _activeRunId = run.RunId;
 

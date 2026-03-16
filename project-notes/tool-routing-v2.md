@@ -8,6 +8,65 @@ This document tracks the **implemented** routing pipeline and the MCP hook point
 - Deterministic policy gate: **Implemented**
 - Tool conflict matrix: **Implemented**
 - MCP permission + audit hooks: **Implemented**
+- **Footman authority recalibration: Implemented** (March 2026)
+
+---
+
+## Footman Authority Model
+
+The Footman is a fast LLM-based routing classifier that provides a second opinion on deterministic routing decisions. Its authority is bounded by the **Action Tier** model to prevent stochastic downgrades of safe retrieval operations.
+
+### Action Tiers
+
+| Tier | Class | Footman Role | Examples |
+|------|-------|-------------|----------|
+| 0 | `RetrievalSafeLocal` | **Bypassed** — deterministic direct execution | Memory read, utility (time/math), greetings, logic puzzles |
+| 1 | `RetrievalSafeExternal` | **Advisory** — may refine query/arguments but cannot veto without typed block reason | Web search, news, deep dive, local business, browse, screen observe |
+| 2 | `PlanComplex` | **Authoritative** — full planning authority | File write, system commands, memory write, ambiguous/multi-step tasks |
+
+### Authority Boundaries
+
+- **Deterministic router = traffic cop**: classifies intent, selects tool family, determines action tier.
+- **Footman = butler / query refiner**: improves query quality, normalizes arguments, requests clarification only when truly necessary.
+- **Tool runner = executor**: executes what the routing pipeline decides.
+
+The Footman should never be a second planner with broad veto power over safe retrieval operations.
+
+### Typed Block Reasons
+
+When Footman wants to block or downgrade a deterministic route, it must return a machine-readable reason code:
+
+| Reason Code | Description | Valid for Tier 0 | Valid for Tier 1 | Valid for Tier 2 |
+|-------------|-------------|:---:|:---:|:---:|
+| `SAFETY_BLOCK` | Hard safety/content policy concern | ✓ | ✓ | ✓ |
+| `TOOL_UNAVAILABLE` | Target tool disabled or not connected | ✓ | ✓ | ✓ |
+| `POLICY_SCOPE_MISMATCH` | Request outside tool's documented scope | ✗ | ✓ | ✓ |
+| `MISSING_REQUIRED_PARAM` | Required parameter missing and cannot be inferred | ✗ | ✓ | ✓ |
+| `AMBIGUOUS_INTENT` | Genuinely ambiguous, needs clarification | ✗ | ✗ | ✓ |
+| `UNKNOWN` / unrecognized | Free-form decline without structured reason | ✗ | ✗ | ✗ |
+
+Unrecognized reason codes are mapped to `Unknown` and rejected for Tier 0/1 downgrades.
+
+### Disagreement Logging
+
+When the deterministic router and Footman disagree on intent, a structured `ROUTER_DISAGREEMENT` audit event is emitted containing:
+
+- User message (truncated)
+- Deterministic intent + confidence
+- Footman intent + confidence
+- Footman reason code (raw)
+- Footman block reason (typed)
+- Action tier
+- Arbitration result (`downgrade_blocked` or `footman_accepted`)
+
+### Implementation Files
+
+- `packages/agent/SirThaddeus.Agent/Routing/ActionTier.cs` — tier enum + classifier
+- `packages/agent/SirThaddeus.Agent/Routing/FootmanBlockReason.cs` — reason enum + parser + tier policy
+- `packages/agent/SirThaddeus.Agent/Routing/RoutingDecision.cs` — carries `BlockReason` property
+- `packages/agent/SirThaddeus.Agent/Routing/FastLlmFootmanRouter.cs` — populates `BlockReason` during parse
+- `packages/agent/SirThaddeus.Agent/AgentOrchestrator.Routing.cs` — tier-aware `ShouldRunFootmanForRoute`, `ShouldBlockFootmanLookupDowngrade`, disagreement logging
+- `packages/agent/SirThaddeus.Agent/AgentOrchestrator.cs` — arbitration block uses tiers and block reasons
 
 ---
 

@@ -152,6 +152,7 @@ public class ChatSessionItem : INotifyPropertyChanged
 {
     private string _title;
     private DateTimeOffset _updatedAtUtc;
+    public string ConversationId { get; } = $"chat-{Guid.NewGuid():N}";
     
     public ObservableCollection<ChatMessageItem> Messages { get; } = new();
 

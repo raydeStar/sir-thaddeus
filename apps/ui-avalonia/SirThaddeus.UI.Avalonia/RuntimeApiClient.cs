@@ -19,9 +19,14 @@ internal sealed class RuntimeApiClient
     public async Task<ChatStartResponse> StartRunAsync(
         string prompt,
         CancellationToken cancellationToken,
+        string? conversationId = null,
         IReadOnlyList<ChatHistoryMessage>? messages = null)
     {
-        var payload = new ChatRequest(prompt, Messages: messages);
+        var payload = new ChatRequest(
+            prompt,
+            ConversationId: conversationId,
+            SessionId: conversationId,
+            Messages: messages);
         using var response = await _httpClient.PostAsJsonAsync("/api/chat", payload, JsonOptions, cancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ChatStartResponse>(JsonOptions, cancellationToken))

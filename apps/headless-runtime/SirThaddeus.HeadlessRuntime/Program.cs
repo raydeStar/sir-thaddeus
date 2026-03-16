@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Security.Principal;
 using System.Text.Json;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -131,6 +132,29 @@ if (toolsAvailable)
         runtimeControls: () => RuntimeControlState.FromSettings(settings));
 }
 
+AutoMemoryExtractor? autoMemoryExtractor = null;
+SqliteMemoryStore? autoMemoryStore = null;
+if (toolsAvailable && settings.Memory.Enabled)
+{
+    var dbPath = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath(settings.Memory.DbPath);
+    autoMemoryStore = new SqliteMemoryStore(dbPath);
+    await autoMemoryStore.EnsureSchemaAsync(CancellationToken.None);
+
+    autoMemoryExtractor = new AutoMemoryExtractor(
+        llm,
+        autoMemoryStore,
+        log: (action, message) => audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = action,
+            Result = "error",
+            Details = new Dictionary<string, object>
+            {
+                ["message"] = message
+            }
+        }));
+}
+
 AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
 {
     llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
@@ -146,6 +170,7 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
         activePersonalityId: currentSettings.ActivePersonalityId,
         personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings),
         footmanRouter: footmanRouter,
+        autoMemoryExtractor: autoMemoryExtractor,
         gatekeeperLlm: gatekeeperLlm)
     {
         ActiveProfileId = currentSettings.ActiveProfileId,
