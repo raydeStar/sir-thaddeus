@@ -1187,48 +1187,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public IReadOnlyList<ChatMessage> GetCurrentHistory() => _history;
 
     /// <summary>
-    /// Adds a user message to the history and triggers trimming.
-    /// </summary>
-    public void AddUserMessageToHistory(string message)
-    {
-        _history.Add(ChatMessage.User(message));
-        TrimHistory();
-        LogEvent("AGENT_USER_MESSAGE", message);
-
-        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
-        {
-            _autoMemoryExtractor.FireAndForgetConversationChunk(
-                message,
-                _currentConversationId,
-                _currentTurnTag ?? $"turn-{_turnSequence:000000}",
-                role: "user");
-        }
-    }
-
-    /// <summary>
     /// Removes the last message from the history if it exists.
     /// </summary>
     public void PopUserMessage()
     {
         if (_history.Count > 0)
             _history.RemoveAt(_history.Count - 1);
-    }
-
-    /// <summary>
-    /// Appends a new assistant message to the history.
-    /// </summary>
-    public void AppendAssistantMessage(string message)
-    {
-        _history.Add(ChatMessage.Assistant(message));
-
-        if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
-        {
-            _autoMemoryExtractor.FireAndForgetConversationChunk(
-                message,
-                _currentConversationId,
-                _currentTurnTag ?? $"turn-{_turnSequence:000000}",
-                role: "assistant");
-        }
     }
 
     private static AgentResponse ApplySeasonEpisodeExistenceSanityGate(

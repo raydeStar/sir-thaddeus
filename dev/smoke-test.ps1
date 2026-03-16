@@ -244,6 +244,65 @@ foreach ($asset in $voiceAssets) {
     }
 }
 
+$packagedUvExe = Resolve-PackagePath -Primary "voice/bin/uv.exe" -Legacy "bin/voice/bin/uv.exe"
+if ($packagedUvExe) {
+    Pass "Bundled uv.exe present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled uv.exe not found"
+    }
+    else {
+        Warn "Bundled uv.exe not found (will download at runtime)"
+    }
+}
+
+$packagedPythonExe = Resolve-PackagePath -Primary "voice/runtime/python/python.exe" -Legacy "bin/voice/runtime/python/python.exe"
+if ($packagedPythonExe) {
+    Pass "Bundled Python runtime present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled Python runtime not found"
+    }
+    else {
+        Warn "Bundled Python runtime not found (will download at runtime)"
+    }
+}
+
+$packagedRequirementsFile = Resolve-PackagePath -Primary "voice/requirements.txt" -Legacy "bin/voice/requirements.txt"
+if ($packagedRequirementsFile) {
+    Pass "Voice requirements.txt present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Voice requirements.txt not found"
+    }
+    else {
+        Warn "Voice requirements.txt not found"
+    }
+}
+
+$packagedWheelDir = Resolve-PackagePath -Primary "voice/deps/wheels" -Legacy "bin/voice/deps/wheels"
+$packagedWheelCount = if ($packagedWheelDir) {
+    @(Get-ChildItem -Path $packagedWheelDir -Filter "*.whl" -File -ErrorAction SilentlyContinue).Count
+}
+else {
+    0
+}
+
+if ($packagedWheelCount -gt 0) {
+    Pass "Bundled wheelhouse present ($packagedWheelCount wheels)"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled wheelhouse missing or empty"
+    }
+    else {
+        Warn "Bundled wheelhouse missing or empty (runtime download required)"
+    }
+}
+
 # Settings template
 $settingsTemplate = Join-Path $testDir "SirThaddeus.Settings.template.json"
 if (Test-Path $settingsTemplate) {
@@ -298,6 +357,58 @@ if ($pdbFiles.Count -eq 0) {
 }
 else {
     Warn "$($pdbFiles.Count) debug symbols found (expected in Debug builds only)"
+}
+
+# =========================================================================
+#  1.5) OFFLINE VOICE DEPENDENCY VALIDATION
+# =========================================================================
+
+Write-Section "Offline Voice Dependency Gate"
+
+if ($voiceAssetsRequired) {
+    if (-not $packagedUvExe -or -not $packagedPythonExe -or -not $packagedRequirementsFile -or $packagedWheelCount -le 0) {
+        Fail "Offline dependency install gate prerequisites missing"
+    }
+    else {
+        $voiceVenvTempDir = Join-Path $env:TEMP ("st-voice-smoke-venv-" + [Guid]::NewGuid().ToString("N"))
+        try {
+            Write-Host "  Creating temporary voice venv for offline install test..."
+            & $packagedUvExe venv $voiceVenvTempDir --python $packagedPythonExe
+            if ($LASTEXITCODE -ne 0) {
+                Fail "Offline dependency install gate" "uv venv creation failed (exit code $LASTEXITCODE)"
+            }
+            else {
+                $venvPython = Join-Path $voiceVenvTempDir "Scripts/python.exe"
+                if (-not (Test-Path $venvPython)) {
+                    Fail "Offline dependency install gate" "venv python not found at $venvPython"
+                }
+                else {
+                    Write-Host "  Installing voice dependencies from bundled wheelhouse (--no-index)..."
+                    & $packagedUvExe pip install --python $venvPython --no-index --find-links $packagedWheelDir -r $packagedRequirementsFile
+                    if ($LASTEXITCODE -ne 0) {
+                        Fail "Offline dependency install gate" "uv pip install failed (exit code $LASTEXITCODE)"
+                    }
+                    else {
+                        & $venvPython -c "import fastapi; import faster_whisper; import uvicorn; import numpy; print('voice dependency imports OK')"
+                        if ($LASTEXITCODE -ne 0) {
+                            Fail "Offline dependency import gate" "Python import verification failed (exit code $LASTEXITCODE)"
+                        }
+                        else {
+                            Pass "Offline voice dependency install + import validation"
+                        }
+                    }
+                }
+            }
+        }
+        finally {
+            if (Test-Path $voiceVenvTempDir) {
+                Remove-Item -Path $voiceVenvTempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+else {
+    Warn "Offline dependency install gate skipped (--AllowRuntimeAssetDownload)"
 }
 
 # =========================================================================

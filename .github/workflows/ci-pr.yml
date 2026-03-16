@@ -115,7 +115,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/dev'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout

@@ -60,6 +60,8 @@ run it manually or let the build scripts handle it:
 
 End users get these assets automatically during the first-run onboarding wizard.
 
+Packaging smoke validation now includes an offline dependency gate that verifies bundled `uv` + Python + wheelhouse can create a venv and install voice dependencies before release publish.
+
 ### Bundled SearXNG sidecar
 
 CI workflows run `dev\build-searxng-package.ps1` automatically before packaging. For local release builds,
@@ -132,6 +134,14 @@ Expected release assets:
 
 - `sir-thaddeus-win-x64-v0.1.0.zip`
 - `sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
+
+Every tagged release now builds three packages in parallel:
+
+- `sir-thaddeus-win-x64-<ver>.zip` — Windows (full bundle: UI, voice, SearXNG)
+- `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (headless + Avalonia UI; self-contained, no install needed)
+- `sir-thaddeus-osx-arm64-<ver>.tar.gz` — macOS Apple Silicon (same; double-click `launch.command`)
+
+Use the `skip_macos=true` promotion input for emergency hotfixes to avoid macOS CI minute cost.
 
 ## Optional code signing
 

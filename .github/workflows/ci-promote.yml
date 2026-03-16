@@ -3,15 +3,17 @@ name: Promote Dev to Production
 # ═══════════════════════════════════════════════════════════════════════
 #  Promotion Pipeline: dev → master → tagged release
 #
-#  Triggered manually from the Actions tab. Runs the full gate:
-#    1) Preflight   — restore + full Release test suite
-#    2) Package     — self-contained release zip + checksums
-#    3) Smoke test  — validate the packaged zip (file structure, checksums)
-#    4) Merge       — fast-forward merge dev into master
-#    5) Tag + Release — create a versioned GitHub Release
+#  Triggered manually from the Actions tab. Gates:
+#    1) preflight         — full test suite (Windows)
+#    2) package-windows   — self-contained win-x64 zip + smoke gate
+#    3) package-linux     — self-contained linux-x64 tar.gz
+#    4) package-macos     — self-contained osx-arm64 tar.gz
+#    5) smoke-test        — validate win-x64 zip (file + offline dep gate)
+#    6) merge             — fast-forward dev into master
+#    7) release           — tag + GitHub Release with all three packages
 #
-#  The version tag is provided as an input (e.g. v1.2.0).
-#  If the tag already exists, the workflow fails before merging.
+#  All three package jobs run in parallel after preflight.
+#  Use skip_macos=true for emergency hotfixes to avoid macOS minute cost.
 # ═══════════════════════════════════════════════════════════════════════
 
 on:
@@ -23,6 +25,11 @@ on:
         type: string
       skip_merge:
         description: "Skip the merge step (tag master as-is)"
+        required: false
+        type: boolean
+        default: false
+      skip_macos:
+        description: "Skip macOS package (emergency hotfix escape hatch)"
         required: false
         type: boolean
         default: false
@@ -76,10 +83,10 @@ jobs:
           if-no-files-found: ignore
 
   # ─────────────────────────────────────────────────────────────────
-  #  Gate 2: Package release zip
+  #  Gate 2a: Windows package
   # ─────────────────────────────────────────────────────────────────
-  package:
-    name: "Gate: Package Release"
+  package-windows:
+    name: "Gate: Package Windows (win-x64)"
     needs: preflight
     runs-on: windows-latest
     timeout-minutes: 60
@@ -113,28 +120,28 @@ jobs:
         shell: pwsh
         run: ./dev/build-searxng-package.ps1
 
-      - name: Package release zip
+      - name: Package win-x64 release zip
         shell: pwsh
         run: |
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ inputs.version }}"
 
-      - name: Upload release artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: promote-release-assets
+          name: promote-package-windows
           path: |
-            artifacts/release/*.zip
-            artifacts/release/*.sha256.txt
+            artifacts/release/sir-thaddeus-win-x64-*.zip
+            artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────
-  #  Gate 3: Smoke test the packaged zip
+  #  Gate 2b: Linux package
   # ─────────────────────────────────────────────────────────────────
-  smoke-test:
-    name: "Gate: Smoke Test"
-    needs: package
-    runs-on: windows-latest
-    timeout-minutes: 15
+  package-linux:
+    name: "Gate: Package Linux (linux-x64)"
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout dev
@@ -143,18 +150,112 @@ jobs:
           ref: dev
           lfs: false
 
-      - name: Download release artifacts
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package linux-x64 tar.gz
+        shell: pwsh
+        run: |
+          pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -Version "${{ inputs.version }}"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: promote-package-linux
+          path: |
+            artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
+            artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 2c: macOS package (10× minutes — skip for hotfixes)
+  # ─────────────────────────────────────────────────────────────────
+  package-macos:
+    name: "Gate: Package macOS (osx-arm64)"
+    needs: preflight
+    if: ${{ !inputs.skip_macos }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package osx-arm64 tar.gz
+        shell: pwsh
+        run: |
+          pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -Version "${{ inputs.version }}"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: promote-package-macos
+          path: |
+            artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
+            artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────
+  #  Gate 3: Smoke test the Windows packaged zip
+  # ─────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: "Gate: Smoke Test"
+    needs: [package-windows, package-linux, package-macos]
+    if: >
+      always() &&
+      needs.package-windows.result == 'success' &&
+      needs.package-linux.result == 'success' &&
+      (needs.package-macos.result == 'success' || needs.package-macos.result == 'skipped')
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          lfs: false
+
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v7
         with:
-          name: promote-release-assets
+          name: promote-package-windows
           path: artifacts/release
 
       - name: Run smoke test
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-*.zip" |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-win-x64-*.zip" |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $zip) { Write-Error "No zip found"; exit 1 }
+          if (-not $zip) { Write-Error "No win-x64 zip found"; exit 1 }
           ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
 
   # ─────────────────────────────────────────────────────────────────
@@ -191,7 +292,7 @@ jobs:
           git push origin master
 
   # ─────────────────────────────────────────────────────────────────
-  #  Gate 5: Tag + publish GitHub Release
+  #  Gate 5: Tag + publish GitHub Release (all platforms)
   # ─────────────────────────────────────────────────────────────────
   release:
     name: "Tag & Publish Release"
@@ -217,10 +318,23 @@ jobs:
           git tag -a "${{ inputs.version }}" -m "Release ${{ inputs.version }}"
           git push origin "${{ inputs.version }}"
 
-      - name: Download release artifacts
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v7
         with:
-          name: promote-release-assets
+          name: promote-package-windows
+          path: release-assets
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: promote-package-linux
+          path: release-assets
+
+      - name: Download macOS artifacts
+        if: ${{ !inputs.skip_macos }}
+        uses: actions/download-artifact@v7
+        with:
+          name: promote-package-macos
           path: release-assets
 
       - name: Create GitHub Release
@@ -233,4 +347,6 @@ jobs:
           make_latest: true
           files: |
             release-assets/*.zip
+            release-assets/*.tar.gz
             release-assets/*.sha256.txt
+

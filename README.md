@@ -103,6 +103,8 @@ That same interaction model applies throughout the runtime:
 - **Reasoning pipeline** for breaking down logic questions step by step
 - **Small-model support** with routing assistance for better tool use
 - **Lightweight document reading** for text-based context
+- **Conversation-scoped memory retrieval** for better continuity across multi-turn chats
+- **Automatic history persistence** for chat and briefing context in memory-backed flows
 
 ### Permissioned Tooling via MCP
 
@@ -182,6 +184,10 @@ dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tool
 MCP now has a split tool model:
 - Core tools run cross-platform (`net10.0`)
 - Windows-only tools (screen capture / OCR) load only on Windows
+
+Runtime API composition has also been modularized into focused endpoint groups
+(`core`, `memory`, `runs`, `profiles`, `personalities`) to reduce regression risk
+and improve production maintainability.
 
 ---
 

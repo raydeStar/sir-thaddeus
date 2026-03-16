@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-03-16 — Avalonia Runtime + Production Hardening
+
+### Highlights
+
+- **Avalonia desktop runtime promoted** as the primary UI path, with desktop-runtime code moved to `LEGACY/` for controlled deprecation.
+- **Headless runtime API modularized** into focused endpoint and helper partials for maintainability and safer future changes.
+- **Memory pipeline hardening** completed: retrieval error/timeout resilience, conversation-scoped history wiring, and automatic chat/assistant chunk persistence restored.
+- **Routing/Footman authority recalibration** added with typed block reasons and disagreement logging for safer deterministic behavior.
+
+### Production Readiness Notes
+
+- Solution build is green on current branch (`dotnet build SirThaddeus.sln --no-restore`).
+- Memory-focused tests are green (conversation scoping and provider argument threading included).
+- Documentation and migration notes were expanded under `docs/migration/` and runtime notes.
+
 ## 2026-03-04 — Terminal Runtime (optimizations branch)
 
 ![Headless Runtime Screenshot](assets/images/headless-shot.png)
