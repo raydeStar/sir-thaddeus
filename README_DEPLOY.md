@@ -141,6 +141,13 @@ Every tagged release now builds three packages in parallel:
 - `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (headless + Avalonia UI; self-contained, no install needed)
 - `sir-thaddeus-osx-arm64-<ver>.tar.gz` — macOS Apple Silicon (same; double-click `launch.command`)
 
+Rolling releases now expose the same split by platform:
+
+- `latest-dev` tracks the newest `dev` push and includes Windows/Linux/macOS artifacts
+- `latest` tracks the newest `master` push and includes Windows/Linux/macOS artifacts
+
+GitHub also shows automatic `Source code (zip)` / `Source code (tar.gz)` snapshots for each release tag; those are repository archives, not runnable packages.
+
 Use the `skip_macos=true` promotion input for emergency hotfixes to avoid macOS CI minute cost.
 
 ## Optional code signing

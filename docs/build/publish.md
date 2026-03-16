@@ -107,12 +107,29 @@ Every tagged release and manual promote now builds **three packages in parallel*
 
 All three end up as GitHub Release assets.
 
+### Rolling releases
+
+Pushes to `dev` and `master` now publish separate rolling artifacts too:
+
+- `latest-dev` for the current `dev` branch head
+- `latest` for the current `master` branch head
+
+Each rolling release now carries:
+
+- `sir-thaddeus-win-x64-<branch>-<sha>.zip`
+- `sir-thaddeus-linux-x64-<branch>-<sha>.tar.gz`
+- `sir-thaddeus-osx-arm64-<branch>-<sha>.tar.gz`
+
+GitHub's built-in `Source code (zip)` and `Source code (tar.gz)` entries are automatic repository snapshots for the release tag. They are not the packaged app artifacts and are expected to appear separately from the uploaded platform bundles.
+
 ### Free-tier minute budget
 
 - Linux jobs cost 1× → nearly free
 - macOS jobs cost 10× → ~45 min build = 450 equivalent minutes
 - Use the `skip_macos=true` input on the promote workflow for emergency hotfixes to avoid macOS cost
-- PR CI (`ci-pr.yml`) does **not** build macOS — only dev/master pushes trigger the Linux+Windows package step
+- Pull requests still do not build release packages
+- Pushes to `dev` and `master` now publish Windows, Linux, and macOS rolling artifacts
+- Tagged releases and promote runs publish the same three-platform layout with versioned names
 
 ## Troubleshooting
 

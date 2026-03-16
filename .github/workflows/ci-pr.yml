@@ -55,8 +55,8 @@ jobs:
             **/TestResults/**/*.trx
           if-no-files-found: ignore
 
-  package:
-    name: Package Build Artifact
+  package-windows:
+    name: Package Windows Build Artifact
     needs: test
     if: >
       github.event_name == 'push' &&
@@ -99,18 +99,108 @@ jobs:
           $shortSha = "${{ github.sha }}".Substring(0, 7)
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "$branchName-$shortSha"
 
-      - name: Upload build package artifacts
+      - name: Upload Windows build package artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: build-package-assets-${{ github.ref_name }}
+          name: build-package-windows-${{ github.ref_name }}
           path: |
-            artifacts/release/*.zip
-            artifacts/release/*.sha256.txt
+            artifacts/release/sir-thaddeus-win-x64-*.zip
+            artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
+          if-no-files-found: error
+
+  package-linux:
+    name: Package Linux Build Artifact
+    needs: test
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package linux-x64 tar.gz
+        shell: pwsh
+        run: |
+          $branchName = "${{ github.ref_name }}"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -Version "$branchName-$shortSha"
+
+      - name: Upload Linux build package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-package-linux-${{ github.ref_name }}
+          path: |
+            artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
+            artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS Build Artifact
+    needs: test
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package osx-arm64 tar.gz
+        shell: pwsh
+        run: |
+          $branchName = "${{ github.ref_name }}"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -Version "$branchName-$shortSha"
+
+      - name: Upload macOS build package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-package-macos-${{ github.ref_name }}
+          path: |
+            artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
+            artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
           if-no-files-found: error
 
   smoke-test:
     name: Smoke Test Package
-    needs: package
+    needs: [package-windows, package-linux, package-macos]
     if: >
       github.event_name == 'push' &&
       github.ref == 'refs/heads/dev'
@@ -126,7 +216,7 @@ jobs:
       - name: Download build package artifacts
         uses: actions/download-artifact@v7
         with:
-          name: build-package-assets-${{ github.ref_name }}
+          name: build-package-windows-${{ github.ref_name }}
           path: artifacts/release
 
       - name: Run smoke test on packaged zip
@@ -139,10 +229,12 @@ jobs:
 
   publish:
     name: Publish Rolling Release
-    needs: [package, smoke-test]
+    needs: [package-windows, package-linux, package-macos, smoke-test]
     if: >
       always() &&
-      needs.package.result == 'success' &&
+      needs.package-windows.result == 'success' &&
+      needs.package-linux.result == 'success' &&
+      needs.package-macos.result == 'success' &&
       (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped') &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
@@ -151,10 +243,22 @@ jobs:
       contents: write
 
     steps:
-      - name: Download build package artifacts
+      - name: Download Windows build package artifacts
         uses: actions/download-artifact@v7
         with:
-          name: build-package-assets-${{ github.ref_name }}
+          name: build-package-windows-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Download Linux build package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: build-package-linux-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Download macOS build package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: build-package-macos-${{ github.ref_name }}
           path: release-assets
 
       - name: Set rolling release tag name
@@ -163,11 +267,11 @@ jobs:
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "tag=latest" >> $GITHUB_OUTPUT
             echo "title=Latest Build (master)" >> $GITHUB_OUTPUT
-            echo "body=Rolling release from master branch. Commit: ${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "body=Rolling release from master branch. Commit: ${{ github.sha }}. Includes separate Windows, Linux, and macOS packages." >> $GITHUB_OUTPUT
           else
             echo "tag=latest-dev" >> $GITHUB_OUTPUT
             echo "title=Latest Dev Build" >> $GITHUB_OUTPUT
-            echo "body=Rolling release from dev branch. Commit: ${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "body=Rolling release from dev branch. Commit: ${{ github.sha }}. Includes separate Windows, Linux, and macOS packages." >> $GITHUB_OUTPUT
           fi
 
       - name: Delete existing rolling release (if any)
@@ -194,4 +298,5 @@ jobs:
           make_latest: false
           files: |
             release-assets/*.zip
+            release-assets/*.tar.gz
             release-assets/*.sha256.txt
