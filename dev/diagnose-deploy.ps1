@@ -24,7 +24,7 @@ function Write-Warn([string]$Msg) { Write-Host "  [WARN] $Msg" -ForegroundColor 
 function Write-Info([string]$Msg) { Write-Host "  $Msg" -ForegroundColor Gray }
 
 function Resolve-UiExecutable([string]$Root) {
-    foreach ($name in @("SirThaddeus.UI.Avalonia.exe", "SirThaddeus.DesktopRuntime.exe")) {
+    foreach ($name in @("SirThaddeus.UI.Avalonia.exe")) {
         $candidate = Join-Path $Root $name
         if (Test-Path $candidate) { return $candidate }
     }

@@ -46,27 +46,11 @@
     </Content>
   </ItemGroup>
 
-  <!-- Compile VoiceHost process manager directly for focused supervision tests
-       without introducing a WPF runtime dependency in this test assembly. -->
+    <!-- Compile AttachedDocumentContext directly from the current Avalonia app
+      without pulling in full UI runtime dependencies. -->
   <ItemGroup>
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
-             Link="DesktopRuntime\VoiceHostProcessManager.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Process.cs"
-             Link="DesktopRuntime\VoiceHostProcessManager.Process.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Session.cs"
-             Link="DesktopRuntime\VoiceHostProcessManager.Session.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Diagnostics.cs"
-             Link="DesktopRuntime\VoiceHostProcessManager.Diagnostics.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostModels.cs"
-             Link="DesktopRuntime\VoiceHostModels.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
-             Link="DesktopRuntime\YouTubeJobsHttpClient.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\DeviceLocationProviders.cs"
-             Link="DesktopRuntime\DeviceLocationProviders.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\LocationAwareAgentOrchestrator.cs"
-             Link="DesktopRuntime\LocationAwareAgentOrchestrator.cs" />
-    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\AttachedDocumentContext.cs"
-             Link="DesktopRuntime\AttachedDocumentContext.cs" />
+      <Compile Include="..\..\apps\ui-avalonia\SirThaddeus.UI.Avalonia\AttachedDocumentContext.cs"
+         Link="Avalonia\AttachedDocumentContext.cs" />
   </ItemGroup>
 
 </Project>

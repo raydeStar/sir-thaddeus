@@ -15,18 +15,18 @@ This will:
 - Initialize the schema (tables + FTS5 index)
 - Insert test facts, events, and chunks
 
-### 2. Run the Desktop Runtime
+### 2. Run the Avalonia Runtime
 
-Start the desktop runtime normally:
+Start the Avalonia runtime normally:
 
 ```powershell
-dotnet run --project apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj
+dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj
 ```
 
 Or build and run the executable:
 ```powershell
-dotnet build apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj
-.\apps\desktop-runtime\SirThaddeus.DesktopRuntime\bin\Debug\net10.0-windows\SirThaddeus.DesktopRuntime.exe
+dotnet build apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj
+.\apps\ui-avalonia\SirThaddeus.UI.Avalonia\bin\Debug\net10.0\SirThaddeus.UI.Avalonia.exe
 ```
 
 ### 3. Test Memory Retrieval

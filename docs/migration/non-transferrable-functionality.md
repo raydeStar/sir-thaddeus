@@ -1,6 +1,6 @@
 # Non-Transferable WPF Functionality
 
-While migrating from the monolithic WPF architecture to the decoupled Avalonia/Headless API architecture, certain functionalities from the legacy `SirThaddeus.DesktopRuntime` cannot be perfectly transferred 1:1. These will require manual attention, platform-specific workarounds, or new libraries in Avalonia.
+While migrating from the former monolithic WPF architecture to the decoupled Avalonia/Headless API architecture, certain functionalities from the removed `SirThaddeus.DesktopRuntime` cannot be perfectly transferred 1:1. These will require manual attention, platform-specific workarounds, or new libraries in Avalonia.
 
 ## 1. Rich Markdown Rendering (FlowDocument)
 **WPF Implementation:** The old app used `FlowDocumentScrollViewer` and a `MarkdownToFlowDocumentConverter` to render rich markdown (bolding, lists, code blocks, syntax highlighting) directly in the chat ledger.

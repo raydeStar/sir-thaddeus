@@ -142,6 +142,7 @@ foreach ($kvp in $projects.GetEnumerator()) {
         "-r", $Runtime,
         "--self-contained", $selfContainedValue,
         "-f", "net10.0",
+        "-p:EnableWindowsTargeting=true",
         "-o", $publishDir
     )
 

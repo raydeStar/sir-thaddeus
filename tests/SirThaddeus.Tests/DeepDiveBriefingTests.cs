@@ -348,6 +348,7 @@ Phone: (503) 555-9580
     {
         var candidates = new[]
         {
+            Path.Combine(repoRoot, "tests", "SirThaddeus.Tests", "Fixtures", fileName),
             Path.Combine(repoRoot, "LEGACY", "SirThaddeus.DesktopRuntime", "Fixtures", fileName),
             Path.Combine(repoRoot, "apps", "desktop-runtime", "SirThaddeus.DesktopRuntime", "Fixtures", fileName)
         };

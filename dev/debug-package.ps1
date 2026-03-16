@@ -56,9 +56,6 @@ Write-Host "      Backend logs are now visible in dedicated windows." -Foregroun
 Write-Host "`n[3/3] Starting Packaged UI..." -ForegroundColor Yellow
 $UiExe = Join-Path $StageDir "SirThaddeus.UI.Avalonia.exe"
 if (-not (Test-Path $UiExe)) {
-    $UiExe = Join-Path $StageDir "SirThaddeus.DesktopRuntime.exe"
-}
-if (-not (Test-Path $UiExe)) {
     Write-Host "ERROR: No UI executable found in stage directory." -ForegroundColor Red
     exit 1
 }

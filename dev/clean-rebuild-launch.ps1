@@ -44,7 +44,6 @@ Write-Host "  CleanReleaseFolder : $($CleanReleaseArtifacts.IsPresent)"
 
 Write-Section "1/4 Tear Down Running Processes"
 Stop-Process -Name "SirThaddeus.UI.Avalonia" -Force -ErrorAction SilentlyContinue
-Stop-Process -Name "SirThaddeus.DesktopRuntime" -Force -ErrorAction SilentlyContinue
 Stop-Process -Name "SirThaddeus.VoiceHost" -Force -ErrorAction SilentlyContinue
 Stop-Process -Name "SirThaddeus.McpServer" -Force -ErrorAction SilentlyContinue
 
@@ -127,9 +126,6 @@ while ($maxWait -gt 0) {
 }
 
 $UiExe = Join-Path $StageDir "SirThaddeus.UI.Avalonia.exe"
-if (-not (Test-Path $UiExe)) {
-    $UiExe = Join-Path $StageDir "SirThaddeus.DesktopRuntime.exe"
-}
 if (-not (Test-Path $UiExe)) {
     Fail "No UI executable found in staged package."
 }

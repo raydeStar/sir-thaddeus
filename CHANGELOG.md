@@ -4,7 +4,7 @@
 
 ### Highlights
 
-- **Avalonia desktop runtime promoted** as the primary UI path, with desktop-runtime code moved to `LEGACY/` for controlled deprecation.
+- **Avalonia desktop runtime promoted** as the primary UI path, and legacy desktop-runtime code removed from the repository.
 - **Headless runtime API modularized** into focused endpoint and helper partials for maintainability and safer future changes.
 - **Memory pipeline hardening** completed: retrieval error/timeout resilience, conversation-scoped history wiring, and automatic chat/assistant chunk persistence restored.
 - **Routing/Footman authority recalibration** added with typed block reasons and disagreement logging for safer deterministic behavior.

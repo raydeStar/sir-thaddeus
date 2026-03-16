@@ -1,38 +1,9 @@
 using SirThaddeus.Config;
-using SirThaddeus.DesktopRuntime.Services;
 
 namespace SirThaddeus.Tests;
 
 public sealed class LocationPolicyTests
 {
-    [Fact]
-    public void ManualOnlyPolicy_DisablesDeviceLocation()
-    {
-        var policy = LocationPolicy.ManualOnly;
-
-        Assert.False(policy.AllowDeviceLocation);
-        Assert.True(policy.AllowManualLocation);
-    }
-
-    [Fact]
-    public async Task NullDeviceLocationProvider_ReturnsDisabledByPolicy()
-    {
-        var provider = new NullDeviceLocationProvider(LocationPolicy.ManualOnly);
-
-        var result = await provider.TryGetLocationAsync(CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Contains("disabled", result.Error, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Registry_DefaultProviders_DoNotIncludeWindowsProvider()
-    {
-        Assert.DoesNotContain(
-            typeof(WindowsDeviceLocationProvider),
-            DeviceLocationProviderRegistry.RegisteredProviderTypes);
-    }
-
     [Fact]
     public void AppSettings_EffectiveLocation_UsesUserProfileLocation()
     {
@@ -66,7 +37,7 @@ public sealed class LocationPolicyTests
         var repoRoot = FindRepoRoot();
         var roots = new[]
         {
-            Path.Combine(repoRoot, "apps", "desktop-runtime"),
+            Path.Combine(repoRoot, "apps", "ui-avalonia"),
             Path.Combine(repoRoot, "packages", "local-tools"),
             Path.Combine(repoRoot, "apps", "mcp-server")
         };

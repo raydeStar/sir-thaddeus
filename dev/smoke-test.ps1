@@ -164,18 +164,13 @@ foreach ($exe in $requiredExes) {
     }
 }
 
-$uiExecutable = $null
-foreach ($candidate in @("SirThaddeus.UI.Avalonia.exe", "SirThaddeus.DesktopRuntime.exe")) {
-    $candidatePath = Join-Path $testDir $candidate
-    if (Test-Path $candidatePath) {
-        $uiExecutable = $candidatePath
-        $sizeMB = [math]::Round((Get-Item $candidatePath).Length / 1MB, 1)
-        Pass "$candidate present (${sizeMB} MB)"
-        break
-    }
+$uiExecutable = Join-Path $testDir "SirThaddeus.UI.Avalonia.exe"
+if (Test-Path $uiExecutable) {
+    $sizeMB = [math]::Round((Get-Item $uiExecutable).Length / 1MB, 1)
+    Pass "SirThaddeus.UI.Avalonia.exe present (${sizeMB} MB)"
 }
-if (-not $uiExecutable) {
-    Fail "UI executable missing from package root (expected SirThaddeus.UI.Avalonia.exe or SirThaddeus.DesktopRuntime.exe)"
+else {
+    Fail "UI executable missing from package root (expected SirThaddeus.UI.Avalonia.exe)"
 }
 
 $headlessRuntimeExecutable = Resolve-PackagePath -Primary "headless/SirThaddeus.HeadlessRuntime.exe" -Legacy "SirThaddeus.HeadlessRuntime.exe"

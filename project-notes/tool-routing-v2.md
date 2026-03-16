@@ -157,8 +157,8 @@ Reference: `project-notes/tool-conflict-matrix.md`.
 - `packages/agent/SirThaddeus.Agent/ToolLoop/ToolLoopExecutor.cs`
 - `packages/agent/SirThaddeus.Agent/AuditedMcpToolClient.cs`
 - `packages/agent/SirThaddeus.Agent/ToolGroupPolicy.cs`
-- `apps/desktop-runtime/SirThaddeus.DesktopRuntime/Services/WpfPermissionGate.cs`
-- `apps/desktop-runtime/SirThaddeus.DesktopRuntime/App.xaml.cs`
+- `apps/ui-avalonia/SirThaddeus.UI.Avalonia/RuntimeApiClient.cs`
+- `apps/ui-avalonia/SirThaddeus.UI.Avalonia/MainWindow.axaml.cs`
 
 ---
 
