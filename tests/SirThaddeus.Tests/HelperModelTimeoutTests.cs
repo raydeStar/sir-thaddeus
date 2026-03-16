@@ -1,6 +1,7 @@
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
+using SirThaddeus.LlmClient;
 using System.Reflection;
 
 namespace SirThaddeus.Tests;
@@ -12,7 +13,7 @@ public sealed class HelperModelTimeoutTests
     {
         var audit = new TestAuditLogger();
         var classifier = new SmartIntentClassifier(
-            new SlowFakeLlmClient(delayMs: 500),
+            new TimeoutThrowingLlmClient(),
             audit,
             timeout: TimeSpan.FromMilliseconds(20));
 
@@ -66,5 +67,24 @@ public sealed class HelperModelTimeoutTests
             Assert.True(timeoutEvent.Details!.ContainsKey("timed_out"));
             Assert.Equal(true, timeoutEvent.Details["timed_out"]);
         });
+    }
+
+    private sealed class TimeoutThrowingLlmClient : ILlmClient
+    {
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools = null,
+            CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException("Simulated classifier timeout.");
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException("Simulated classifier timeout.");
+
+        public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>("timeout-throwing-fake");
     }
 }
