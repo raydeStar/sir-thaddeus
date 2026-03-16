@@ -11,6 +11,7 @@ public enum HarnessCommandKind
 public enum HarnessExecutionMode
 {
     Live,
+    Headless,
     Replay,
     Stub
 }

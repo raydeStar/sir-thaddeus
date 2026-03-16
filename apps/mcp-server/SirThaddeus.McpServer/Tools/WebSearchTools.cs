@@ -65,7 +65,13 @@ public static class WebSearchTools
         () => new WebSearchRouter(
             mode: Environment.GetEnvironmentVariable("WEBSEARCH_MODE") ?? "auto",
             searxngBaseUrl: Environment.GetEnvironmentVariable("WEBSEARCH_SEARXNG_URL")
-                            ?? "http://localhost:8080"));
+                            ?? "http://localhost:8080",
+            searchApiKey: Environment.GetEnvironmentVariable("WEBSEARCH_API_KEY")
+                            ?? "",
+            searchApiBaseUrl: Environment.GetEnvironmentVariable("WEBSEARCH_API_BASE_URL")
+                            ?? "https://www.searchapi.io/api/v1/search",
+            searchApiEngine: Environment.GetEnvironmentVariable("WEBSEARCH_API_ENGINE")
+                            ?? "google"));
 
     [McpServerTool, Description(
         "Searches the web and returns rich summaries of the top results. " +
@@ -113,6 +119,7 @@ public static class WebSearchTools
         // ── Phase 1: Search ──────────────────────────────────────────
         var queryBundle = QueryBundleBuilder.Build(query);
         var aggregatedResults = new List<SearchResult>();
+        var aggregatedErrors = new List<string>();
         var providerLog = new List<object>();
         var providersUsed = new List<string>();
 
@@ -129,12 +136,21 @@ public static class WebSearchTools
                 cancellationToken);
 
             aggregatedResults.AddRange(bundleResult.Results);
+            aggregatedErrors.AddRange(bundleResult.Errors);
             providerLog.Add(new
             {
                 query = bundledQuery,
                 provider = bundleResult.Provider,
                 resultCount = bundleResult.Results.Count,
-                errors = bundleResult.Errors
+                errors = bundleResult.Errors,
+                diagnostics = bundleResult.Diagnostics.Select(d => new
+                {
+                    provider = d.Provider,
+                    phase = d.Phase,
+                    outcome = d.Outcome,
+                    message = d.Message,
+                    resultCount = d.ResultCount
+                }).ToArray()
             });
             providersUsed.Add(bundleResult.Provider);
         }
@@ -143,7 +159,17 @@ public static class WebSearchTools
         {
             Provider = string.Join(", ", providersUsed.Distinct(StringComparer.OrdinalIgnoreCase)),
             Results = aggregatedResults,
-            Errors = []
+            Errors = aggregatedErrors
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+        };
+        var searchDiagnostics = new
+        {
+            query,
+            recency,
+            provider = searchResult.Provider,
+            bundles = providerLog.ToArray()
         };
 
         if (searchResult.Results.Count == 0)
@@ -154,6 +180,9 @@ public static class WebSearchTools
             foreach (var err in searchResult.Errors)
                 sb.AppendLine($"Warning: {err}");
             sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
+            sb.AppendLine();
+            sb.AppendLine(SourcesDelimiter);
+            sb.AppendLine(SerializeSourcesPayload(Array.Empty<object>(), searchDiagnostics));
             return sb.ToString();
         }
 
@@ -191,7 +220,13 @@ public static class WebSearchTools
             : VetResultsByQuery(query, dedupedResults, extractions, urlsToRead);
 
         // ── Phase 3: Format output (text for LLM + JSON for UI) ──────
-        return FormatResults(query, vettedResults, extractions, urlsToRead);
+        return FormatResults(
+            query,
+            searchResult.Provider,
+            vettedResults,
+            extractions,
+            urlsToRead,
+            searchDiagnostics);
     }
 
     /// <summary>
@@ -394,9 +429,11 @@ public static class WebSearchTools
 
     private static string FormatResults(
         string query,
+        string provider,
         IReadOnlyList<SearchResult> results,
         List<ContentExtractor.ExtractionResult> extractions,
-        List<string> originalUrls)
+        List<string> originalUrls,
+        object searchDiagnostics)
     {
         var sb = new StringBuilder();
         var strictNewsMode = LooksLikeNewsQuery(query);
@@ -417,6 +454,8 @@ public static class WebSearchTools
                       "Lead with the bottom line, then provide detail. No URLs. " +
                       "ONLY state facts found in the sources below. " +
                       "If a detail is not in the sources, do NOT guess or make it up.");
+        if (!string.IsNullOrWhiteSpace(provider))
+            sb.AppendLine($"Provider: {provider}");
         sb.AppendLine();
 
         var included = 0;
@@ -513,10 +552,7 @@ public static class WebSearchTools
             });
         }
 
-        sb.AppendLine(JsonSerializer.Serialize(sources, new JsonSerializerOptions
-        {
-            WriteIndented = false
-        }));
+        sb.AppendLine(SerializeSourcesPayload(sources, searchDiagnostics));
 
         return sb.ToString();
     }
@@ -569,8 +605,28 @@ public static class WebSearchTools
             })
             .ToArray();
 
-        sb.AppendLine(JsonSerializer.Serialize(sources));
+        sb.AppendLine(SerializeSourcesPayload(sources, new
+        {
+            query,
+            recency = "any",
+            provider = "existence_gate",
+            bundles = Array.Empty<object>()
+        }));
         return sb.ToString();
+    }
+
+    private static string SerializeSourcesPayload(
+        IReadOnlyCollection<object> sources,
+        object searchDiagnostics)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            sources,
+            searchDiagnostics
+        }, new JsonSerializerOptions
+        {
+            WriteIndented = false
+        });
     }
 
     /// <summary>

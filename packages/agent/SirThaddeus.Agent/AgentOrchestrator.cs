@@ -81,6 +81,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private string? _preferredUnits = "auto";
     private IReadOnlyList<string> _lastFirstPrinciplesRationale = [];
     private DateTimeOffset _lastFirstPrinciplesAt;
+    private string? _currentConversationId;
+    private string? _currentTurnTag;
 
     private const int MaxToolRoundTrips  = 10;  // Safety valve
     private const int DefaultWebSearchMaxResults = 5;
@@ -125,14 +127,33 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string WebFollowUpWithRelatedInstruction = OrchestratorPrompts.WebFollowUpWithRelatedInstruction;
 
     // ── Token budget per intent ──────────────────────────────────────
-    // Tight caps reduce filler from small models while still leaving
-    // enough headroom for a substantive answer (lists, step-by-step).
-    private const int MaxTokensCasual         = 512;
-    private const int MaxTokensCasualRetry    = 2048;
+    // Configurable caps — when MaxTokensBudget is set from user
+    // settings the casual / retry ceilings scale accordingly.  The
+    // remaining per-intent caps stay fixed because they guard
+    // specialised LLM calls (routing, summaries) that don't benefit
+    // from a larger completion window.
+    private int _maxTokensCasual      = 512;
+    private int _maxTokensCasualRetry = 2048;
     private const int MaxTokensWebSummary     = 1024;
     private const int MaxTokensWebSummaryRetry = 2048;
     private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
+
+    /// <summary>
+    /// User-facing max-token budget for casual chat responses.
+    /// When set (e.g. from <c>LlmSettings.MaxTokens</c>), overrides
+    /// the default 512 cap and scales the truncation-retry ceiling
+    /// to <c>Max(budget, 2048)</c>.
+    /// </summary>
+    public int MaxTokensBudget
+    {
+        get => _maxTokensCasual;
+        set
+        {
+            _maxTokensCasual = value > 0 ? value : 512;
+            _maxTokensCasualRetry = Math.Max(_maxTokensCasual, 2048);
+        }
+    }
 
     // ── Logic puzzle decomposition scaffold ──────────────────────────
     private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
@@ -216,6 +237,35 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             _preferredUnits = NormalizeUnitPreference(value);
             _searchOrchestrator.PreferredUnits = _preferredUnits;
         }
+    }
+
+    /// <summary>
+    /// Seeds the conversation history with prior user/assistant turns
+    /// so multi-turn follow-ups work across stateless HTTP requests.
+    /// Call this <b>before</b> <see cref="ProcessAsync"/> to replay
+    /// the conversation context.  Only user and assistant messages
+    /// are accepted — system messages are silently skipped because
+    /// the constructor already seeds the system prompt.
+    /// </summary>
+    public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
+    {
+        foreach (var (role, content) in priorMessages)
+        {
+            if (string.IsNullOrWhiteSpace(content)) continue;
+
+            switch (role)
+            {
+                case "user":
+                    _history.Add(ChatMessage.User(content));
+                    break;
+                case "assistant":
+                    _history.Add(ChatMessage.Assistant(content));
+                    break;
+                // Skip system/tool — system prompt is already in _history[0].
+            }
+        }
+
+        TrimHistory();
     }
 
     /// <inheritdoc />
@@ -305,7 +355,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
         _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(mcp, audit, new SmartIntentClassifier(effectiveGatekeeper), _timeProvider);
+        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
+            mcp,
+            audit,
+            new SmartIntentClassifier(effectiveGatekeeper, audit),
+            _timeProvider);
         _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
         _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
         _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
@@ -333,8 +387,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     }
 
     /// <inheritdoc />
+    public Task<AgentResponse> ProcessAsync(
+        string userMessage,
+        CancellationToken cancellationToken = default)
+        => ProcessAsync(userMessage, conversationId: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<AgentResponse> ProcessAsync(
         string userMessage,
+        string? conversationId,
         CancellationToken cancellationToken = default)
     {
         var usageBaseline = CaptureUsageSnapshot();
@@ -347,6 +408,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";
+        _currentTurnTag = personalityTurnTag;
+        if (!IsMultiIntentBypassActive() || !string.IsNullOrWhiteSpace(conversationId))
+            _currentConversationId = string.IsNullOrWhiteSpace(conversationId)
+                ? null
+                : conversationId.Trim();
+
         var personalityTurnContext = _personalityRuntime.BuildTurnContext(userMessage);
         var personalityAnchor = _personalityRuntime.BuildAnchor(personalityTurnTag, userMessage);
         LogEvent(
@@ -375,6 +442,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
         {
             _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+            _autoMemoryExtractor.FireAndForgetConversationChunk(
+                userMessage,
+                _currentConversationId,
+                personalityTurnTag,
+                role: "user");
         }
 
         var toolCallsMade = new List<ToolCallRecord>();
@@ -395,6 +467,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // total turn latency.
         var memoryTask = SafeModeEnabled ? Task.FromResult(new MemoryContextResult()) : GetMemoryContextSafeAsync(
             userMessage,
+            _currentConversationId,
             cancellationToken);
 
         var slotStateBefore = _dialogueStore.Get();
@@ -434,7 +507,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         // When the tripwire router didn't make a high-confidence
         // deterministic match (< 0.95), invoke the Footman for a
         // second opinion using a small, fast gatekeeper model.
+        // Authority boundaries are enforced by ActionTier — see
+        // ShouldRunFootmanForRoute and ShouldBlockFootmanLookupDowngrade.
         RoutingDecision? footmanDecision = null;
+        var actionTier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
         if (_footmanRouter is not null && ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
         {
             var features = RoutingFeatures.Extract(
@@ -459,28 +535,61 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
                     needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
 
-                if (ShouldBlockFootmanLookupDowngrade(lowerIncoming, route, footmanRoute, webEvidence))
+                if (ShouldBlockFootmanLookupDowngrade(
+                        lowerIncoming, route, footmanRoute, webEvidence,
+                        footmanDecision.BlockReason))
                 {
                     LogEvent("FOOTMAN_DOWNGRADE_BLOCKED",
                         $"baseIntent={route.Intent}, proposedIntent={footmanIntent}, " +
-                        $"reason={footmanDecision.ReasonCode}, webScore={webEvidence.Score:0.0}, " +
+                        $"reason={footmanDecision.ReasonCode}, blockReason={footmanDecision.BlockReason}, " +
+                        $"actionTier={actionTier}, webScore={webEvidence.Score:0.0}, " +
                         $"webReason={webEvidence.ReasonCode}");
+
+                    // ── Disagreement log (structured) ────────────────
+                    LogRouterDisagreement(
+                        userMessage, route, footmanIntent,
+                        footmanDecision, actionTier, "downgrade_blocked");
                 }
                 else
                 {
+                    // Check if this is a genuine disagreement even though
+                    // we accepted the Footman's decision.
+                    var isDisagreement = !string.Equals(
+                        route.Intent, footmanIntent, StringComparison.OrdinalIgnoreCase);
+
                     route = footmanRoute;
                     LogEvent("FOOTMAN_OVERRIDE",
                         $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
                         $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
-                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}");
+                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}, " +
+                        $"actionTier={actionTier}");
+
+                    if (isDisagreement)
+                    {
+                        LogRouterDisagreement(
+                            userMessage, routeBeforeFootman: new RouterOutput
+                            {
+                                Intent = routeIntentBeforeFootman,
+                                Confidence = routeConfidenceBeforeFootman,
+                                NeedsWeb = true, NeedsSearch = true
+                            },
+                            footmanIntent, footmanDecision, actionTier,
+                            "footman_accepted");
+                    }
                 }
             }
             else
             {
                 LogEvent("FOOTMAN_DEFERRED",
                     $"abstain={footmanDecision.Abstain}, confidence={footmanDecision.Confidence:F2}, " +
-                    $"reason={footmanDecision.ReasonCode} — keeping tripwire route");
+                    $"reason={footmanDecision.ReasonCode}, actionTier={actionTier} — keeping tripwire route");
             }
+        }
+        else
+        {
+            LogEvent("FOOTMAN_SKIPPED",
+                $"actionTier={actionTier}, intent={route.Intent}, " +
+                $"confidence={route.Confidence:F2}");
         }
 
         // ── Apply Footman context policy ─────────────────────────────
@@ -608,7 +717,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 "Web search is currently blocked because Safe Mode is enabled. " +
                 "Disable Safe Mode in Runtime Safety to run web lookups.";
             LogEvent("WEB_LOOKUP_BLOCKED_SAFE_MODE", safeModeWebBlockMessage);
-            _history.Add(ChatMessage.Assistant(safeModeWebBlockMessage));
+            AppendAssistantMessage(safeModeWebBlockMessage);
 
             return AttachContextSnapshot(new AgentResponse
             {
@@ -652,7 +761,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 roundTrips);
             if (firstPrinciplesFollowUp is not null)
             {
-                _history.Add(ChatMessage.Assistant(firstPrinciplesFollowUp.Text));
+                AppendAssistantMessage(firstPrinciplesFollowUp.Text);
                 LogEvent("FIRST_PRINCIPLES_FOLLOWUP", firstPrinciplesFollowUp.Text);
                 return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
             }
@@ -665,7 +774,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var specialCaseText = deterministicSpecialCase.AnswerText;
                 _lastFirstPrinciplesRationale = deterministicSpecialCase.RationaleLines.Take(3).ToArray();
                 _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
-                _history.Add(ChatMessage.Assistant(specialCaseText));
+                AppendAssistantMessage(specialCaseText);
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={deterministicSpecialCase.TriggerRisk}, source={deterministicSpecialCase.TriggerSource}, why={deterministicSpecialCase.TriggerWhy}");
                 LogEvent("AGENT_RESPONSE", specialCaseText);
@@ -776,7 +885,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var lastAssistantText = _history.LastOrDefault(m => m.Role == "assistant")?.Content;
                 if (!string.Equals(lastAssistantText, utilityResponse.Text, StringComparison.Ordinal))
                 {
-                    _history.Add(ChatMessage.Assistant(utilityResponse.Text));
+                    AppendAssistantMessage(utilityResponse.Text);
                     LogEvent("AGENT_RESPONSE", utilityResponse.Text);
                 }
 
@@ -802,7 +911,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     contextualUserMessage);
                 _lastFirstPrinciplesRationale = guardrailsResult.RationaleLines.Take(3).ToArray();
                 _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
-                _history.Add(ChatMessage.Assistant(guardedText));
+                AppendAssistantMessage(guardedText);
                 LogEvent("GUARDRAILS_RESPONSE",
                     $"risk={guardrailsResult.TriggerRisk}, source={guardrailsResult.TriggerSource}, why={guardrailsResult.TriggerWhy}");
                 LogEvent(
@@ -828,7 +937,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     toolCallsMade,
                     roundTrips,
                     cancellationToken);
-                _history.Add(ChatMessage.Assistant(memorySummary.Text));
+                AppendAssistantMessage(memorySummary.Text);
                 LogEvent("AGENT_RESPONSE", memorySummary.Text);
                 return AttachContextSnapshot(memorySummary, usageBaseline);
             }
@@ -858,7 +967,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
-                    _history.Add(ChatMessage.Assistant(searchResponse.Text));
+                    AppendAssistantMessage(searchResponse.Text);
 
                 LogEvent("AGENT_RESPONSE", searchResponse.Text);
                 return AttachContextSnapshot(
@@ -915,7 +1024,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 InjectFewShotExamplesInPlace(messages, _personalityRuntime.Snapshot.Profile.Instructions.FewShotExamples);
 
                 var response = await CallLlmWithRetrySafe(
-                    messages, roundTrips, MaxTokensCasual, cancellationToken);
+                    messages, roundTrips, _maxTokensCasual, cancellationToken);
 
                 // ── Truncation recovery ──────────────────────────────
                 // If the LLM hit the token ceiling mid-sentence, retry
@@ -923,10 +1032,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     LogEvent("CASUAL_TRUNCATED",
-                        $"Response truncated at {MaxTokensCasual} tokens — retrying with {MaxTokensCasualRetry}.");
+                        $"Response truncated at {_maxTokensCasual} tokens — retrying with {_maxTokensCasualRetry}.");
                     roundTrips++;
                     response = await CallLlmWithRetrySafe(
-                        messages, roundTrips, MaxTokensCasualRetry, cancellationToken);
+                        messages, roundTrips, _maxTokensCasualRetry, cancellationToken);
                 }
 
                 var text = _postProcessor.ProcessChatOnlyDraft(
@@ -950,7 +1059,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         "Try a direct format like \"350F in C\".";
                     LogEvent("DETERMINISTIC_NO_WEB_ENFORCED",
                         "Suppressed chat fallback web search for deterministic route.");
-                    _history.Add(ChatMessage.Assistant(deterministicFallback));
+                    AppendAssistantMessage(deterministicFallback);
                     LogEvent("AGENT_RESPONSE", deterministicFallback);
                     return AttachContextSnapshot(new AgentResponse
                     {
@@ -1002,7 +1111,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LogEvent("CHAT_RESPONSE_EMPTY_NO_FALLBACK", "Returned local fallback message.");
                 }
 
-                _history.Add(ChatMessage.Assistant(text));
+                AppendAssistantMessage(text);
                 LogEvent("AGENT_RESPONSE", text);
 
                 return AttachContextSnapshot(new AgentResponse
@@ -1078,30 +1187,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     public IReadOnlyList<ChatMessage> GetCurrentHistory() => _history;
 
     /// <summary>
-    /// Adds a user message to the history and triggers trimming.
-    /// </summary>
-    public void AddUserMessageToHistory(string message)
-    {
-        _history.Add(ChatMessage.User(message));
-        TrimHistory();
-        LogEvent("AGENT_USER_MESSAGE", message);
-    }
-
-    /// <summary>
     /// Removes the last message from the history if it exists.
     /// </summary>
     public void PopUserMessage()
     {
         if (_history.Count > 0)
             _history.RemoveAt(_history.Count - 1);
-    }
-
-    /// <summary>
-    /// Appends a new assistant message to the history.
-    /// </summary>
-    public void AppendAssistantMessage(string message)
-    {
-        _history.Add(ChatMessage.Assistant(message));
     }
 
     private static AgentResponse ApplySeasonEpisodeExistenceSanityGate(

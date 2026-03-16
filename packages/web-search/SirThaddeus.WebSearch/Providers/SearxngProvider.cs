@@ -102,18 +102,27 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
+        // Two attempts — the first cold-start request from a freshly spawned
+        // process can be slow on Windows due to IPv6 DNS resolution for
+        // "localhost" before falling back to IPv4 127.0.0.1.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(2_000);
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(4_000);
 
-            var response = await _http.GetAsync(_baseUrl, cts.Token);
-            return response.IsSuccessStatusCode;
+                var response = await _http.GetAsync(_baseUrl, cts.Token);
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                if (attempt == 0)
+                    await Task.Delay(500, cancellationToken);
+            }
         }
-        catch
-        {
-            return false;
-        }
+
+        return false;
     }
 
     /// <summary>

@@ -27,6 +27,12 @@ internal static class WebToolFailureMapper
 
     private static string BuildMessage(string code, string message)
     {
+        if (ContainsBudgetExceeded(code) || ContainsBudgetExceeded(message))
+        {
+            return "Web search hit the current per-turn tool budget before it could finish this request. " +
+                   "Retry the request or raise the web tool budget in Settings.";
+        }
+
         if (ContainsTimeout(code) || ContainsTimeout(message))
         {
             return "Web search hit a timeout before results were retrieved. " +
@@ -47,7 +53,7 @@ internal static class WebToolFailureMapper
         return "Web search failed before returning results. Please retry in a moment.";
     }
 
-    private static bool TryParseStructuredError(
+    internal static bool TryParseStructuredError(
         string payload,
         out string code,
         out string message)
@@ -95,6 +101,49 @@ internal static class WebToolFailureMapper
         }
     }
 
+    internal static bool IsBudgetExceeded(
+        string payload,
+        out string budgetName,
+        out int limit)
+    {
+        budgetName = "";
+        limit = 0;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+
+            if (!doc.RootElement.TryGetProperty("error", out var errorEl) ||
+                errorEl.ValueKind != JsonValueKind.String ||
+                !string.Equals(errorEl.GetString(), "tool_budget_exceeded", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (doc.RootElement.TryGetProperty("budget", out var budgetEl) &&
+                budgetEl.ValueKind == JsonValueKind.String)
+            {
+                budgetName = budgetEl.GetString() ?? "";
+            }
+
+            if (doc.RootElement.TryGetProperty("limit", out var limitEl) &&
+                limitEl.TryGetInt32(out var parsedLimit))
+            {
+                limit = parsedLimit;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool ContainsTimeout(string value)
         => value.Contains("timeout", StringComparison.OrdinalIgnoreCase);
 
@@ -106,4 +155,8 @@ internal static class WebToolFailureMapper
     private static bool ContainsUnavailable(string value)
         => value.Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase) ||
            value.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsBudgetExceeded(string value)
+        => value.Contains("tool_budget_exceeded", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("budget_exceeded", StringComparison.OrdinalIgnoreCase);
 }

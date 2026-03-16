@@ -7,6 +7,13 @@ using SirThaddeus.VoiceHost.Models;
 
 var options = VoiceHostRuntimeOptions.Parse(args);
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.SingleLine = true;
+    options.TimestampFormat = "HH:mm:ss ";
+});
+builder.Logging.AddDebug();
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
@@ -501,3 +508,4 @@ app.MapGet("/", () => Results.Json(new
 }));
 
 app.Run();
+

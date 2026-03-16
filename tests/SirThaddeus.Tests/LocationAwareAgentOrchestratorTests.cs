@@ -360,6 +360,12 @@ public sealed class LocationAwareAgentOrchestratorTests
             });
         }
 
+        public Task<AgentResponse> ProcessAsync(
+            string userMessage,
+            string? conversationId,
+            CancellationToken cancellationToken = default)
+            => ProcessAsync(userMessage, cancellationToken);
+
         public void ResetConversation()
         {
         }

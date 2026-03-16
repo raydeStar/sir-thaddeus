@@ -130,7 +130,7 @@ if ($webMode -eq "searxng") {
     $searxProbe = Test-HttpEndpoint -Url $searxUrl
     if (-not $searxProbe.Ok) {
         Write-Host "webSearch.mode is 'searxng' but SearxNG is unreachable: $($searxProbe.Message)" -ForegroundColor Red
-        Write-Host "Either start SearxNG or switch webSearch.mode to 'ddg_html'." -ForegroundColor Yellow
+        Write-Host "Either start SearxNG or switch webSearch.mode to 'auto'/'search_api' with a configured hosted fallback." -ForegroundColor Yellow
         exit 1
     }
     Write-Host "SearxNG probe OK ($($searxProbe.Status))."
@@ -141,7 +141,7 @@ elseif ($webMode -eq "auto") {
         Write-Host "Auto mode: SearxNG reachable ($($searxProbe.Status))."
     }
     else {
-        Write-Host "Auto mode: SearxNG not reachable ($($searxProbe.Message)); runtime will fallback to DDG/Google News." -ForegroundColor Yellow
+        Write-Host "Auto mode: SearxNG not reachable ($($searxProbe.Message)); runtime will fallback to SearchApi/Google News if configured." -ForegroundColor Yellow
     }
 }
 
@@ -156,7 +156,7 @@ if (-not $hasPlacesKey) {
 
 if ($IncludeUnitTests) {
     Write-Host ""
-    Write-Host "Tip: close DesktopRuntime before unit tests to avoid file-lock build failures." -ForegroundColor Yellow
+    Write-Host "Tip: close SirThaddeus UI windows before unit tests to avoid file-lock build failures." -ForegroundColor Yellow
     Invoke-Step -Name "Unit tests" -Action { ./dev/test.ps1 }
 }
 

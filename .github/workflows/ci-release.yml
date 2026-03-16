@@ -1,5 +1,20 @@
 name: CI (Release Gate)
 
+# ═══════════════════════════════════════════════════════════════════════
+#  Tag-triggered release gate.
+#
+#  Push a tag matching v* (or trigger manually) to run:
+#    1) preflight       — full test suite on Windows
+#    2) package-windows — self-contained win-x64 zip + offline smoke gate
+#    3) package-linux   — self-contained linux-x64 tar.gz (ubuntu runner)
+#    4) package-macos   — self-contained osx-arm64 tar.gz (macos runner)
+#    5) publish         — create GitHub Release with all three packages
+#
+#  Windows and Linux/macOS packaging run in parallel after preflight.
+#  macOS minutes (10× multiplier) are gated to tags only; PRs use only
+#  Windows + Linux.
+# ═══════════════════════════════════════════════════════════════════════
+
 on:
   workflow_dispatch:
   push:
@@ -51,7 +66,7 @@ jobs:
           if-no-files-found: ignore
 
   package:
-    name: Package Release Artifact
+    name: Package Windows (win-x64)
     needs: preflight
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
@@ -81,33 +96,139 @@ jobs:
         shell: pwsh
         run: ./dev/fetch-assets.ps1
 
+      - name: Build bundled SearXNG sidecar payload
+        shell: pwsh
+        run: ./dev/build-searxng-package.ps1
+
       - name: Package release zip + checksums
         shell: pwsh
         run: |
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -Version "${{ github.ref_name }}"
 
-      - name: Upload release package artifacts
+      - name: Smoke test packaged zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-win-x64-*.zip" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) { Write-Error "No win-x64 zip found in artifacts/release"; exit 1 }
+          ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
+
+      - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: release-package-assets
+          name: release-package-windows
           path: |
-            artifacts/release/*.zip
-            artifacts/release/*.zip.sha256.txt
+            artifacts/release/sir-thaddeus-win-x64-*.zip
+            artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
+          if-no-files-found: error
+
+  package-linux:
+    name: Package Linux (linux-x64)
+    needs: preflight
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package linux-x64 tar.gz
+        shell: pwsh
+        run: |
+          pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -Version "${{ github.ref_name }}"
+
+      - name: Upload Linux package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-package-linux
+          path: |
+            artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
+            artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS (osx-arm64)
+    needs: preflight
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Package osx-arm64 tar.gz
+        shell: pwsh
+        run: |
+          pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -Version "${{ github.ref_name }}"
+
+      - name: Upload macOS package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-package-macos
+          path: |
+            artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
+            artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
-    needs: package
+    needs: [package, package-linux, package-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download release package artifacts
+      - name: Download Windows package
         uses: actions/download-artifact@v7
         with:
-          name: release-package-assets
+          name: release-package-windows
+          path: release-assets
+
+      - name: Download Linux package
+        uses: actions/download-artifact@v7
+        with:
+          name: release-package-linux
+          path: release-assets
+
+      - name: Download macOS package
+        uses: actions/download-artifact@v7
+        with:
+          name: release-package-macos
           path: release-assets
 
       - name: Create GitHub release and upload assets
@@ -117,4 +238,5 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/*.zip
-            release-assets/*.zip.sha256.txt
+            release-assets/*.tar.gz
+            release-assets/*.sha256.txt

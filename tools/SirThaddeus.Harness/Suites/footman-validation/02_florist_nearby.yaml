@@ -27,5 +27,12 @@ expectations:
     - as an ai
     - i can't
     - i cannot
+    - could not retrieve
+    - no results
+    - unable to find
+    - try naming one specific place
+    - location services
+    - I need a location
+    - set your location
   max_response_chars: 2000
 min_score: 7.0

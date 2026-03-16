@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 
 param(
     [ValidateSet("Debug", "Release")]
@@ -10,7 +10,9 @@ param(
 
     [string]$Version = "",
 
-    [switch]$SkipPreflight
+    [switch]$SkipPreflight,
+
+    [switch]$LiteBundle
 )
 
 Set-StrictMode -Version Latest
@@ -91,7 +93,7 @@ $archiveStem = "sir-thaddeus-$Runtime-$archiveToken"
 $archiveName = "$archiveStem.zip"
 $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
-$binaryChecksumsPath = Join-Path $releaseDir "$archiveStem-binaries.sha256.txt"
+$contentsChecksumsPath = Join-Path $releaseDir "$archiveStem-contents.sha256.txt"
 
 $firstRunReadmeSource = Join-Path $RepoRoot "README_FIRST_RUN.md"
 $settingsTemplateSource = Join-Path $RepoRoot "SirThaddeus.Settings.template.json"
@@ -100,6 +102,7 @@ Write-Section "Package Settings"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  Runtime       : $Runtime"
 Write-Host "  SelfContained : $effectiveSelfContained"
+Write-Host "  Bundle profile: $(if ($LiteBundle) { 'lite' } else { 'full' })"
 if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     Write-Host "  Version       : <timestamp>"
 }
@@ -118,39 +121,46 @@ if (-not $SkipPreflight) {
     }
 }
 
+$includeOptionalBundledAssets = -not $LiteBundle.IsPresent
 $strictVoiceAssetGate = $Configuration -eq "Release"
 
 # -- Verify Piper TTS assets ---------------------------------------------------
 # Assets are fetched from GitHub Releases via dev/fetch-assets.ps1 (CI)
 # or downloaded at runtime by AssetManager. Verify they are present.
 
-Write-Section "Verify Piper TTS Assets"
-
 $voiceBackendDir = Join-Path $RepoRoot "apps/voice-backend"
 $piperExe = Join-Path $voiceBackendDir "piper/piper.exe"
 $piperVoiceModel = Join-Path $voiceBackendDir "piper-voices/en_US-john-medium/en_US-john-medium.onnx"
 
-if (Test-Path $piperExe) {
-    Write-Host "  piper.exe present"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "piper.exe not found at $piperExe" `
-        -WarnMessage "piper.exe not found at $piperExe" `
-        -Required $strictVoiceAssetGate
-}
+if ($includeOptionalBundledAssets) {
+    Write-Section "Verify Piper TTS Assets"
 
-if (Test-Path $piperVoiceModel) {
-    $voiceSize = [math]::Round((Get-Item $piperVoiceModel).Length / 1MB, 1)
-    Write-Host "  Default voice model present (${voiceSize} MB)"
+    if (Test-Path $piperExe) {
+        Write-Host "  piper.exe present"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper.exe not found at $piperExe" `
+            -WarnMessage "piper.exe not found at $piperExe" `
+            -Required $strictVoiceAssetGate
+    }
+
+    if (Test-Path $piperVoiceModel) {
+        $voiceSize = [math]::Round((Get-Item $piperVoiceModel).Length / 1MB, 1)
+        Write-Host "  Default voice model present (${voiceSize} MB)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "Default voice model not found at $piperVoiceModel" `
+            -WarnMessage "Default voice model not found at $piperVoiceModel" `
+            -Required $strictVoiceAssetGate
+    }
 }
 else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "Default voice model not found at $piperVoiceModel" `
-        -WarnMessage "Default voice model not found at $piperVoiceModel" `
-        -Required $strictVoiceAssetGate
+    Write-Section "Lite Profile"
+    Write-Host "  Skipping bundled voice + Playwright payloads to minimize package size."
 }
 
 Write-Section "Publish Artifacts"
@@ -158,19 +168,40 @@ Write-Section "Publish Artifacts"
 $projects = @(
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj",
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj",
-    "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj",
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
 )
+
+$projectStageSubdirs = @{
+    "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = ""
+    "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = ""
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = "headless"
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = ""
+}
+
+$optionalSearxngProject = "apps/searxng/SirThaddeus.Searxng/SirThaddeus.Searxng.csproj"
 
 $projectFrameworkOverrides = @{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = @{
-        default = "net8.0"
-        windows = "net8.0-windows10.0.19041.0"
+        default = "net10.0"
+        windows = "net10.0-windows10.0.19041.0"
     }
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
-        default = "net8.0"
+        default = "net10.0"
     }
-    "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj" = @{
-        windows = "net8.0-windows"
+    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = @{
+        default = "net10.0"
+    }
+    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = @{
+        default = "net10.0"
+    }
+}
+
+if (Test-Path (Join-Path $RepoRoot $optionalSearxngProject)) {
+    $projects += $optionalSearxngProject
+    $projectStageSubdirs[$optionalSearxngProject] = "search"
+    $projectFrameworkOverrides[$optionalSearxngProject] = @{
+        default = "net10.0"
     }
 }
 
@@ -193,6 +224,51 @@ function Resolve-PublishFramework([string]$ProjectPath, [string]$TargetRuntime) 
     return $null
 }
 
+function Copy-DirectoryContents([string]$SourceRoot, [string]$DestinationRoot) {
+    if (-not (Test-Path $SourceRoot)) {
+        throw "Source directory not found: $SourceRoot"
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
+
+    @(Get-ChildItem -Path $SourceRoot -Recurse -Force) | ForEach-Object {
+        $relativePath = $_.FullName.Substring($SourceRoot.Length).TrimStart('\')
+        $destinationPath = Join-Path $DestinationRoot $relativePath
+
+        if ($_.PSIsContainer) {
+            New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
+            return
+        }
+
+        $destinationParent = Split-Path $destinationPath -Parent
+        if (-not (Test-Path $destinationParent)) {
+            New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+        }
+
+        Copy-Item -Path $_.FullName -Destination $destinationPath -Force -ErrorAction Stop
+    }
+}
+
+function Test-SearxngPayloadRoot([string]$CandidateRoot, [ref]$MissingPath) {
+    $requiredPaths = @(
+        "start-searxng.ps1",
+        "runtime\python\python.exe",
+        "source\searxng-upstream\searx\webapp.py",
+        "deps\site-packages\flask\__init__.py"
+    )
+
+    foreach ($relativePath in $requiredPaths) {
+        $candidatePath = Join-Path $CandidateRoot $relativePath
+        if (-not (Test-Path $candidatePath)) {
+            $MissingPath.Value = $candidatePath
+            return $false
+        }
+    }
+
+    $MissingPath.Value = $null
+    return $true
+}
+
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
@@ -212,6 +288,7 @@ foreach ($project in $projects) {
 
     $publishArgs = @(
         "publish", $project,
+        "-m:1",
         "-c", $Configuration,
         "-r", $Runtime,
         "--self-contained", $selfContainedValue,
@@ -222,7 +299,24 @@ foreach ($project in $projects) {
         $publishArgs += @("-f", $targetFramework)
     }
 
-    dotnet @publishArgs
+    $nativePreference = $null
+    $hasNativePreference = $false
+    try {
+        $nativeVariable = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+        if ($null -ne $nativeVariable) {
+            $hasNativePreference = $true
+            $nativePreference = $nativeVariable.Value
+            $script:PSNativeCommandUseErrorActionPreference = $false
+        }
+
+        & dotnet @publishArgs
+    }
+    finally {
+        if ($hasNativePreference) {
+            $script:PSNativeCommandUseErrorActionPreference = $nativePreference
+        }
+    }
+
     if ($LASTEXITCODE -ne 0) {
         Fail "dotnet publish failed for $project (exit code $LASTEXITCODE)." $LASTEXITCODE
     }
@@ -231,7 +325,7 @@ foreach ($project in $projects) {
 # -- Structured staging --------------------------------------------------------
 #
 #  ZIP root/
-#   ├── SirThaddeus.DesktopRuntime.exe   ← user double-clicks this
+#   ├── SirThaddeus.UI.Avalonia.exe      ← user double-clicks this
 #   ├── SirThaddeus.McpServer.exe
 #   ├── SirThaddeus.VoiceHost.exe
 #   ├── README_FIRST_RUN.md
@@ -244,156 +338,238 @@ if (Test-Path $stageDir) {
     Remove-Item -Path $stageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
-$binDir = Join-Path $stageDir "bin"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
 foreach ($project in $projects) {
     $projectName = [System.IO.Path]::GetFileNameWithoutExtension($project)
     $projectPublishDir = Join-Path $RepoRoot "artifacts/publish/$projectName/$Runtime"
+    $stageSubdir = if ($projectStageSubdirs.ContainsKey($project)) { $projectStageSubdirs[$project] } else { "" }
+    
+    if ([string]::IsNullOrWhiteSpace($stageSubdir)) {
+        Write-Host "  Staging $projectName files..."
+    }
+    else {
+        Write-Host "  Staging $projectName files -> $stageSubdir/"
+    }
 
-    Write-Host "  Staging $projectName files..."
     @(Get-ChildItem -Path $projectPublishDir -Recurse) | ForEach-Object {
         $relativePath = $_.FullName.Substring($projectPublishDir.Length).TrimStart('\')
-        $isExe = ($_.Extension -eq ".exe" -and $relativePath -notmatch '\\')
-
-        if ($isExe) {
-            # Top-level EXEs land at the ZIP root
-            $dest = Join-Path $stageDir $_.Name
+        $destRoot = if ([string]::IsNullOrWhiteSpace($stageSubdir)) {
+            $stageDir
         }
-        elseif ($_.PSIsContainer) {
-            # Recreate subdirectories under bin/
-            $dest = Join-Path $binDir $relativePath
+        else {
+            Join-Path $stageDir $stageSubdir
+        }
+        $dest = Join-Path $destRoot $relativePath
+
+        if ($_.PSIsContainer) {
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             return
         }
-        else {
-            # Everything else (DLLs, assets, voice/) goes into bin/
-            $dest = Join-Path $binDir $relativePath
-            $destParent = Split-Path $dest -Parent
-            if (-not (Test-Path $destParent)) {
-                New-Item -ItemType Directory -Path $destParent -Force | Out-Null
-            }
+
+        $destParent = Split-Path $dest -Parent
+        if (-not (Test-Path $destParent)) {
+            New-Item -ItemType Directory -Path $destParent -Force | Out-Null
         }
+
         Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction Stop
     }
 }
 
-# -- Bundle voice-backend assets (GitHub Releases) ---------------------------
-# These are fetched from GitHub Releases via dev/fetch-assets.ps1 in CI.
-# They land under bin/voice/ alongside the Python scripts already
-# staged by the VoiceHost dotnet publish output.
+$searchStageDir = Join-Path $stageDir "search"
+$searchPayloadRequired = $Configuration -eq "Release"
+$searchSidecarStaged = $false
+$searchStageFailures = @()
+$rawSearxngPayloadCandidates = @(
+    (Join-Path $RepoRoot "apps/searxng/package"),
+    (Join-Path $RepoRoot "artifacts/searxng/$Runtime/package"),
+    (Join-Path $RepoRoot "apps/searxng/dist")
+)
 
-$voiceStageBinDir = Join-Path $binDir "voice"
-if (-not (Test-Path $voiceStageBinDir)) {
-    New-Item -ItemType Directory -Force -Path $voiceStageBinDir | Out-Null
+foreach ($candidate in $rawSearxngPayloadCandidates) {
+    if (-not (Test-Path $candidate)) {
+        continue
+    }
+
+    $missingSearchPath = $null
+    if (-not (Test-SearxngPayloadRoot -CandidateRoot $candidate -MissingPath ([ref]$missingSearchPath))) {
+        Write-Host "  WARN: skipping invalid search payload candidate $candidate (missing $missingSearchPath)" -ForegroundColor Yellow
+        continue
+    }
+
+    try {
+        if (Test-Path $searchStageDir) {
+            Remove-Item -Path $searchStageDir -Recurse -Force
+        }
+
+        Copy-DirectoryContents -SourceRoot $candidate -DestinationRoot $searchStageDir
+        Write-Host "  Staged: search/ payload from $candidate"
+        $searchSidecarStaged = $true
+        break
+    }
+    catch {
+        $message = $_.Exception.Message
+        $searchStageFailures += "${candidate}: $message"
+        Write-Host "  WARN: failed to stage search payload from $candidate ($message)" -ForegroundColor Yellow
+    }
 }
 
-# Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
-$piperSource = Join-Path $voiceBackendDir "piper"
-if (Test-Path $piperSource) {
-    $piperDest = Join-Path $voiceStageBinDir "piper"
-    New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
-    Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
-    $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
-    Write-Host "  Staged: piper/ ($piperCount files)"
-}
-else {
+if (-not $searchSidecarStaged) {
+    $detail = if ($searchStageFailures.Count -gt 0) {
+        " Tried candidates: " + ($searchStageFailures -join "; ")
+    }
+    else {
+        ""
+    }
+
     Assert-OrWarn `
         -Condition $false `
-        -ErrorMessage "piper/ directory not found; TTS will be unavailable" `
-        -WarnMessage "piper/ directory not found; TTS will be unavailable" `
-        -Required $strictVoiceAssetGate
+        -ErrorMessage "Bundled SearXNG sidecar payload not found or could not be staged.$detail" `
+        -WarnMessage "Bundled SearXNG sidecar payload not found or could not be staged.$detail" `
+        -Required $searchPayloadRequired
 }
 
-# Piper voice models (default: en_US-john-medium)
-$piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
-if (Test-Path $piperVoicesSource) {
-    $piperVoicesDest = Join-Path $voiceStageBinDir "piper-voices"
-    New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
-    Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
-    $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
-    Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
+if ($includeOptionalBundledAssets) {
+    # -- Bundle voice-backend assets (GitHub Releases) ---------------------------
+    # These are fetched from GitHub Releases via dev/fetch-assets.ps1 in CI.
+    # They land under voice/ alongside the Python scripts staged by VoiceHost publish.
+
+    $voiceStageDir = Join-Path $stageDir "voice"
+    if (-not (Test-Path $voiceStageDir)) {
+        New-Item -ItemType Directory -Force -Path $voiceStageDir | Out-Null
+    }
+
+    # Piper TTS native binary (standalone exe + DLLs + espeak-ng-data)
+    $piperSource = Join-Path $voiceBackendDir "piper"
+    if (Test-Path $piperSource) {
+        $piperDest = Join-Path $voiceStageDir "piper"
+        New-Item -ItemType Directory -Force -Path $piperDest | Out-Null
+        Copy-Item -Path (Join-Path $piperSource "*") -Destination $piperDest -Recurse -Force
+        $piperCount = @(Get-ChildItem -Path $piperDest -Recurse -File).Count
+        Write-Host "  Staged: piper/ ($piperCount files)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper/ directory not found; TTS will be unavailable" `
+            -WarnMessage "piper/ directory not found; TTS will be unavailable" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Piper voice models (default: en_US-john-medium)
+    $piperVoicesSource = Join-Path $voiceBackendDir "piper-voices"
+    if (Test-Path $piperVoicesSource) {
+        $piperVoicesDest = Join-Path $voiceStageDir "piper-voices"
+        New-Item -ItemType Directory -Force -Path $piperVoicesDest | Out-Null
+        Copy-Item -Path (Join-Path $piperVoicesSource "*") -Destination $piperVoicesDest -Recurse -Force
+        $voiceCount = @(Get-ChildItem -Path $piperVoicesDest -Recurse -Filter "*.onnx").Count
+        Write-Host "  Staged: piper-voices/ ($voiceCount voice model(s))"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "piper-voices/ directory not found; no bundled voices" `
+            -WarnMessage "piper-voices/ directory not found; no bundled voices" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # uv.exe — Python environment manager
+    $uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
+    if (Test-Path $uvSource) {
+        $uvDest = Join-Path $voiceStageDir "bin"
+        New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
+        Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
+        Write-Host "  Staged: bin/uv.exe"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled uv.exe not found; offline venv creation may fail" `
+            -WarnMessage "bundled uv.exe not found; offline venv creation may fail" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Bundled Python 3.11 runtime
+    $runtimeSource = Join-Path $voiceBackendDir "runtime/python"
+    if (Test-Path $runtimeSource) {
+        $runtimeDest = Join-Path $voiceStageDir "runtime/python"
+        New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
+        Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
+        $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
+        Write-Host "  Staged: runtime/python ($runtimeCount files)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled Python runtime not found; will download at first run" `
+            -WarnMessage "bundled Python runtime not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Python wheel dependencies (offline pip install)
+    $wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
+    if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
+        $wheelsDest = Join-Path $voiceStageDir "deps/wheels"
+        New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
+        Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
+        $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
+        $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+        Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled Python wheels not found; will download at first run" `
+            -WarnMessage "bundled Python wheels not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
+
+    # Faster-Whisper base STT model
+    $sttSource = Join-Path $voiceBackendDir "stt-models/base"
+    if (Test-Path $sttSource) {
+        $sttDest = Join-Path $voiceStageDir "stt-models/base"
+        New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
+        Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
+        Write-Host "  Staged: stt-models/base"
+
+        $sttModelFile = Join-Path $sttDest "model.bin"
+        Assert-OrWarn `
+            -Condition (Test-Path $sttModelFile) `
+            -ErrorMessage "bundled STT model.bin missing at $sttModelFile" `
+            -WarnMessage "bundled STT model.bin missing at $sttModelFile" `
+            -Required $strictVoiceAssetGate
+    }
+    else {
+        Assert-OrWarn `
+            -Condition $false `
+            -ErrorMessage "bundled STT model not found; will download at first run" `
+            -WarnMessage "bundled STT model not found; will download at first run" `
+            -Required $strictVoiceAssetGate
+    }
 }
 else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "piper-voices/ directory not found; no bundled voices" `
-        -WarnMessage "piper-voices/ directory not found; no bundled voices" `
-        -Required $strictVoiceAssetGate
-}
+    # Remove optional heavyweight payloads for a smaller runtime package.
+    $litePruneTargets = @(
+        ".playwright",
+        "voice/piper",
+        "voice/piper-voices",
+        "voice/runtime",
+        "voice/deps",
+        "voice/stt-models"
+    )
 
-# uv.exe — Python environment manager
-$uvSource = Join-Path $voiceBackendDir "bin/uv.exe"
-if (Test-Path $uvSource) {
-    $uvDest = Join-Path $voiceStageBinDir "bin"
-    New-Item -ItemType Directory -Force -Path $uvDest | Out-Null
-    Copy-Item -Path $uvSource -Destination (Join-Path $uvDest "uv.exe") -Force
-    Write-Host "  Staged: bin/uv.exe"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled uv.exe not found; offline venv creation may fail" `
-        -WarnMessage "bundled uv.exe not found; offline venv creation may fail" `
-        -Required $strictVoiceAssetGate
-}
+    foreach ($relative in $litePruneTargets) {
+        $target = Join-Path $stageDir $relative
+        if (Test-Path $target) {
+            Remove-Item -Path $target -Recurse -Force
+            Write-Host "  Pruned: $relative"
+        }
+    }
 
-# Bundled Python 3.11 runtime
-$runtimeSource = Join-Path $voiceBackendDir "runtime/python"
-if (Test-Path $runtimeSource) {
-    $runtimeDest = Join-Path $voiceStageBinDir "runtime/python"
-    New-Item -ItemType Directory -Force -Path $runtimeDest | Out-Null
-    Copy-Item -Path (Join-Path $runtimeSource "*") -Destination $runtimeDest -Recurse -Force
-    $runtimeCount = @(Get-ChildItem -Path $runtimeDest -Recurse -File).Count
-    Write-Host "  Staged: runtime/python ($runtimeCount files)"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled Python runtime not found; will download at first run" `
-        -WarnMessage "bundled Python runtime not found; will download at first run" `
-        -Required $strictVoiceAssetGate
-}
-
-# Python wheel dependencies (offline pip install)
-$wheelsSource = Join-Path $voiceBackendDir "deps/wheels"
-if ((Test-Path $wheelsSource) -and (Get-ChildItem -Path $wheelsSource -Filter "*.whl" | Measure-Object).Count -gt 0) {
-    $wheelsDest = Join-Path $voiceStageBinDir "deps/wheels"
-    New-Item -ItemType Directory -Force -Path $wheelsDest | Out-Null
-    Copy-Item -Path (Join-Path $wheelsSource "*.whl") -Destination $wheelsDest -Force
-    $wheelCount = @(Get-ChildItem -Path $wheelsDest -Filter "*.whl").Count
-    $wheelSizeMB = [math]::Round(((Get-ChildItem -Path $wheelsDest -Filter "*.whl" | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
-    Write-Host "  Staged: deps/wheels ($wheelCount wheels, ${wheelSizeMB} MB)"
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled Python wheels not found; will download at first run" `
-        -WarnMessage "bundled Python wheels not found; will download at first run" `
-        -Required $strictVoiceAssetGate
-}
-
-# Faster-Whisper base STT model
-$sttSource = Join-Path $voiceBackendDir "stt-models/base"
-if (Test-Path $sttSource) {
-    $sttDest = Join-Path $voiceStageBinDir "stt-models/base"
-    New-Item -ItemType Directory -Force -Path $sttDest | Out-Null
-    Copy-Item -Path (Join-Path $sttSource "*") -Destination $sttDest -Recurse -Force
-    Write-Host "  Staged: stt-models/base"
-
-    $sttModelFile = Join-Path $sttDest "model.bin"
-    Assert-OrWarn `
-        -Condition (Test-Path $sttModelFile) `
-        -ErrorMessage "bundled STT model.bin missing at $sttModelFile" `
-        -WarnMessage "bundled STT model.bin missing at $sttModelFile" `
-        -Required $strictVoiceAssetGate
-}
-else {
-    Assert-OrWarn `
-        -Condition $false `
-        -ErrorMessage "bundled STT model not found; will download at first run" `
-        -WarnMessage "bundled STT model not found; will download at first run" `
-        -Required $strictVoiceAssetGate
+    $uvTarget = Join-Path $stageDir "voice/bin/uv.exe"
+    if (Test-Path $uvTarget) {
+        Remove-Item -Path $uvTarget -Force
+        Write-Host "  Pruned: voice/bin/uv.exe"
+    }
 }
 
 # Stage asset manifest so the app can self-heal (download missing assets at runtime)
@@ -438,13 +614,13 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "  Removed debug symbols: $($pdbFiles.Count)"
 }
 
-Write-Section "Archive + Checksums (Full Bundle)"
+Write-Section "Archive + Checksums"
 
-foreach ($p in @($archivePath, $checksumPath, $binaryChecksumsPath)) {
+foreach ($p in @($archivePath, $checksumPath, $contentsChecksumsPath)) {
     if (Test-Path $p) { Remove-Item $p -Force }
 }
 
-# ── Full bundle zip (includes all vendored voice-backend assets) ─────
+# ── Package zip (full by default; use -LiteBundle to trim optional assets) ─────
 $sourcePath = $stageDir
 if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
 Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
@@ -455,18 +631,21 @@ $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 $fullSizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 1)
 Write-Host "  Full archive: $archiveName (${fullSizeMB} MB)"
 
-$binaries = Get-ChildItem -Path $stageDir -File
-$binaryLines = foreach ($file in $binaries) {
+$stageRootPrefix = $stageDir
+if ($stageRootPrefix -notmatch '\\$') { $stageRootPrefix += '\' }
+$stagedFiles = Get-ChildItem -Path $stageDir -File -Recurse | Sort-Object FullName
+$contentLines = foreach ($file in $stagedFiles) {
     $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256
-    "$($hash.Hash) *$($file.Name)"
+    $relativePath = $file.FullName.Substring($stageRootPrefix.Length).Replace('\', '/')
+    "$($hash.Hash) *$relativePath"
 }
-$binaryLines | Out-File -FilePath $binaryChecksumsPath -Encoding ASCII -Force
+$contentLines | Out-File -FilePath $contentsChecksumsPath -Encoding ASCII -Force
 
 Write-Section "Done"
 Write-Host "  Publish dir  : $publishDir"
 Write-Host "  Stage dir    : $stageDir"
 Write-Host "  Full archive : $archivePath  (${fullSizeMB} MB)"
 Write-Host "  Checksums    : $checksumPath"
-Write-Host "  Binary SHA   : $binaryChecksumsPath"
+Write-Host "  Contents SHA : $contentsChecksumsPath"
 
 exit 0

@@ -1,4 +1,8 @@
 #requires -Version 5.1
+param(
+    [switch]$SkipRestore
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -25,6 +29,14 @@ Write-Section "Bootstrap (.NET)"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 $SlnFile = Join-Path $RepoRoot "SirThaddeus.sln"
+
+# Keep dotnet first-run state inside the repo so bootstrap/localrunner do not
+# depend on a writable user profile path.
+$DotnetCliHome = Join-Path $RepoRoot ".dotnet_cli"
+New-Item -ItemType Directory -Force -Path $DotnetCliHome | Out-Null
+$env:DOTNET_CLI_HOME = $DotnetCliHome
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
 
 # ── Verify dotnet CLI ──────────────────────────────────────────
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -57,10 +69,15 @@ Write-Host "  OK  artifacts folder ready: $TestArtifacts" -ForegroundColor Green
 # ── Restore ────────────────────────────────────────────────────
 Write-Section "Restore"
 
-dotnet restore $SlnFile
-if ($LASTEXITCODE -ne 0) { Fail "dotnet restore failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
+if ($SkipRestore) {
+    Write-Host "  Skipping restore (caller requested)." -ForegroundColor DarkGray
+}
+else {
+    dotnet restore $SlnFile
+    if ($LASTEXITCODE -ne 0) { Fail "dotnet restore failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
 
-Write-Host "  OK  Restore complete" -ForegroundColor Green
+    Write-Host "  OK  Restore complete" -ForegroundColor Green
+}
 
 Write-Section "Done"
 Write-Host "  Bootstrap complete. Next: dev\test.ps1"

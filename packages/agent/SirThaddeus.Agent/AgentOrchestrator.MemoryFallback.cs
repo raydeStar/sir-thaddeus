@@ -528,6 +528,6 @@ public sealed partial class AgentOrchestrator
             return;
         }
 
-        _history.Add(ChatMessage.Assistant(replacementText));
+        AppendAssistantMessage(replacementText);
     }
 }

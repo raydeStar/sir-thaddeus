@@ -54,6 +54,31 @@ public sealed class MemoryRetriever
         var chunkCandidates = await _store.SearchChunksAsync(
             query, queryEmbedding, Thresholds.ChunksRetrieve, ct);
 
+        // Conversation scope (when provided): prefer in-conversation
+        // memories first; if none are found, gracefully fall back to
+        // global retrieval so memory remains useful.
+        var conversationScope = NormalizeConversationId(context?.ConversationId);
+        if (!string.IsNullOrWhiteSpace(conversationScope))
+        {
+            var scopedFacts = factCandidates
+                .Where(c => IsInConversation(c.Item.SourceRef, conversationScope))
+                .ToList();
+            var scopedEvents = eventCandidates
+                .Where(c => IsInConversation(c.Item.SourceRef, conversationScope))
+                .ToList();
+            var scopedChunks = chunkCandidates
+                .Where(c => IsInConversation(c.Item.SourceRef, conversationScope))
+                .ToList();
+
+            var hasScopedHits = scopedFacts.Count > 0 || scopedEvents.Count > 0 || scopedChunks.Count > 0;
+            if (hasScopedHits)
+            {
+                factCandidates = scopedFacts;
+                eventCandidates = scopedEvents;
+                chunkCandidates = scopedChunks;
+            }
+        }
+
         // ── Step 1.5: Score all candidates ───────────────────────────
         var scoredFacts = ScoreFacts(factCandidates, intent);
         var scoredEvents = ScoreEvents(eventCandidates, intent);
@@ -257,6 +282,28 @@ public sealed class MemoryRetriever
             if (!string.IsNullOrEmpty(c.SourceRef)) citations.Add(c.SourceRef);
 
         return [.. citations];
+    }
+
+    private static bool IsInConversation(string? sourceRef, string normalizedConversationId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRef) || string.IsNullOrWhiteSpace(normalizedConversationId))
+            return false;
+
+        var normalizedSource = NormalizeConversationId(sourceRef);
+        return string.Equals(normalizedSource, normalizedConversationId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeConversationId(string? conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+            return null;
+
+        var normalized = conversationId.Trim();
+        const string prefix = "conv:";
+        if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[prefix.Length..];
+
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     // ─────────────────────────────────────────────────────────────────

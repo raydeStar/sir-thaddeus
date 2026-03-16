@@ -54,7 +54,7 @@ public sealed partial class AgentOrchestrator
         {
             var errorText = "I wasn't able to capture your screen. " +
                             "Make sure the ScreenRead permission is enabled in Settings.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             LogEvent("SCREEN_CAPTURE_FAILED", screenResult.Result ?? "(empty)");
             return AttachContextSnapshot(new AgentResponse
             {
@@ -83,7 +83,7 @@ public sealed partial class AgentOrchestrator
 
         roundTrips++;
         var screenResponse = await CallLlmWithRetrySafe(
-            messages, roundTrips, MaxTokensCasual, cancellationToken);
+            messages, roundTrips, _maxTokensCasual, cancellationToken);
 
         var screenText = _postProcessor.ProcessChatOnlyDraft(
             screenResponse.Content ?? "[No response]",
@@ -91,7 +91,7 @@ public sealed partial class AgentOrchestrator
             toolCallsMade,
             LogEvent);
 
-        _history.Add(ChatMessage.Assistant(screenText));
+        AppendAssistantMessage(screenText);
         LogEvent("AGENT_RESPONSE", screenText);
 
         return AttachContextSnapshot(new AgentResponse
@@ -191,7 +191,7 @@ public sealed partial class AgentOrchestrator
         {
             var errorText = "I couldn't resolve that location for weather lookup. " +
                             "Try a city and region like \"Portland, OR\".";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -205,7 +205,7 @@ public sealed partial class AgentOrchestrator
         {
             var noLocationText = "I couldn't find coordinates for that location. " +
                                  "Try a more specific place name.";
-            _history.Add(ChatMessage.Assistant(noLocationText));
+            AppendAssistantMessage(noLocationText);
             return new AgentResponse
             {
                 Text = noLocationText,
@@ -239,7 +239,7 @@ public sealed partial class AgentOrchestrator
                     $"I found **{geo.Name}**, but that conflicts with your current location context " +
                     $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
 
-                _history.Add(ChatMessage.Assistant(confirmText));
+                AppendAssistantMessage(confirmText);
                 _dialogueStore.Update(activeState with { GeocodeMismatch = true });
                 return new AgentResponse
                 {
@@ -305,7 +305,7 @@ public sealed partial class AgentOrchestrator
         {
             var errorText = "I couldn't fetch the weather details right now. " +
                             "Please try again in a moment.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -327,7 +327,7 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
             weatherBrief = $"{mismatchWarning}\n\n{weatherBrief}";
 
-        _history.Add(ChatMessage.Assistant(weatherBrief));
+        AppendAssistantMessage(weatherBrief);
         LogEvent("AGENT_RESPONSE", weatherBrief);
 
         return new AgentResponse
@@ -365,7 +365,7 @@ public sealed partial class AgentOrchestrator
         if (!geocodeCall.Success)
         {
             var errorText = "I couldn't resolve that location for a timezone lookup.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -378,7 +378,7 @@ public sealed partial class AgentOrchestrator
         if (!TryParseBestGeocodeCandidate(geocodeCall.Result, out var geo))
         {
             var noLocationText = "I couldn't find coordinates for that location. Try a more specific city/country.";
-            _history.Add(ChatMessage.Assistant(noLocationText));
+            AppendAssistantMessage(noLocationText);
             return new AgentResponse
             {
                 Text = noLocationText,
@@ -412,7 +412,7 @@ public sealed partial class AgentOrchestrator
                     $"I found **{geo.Name}**, but that conflicts with your current location context " +
                     $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
 
-                _history.Add(ChatMessage.Assistant(confirmText));
+                AppendAssistantMessage(confirmText);
                 _dialogueStore.Update(activeState with { GeocodeMismatch = true });
                 return new AgentResponse
                 {
@@ -475,7 +475,7 @@ public sealed partial class AgentOrchestrator
         if (!timezoneCall.Success)
         {
             var errorText = "I couldn't resolve the timezone for that location right now.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -496,7 +496,7 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
             timeBrief = $"{mismatchWarning}\n\n{timeBrief}";
 
-        _history.Add(ChatMessage.Assistant(timeBrief));
+        AppendAssistantMessage(timeBrief);
         LogEvent("AGENT_RESPONSE", timeBrief);
 
         return new AgentResponse
@@ -533,7 +533,7 @@ public sealed partial class AgentOrchestrator
         if (!holidayCall.Success)
         {
             var errorText = "I couldn't fetch holiday data right now. Please try again in a moment.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -546,7 +546,7 @@ public sealed partial class AgentOrchestrator
         var holidayText = BuildHolidayUtilityResponse(
             utilityResult.McpToolName, holidayCall.Result);
 
-        _history.Add(ChatMessage.Assistant(holidayText));
+        AppendAssistantMessage(holidayText);
         LogEvent("AGENT_RESPONSE", holidayText);
 
         return new AgentResponse
@@ -583,7 +583,7 @@ public sealed partial class AgentOrchestrator
         if (!feedCall.Success)
         {
             var errorText = "I couldn't fetch that feed right now.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -594,7 +594,7 @@ public sealed partial class AgentOrchestrator
         }
 
         var feedText = BuildFeedUtilityResponse(feedCall.Result);
-        _history.Add(ChatMessage.Assistant(feedText));
+        AppendAssistantMessage(feedText);
         LogEvent("AGENT_RESPONSE", feedText);
 
         return new AgentResponse
@@ -631,7 +631,7 @@ public sealed partial class AgentOrchestrator
         if (!statusCall.Success)
         {
             var errorText = "I couldn't complete that reachability check right now.";
-            _history.Add(ChatMessage.Assistant(errorText));
+            AppendAssistantMessage(errorText);
             return new AgentResponse
             {
                 Text = errorText,
@@ -642,7 +642,7 @@ public sealed partial class AgentOrchestrator
         }
 
         var statusText = BuildStatusUtilityResponse(statusCall.Result);
-        _history.Add(ChatMessage.Assistant(statusText));
+        AppendAssistantMessage(statusText);
         LogEvent("AGENT_RESPONSE", statusText);
 
         return new AgentResponse
@@ -1007,7 +1007,7 @@ public sealed partial class AgentOrchestrator
                 $"I read `{target}`. Summary:\n{summary}";
         }
 
-        _history.Add(ChatMessage.Assistant(responseText));
+        AppendAssistantMessage(responseText);
         LogEvent("AGENT_RESPONSE", responseText);
 
         return new AgentResponse

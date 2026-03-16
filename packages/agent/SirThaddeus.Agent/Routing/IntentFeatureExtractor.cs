@@ -832,6 +832,34 @@ public static class IntentFeatureExtractor
         if (ContainsAny(lower, explicitSignals))
             return true;
 
+        ReadOnlySpan<string> followUpDeepDiveSignals =
+        [
+            "pull me up more info on",
+            "pull me up more info about",
+            "bring me up more info on",
+            "bring me up more info about",
+            "tell me more about",
+            "more info on",
+            "more info about"
+        ];
+
+        if (ContainsAny(lower, followUpDeepDiveSignals))
+        {
+            ReadOnlySpan<string> businessTerms =
+            [
+                "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+                "florist", "florists", "bakery", "bakeries",
+                "bar", "pub", "store", "shop",
+                "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+                "hotel", "motel",
+                "gas station", "car wash", "laundromat", "salon", "barber",
+                "gym", "dentist", "clinic", "doctor", "urgent care"
+            ];
+
+            if (ContainsAny(lower, businessTerms) && !LooksLikeLocalBusinessDiscovery(lower))
+                return true;
+        }
+
         // Natural phrasing often includes "tell me when <place> is open/closed".
         var hasTellMeWhen = lower.Contains("tell me when", StringComparison.Ordinal);
         var hasWhatTime = lower.Contains("what time", StringComparison.Ordinal);
@@ -935,6 +963,7 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
@@ -1005,6 +1034,7 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",

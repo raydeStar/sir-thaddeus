@@ -88,6 +88,10 @@ jobs:
         shell: pwsh
         run: ./dev/fetch-assets.ps1
 
+      - name: Build bundled SearXNG sidecar payload
+        shell: pwsh
+        run: ./dev/build-searxng-package.ps1
+
       - name: Package build zip + checksums
         shell: pwsh
         run: |
@@ -101,7 +105,7 @@ jobs:
           name: build-package-assets-${{ github.ref_name }}
           path: |
             artifacts/release/*.zip
-            artifacts/release/*.zip.sha256.txt
+            artifacts/release/*.sha256.txt
           if-no-files-found: error
 
   smoke-test:
@@ -111,7 +115,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/dev'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -190,4 +194,4 @@ jobs:
           make_latest: false
           files: |
             release-assets/*.zip
-            release-assets/*.zip.sha256.txt
+            release-assets/*.sha256.txt

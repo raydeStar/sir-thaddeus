@@ -196,6 +196,10 @@ Pre-computed signals for this message:
         // Clamp confidence
         var confidence = Math.Clamp(parsed.Confidence, 0.0, 1.0);
 
+        // Parse typed block reason from raw reason code string.
+        var rawReasonCode = parsed.ReasonCode ?? "footman_llm";
+        var blockReason = FootmanBlockReasonPolicy.Parse(rawReasonCode);
+
         var decision = new RoutingDecision
         {
             SchemaVersion = 1,
@@ -204,7 +208,8 @@ Pre-computed signals for this message:
             ContextPolicy = contextPolicy,
             Confidence = confidence,
             Abstain = parsed.Abstain,
-            ReasonCode = parsed.ReasonCode ?? "footman_llm"
+            ReasonCode = rawReasonCode,
+            BlockReason = blockReason
         };
 
         // Auto-fallback on low confidence
@@ -216,7 +221,8 @@ Pre-computed signals for this message:
             {
                 NextState = AgentState.Fallback,
                 Abstain = true,
-                ReasonCode = "low_confidence"
+                ReasonCode = "low_confidence",
+                BlockReason = FootmanBlockReason.Unknown
             };
         }
 
@@ -226,7 +232,8 @@ Pre-computed signals for this message:
             return decision with
             {
                 NextState = AgentState.Fallback,
-                ReasonCode = parsed.ReasonCode ?? "footman_abstain"
+                ReasonCode = parsed.ReasonCode ?? "footman_abstain",
+                BlockReason = blockReason
             };
         }
 

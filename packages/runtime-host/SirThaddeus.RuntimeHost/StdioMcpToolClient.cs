@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Text.Json;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
@@ -14,6 +15,7 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
     private readonly IAuditLogger _audit;
     private readonly SemaphoreSlim _rpcLock = new(1, 1);
     private readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
+    private const int MaxTransportRecoveryAttempts = 1;
 
     private Process? _process;
     private StreamWriter? _stdin;
@@ -37,54 +39,26 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_initialized)
-            return;
-
-        var startInfo = new ProcessStartInfo
+        await _rpcLock.WaitAsync(cancellationToken);
+        try
         {
-            FileName = _serverPath,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var pair in _env)
-            startInfo.Environment[pair.Key] = pair.Value;
-
-        _process = new Process { StartInfo = startInfo };
-        _process.Start();
-        _stdin = _process.StandardInput;
-        _stdout = _process.StandardOutput;
-
-        _audit.Append(new AuditEvent
-        {
-            Actor = "runtime",
-            Action = "MCP_SERVER_STARTED",
-            Result = "ok",
-            Details = new Dictionary<string, object>
+            if (_initialized && IsTransportHealthy())
             {
-                ["path"] = _serverPath,
-                ["pid"] = _process.Id
+                return;
             }
-        });
 
-        await SendRequestAsync<JsonElement>("initialize", new
+            await StartOrRestartLockedAsync("startup", cancellationToken);
+        }
+        finally
         {
-            protocolVersion = "2024-11-05",
-            capabilities = new { },
-            clientInfo = new { name = _clientName, version = _clientVersion }
-        }, cancellationToken);
-        await SendNotificationAsync("notifications/initialized", new { }, cancellationToken);
-
-        _initialized = true;
+            _rpcLock.Release();
+        }
     }
 
     public async Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
-        var payload = await SendRequestAsync<JsonElement>("tools/list", new { }, cancellationToken);
+        var payload = await SendRequestWithRecoveryAsync<JsonElement>("tools/list", new { }, cancellationToken);
         var tools = new List<McpToolInfo>();
         if (!payload.TryGetProperty("tools", out var toolsArray) || toolsArray.ValueKind != JsonValueKind.Array)
             return tools;
@@ -124,7 +98,7 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
             parsedArgs = new { };
         }
 
-        var payload = await SendRequestAsync<JsonElement>("tools/call", new
+        var payload = await SendRequestWithRecoveryAsync<JsonElement>("tools/call", new
         {
             name = toolName,
             arguments = parsedArgs
@@ -143,54 +117,28 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
         return string.Join(Environment.NewLine, lines);
     }
 
+    private async Task<T> SendRequestWithRecoveryAsync<T>(string method, object @params, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await SendRequestAsync<T>(method, @params, cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxTransportRecoveryAttempts && IsRecoverableTransportFailure(ex))
+            {
+                await RecoverTransportAsync(ex, cancellationToken);
+            }
+        }
+    }
+
     private async Task<T> SendRequestAsync<T>(string method, object @params, CancellationToken cancellationToken)
     {
         await _rpcLock.WaitAsync(cancellationToken);
         try
         {
-            var id = Interlocked.Increment(ref _requestId);
-            var req = JsonSerializer.Serialize(new { jsonrpc = "2.0", id, method, @params });
-            await _stdin!.WriteLineAsync(req.AsMemory(), cancellationToken);
-            await _stdin.FlushAsync(cancellationToken);
-
-            while (true)
-            {
-                var line = await _stdout!.ReadLineAsync(cancellationToken);
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                using var doc = JsonDocument.Parse(line);
-                var root = doc.RootElement;
-                if (!root.TryGetProperty("id", out var idProp) || idProp.GetInt32() != id)
-                    continue;
-
-                if (root.TryGetProperty("error", out var error))
-                {
-                    var msg = error.TryGetProperty("message", out var message) ? message.GetString() : "Unknown MCP error";
-                    throw new InvalidOperationException(msg ?? "Unknown MCP error");
-                }
-
-                if (!root.TryGetProperty("result", out var result))
-                    throw new InvalidOperationException("MCP response missing result.");
-
-                return JsonSerializer.Deserialize<T>(result.GetRawText(), _json)
-                    ?? throw new InvalidOperationException("Failed to deserialize MCP response.");
-            }
-        }
-        finally
-        {
-            _rpcLock.Release();
-        }
-    }
-
-    private async Task SendNotificationAsync(string method, object @params, CancellationToken cancellationToken)
-    {
-        await _rpcLock.WaitAsync(cancellationToken);
-        try
-        {
-            var req = JsonSerializer.Serialize(new { jsonrpc = "2.0", method, @params });
-            await _stdin!.WriteLineAsync(req.AsMemory(), cancellationToken);
-            await _stdin.FlushAsync(cancellationToken);
+            EnsureTransportBound();
+            return await SendRequestLockedAsync<T>(method, @params, cancellationToken);
         }
         finally
         {
@@ -204,11 +152,182 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
             throw new InvalidOperationException("MCP client is not initialized.");
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
+    {
+        await _rpcLock.WaitAsync();
+        try
+        {
+            DisposeTransportLocked(killProcess: true);
+            _initialized = false;
+        }
+        finally
+        {
+            _rpcLock.Release();
+            _rpcLock.Dispose();
+        }
+    }
+
+    private async Task StartOrRestartLockedAsync(string reason, CancellationToken cancellationToken)
+    {
+        DisposeTransportLocked(killProcess: true);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _serverPath,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = false,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var pair in _env)
+            startInfo.Environment[pair.Key] = pair.Value;
+
+        _process = new Process { StartInfo = startInfo };
+        _process.Start();
+        _stdin = _process.StandardInput;
+        _stdout = _process.StandardOutput;
+        _initialized = false;
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "MCP_SERVER_STARTED",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["path"] = _serverPath,
+                ["pid"] = _process.Id,
+                ["reason"] = reason
+            }
+        });
+
+        try
+        {
+            await SendRequestLockedAsync<JsonElement>("initialize", new
+            {
+                protocolVersion = "2024-11-05",
+                capabilities = new { },
+                clientInfo = new { name = _clientName, version = _clientVersion }
+            }, cancellationToken);
+
+            await SendNotificationLockedAsync("notifications/initialized", new { }, cancellationToken);
+            _initialized = true;
+        }
+        catch
+        {
+            DisposeTransportLocked(killProcess: true);
+            _initialized = false;
+            throw;
+        }
+    }
+
+    private async Task<T> SendRequestLockedAsync<T>(string method, object @params, CancellationToken cancellationToken)
+    {
+        EnsureTransportBound();
+
+        var id = Interlocked.Increment(ref _requestId);
+        var req = JsonSerializer.Serialize(new { jsonrpc = "2.0", id, method, @params });
+        await _stdin!.WriteLineAsync(req.AsMemory(), cancellationToken);
+        await _stdin.FlushAsync(cancellationToken);
+
+        while (true)
+        {
+            var line = await _stdout!.ReadLineAsync(cancellationToken);
+            if (line is null)
+                throw new IOException("MCP stdout stream closed unexpectedly.");
+
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("id", out var idProp) || idProp.GetInt32() != id)
+                continue;
+
+            if (root.TryGetProperty("error", out var error))
+            {
+                var msg = error.TryGetProperty("message", out var message) ? message.GetString() : "Unknown MCP error";
+                throw new InvalidOperationException(msg ?? "Unknown MCP error");
+            }
+
+            if (!root.TryGetProperty("result", out var result))
+                throw new InvalidOperationException("MCP response missing result.");
+
+            return JsonSerializer.Deserialize<T>(result.GetRawText(), _json)
+                ?? throw new InvalidOperationException("Failed to deserialize MCP response.");
+        }
+    }
+
+    private async Task SendNotificationLockedAsync(string method, object @params, CancellationToken cancellationToken)
+    {
+        EnsureTransportBound();
+        var req = JsonSerializer.Serialize(new { jsonrpc = "2.0", method, @params });
+        await _stdin!.WriteLineAsync(req.AsMemory(), cancellationToken);
+        await _stdin.FlushAsync(cancellationToken);
+    }
+
+    private async Task RecoverTransportAsync(Exception failure, CancellationToken cancellationToken)
+    {
+        await _rpcLock.WaitAsync(cancellationToken);
+        try
+        {
+            var reason = failure.Message;
+            _audit.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "MCP_SERVER_RECOVERY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["reason"] = reason
+                }
+            });
+
+            await StartOrRestartLockedAsync("transport_recovery", cancellationToken);
+        }
+        finally
+        {
+            _rpcLock.Release();
+        }
+    }
+
+    private bool IsTransportHealthy()
+    {
+        return _process is { HasExited: false } && _stdin is not null && _stdout is not null;
+    }
+
+    private void EnsureTransportBound()
+    {
+        if (_process is null || _process.HasExited || _stdin is null || _stdout is null)
+            throw new IOException("MCP transport is unavailable.");
+    }
+
+    private static bool IsRecoverableTransportFailure(Exception ex)
+    {
+        if (ex is OperationCanceledException)
+            return false;
+
+        if (ex is IOException or ObjectDisposedException)
+            return true;
+
+        var message = ex.Message ?? "";
+        if (message.Length == 0)
+            return false;
+
+        return message.Contains("pipe is being closed", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("broken pipe", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("transport is unavailable", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("stream closed", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("MCP client is not initialized", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void DisposeTransportLocked(bool killProcess)
     {
         try
         {
-            if (_process is { HasExited: false })
+            if (killProcess && _process is { HasExited: false })
             {
                 _process.Kill(entireProcessTree: true);
                 _process.WaitForExit(2000);
@@ -222,8 +341,9 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
         _stdin?.Dispose();
         _stdout?.Dispose();
         _process?.Dispose();
-        _rpcLock.Dispose();
 
-        return ValueTask.CompletedTask;
+        _stdin = null;
+        _stdout = null;
+        _process = null;
     }
 }

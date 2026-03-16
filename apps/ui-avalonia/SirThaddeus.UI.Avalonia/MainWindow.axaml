@@ -1,0 +1,1603 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SirThaddeus.UI.Avalonia.ViewModels"
+        xmlns:local="using:SirThaddeus.UI.Avalonia"
+        x:Class="SirThaddeus.UI.Avalonia.MainWindow"
+        Width="1060"
+        Height="760"
+        MinWidth="860"
+        MinHeight="620"
+        Title="Sir Thaddeus"
+        Icon="avares://SirThaddeus.UI.Avalonia/Assets/Icons/sir-thaddeus.ico"
+        Background="{StaticResource BaseBrush}"
+        Foreground="{StaticResource TextBrush}"
+        KeyDown="Window_KeyDown"
+        KeyUp="Window_KeyUp">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Grid.Row="0"
+            Background="{StaticResource CrustBrush}"
+            Padding="20,12,20,0"
+            BorderBrush="{StaticResource Surface0Brush}"
+            BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
+          <Button x:Name="ConversationButton" Classes="headerBtn" Click="ConversationButton_Click">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock x:Name="ConversationTitleText" Text="Conversation" FontWeight="SemiBold" FontSize="13"/>
+              <TextBlock Text="&#x25BE;" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+
+          <Button x:Name="ConnectionStatusButton" Classes="headerBtn" Click="ConnectionStatusButton_Click">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock x:Name="ConnectionStatusText" Text="Disconnected" FontSize="12"/>
+            </StackPanel>
+          </Button>
+        </StackPanel>
+
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="0">
+          <ToggleButton x:Name="ChatTabButton" Content="Chat" IsChecked="True" Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="BriefingTabButton" Content="Briefing" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+          <ToggleButton x:Name="SettingsTabButton" Content="Settings" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
+          <Button x:Name="ConnectButton" Content="Connect" Classes="headerBtn" Click="ConnectButton_Click"/>
+          <Button x:Name="NewChatButton" Content="New Chat" Classes="headerBtn" Click="NewChatButton_Click"/>
+          <Button x:Name="StopAllButton" Content="STOP ALL" Classes="cancelBtn" Click="StopAllButton_Click" Margin="4,0,0,0"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+      <Border x:Name="ConversationDrawer"
+              Grid.Column="0"
+              Width="280"
+              IsVisible="False"
+              Background="{StaticResource CrustBrush}"
+              BorderBrush="{StaticResource Surface0Brush}"
+              BorderThickness="0,0,1,0">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+          <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
+            <TextBlock Text="Conversations" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseConversationDrawerButton_Click"/>
+          </Grid>
+
+          <StackPanel Grid.Row="1" Margin="12,0,12,8" Orientation="Horizontal" Spacing="8">
+            <Button Content="New Chat" Classes="actionBtn" Click="NewChatButton_Click"/>
+            <Button Content="Clear History" Classes="actionBtn" Click="ClearHistoryButton_Click"/>
+          </StackPanel>
+
+          <ListBox x:Name="ChatHistoryList"
+                   Grid.Row="2"
+                   Margin="8,0,8,8"
+                   SelectionChanged="ChatHistoryList_SelectionChanged"
+                   Background="{StaticResource BaseBrush}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Padding="12,10" Margin="0,0,0,4" Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                  <StackPanel>
+                    <TextBlock Text="{ReflectionBinding Title}" FontWeight="SemiBold" FontSize="12"/>
+                    <TextBlock Text="{ReflectionBinding UpdatedLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}"/>
+                    <TextBlock Text="{ReflectionBinding Preview}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextTrimming="CharacterEllipsis" MaxLines="2"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Grid.Row="3"
+                     Margin="12,0,12,12"
+                     Text="Select a conversation to restore that transcript."
+                     FontSize="11"
+                     Foreground="{StaticResource Overlay0Brush}"
+                     TextWrapping="Wrap"/>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1">
+        <Grid x:Name="ChatView">
+          <Grid RowDefinitions="*" RowSpacing="0">
+
+            <ScrollViewer Grid.Row="0"
+                          x:Name="ChatScroller"
+                          Background="{StaticResource BaseBrush}"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <Grid>
+                <StackPanel x:Name="EmptyHero"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Margin="0,80,0,0"
+                            Spacing="4">
+                  <TextBlock Text="Sir Thaddeus"
+                             FontSize="36"
+                             FontWeight="Bold"
+                             Foreground="{StaticResource TextBrush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4"
+                             Opacity="0.95"/>
+                  <TextBlock Text="Your AI. Your Rules."
+                             FontSize="16"
+                             FontWeight="Medium"
+                             Foreground="{StaticResource Subtext1Brush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,2"/>
+                  <TextBlock Text="A local-first copilot that only acts with explicit permission."
+                             FontSize="13"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,28"/>
+                  <Border Background="{StaticResource Surface0Brush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          Padding="20,14"
+                          HorizontalAlignment="Center">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="Hold to talk  &#x2014;  Ctrl+Alt+M"
+                                 FontSize="12"
+                                 Foreground="{StaticResource Subtext0Brush}"
+                                 HorizontalAlignment="Center"/>
+                      <TextBlock Text="Command Palette  &#x2014;  Ctrl+Space"
+                                 FontSize="12"
+                                 Foreground="{StaticResource Subtext0Brush}"
+                                 HorizontalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+
+                <ItemsControl x:Name="ChatMessagesList" Margin="24,20,24,60" Background="Transparent">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ChatMessageItem">
+                      <Border Margin="0,0,0,12"
+                              Background="{StaticResource MantleBrush}"
+                              CornerRadius="{StaticResource RadiusMd}"
+                              BorderBrush="{StaticResource Surface0Brush}"
+                              BorderThickness="1"
+                              Padding="0">
+                        <!-- Per-message context menu -->
+                        <Border.ContextMenu>
+                          <ContextMenu>
+                            <MenuItem Header="Copy" Click="CopyMessage_Click"/>
+                            <MenuItem Header="Retry" Click="RetryMessage_Click" IsVisible="{Binding IsAssistant}"/>
+                            <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
+                          </ContextMenu>
+                        </Border.ContextMenu>
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="4"/>
+                            <ColumnDefinition Width="*"/>
+                          </Grid.ColumnDefinitions>
+                          <!-- Spines for role visual distinction -->
+                          <Border Grid.Column="0" Background="{StaticResource MauveBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsAssistant}"/>
+                          <Border Grid.Column="0" Background="{StaticResource BlueBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsUser}"/>
+                          <Border Grid.Column="0" Background="{StaticResource YellowBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsSystem}"/>
+                          <Border Grid.Column="0" Background="{StaticResource PeachBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsToolActivity}"/>
+
+                          <StackPanel Grid.Column="1" Margin="16,14,16,14">
+                            <!-- Header row: Author + Role + Time + Triple-dot menu -->
+                            <Grid Margin="0,0,0,8">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                              </Grid.ColumnDefinitions>
+                              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding AuthorLabel}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Subtext1Brush}"/>
+                                <TextBlock Text="{Binding RoleLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"
+                                           IsVisible="{Binding RoleLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                <TextBlock Text="{Binding TimeDisplay}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                              </StackPanel>
+                              <Button Grid.Column="1"
+                                      Content="⋯"
+                                      FontSize="14"
+                                      FontWeight="Bold"
+                                      Padding="6,0"
+                                      MinWidth="0"
+                                      MinHeight="0"
+                                      Background="Transparent"
+                                      Foreground="{StaticResource Overlay0Brush}"
+                                      BorderThickness="0"
+                                      Cursor="Hand"
+                                      VerticalAlignment="Center">
+                                <Button.Flyout>
+                                  <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                    <MenuItem Header="Copy" Click="CopyMessage_Click"/>
+                                    <MenuItem Header="Retry" Click="RetryMessage_Click" IsVisible="{Binding IsUser}"/>
+                                    <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
+                                  </MenuFlyout>
+                                </Button.Flyout>
+                              </Button>
+                            </Grid>
+
+                            <!-- Thinking/Reasoning expander -->
+                            <Border IsVisible="{Binding HasThoughtContent}"
+                                    Background="{StaticResource BaseBrush}"
+                                    CornerRadius="{StaticResource RadiusSm}"
+                                    Padding="12,8"
+                                    Margin="0,0,0,8">
+                              <Expander IsExpanded="{Binding IsThoughtExpanded}" Padding="0">
+                                <Expander.Header>
+                                  <TextBlock Text="Reasoning" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                                </Expander.Header>
+                                <SelectableTextBlock Text="{Binding ThoughtContent}"
+                                                     FontSize="12"
+                                                     FontFamily="Cascadia Mono, Consolas, monospace"
+                                                     LineHeight="18"
+                                                     Foreground="{StaticResource Subtext0Brush}"
+                                                     Padding="0,6,0,0"
+                                                     TextWrapping="Wrap"
+                                                     MaxHeight="300"/>
+                              </Expander>
+                            </Border>
+
+                            <!-- Message content -->
+                            <SelectableTextBlock Text="{Binding Content}"
+                                                 FontSize="14"
+                                                 LineHeight="22"
+                                                 Foreground="{StaticResource TextBrush}"
+                                                 TextWrapping="Wrap"/>
+
+                            <!-- Inline tool activity footer (compact, dim) -->
+                            <TextBlock IsVisible="{Binding HasToolSummary}"
+                                       Text="{Binding ToolSummary}"
+                                       FontSize="11"
+                                       Foreground="{StaticResource Overlay0Brush}"
+                                       Margin="0,6,0,0"
+                                       Opacity="0.7"/>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+
+        <Grid x:Name="BriefingView" IsVisible="False" Background="{StaticResource BaseBrush}">
+          <Grid ColumnDefinitions="260,*,320">
+            <Border Grid.Column="0"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,1,0">
+              <Grid RowDefinitions="Auto,*">
+                <StackPanel Margin="16,16,16,12" Spacing="4">
+                  <TextBlock Text="Briefing History" FontSize="13" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="BriefingHistoryHintText"
+                             Text="Deep-dive results from this conversation appear here."
+                             FontSize="11"
+                             Foreground="{StaticResource Overlay0Brush}"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <ListBox Grid.Row="1"
+                         x:Name="BriefingHistoryList"
+                         Margin="10,0,10,10"
+                         SelectionChanged="BriefingHistoryList_SelectionChanged"
+                         Background="{StaticResource BaseBrush}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource Surface0Brush}" CornerRadius="6">
+                        <StackPanel Spacing="4">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Text="{ReflectionBinding Title}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                            <Border Grid.Column="1" Background="{ReflectionBinding ConfidenceBrush}" CornerRadius="999" Padding="8,2">
+                              <TextBlock Text="{ReflectionBinding ConfidenceLabel}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource BaseBrush}"/>
+                            </Border>
+                          </Grid>
+                          <TextBlock Text="{ReflectionBinding StatusLine}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap" MaxLines="2"/>
+                          <TextBlock Text="{ReflectionBinding UpdatedLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Column="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="24,20,20,20" MaxWidth="760" Spacing="14">
+                <Border Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="12,10">
+                  <TextBlock x:Name="BriefingStatusText"
+                             Text="No briefing loaded yet. Ask for a place or product deep dive in chat."
+                             FontSize="12"
+                             Foreground="{StaticResource Subtext0Brush}"
+                             TextWrapping="Wrap"/>
+                </Border>
+
+                <Border x:Name="BriefingEmptyState"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="24,22">
+                  <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <TextBlock Text="No briefing loaded"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Use chat to ask about a business, place, or product. Structured briefing output will appear here when the runtime returns it."
+                               MaxWidth="480"
+                               FontSize="12"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="BriefingHeroCard"
+                        IsVisible="False"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}"
+                        Padding="16,14">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="BriefingHeroTitleText" Text="Briefing title" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="BriefingHeroStatusText" Text="Status line" FontSize="14" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border x:Name="BriefingConfidenceBadge" Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="10,4" VerticalAlignment="Top">
+                        <TextBlock x:Name="BriefingConfidenceText" Text="Unknown" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource CrustBrush}"/>
+                      </Border>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                      <Border Background="{StaticResource BaseBrush}" CornerRadius="8" Padding="10,8" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="Checked" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                          <TextBlock x:Name="BriefingLastCheckedText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                      <Border Grid.Column="1" Background="{StaticResource BaseBrush}" CornerRadius="8" Padding="10,8" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="Hours" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                          <TextBlock x:Name="BriefingClosesText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="BriefingWebsiteButton" Content="Website" Classes="actionBtn" IsEnabled="False" Click="BriefingWebsiteButton_Click"/>
+                      <Button x:Name="BriefingDirectionsButton" Content="Directions" Classes="actionBtn" IsEnabled="False" Click="BriefingDirectionsButton_Click"/>
+                      <Button x:Name="BriefingCopyPhoneButton" Content="Copy Phone" Classes="actionBtn" IsEnabled="False" Click="BriefingCopyPhoneButton_Click"/>
+                      <Button x:Name="BriefingCopyAddressButton" Content="Copy Address" Classes="actionBtn" IsEnabled="False" Click="BriefingCopyAddressButton_Click"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <ItemsControl x:Name="BriefingCardsList" IsVisible="False">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="0,0,0,12"
+                              Padding="14,12"
+                              Background="{StaticResource MantleBrush}"
+                              BorderBrush="{StaticResource Surface0Brush}"
+                              BorderThickness="1"
+                              CornerRadius="{StaticResource RadiusMd}">
+                        <StackPanel Spacing="8">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Text="{ReflectionBinding Title}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="1" Text="{ReflectionBinding TypeLabel}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource BlueBrush}" VerticalAlignment="Center"/>
+                          </Grid>
+                          <ItemsControl ItemsSource="{ReflectionBinding Bullets}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                  <TextBlock Text="- " FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                                  <TextBlock Text="{Binding}" FontSize="12" Foreground="{StaticResource Subtext1Brush}" TextWrapping="Wrap" MaxWidth="620"/>
+                                </StackPanel>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Text="{ReflectionBinding SourceSummary}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border x:Name="BriefingAuditSection"
+                        IsVisible="False"
+                        Background="{StaticResource MantleBrush}"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusMd}">
+                  <Grid RowDefinitions="Auto,*">
+                    <TextBlock Grid.Row="0" Text="Audit Trail" Margin="14,12,14,4" FontSize="13" FontWeight="SemiBold"/>
+                    <ListBox x:Name="BriefingAuditList" Grid.Row="1" Margin="10,0,10,10" Background="Transparent">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource BaseBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" CornerRadius="6">
+                            <StackPanel Spacing="4">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBlock Text="{ReflectionBinding StepLabel}" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Grid.Column="1" Text="{ReflectionBinding TimestampLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}"/>
+                              </Grid>
+                              <TextBlock Text="{ReflectionBinding Detail}" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                              <TextBlock Text="{ReflectionBinding SourceSummary}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Grid>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Column="2"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="1,0,0,0">
+              <ScrollViewer VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="16,18,16,18" Spacing="14">
+                  <TextBlock Text="Quick Info" FontSize="13" FontWeight="SemiBold"/>
+
+                  <Border Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          Padding="12,10">
+                    <StackPanel Spacing="8">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Address" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingAddressText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Phone" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingPhoneText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Query" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
+                        <TextBlock x:Name="BriefingQueryText" Text="-" FontSize="12" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <Border x:Name="BriefingMapSection"
+                          IsVisible="False"
+                          Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          Padding="12,10">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="Map" FontSize="13" FontWeight="SemiBold"/>
+                      <TextBlock x:Name="BriefingMapLabelText" Text="Map" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                      <TextBlock x:Name="BriefingMapCoordsText" Text="-" FontSize="11" Foreground="{StaticResource Subtext0Brush}" TextWrapping="Wrap"/>
+                      <TextBlock Text="Coordinates are shown now; platform map embedding can land later without changing the contract."
+                                 FontSize="10"
+                                 Foreground="{StaticResource Overlay0Brush}"
+                                 TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+
+                  <Border x:Name="BriefingSourcesSection"
+                          IsVisible="False"
+                          Background="{StaticResource BaseBrush}"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1">
+                    <Grid RowDefinitions="Auto,*">
+                      <TextBlock Grid.Row="0" Text="Sources" Margin="12,10,12,4" FontSize="13" FontWeight="SemiBold"/>
+                      <ListBox x:Name="BriefingSourcesList" Grid.Row="1" Margin="8,0,8,8" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate>
+                            <Border Margin="0,0,0,6" Padding="10,8" Background="{StaticResource MantleBrush}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" CornerRadius="6">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <StackPanel Spacing="3">
+                                  <TextBlock Text="{ReflectionBinding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                  <TextBlock Text="{ReflectionBinding Meta}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Open"
+                                        Classes="actionBtn"
+                                        Tag="{ReflectionBinding Url}"
+                                        Click="BriefingSourceOpenButton_Click"/>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                    </Grid>
+                  </Border>
+                </StackPanel>
+              </ScrollViewer>
+            </Border>
+          </Grid>
+        </Grid>
+
+        <Grid x:Name="SettingsView" IsVisible="False" Background="{StaticResource BaseBrush}">
+          <Grid RowDefinitions="Auto,*" RowSpacing="0">
+            <Border x:Name="SettingsHeaderBar"
+                    x:CompileBindings="False"
+                    Background="{StaticResource CrustBrush}"
+                    Padding="24,12"
+                    BorderBrush="{StaticResource Surface0Brush}"
+                    BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                <Button Grid.Column="1"
+                        x:Name="ReloadSettingsButton"
+                        Content="Reload"
+                        Classes="actionBtn"
+                        Click="ReloadSettingsButton_Click"/>
+                <Button Grid.Column="2"
+                        x:Name="SaveSettingsButton"
+                        Content="Save"
+                        Classes="sendBtn"
+                        IsEnabled="{Binding IsDirty}"
+                        Click="SaveSettingsButton_Click"/>
+              </Grid>
+            </Border>
+
+            <TabControl Grid.Row="1" x:Name="SettingsTabControl" Classes="settingsTabs" TabStripPlacement="Left" Padding="0" Background="Transparent" SelectionChanged="SettingsTabControl_SelectionChanged"> 
+            
+            <TabItem Header="General">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- Runtime Connection -->
+                  <StackPanel Spacing="10" x:CompileBindings="False">
+                    <TextBlock Text="RUNTIME" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                          <TextBox x:Name="RuntimeUrlBox"
+                                   Text="http://127.0.0.1:5378"
+                                   Classes="chatInput"
+                                   FontSize="13"
+                                   Padding="12,10"/>
+                          <Button Grid.Column="1" Content="Connect" Classes="actionBtn" Click="ConnectButton_Click"/>
+                        </Grid>
+                        <TextBlock x:Name="SettingsRuntimeText" Text="Runtime: not connected" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button x:Name="StartRuntimeButton" Content="Start Local Runtime" Classes="actionBtn" Click="StartRuntimeButton_Click"/>
+                          <Button x:Name="StopRuntimeButton" Content="Stop Managed Runtime" Classes="actionBtn" Click="StopRuntimeButton_Click"/>
+                        </StackPanel>
+                        <TextBlock x:Name="RuntimeLaunchStateText" Text="Managed runtime: not running" Classes="hint"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Constraints -->
+                  <StackPanel x:Name="ConstraintsPanel" Spacing="10" x:CompileBindings="False">
+                    <TextBlock Text="CONSTRAINTS" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="14" ColumnSpacing="16">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Max tool calls per turn" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding MaxToolCallsPerTurn}" Minimum="1" Maximum="100" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Max tool calls per session" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxToolCallsPerSession}" Minimum="1" Maximum="10000" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Max web pulls per turn" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding MaxWebPullsPerTurn}" Minimum="0" Maximum="25" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Max file ops per minute" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding MaxFileOpsPerMinute}" Minimum="0" Maximum="600" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Interaction -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="INTERACTION" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="10">
+                        <CheckBox x:Name="SendOnEnterCheckBox" Content="Send on Enter (Shift+Enter for newline)" Classes="settingsCheck" Click="SendOnEnterCheckBox_Click"/>
+                        <CheckBox x:Name="AutoSwitchPermissionsCheckBox" Content="Auto-switch to Permissions on approval request" Classes="settingsCheck" Click="AutoSwitchPermissionsCheckBox_Click"/>
+                        <CheckBox x:Name="AutoConnectCheckBox" Content="Auto-connect on startup" Classes="settingsCheck" Click="AutoConnectCheckBox_Click"/>
+                        <CheckBox x:Name="AutoStartRuntimeCheckBox" Content="Auto-start local runtime if unavailable" Classes="settingsCheck" Click="AutoStartRuntimeCheckBox_Click"/>
+                        <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on close" Classes="settingsCheck" Click="MinimizeToTrayCheckBox_Click"/>
+                        <TextBlock x:Name="TraySupportText" Text="Tray support is being detected..." Classes="hint" Margin="0,4,0,0"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Shortcuts -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="SHORTCUTS" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="Ctrl+1 Chat  &#x2022;  Ctrl+2 Briefing  &#x2022;  Ctrl+3 Settings" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Push-to-talk chord" Classes="hint"/>
+                            <TextBox Text="{ReflectionBinding PttChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Text="Interrupt chord" Classes="hint"/>
+                            <TextBox Text="{ReflectionBinding ShutupChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                        </Grid>
+                        <TextBlock Text="Voice and read-aloud are currently Windows-only." Classes="hint" Margin="0,4,0,0"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Location" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="LOCATION" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="Manual location for nearby searches (city/state, ZIP, or country)." Classes="hint"/>
+                        <TextBox Text="{ReflectionBinding Location}"
+                                 Watermark="e.g., Olympia, WA"
+                                 Classes="chatInput"
+                                 FontSize="13"
+                                 Padding="12,10"/>
+                        <Border Classes="separator" Margin="0,4,0,2"/>
+                        <TextBlock Text="Display" Classes="hint"/>
+                        <CheckBox Content="Use 24-hour time (military time)" IsChecked="{ReflectionBinding Use24HourTime}" Classes="settingsCheck"/>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" VerticalAlignment="Center">
+                          <TextBlock Text="Preferred units" Classes="formLabel" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1"
+                                    ItemsSource="{ReflectionBinding PreferredUnitsOptions}"
+                                    SelectedItem="{ReflectionBinding PreferredUnits}"
+                                    HorizontalAlignment="Left"
+                                    MinWidth="140"
+                                    FontSize="13"/>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="LlmsTabItem" Header="LLMs" x:CompileBindings="False">
+              <ScrollViewer x:Name="LlmsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- Primary Engine -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="PRIMARY ENGINE" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="Presets" FontSize="12" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
+                          <Button x:Name="LmStudioPresetBtn" Content="LM Studio" Classes="actionBtn" Tag="http://localhost:1234"/>
+                          <Button x:Name="OllamaPresetBtn" Content="Ollama" Classes="actionBtn" Tag="http://localhost:11434"/>
+                          <Button x:Name="OpenAiPresetBtn" Content="OpenAI" Classes="actionBtn" Tag="https://api.openai.com"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="12">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Base URL" Classes="hint"/>
+                            <TextBox Text="{Binding LlmBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Spacing="4">
+                            <TextBlock Text="Model ID" Classes="hint"/>
+                            <TextBox Text="{Binding LlmModel}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
+                            <Button Content="Refresh Models" Classes="actionBtn" Click="RefreshPrimaryModelsButton_Click"/>
+                            <TextBlock Text="Queries /v1/models on the base URL" Classes="hint" VerticalAlignment="Center"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="3" Spacing="4">
+                            <TextBlock Text="Discovered models" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding AvailablePrimaryModels}" SelectedItem="{Binding LlmModel}" HorizontalAlignment="Stretch"/>
+                          </StackPanel>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Gatekeeper -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="GATEKEEPER" Classes="sectionLabel"/>
+                    <TextBlock Text="Optional smaller model for fast local verification of tools." Classes="hint"/>
+                    <Border Classes="settingsCard">
+                      <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Base URL" Classes="hint"/>
+                          <TextBox Text="{Binding GatekeeperBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Spacing="4">
+                          <TextBlock Text="Model ID" Classes="hint"/>
+                          <TextBox Text="{Binding GatekeeperModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="2" Text="{Binding EffectiveGatekeeperBaseUrl}" Classes="hint"/>
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10">
+                          <Button Content="Refresh Gatekeeper" Classes="actionBtn" Click="RefreshGatekeeperModelsButton_Click"/>
+                          <TextBlock Text="Falls back to primary URL when blank" Classes="hint" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="4" Spacing="4">
+                          <TextBlock Text="Discovered models" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding AvailableGatekeeperModels}" SelectedItem="{Binding GatekeeperModelId}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Parameters -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="PARAMETERS" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="14" ColumnSpacing="16">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Max tokens" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding LlmMaxTokens}" Minimum="1" Maximum="32000" FontSize="13" Padding="10,8" HorizontalAlignment="Right" Width="120"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Temperature" Classes="formLabel"/>
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LlmTemperature}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F2" FontSize="13" Padding="10,8" HorizontalAlignment="Right" Width="120"/>
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="AudioTabItem" Header="Audio &amp; Voice" x:CompileBindings="False">
+              <ScrollViewer x:Name="AudioScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- Audio Devices -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="AUDIO DEVICES" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto" RowSpacing="12">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Input device" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding AvailableInputDevices}" SelectedItem="{Binding SelectedInputDevice}" HorizontalAlignment="Stretch"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Spacing="4">
+                            <TextBlock Text="Output device" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding AvailableOutputDevices}" SelectedItem="{Binding SelectedOutputDevice}" HorizontalAlignment="Stretch"/>
+                          </StackPanel>
+                          <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Input gain" Classes="hint"/>
+                              <NumericUpDown Value="{Binding InputGain}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F1" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding InputGain, StringFormat={}{0:F1}x}" FontSize="13" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Bottom" Margin="0,0,0,8"/>
+                          </Grid>
+                        </Grid>
+                        <Button Content="Refresh Devices" Classes="actionBtn" Click="RefreshAudioDevicesButton_Click"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Voice Pipeline -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="VOICE PIPELINE" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <CheckBox Content="Enable Local VoiceHost" IsChecked="{Binding VoiceHostEnabled}" Classes="settingsCheck"/>
+                        <StackPanel Spacing="10" IsVisible="{Binding VoiceHostEnabled}">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="VoiceHost URL" Classes="hint"/>
+                            <TextBox Text="{Binding VoiceHostBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <Button Content="Refresh Health" Classes="actionBtn" Click="RefreshVoiceHostHealthButton_Click"/>
+                          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" RowSpacing="8" ColumnSpacing="16">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="Status" Classes="hint"/>
+                              <TextBlock Text="{Binding VoiceHostStatusText}" FontSize="13" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                              <TextBlock Text="Version" Classes="hint"/>
+                              <TextBlock Text="{Binding VoiceHostVersion}" FontSize="13"/>
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Spacing="2">
+                              <TextBlock Text="ASR" Classes="hint"/>
+                              <TextBlock Text="{Binding VoiceHostAsrReady}" FontSize="13"/>
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                              <TextBlock Text="TTS" Classes="hint"/>
+                              <TextBlock Text="{Binding VoiceHostTtsReady}" FontSize="13"/>
+                            </StackPanel>
+                          </Grid>
+                          <TextBlock Text="{Binding VoiceHostMessage}" Classes="hint"/>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- TTS -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="TEXT-TO-SPEECH" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="TTS engine" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding TtsEngineOptions}" SelectedItem="{Binding VoiceTtsEngine}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding VoiceSectionLabel}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Subtext1Brush}"/>
+                        <TextBlock Text="{Binding VoiceSectionDescription}" Classes="hint"/>
+                        <StackPanel Spacing="8" IsVisible="{Binding IsWindowsEngine}">
+                          <TextBlock Text="Uses the system speech synthesizer. Voice and model ID are optional." Classes="hint"/>
+                        </StackPanel>
+                        <StackPanel Spacing="10" IsVisible="{Binding IsPiperEngine}">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Piper voice" Classes="hint"/>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <ComboBox ItemsSource="{Binding AvailablePiperVoices}" SelectedItem="{Binding SelectedPiperVoice}" HorizontalAlignment="Stretch"/>
+                              <Button Grid.Column="1" Content="Refresh" Classes="actionBtn" Click="RefreshTtsVoicesButton_Click"/>
+                            </Grid>
+                          </StackPanel>
+                          <TextBlock Text="{Binding PiperVoiceDownloadStatus}" Classes="hint" Foreground="{StaticResource SapphireBrush}" IsVisible="{Binding IsPiperStatusVisible}"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Model ID (optional)" Classes="hint"/>
+                            <TextBox Text="{Binding VoiceTtsModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                        </StackPanel>
+                        <StackPanel Spacing="10" IsVisible="{Binding IsKokoroEngine}">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Kokoro voice" Classes="hint"/>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <ComboBox ItemsSource="{Binding AvailableKokoroVoices}" SelectedItem="{Binding SelectedKokoroVoice}" HorizontalAlignment="Stretch"/>
+                              <Button Grid.Column="1" Content="Refresh" Classes="actionBtn" Click="RefreshTtsVoicesButton_Click"/>
+                            </Grid>
+                          </StackPanel>
+                          <TextBlock Text="Leaving blank falls back to the active personality preference." Classes="hint"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Model ID (optional)" Classes="hint"/>
+                            <TextBox Text="{Binding VoiceTtsModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- YouTube -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="YOUTUBE" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="ASR provider" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding YouTubeAsrProviderOptions}" SelectedItem="{Binding YouTubeAsrProvider}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Spacing="4">
+                          <TextBlock Text="Model ID / size" Classes="hint"/>
+                          <TextBox Text="{Binding YouTubeAsrModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Spacing="4">
+                          <TextBlock Text="Language hint" Classes="hint"/>
+                          <TextBox Text="{Binding YouTubeLanguageHint}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="3" Spacing="4">
+                          <TextBlock Text="Drafting tone" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding YouTubeDraftToneOptions}" SelectedItem="{Binding YouTubeDraftTone}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <CheckBox Grid.Row="4" Content="Keep audio files" IsChecked="{Binding YouTubeKeepAudio}" Classes="settingsCheck"/>
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="SearchTabItem" Header="Search" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- Live Search -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="LIVE SEARCH" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <CheckBox Content="Enable live web search" IsChecked="{Binding WebSearchEnabled}" Classes="settingsCheck"/>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Mode" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding WebSearchModeOptions}" SelectedItem="{Binding WebSearchMode}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Timeout (ms)" Classes="hint"/>
+                            <NumericUpDown Value="{Binding WebSearchTimeoutMs}" Minimum="1000" Maximum="120000" Increment="500" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Text="Max results" Classes="hint"/>
+                            <NumericUpDown Value="{Binding WebSearchMaxResults}" Minimum="1" Maximum="20" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                          </StackPanel>
+                        </Grid>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="MCP web permission" Classes="hint"/>
+                          <ComboBox ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- SearXNG -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="SEARXNG" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <CheckBox Content="Auto-start bundled local SearXNG" IsChecked="{Binding SearxngAutoStart}" Classes="settingsCheck"/>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Base URL" Classes="hint"/>
+                          <TextBox Text="{Binding SearxngBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" RowSpacing="8" ColumnSpacing="16">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Status" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearxngStatusText}" FontSize="13" FontWeight="SemiBold"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Reachable" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearxngReachableText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Spacing="2">
+                            <TextBlock Text="Managed by runtime" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearxngManagedText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Last launch" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearxngLastLaunchStatus}" FontSize="13"/>
+                          </StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding SearchSearxngMessage}" Classes="hint"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Hosted Search API -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="HOSTED SEARCH API" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="API key" Classes="hint"/>
+                          <TextBox Text="{Binding SearchApiKey}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Base URL" Classes="hint"/>
+                          <TextBox Text="{Binding SearchApiBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Engine" Classes="hint"/>
+                          <TextBox Text="{Binding SearchApiEngine}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Status" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearchApiStatusText}" FontSize="13" FontWeight="SemiBold"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Message" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchSearchApiMessage}" FontSize="13" TextWrapping="Wrap"/>
+                          </StackPanel>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Runtime + MCP -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="RUNTIME + MCP" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <Button x:Name="RefreshSearchStatusButton" Content="Refresh Search Status" Classes="actionBtn" Click="RefreshSearchStatusButton_Click"/>
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="16">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Effective status" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchStatusText}" FontSize="13" FontWeight="SemiBold"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Live search" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLiveSearchAvailableText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Spacing="2">
+                            <TextBlock Text="MCP status" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchMcpStatusText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="MCP tools" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchMcpToolsAvailableText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="2" Spacing="2">
+                            <TextBlock Text="Web permission" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchWebPermissionEffective}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Last checked" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastCheckedText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="3" Spacing="2">
+                            <TextBlock Text="MCP server path" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchMcpServerPath}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Overlay0Brush}"/>
+                          </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.5" Margin="0,4"/>
+
+                        <TextBlock Text="LAST TRACE" Classes="sectionLabel" Margin="0,4,0,0"/>
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="16">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Status" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastProviderStatusText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Provider" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastProviderText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Spacing="2">
+                            <TextBlock Text="Query" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastQueryText}" FontSize="13" TextWrapping="Wrap"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Time" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastProviderCheckedText}" FontSize="13"/>
+                          </StackPanel>
+                          <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
+                            <TextBlock Text="Path" Classes="hint"/>
+                            <TextBlock Text="{Binding SearchLastPathText}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Overlay0Brush}"/>
+                          </StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding SearchStatusMessage}" Classes="hint"/>
+                        <TextBlock Text="{Binding SearchMcpMessage}" Classes="hint"/>
+                        <TextBlock Text="{Binding SearchLastFailureText}" Classes="hint"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+
+            <TabItem x:Name="PermissionsTabItem" Header="Permissions" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- ── Permission Request Card ── -->
+                  <Border x:Name="PermissionRequestCard"
+                          IsVisible="False"
+                          Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface1Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusLg}"
+                          Padding="24,20">
+                    <StackPanel Spacing="16">
+                      <!-- Header -->
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="&#x1F510;" FontSize="22" VerticalAlignment="Center"/>
+                        <TextBlock Text="Permission Required"
+                                   FontSize="18" FontWeight="Bold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   VerticalAlignment="Center"/>
+                      </StackPanel>
+
+                      <!-- Structured fields -->
+                      <Border Background="{StaticResource Surface0Brush}"
+                              CornerRadius="{StaticResource RadiusSm}"
+                              Padding="16,14">
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" RowSpacing="8" ColumnSpacing="14">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Tool:"
+                                     Foreground="{StaticResource Subtext0Brush}"
+                                     FontWeight="SemiBold" FontSize="13"/>
+                          <TextBlock x:Name="PermToolNameText" Grid.Row="0" Grid.Column="1"
+                                     Foreground="{StaticResource PeachBrush}"
+                                     FontWeight="Bold" FontFamily="Cascadia Mono,Consolas,monospace"
+                                     FontSize="13"/>
+
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Category:"
+                                     Foreground="{StaticResource Subtext0Brush}"
+                                     FontWeight="SemiBold" FontSize="13"/>
+                          <TextBlock x:Name="PermCategoryText" Grid.Row="1" Grid.Column="1"
+                                     Foreground="{StaticResource TextBrush}"
+                                     FontWeight="Bold" FontSize="13"/>
+
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="What it does:"
+                                     Foreground="{StaticResource Subtext0Brush}"
+                                     FontWeight="SemiBold" FontSize="13"/>
+                          <TextBlock x:Name="PermDescriptionText" Grid.Row="2" Grid.Column="1"
+                                     Foreground="{StaticResource Subtext1Brush}"
+                                     FontSize="13" TextWrapping="Wrap"/>
+
+                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Details:"
+                                     Foreground="{StaticResource Subtext0Brush}"
+                                     FontWeight="SemiBold" FontSize="13"/>
+                          <TextBlock x:Name="PermDetailsText" Grid.Row="3" Grid.Column="1"
+                                     Foreground="{StaticResource Subtext1Brush}"
+                                     FontFamily="Cascadia Mono,Consolas,monospace"
+                                     FontSize="12" TextWrapping="Wrap"/>
+                        </Grid>
+                      </Border>
+
+                      <!-- Warning banner -->
+                      <Border Background="#1A2A3E"
+                              CornerRadius="{StaticResource RadiusSm}"
+                              Padding="14,10">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="&#x26A0;" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource YellowBrush}"/>
+                          <TextBlock x:Name="PermWarningText"
+                                     Text="Sir Thaddeus is requesting access to a tool on your behalf."
+                                     Foreground="{StaticResource PeachBrush}"
+                                     FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Action buttons -->
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Spacing="8">
+                        <Button x:Name="DenyPermissionButton" Content="Deny"
+                                Classes="denyBtn" IsEnabled="False"
+                                Click="DenyPermissionButton_Click"/>
+                        <Button x:Name="ApprovePermissionButton" Content="Allow once"
+                                Classes="allowOnceBtn" IsEnabled="False"
+                                Click="ApprovePermissionButton_Click"/>
+                        <Button x:Name="AllowSessionButton" Content="Allow for session"
+                                Classes="allowSessionBtn" IsEnabled="False"
+                                Click="AllowSessionButton_Click"/>
+                        <Button x:Name="AllowAlwaysButton" Content="Allow always"
+                                Classes="allowAlwaysBtn" IsEnabled="False"
+                                Click="AllowAlwaysButton_Click"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <!-- ── No Pending (shown when idle) ── -->
+                  <Border x:Name="PermissionIdleCard"
+                          IsVisible="True"
+                          Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusMd}"
+                          Padding="20,16">
+                    <TextBlock x:Name="PermissionSummaryText"
+                               Text="No pending permission requests."
+                               FontSize="13"
+                               Foreground="{StaticResource Overlay1Brush}"
+                               HorizontalAlignment="Center"/>
+                  </Border>
+
+                  <!-- Hidden payload box for data transfer -->
+                  <TextBox x:Name="PermissionPayloadBox" IsVisible="False" IsReadOnly="True"/>
+
+                  <!-- ── MCP Policies ── -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="MCP PERMISSION POLICIES" Classes="sectionLabel"/>
+                    <TextBlock Text="Require confirmation before the agent acts in these capability groups." Classes="hint" Margin="0,0,0,4"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="Developer override" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding DeveloperOverrideOptions}" SelectedItem="{Binding McpDeveloperOverride}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="Screen capture" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpScreen}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="File system (read &amp; write)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpFiles}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="System commands" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpSystem}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="Web navigation &amp; search" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="Memory (read)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpMemoryRead}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
+                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                          <TextBlock Text="Memory (write)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpMemoryWrite}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="AuditTabItem" Header="Audit">
+              <Grid RowDefinitions="Auto,*" RowSpacing="0">
+                <Border Background="{StaticResource CrustBrush}"
+                        Padding="48,16,48,12"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
+                    <Button x:Name="RefreshAuditButton" Content="Refresh"
+                            Classes="actionBtn" Click="RefreshAuditButton_Click"/>
+                    <Button Grid.Column="1" Content="Open Log File"
+                            Classes="actionBtn" Click="OpenAuditLogFile_Click"/>
+                    <Button Grid.Column="2" Content="Open Folder"
+                            Classes="actionBtn" Click="OpenAuditLogFolder_Click"/>
+                    <TextBlock Grid.Column="3" Text="AUDIT LOG" Classes="sectionLabel" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Border Grid.Row="1" Margin="24,16,24,24" Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="4">
+                  <ListBox x:Name="AuditList"
+                           Background="Transparent"
+                           Foreground="{StaticResource TextBrush}"/>
+                </Border>
+              </Grid>
+            </TabItem>
+
+            <TabItem x:Name="MemoryTabItem" Header="Memory">
+              <Grid RowDefinitions="Auto,*" RowSpacing="0">
+                <Border Background="{StaticResource CrustBrush}"
+                        Padding="48,16,48,12"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                    <TextBox x:Name="MemoryFilterBox"
+                             Watermark="Filter memory..."
+                             Classes="chatInput"
+                             FontSize="13"
+                             Padding="12,8"/>
+                    <TextBlock Grid.Column="1"
+                               x:Name="MemoryStatusText"
+                               Text="Memory: not loaded"
+                               FontSize="12"
+                               Foreground="{StaticResource Overlay0Brush}"
+                               VerticalAlignment="Center"/>
+                    <Button Grid.Column="2"
+                            x:Name="RefreshMemoryButton"
+                            Content="Refresh"
+                            Classes="actionBtn"
+                            Click="RefreshMemoryButton_Click"/>
+                  </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Margin="24,16,24,24">
+                  <TabControl Background="Transparent" Padding="0,8,0,0">
+                    <TabItem Header="Facts">
+                      <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="MemoryFactsList" AutoGenerateColumns="False" IsReadOnly="False" Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" CellEditEnded="MemoryFactsList_CellEditEnded">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Subject" Binding="{ReflectionBinding Subject}" Width="120" />
+                            <DataGridTextColumn Header="Predicate" Binding="{ReflectionBinding Predicate}" Width="100" />
+                            <DataGridTextColumn Header="Object" Binding="{ReflectionBinding Object}" Width="*" />
+                            <DataGridTextColumn Header="Confidence" Binding="{ReflectionBinding Confidence}" Width="80" />
+                            <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding ProfileId}" Width="100" />
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </TabItem>
+                    <TabItem Header="Events">
+                      <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="MemoryEventsList" AutoGenerateColumns="False" IsReadOnly="False" Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" CellEditEnded="MemoryEventsList_CellEditEnded">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Type" Binding="{ReflectionBinding Type}" Width="120" />
+                            <DataGridTextColumn Header="Title" Binding="{ReflectionBinding Title}" Width="*" />
+                            <DataGridTextColumn Header="Summary" Binding="{ReflectionBinding Summary}" Width="150" />
+                            <DataGridTextColumn Header="Confidence" Binding="{ReflectionBinding Confidence}" Width="80" />
+                            <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding ProfileId}" Width="100" />
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </TabItem>
+                    <TabItem Header="Chunks">
+                      <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="MemoryChunksList" AutoGenerateColumns="False" IsReadOnly="False" Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" CellEditEnded="MemoryChunksList_CellEditEnded">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Source Type" Binding="{ReflectionBinding SourceType}" Width="100" />
+                            <DataGridTextColumn Header="Source Ref" Binding="{ReflectionBinding SourceRef}" Width="120" />
+                            <DataGridTextColumn Header="Text" Binding="{ReflectionBinding Text}" Width="*" />
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </TabItem>
+                    <TabItem Header="Nuggets">
+                      <Border Background="{StaticResource MantleBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="MemoryNuggetsList" AutoGenerateColumns="False" IsReadOnly="False" Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" CellEditEnded="MemoryNuggetsList_CellEditEnded">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Text" Binding="{ReflectionBinding Text}" Width="*" />
+                            <DataGridTextColumn Header="Tags" Binding="{ReflectionBinding Tags}" Width="120" />
+                            <DataGridTextColumn Header="Weight" Binding="{ReflectionBinding Weight}" Width="80" />
+                            <DataGridTextColumn Header="Pin Lvl" Binding="{ReflectionBinding PinLevel}" Width="60" />
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </TabItem>
+                  </TabControl>
+                </Border>
+              </Grid>
+            </TabItem>
+
+            <TabItem x:Name="ProfilesTabItem" Header="Profiles">
+              <Grid RowDefinitions="Auto,*,Auto" RowSpacing="0">
+                <Border Background="{StaticResource CrustBrush}"
+                        Padding="48,16,48,12"
+                        BorderBrush="{StaticResource Surface0Brush}"
+                        BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <Button x:Name="RefreshProfilesButton"
+                            Content="Refresh"
+                            Classes="actionBtn"
+                            Click="RefreshProfilesButton_Click"/>
+                    <TextBlock Grid.Column="1"
+                               x:Name="ProfilesStatusText"
+                               Text="Profiles: not loaded"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource Overlay0Brush}"/>
+                  </Grid>
+                </Border>
+
+                <Grid Grid.Row="1" Margin="24,16,24,16" ColumnDefinitions="*,16,*">
+                  <!-- Memory Profiles -->
+                  <Border Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusMd}">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10" Margin="16">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Memory Profiles" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="Your user and person memory cards."
+                                   Classes="hint"/>
+                      </StackPanel>
+                      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6">
+                        <Button x:Name="AddProfileButton"
+                                Content="Add"
+                                Classes="actionBtn"
+                                Click="AddProfileButton_Click"/>
+                        <Button x:Name="EditProfileButton"
+                                Content="Edit"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="EditProfileButton_Click"/>
+                        <Button x:Name="DeleteProfileButton"
+                                Content="Delete"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="DeleteProfileButton_Click"/>
+                        <Button x:Name="SetActiveProfileButton"
+                                Content="Set Active"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="SetActiveProfileButton_Click"/>
+                      </StackPanel>
+                      <Border Grid.Row="2" CornerRadius="{StaticResource RadiusSm}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="ProfilesList"
+                                  SelectionChanged="ProfilesList_SelectionChanged"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  GridLinesVisibility="Horizontal">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Profile" Binding="{ReflectionBinding DisplayName}" Width="160"/>
+                            <DataGridTextColumn Header="Details" Binding="{ReflectionBinding Meta}" Width="*"/>
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </Grid>
+                  </Border>
+
+                  <!-- Personalities -->
+                  <Border Grid.Column="2"
+                          Background="{StaticResource MantleBrush}"
+                          BorderBrush="{StaticResource Surface0Brush}"
+                          BorderThickness="1"
+                          CornerRadius="{StaticResource RadiusMd}">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10" Margin="16">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Personalities" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="Assistant behavior profiles."
+                                   Classes="hint"/>
+                      </StackPanel>
+                      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6">
+                        <Button x:Name="AddPersonalityButton"
+                                Content="Add"
+                                Classes="actionBtn"
+                                Click="AddPersonalityButton_Click"/>
+                        <Button x:Name="EditPersonalityButton"
+                                Content="Edit"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="EditPersonalityButton_Click"/>
+                        <Button x:Name="DeletePersonalityButton"
+                                Content="Delete"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="DeletePersonalityButton_Click"/>
+                        <Button x:Name="SetActivePersonalityButton"
+                                Content="Set Active"
+                                Classes="actionBtn"
+                                IsEnabled="False"
+                                Click="SetActivePersonalityButton_Click"/>
+                      </StackPanel>
+                      <Border Grid.Row="2" CornerRadius="{StaticResource RadiusSm}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1" Padding="2">
+                        <DataGrid x:Name="PersonalitiesList"
+                                  SelectionChanged="PersonalitiesList_SelectionChanged"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  GridLinesVisibility="Horizontal">
+                          <DataGrid.Columns>
+                            <DataGridTextColumn Header="Personality" Binding="{ReflectionBinding DisplayName}" Width="160"/>
+                            <DataGridTextColumn Header="Details" Binding="{ReflectionBinding Meta}" Width="*"/>
+                          </DataGrid.Columns>
+                        </DataGrid>
+                      </Border>
+                    </Grid>
+                  </Border>
+                </Grid>
+
+                <Border Grid.Row="2" Padding="48,0,48,16">
+                  <TextBlock Text="Add opens a starter JSON document. Edit loads the current JSON. Active items are selected automatically when the tab refreshes."
+                             Classes="hint"/>
+                </Border>
+              </Grid>
+            </TabItem>
+            </TabControl>
+          </Grid>
+        </Grid>
+      </Grid>
+
+      <Border x:Name="ActionDrawer"
+              Grid.Column="2"
+              Width="320"
+              IsVisible="False"
+              Background="{StaticResource CrustBrush}"
+              BorderBrush="{StaticResource Surface0Brush}"
+              BorderThickness="1,0,0,0">
+        <Grid RowDefinitions="Auto,Auto,*">
+          <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
+            <TextBlock Text="Activity" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseActionDrawerButton_Click"/>
+          </Grid>
+
+          <Border Grid.Row="1"
+                  Margin="12,0,12,8"
+                  Background="{StaticResource BaseBrush}"
+                  CornerRadius="{StaticResource RadiusMd}"
+                  BorderBrush="{StaticResource Surface0Brush}"
+                  BorderThickness="1"
+                  Padding="10,8">
+            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+              <Border Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="8,3">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Border x:Name="ActionConnectionDot"
+                          Width="7"
+                          Height="7"
+                          CornerRadius="999"
+                          Background="{StaticResource Overlay0Brush}"
+                          VerticalAlignment="Center"/>
+                  <TextBlock x:Name="ActionConnectionStateText"
+                             Text="Disconnected"
+                             FontSize="11"
+                             FontWeight="SemiBold"
+                             VerticalAlignment="Center"/>
+                </StackPanel>
+              </Border>
+              <TextBlock Grid.Column="1"
+                         Text="|"
+                         Foreground="{StaticResource Overlay0Brush}"
+                         VerticalAlignment="Center"/>
+              <TextBlock x:Name="ActionRuntimeStateText"
+                         Grid.Column="2"
+                         Text="Runtime: unknown"
+                         FontSize="11"
+                         Foreground="{StaticResource Overlay0Brush}"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+
+          <Border Grid.Row="2" Margin="12,0,12,12" Background="{StaticResource BaseBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
+            <Grid RowDefinitions="Auto,*">
+              <TextBlock Grid.Row="0" Text="Recent Activity" Margin="10,8,10,6" FontWeight="SemiBold" FontSize="12"/>
+              <ListBox x:Name="ActionAuditPreviewList" Grid.Row="1" Margin="8,0,8,8" Background="Transparent"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="2" x:Name="InputBar"
+            Background="{StaticResource CrustBrush}"
+            Padding="20,14"
+            BorderBrush="{StaticResource Surface0Brush}"
+            BorderThickness="0,1,0,0">
+      <StackPanel Spacing="8">
+        <Border x:Name="AttachmentChip"
+                IsVisible="False"
+                Background="{StaticResource Surface0Brush}"
+                CornerRadius="{StaticResource RadiusMd}"
+                BorderBrush="{StaticResource Surface1Brush}"
+                BorderThickness="1"
+                Padding="12,8">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <StackPanel Spacing="2">
+              <TextBlock x:Name="AttachmentNameText" Text="attachment.txt" FontSize="12" FontWeight="SemiBold"/>
+              <TextBlock x:Name="AttachmentMetaText" Text="0 chars" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
+            </StackPanel>
+            <Button Grid.Column="1" Content="Remove" Classes="actionBtn" Click="RemoveAttachmentButton_Click"/>
+          </Grid>
+        </Border>
+
+        <Border Background="{StaticResource BaseBrush}"
+                BorderBrush="{StaticResource Surface0Brush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource RadiusMd}"
+                Padding="10,8"
+                IsVisible="False">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Border x:Name="PttStateBadge"
+                    Background="{StaticResource Surface0Brush}"
+                    CornerRadius="999"
+                    Padding="10,4"
+                    VerticalAlignment="Top">
+              <TextBlock x:Name="PttStateText"
+                         Text="READY"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         Foreground="{StaticResource BaseBrush}"/>
+            </Border>
+
+            <StackPanel Grid.Column="1" Spacing="2">
+              <TextBlock x:Name="PttStatusText"
+                         Text="Voice ready. Hold Talk or press Ctrl+Alt+M."
+                         FontSize="11"
+                         Foreground="{StaticResource TextBrush}"
+                         TextWrapping="Wrap"/>
+              <TextBlock x:Name="PttDetailText"
+                         Text="Preparing voice controls."
+                         FontSize="10"
+                         Foreground="{StaticResource Overlay0Brush}"
+                         TextWrapping="Wrap"/>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+          <Button x:Name="AttachFileButton"
+                  Grid.Column="0"
+                  Content="+"
+                  Width="40"
+                  Height="40"
+                  FontSize="18"
+                  FontWeight="Light"
+                  Classes="actionBtn"
+                  Click="AttachFileButton_Click"/>
+          <TextBox x:Name="PromptBox"
+                   Grid.Column="1"
+                   Watermark="Type a message... (Shift+Enter for new line)"
+                   AcceptsReturn="True"
+                   MinHeight="40"
+                   MaxHeight="120"
+                   TextWrapping="Wrap"
+                   TextChanged="PromptBox_TextChanged"
+                   Classes="chatInput"/>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="6">
+            <Button x:Name="PttHoldButton"
+                    Content="Hold Talk"
+                    Classes="actionBtn"/>
+            <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
+            <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click" IsVisible="False"/>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

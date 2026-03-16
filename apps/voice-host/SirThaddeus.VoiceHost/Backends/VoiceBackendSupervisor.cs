@@ -274,7 +274,16 @@ public sealed class VoiceBackendSupervisor : IDisposable
             return _options.BackendExecutablePath;
 
         var baseDir = AppContext.BaseDirectory;
-        var candidates = new[]
+        var repoVoiceBackendDir = ResolveVoiceBackendDirectory();
+        var repoCandidates = string.IsNullOrWhiteSpace(repoVoiceBackendDir)
+            ? Array.Empty<string>()
+            : new[]
+            {
+                Path.Combine(repoVoiceBackendDir, "dist", "voice-backend.exe"),
+                Path.Combine(repoVoiceBackendDir, "start-voice-backend.ps1"),
+                Path.Combine(repoVoiceBackendDir, "server.py")
+            };
+        var packagedCandidates = new[]
         {
             // Packaged release layout
             Path.Combine(baseDir, "bin", "voice", "voice-backend.exe"),
@@ -286,18 +295,10 @@ public sealed class VoiceBackendSupervisor : IDisposable
             // Fallback layout (powershell bootstrapper)
             Path.Combine(baseDir, "voice", "start-voice-backend.ps1"),
             Path.Combine(baseDir, "start-voice-backend.ps1"),
-            // Legacy / dev fallbacks
-            Path.Combine(baseDir, "voice", "server.py"),
-            Path.GetFullPath(Path.Combine(
-                baseDir, "..", "..", "..", "..", "..",
-                "voice-backend", "start-voice-backend.ps1")),
-            Path.GetFullPath(Path.Combine(
-                baseDir, "..", "..", "..", "..", "..",
-                "voice-backend", "dist", "voice-backend.exe")),
-            Path.GetFullPath(Path.Combine(
-                baseDir, "..", "..", "..", "..", "..",
-                "voice-backend", "server.py"))
+            // Fallback layout (embedded script only)
+            Path.Combine(baseDir, "voice", "server.py")
         };
+        var candidates = repoCandidates.Concat(packagedCandidates).ToArray();
 
         foreach (var candidate in candidates)
         {
@@ -421,10 +422,11 @@ public sealed class VoiceBackendSupervisor : IDisposable
         // Compose an effective PATH from process + user + machine values so
         // child processes see recently installed tools without requiring logoff.
         var effectivePath = BuildEffectivePath();
+        var pathKey = ResolveEnvironmentKey(startInfo.Environment, "Path");
         if (!string.IsNullOrWhiteSpace(effectivePath))
-            startInfo.Environment["PATH"] = effectivePath;
+            startInfo.Environment[pathKey] = effectivePath;
 
-        var lookupPath = startInfo.Environment.TryGetValue("PATH", out var pathValue)
+        var lookupPath = startInfo.Environment.TryGetValue(pathKey, out var pathValue)
             ? pathValue
             : string.Empty;
         var ytDlpPath = ResolveExecutablePathOnPath("yt-dlp", lookupPath);
@@ -439,6 +441,21 @@ public sealed class VoiceBackendSupervisor : IDisposable
             "Prepared backend tool paths. yt-dlp={YtDlpAvailable} ffmpeg={FfmpegAvailable}",
             !string.IsNullOrWhiteSpace(ytDlpPath),
             !string.IsNullOrWhiteSpace(ffmpegPath));
+    }
+
+    private static string ResolveEnvironmentKey(
+        IDictionary<string, string?> environment,
+        string preferredKey)
+    {
+        foreach (var key in environment.Keys)
+        {
+            if (string.Equals(key, preferredKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return key;
+            }
+        }
+
+        return preferredKey;
     }
 
     private static string BuildEffectivePath()
@@ -764,6 +781,12 @@ public sealed class VoiceBackendSupervisor : IDisposable
     {
         try
         {
+            if (HasUsableLocalVoiceAssets())
+            {
+                _logger.LogDebug("Local voice backend assets already exist; skipping asset fetch.");
+                return;
+            }
+
             var repoRoot = ResolveRepoRoot();
             if (repoRoot == null)
             {
@@ -785,6 +808,33 @@ public sealed class VoiceBackendSupervisor : IDisposable
         {
             _logger.LogWarning(ex, "Asset fetch failed (non-fatal); backend may still start if assets are already present.");
         }
+    }
+
+    private bool HasUsableLocalVoiceAssets()
+    {
+        var backendPath = ResolveBackendExecutablePath();
+        if (!File.Exists(backendPath))
+        {
+            return false;
+        }
+
+        var backendDir = Path.GetDirectoryName(backendPath);
+        if (string.IsNullOrWhiteSpace(backendDir) || !Directory.Exists(backendDir))
+        {
+            return false;
+        }
+
+        var hasBootstrap = File.Exists(Path.Combine(backendDir, "start-voice-backend.ps1")) ||
+                           File.Exists(Path.Combine(backendDir, "server.py")) ||
+                           File.Exists(Path.Combine(backendDir, "voice-backend.exe"));
+        var hasSpeechModels = Directory.Exists(Path.Combine(backendDir, "stt-models"));
+        var hasTtsAssets = Directory.Exists(Path.Combine(backendDir, "piper")) ||
+                           Directory.Exists(Path.Combine(backendDir, "piper-voices")) ||
+                           Directory.Exists(Path.Combine(backendDir, "voices"));
+        var hasPythonRuntime = Directory.Exists(Path.Combine(backendDir, ".venv")) ||
+                               Directory.Exists(Path.Combine(backendDir, "runtime"));
+
+        return hasBootstrap && hasSpeechModels && hasTtsAssets && hasPythonRuntime;
     }
 
     private static string? ResolveRepoRoot()
@@ -895,3 +945,11 @@ public sealed record BackendSupervisorResult
             ExecutablePath = executablePath
         };
 }
+
+
+
+
+
+
+
+

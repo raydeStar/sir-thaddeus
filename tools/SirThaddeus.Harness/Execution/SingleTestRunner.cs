@@ -53,6 +53,7 @@ public sealed class SingleTestRunner
         HarnessFixture? loadedFixture = null;
         RecordingLlmClient? recordingLlmClient = null;
         ILlmClient llmClient;
+        HeadlessExecutionResult? headlessResult = null;
 
         IToolExecutor baseExecutor;
         if (mode is HarnessExecutionMode.Replay or HarnessExecutionMode.Stub)
@@ -77,6 +78,15 @@ public sealed class SingleTestRunner
                 {
                     llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
                     baseExecutor = new LiveToolExecutor(settings);
+                    break;
+                }
+            case HarnessExecutionMode.Headless:
+                {
+                    await using var headlessClient = new HeadlessRuntimeHarnessClient(settings);
+                    await headlessClient.InitializeAsync(cancellationToken);
+                    headlessResult = await headlessClient.ExecuteAsync(test, cancellationToken);
+                    llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
+                    baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, new LiveToolExecutor(settings));
                     break;
                 }
             case HarnessExecutionMode.Replay:
@@ -117,30 +127,47 @@ public sealed class SingleTestRunner
             modelName,
             cancellationToken);
 
-        var effectivePersonalityId = !string.IsNullOrWhiteSpace(test.PersonalityId)
-            ? test.PersonalityId
-            : settings.ActivePersonalityId;
+        AgentResponse response;
+        IReadOnlyList<TraceStep> steps;
+        IReadOnlyList<RecordedToolTurn> judgeToolTurns;
 
-        var gatekeeperClient = BuildGatekeeperClient(settings);
-        var footmanRouter = gatekeeperClient is not null ? new FastLlmFootmanRouter(gatekeeperClient, logEvent: (_, _) => { }) : null;
+        if (mode == HarnessExecutionMode.Headless && headlessResult is not null)
+        {
+            response = headlessResult.Response;
+            steps = headlessResult.Steps;
+            judgeToolTurns = headlessResult.ToolTurns;
+        }
+        else
+        {
+            var effectivePersonalityId = !string.IsNullOrWhiteSpace(test.PersonalityId)
+                ? test.PersonalityId
+                : settings.ActivePersonalityId;
 
-        var orchestrator = new AgentOrchestrator(
-            llmClient,
-            mcpClient,
-            new TestAuditLogger(),
-            settings.Llm.SystemPrompt,
-            activePersonalityId: effectivePersonalityId,
-            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings),
-            footmanRouter: footmanRouter,
-            gatekeeperLlm: gatekeeperClient);
-        orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
+            var gatekeeperClient = BuildGatekeeperClient(settings);
+            var footmanRouter = gatekeeperClient is not null ? new FastLlmFootmanRouter(gatekeeperClient, logEvent: (_, _) => { }) : null;
 
-        var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
-        traceRecorder.RecordFinal(response.Text);
-        var steps = traceRecorder.Snapshot();
+            var orchestrator = new AgentOrchestrator(
+                llmClient,
+                mcpClient,
+                new TestAuditLogger(),
+                settings.Llm.SystemPrompt,
+                activePersonalityId: effectivePersonalityId,
+                personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings),
+                footmanRouter: footmanRouter,
+                gatekeeperLlm: gatekeeperClient);
+            orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
+            orchestrator.UserLocationHint = settings.GetEffectiveUserLocation(settings.ActiveProfileId).GetResolvedLabel();
+            orchestrator.UserTimezone = settings.GetEffectiveUserLocation(settings.ActiveProfileId).GetResolvedTimezone();
+            orchestrator.PreferredUnits = settings.Weather.GetNormalizedUnitSystem();
+
+            response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
+            traceRecorder.RecordFinal(response.Text);
+            steps = traceRecorder.Snapshot();
+            judgeToolTurns = recordingExecutor.RecordedTurns;
+        }
 
         var preliminary = _scoringEngine.Score(test, response, steps, judgeResult: null);
-        var judgePacket = BuildJudgePacket(test, response, recordingExecutor.RecordedTurns, preliminary);
+        var judgePacket = BuildJudgePacket(test, response, judgeToolTurns, preliminary);
         var judgeResult = await _judgeClient.ExecuteAsync(
             _context.Options.JudgeMode,
             judgePacket,
@@ -233,6 +260,7 @@ public sealed class SingleTestRunner
         return test.Mode.Trim().ToLowerInvariant() switch
         {
             "live" => HarnessExecutionMode.Live,
+            "headless" => HarnessExecutionMode.Headless,
             "replay" => HarnessExecutionMode.Replay,
             "stub" => HarnessExecutionMode.Stub,
             _ => options.Mode
@@ -307,6 +335,13 @@ public sealed class SingleTestRunner
             }
         };
     }
+}
+
+internal sealed record HeadlessExecutionResult
+{
+    public required AgentResponse Response { get; init; }
+    public required IReadOnlyList<TraceStep> Steps { get; init; }
+    public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
 }
 
 public sealed record SuiteRunContext

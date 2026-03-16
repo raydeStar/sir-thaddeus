@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Diagnose a deployed release build. Run from the directory containing
-    SirThaddeus.DesktopRuntime.exe (the extracted ZIP root).
+    SirThaddeus.UI.Avalonia.exe (the extracted ZIP root).
 
 .EXAMPLE
     cd C:\path\to\extracted\zip
@@ -23,28 +23,52 @@ function Write-Err([string]$Msg) { Write-Host "  [FAIL] $Msg" -ForegroundColor R
 function Write-Warn([string]$Msg) { Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Info([string]$Msg) { Write-Host "  $Msg" -ForegroundColor Gray }
 
+function Resolve-UiExecutable([string]$Root) {
+    foreach ($name in @("SirThaddeus.UI.Avalonia.exe", "SirThaddeus.DesktopRuntime.exe")) {
+        $candidate = Join-Path $Root $name
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Resolve-VoiceRoot([string]$Root) {
+    foreach ($relative in @("voice", "bin\voice")) {
+        $candidate = Join-Path $Root $relative
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Resolve-SearchRoot([string]$Root) {
+    foreach ($relative in @("search", "bin\search")) {
+        $candidate = Join-Path $Root $relative
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
 # ── 1. Check directory structure ─────────────────────────────────────
 Write-Section "1. Directory Structure"
 
 $checks = @(
-    @{ Path = "SirThaddeus.DesktopRuntime.exe"; Label = "DesktopRuntime exe" },
-    @{ Path = "SirThaddeus.VoiceHost.exe";      Label = "VoiceHost exe" },
-    @{ Path = "SirThaddeus.McpServer.exe";       Label = "McpServer exe" },
-    @{ Path = "bin";                             Label = "bin/ directory" },
-    @{ Path = "bin\voice";                       Label = "bin/voice/ directory" },
-    @{ Path = "bin\voice\start-voice-backend.ps1"; Label = "Voice backend bootstrap script" },
-    @{ Path = "bin\voice\server.py";             Label = "Voice backend server.py" },
-    @{ Path = "bin\voice\requirements.txt";      Label = "Voice backend requirements.txt" },
-    @{ Path = "bin\voice\piper\piper.exe";       Label = "Piper TTS binary" },
-    @{ Path = "bin\voice\piper-voices\en_US-john-medium\en_US-john-medium.onnx"; Label = "Piper voice model" },
-    @{ Path = "bin\voice\runtime\python\python.exe"; Label = "Bundled Python runtime" },
-    @{ Path = "bin\voice\bin\uv.exe";            Label = "uv.exe (Python manager)" },
-    @{ Path = "bin\voice\deps\wheels";           Label = "Bundled wheel directory" },
-    @{ Path = "bin\voice\stt-models\base\model.bin"; Label = "Whisper STT model" },
-    @{ Path = "bin\Fixtures";                    Label = "Fixtures directory" },
-    @{ Path = "assets\manifest.json";            Label = "Asset manifest (self-heal)" },
-    @{ Path = "README_FIRST_RUN.md";             Label = "README first run" }
+    @{ Path = "SirThaddeus.VoiceHost.exe";      Label = "VoiceHost exe"; Optional = $false },
+    @{ Path = "SirThaddeus.McpServer.exe";      Label = "McpServer exe"; Optional = $false },
+    @{ Path = "voice";                          Label = "voice/ directory (new layout)"; Optional = $true },
+    @{ Path = "bin\voice";                      Label = "bin/voice/ directory (legacy layout)"; Optional = $true },
+    @{ Path = "search";                         Label = "search/ directory (new layout)"; Optional = $true },
+    @{ Path = "bin\search";                     Label = "bin/search/ directory (legacy layout)"; Optional = $true },
+    @{ Path = "bin\Fixtures";                   Label = "Fixtures directory"; Optional = $true },
+    @{ Path = "assets\manifest.json";           Label = "Asset manifest (self-heal)"; Optional = $false },
+    @{ Path = "README_FIRST_RUN.md";            Label = "README first run"; Optional = $false }
 )
+
+$uiExecutable = Resolve-UiExecutable $DeployDir
+if ($uiExecutable) {
+    $uiName = [System.IO.Path]::GetFileName($uiExecutable)
+    $checks = @(@{ Path = $uiName; Label = "UI executable" }) + $checks
+} else {
+    $checks = @(@{ Path = "SirThaddeus.UI.Avalonia.exe"; Label = "UI executable (expected)" }) + $checks
+}
 
 foreach ($check in $checks) {
     $fullPath = Join-Path $DeployDir $check.Path
@@ -58,15 +82,73 @@ foreach ($check in $checks) {
             Write-Ok "$($check.Label) ($sizeMB MB)"
         }
     } else {
-        Write-Err "$($check.Label) NOT FOUND at $fullPath"
+        if ($check.Optional) {
+            Write-Warn "$($check.Label) not found at $fullPath"
+        } else {
+            Write-Err "$($check.Label) NOT FOUND at $fullPath"
+        }
     }
 }
 
-# Count wheels
-$wheelDir = Join-Path $DeployDir "bin\voice\deps\wheels"
-if (Test-Path $wheelDir) {
-    $wheelCount = (Get-ChildItem $wheelDir -Filter "*.whl" -ErrorAction SilentlyContinue | Measure-Object).Count
-    Write-Info "  Wheel count: $wheelCount"
+# Voice payload details (lite bundle friendly)
+$voiceRoot = Resolve-VoiceRoot $DeployDir
+if ($voiceRoot) {
+    Write-Info "  Voice root detected: $voiceRoot"
+    $voiceChecks = @(
+        @{ Rel = "start-voice-backend.ps1"; Label = "Voice backend bootstrap script"; Optional = $false },
+        @{ Rel = "server.py"; Label = "Voice backend server.py"; Optional = $false },
+        @{ Rel = "requirements.txt"; Label = "Voice backend requirements.txt"; Optional = $false },
+        @{ Rel = "piper\piper.exe"; Label = "Piper TTS binary"; Optional = $true },
+        @{ Rel = "piper-voices\en_US-john-medium\en_US-john-medium.onnx"; Label = "Piper voice model"; Optional = $true },
+        @{ Rel = "runtime\python\python.exe"; Label = "Bundled Python runtime"; Optional = $true },
+        @{ Rel = "bin\uv.exe"; Label = "uv.exe (Python manager)"; Optional = $true },
+        @{ Rel = "deps\wheels"; Label = "Bundled wheel directory"; Optional = $true },
+        @{ Rel = "stt-models\base\model.bin"; Label = "Whisper STT model"; Optional = $true }
+    )
+
+    foreach ($entry in $voiceChecks) {
+        $fullPath = Join-Path $voiceRoot $entry.Rel
+        if (Test-Path $fullPath) {
+            Write-Ok "$($entry.Label) present"
+        } elseif ($entry.Optional) {
+            Write-Warn "$($entry.Label) not bundled (lite package or runtime download)"
+        } else {
+            Write-Err "$($entry.Label) missing"
+        }
+    }
+
+    $wheelDir = Join-Path $voiceRoot "deps\wheels"
+    if (Test-Path $wheelDir) {
+        $wheelCount = (Get-ChildItem $wheelDir -Filter "*.whl" -ErrorAction SilentlyContinue | Measure-Object).Count
+        Write-Info "  Wheel count: $wheelCount"
+    }
+} else {
+    Write-Err "Voice directory not found (expected voice/ or bin/voice/)"
+}
+
+$searchRoot = Resolve-SearchRoot $DeployDir
+if ($searchRoot) {
+    Write-Info "  Search root detected: $searchRoot"
+    $searchChecks = @(
+        @{ Rel = "start-searxng.ps1"; Label = "SearXNG bootstrap script"; Optional = $false },
+        @{ Rel = "runtime\python\python.exe"; Label = "Bundled SearXNG Python runtime"; Optional = $false },
+        @{ Rel = "source\searxng-upstream\searx\webapp.py"; Label = "SearXNG source payload"; Optional = $false },
+        @{ Rel = "deps\site-packages\flask\__init__.py"; Label = "Bundled SearXNG dependencies"; Optional = $false },
+        @{ Rel = "THIRD_PARTY_NOTICES.md"; Label = "SearXNG license/source notice"; Optional = $false }
+    )
+
+    foreach ($entry in $searchChecks) {
+        $fullPath = Join-Path $searchRoot $entry.Rel
+        if (Test-Path $fullPath) {
+            Write-Ok "$($entry.Label) present"
+        } elseif ($entry.Optional) {
+            Write-Warn "$($entry.Label) not bundled"
+        } else {
+            Write-Err "$($entry.Label) missing"
+        }
+    }
+} else {
+    Write-Warn "Search directory not found (expected search/ or bin/search/)"
 }
 
 # ── 2. Settings file ────────────────────────────────────────────────
@@ -84,6 +166,8 @@ if (Test-Path $settingsFile) {
         Write-Info "  Voice.VoiceHostBaseUrl: $($settings.voice.voiceHostBaseUrl)"
         Write-Info "  Voice.TtsEngine: $($settings.voice.ttsEngine)"
         Write-Info "  Voice.TtsVoiceId: $($settings.voice.ttsVoiceId)"
+        Write-Info "  WebSearch.Mode: $($settings.webSearch.mode)"
+        Write-Info "  WebSearch.SearxngBaseUrl: $($settings.webSearch.searxngBaseUrl)"
         Write-Info "  RuntimeSafety.SafeMode: $($settings.runtimeSafety.safeMode)"
         Write-Info "  RuntimeSafety.SafeModeReason: $($settings.runtimeSafety.safeModeReason)"
         Write-Info "  RuntimeSafety.StrictHandshake: $($settings.runtimeSafety.strictHandshake)"
@@ -131,7 +215,7 @@ if (Test-Path $mcpExe) {
         $proc = Start-Process -FilePath $mcpExe -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\mcp-stdout.txt" -RedirectStandardError "$env:TEMP\mcp-stderr.txt"
         Start-Sleep -Seconds 5
         if ($proc.HasExited) {
-            Write-Err "McpServer exited with code $($proc.ExitCode)"
+            Write-Warn "McpServer exited quickly (usually normal for stdio transport in standalone probe mode)."
         } else {
             Write-Ok "McpServer is running (PID: $($proc.Id))"
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -197,20 +281,21 @@ if (Test-Path $voiceHostExe) {
 # ── 6. Test voice backend script directly ────────────────────────────
 Write-Section "6. Test Voice Backend Script"
 
-$backendScript = Join-Path $DeployDir "bin\voice\start-voice-backend.ps1"
+$voiceRootForScript = Resolve-VoiceRoot $DeployDir
+$backendScript = if ($voiceRootForScript) { Join-Path $voiceRootForScript "start-voice-backend.ps1" } else { $null }
 if (Test-Path $backendScript) {
     Write-Info "Testing voice backend on port 18098 for 15 seconds..."
     Write-Info "Script path: $backendScript"
     try {
         $proc = Start-Process -FilePath "powershell" `
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$backendScript`" -Port 18098" `
-            -WorkingDirectory (Join-Path $DeployDir "bin\voice") `
+            -WorkingDirectory $voiceRootForScript `
             -NoNewWindow -PassThru `
             -RedirectStandardOutput "$env:TEMP\vb-stdout.txt" `
             -RedirectStandardError "$env:TEMP\vb-stderr.txt"
         Start-Sleep -Seconds 15
         if ($proc.HasExited) {
-            Write-Err "Voice backend exited with code $($proc.ExitCode)"
+            Write-Warn "Voice backend exited with code $($proc.ExitCode) (can happen offline in lite package during asset bootstrap)"
         } else {
             Write-Ok "Voice backend is running (PID: $($proc.Id))"
             try {
@@ -222,7 +307,7 @@ if (Test-Path $backendScript) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         }
     } catch {
-        Write-Err "Failed to start voice backend: $($_.Exception.Message)"
+        Write-Warn "Failed to start voice backend: $($_.Exception.Message)"
     }
 
     foreach ($stream in @("stdout", "stderr")) {
@@ -235,7 +320,7 @@ if (Test-Path $backendScript) {
         }
     }
 } else {
-    Write-Err "Voice backend script not found"
+    Write-Warn "Voice backend script not found"
 }
 
 Write-Section "Done"

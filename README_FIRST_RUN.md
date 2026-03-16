@@ -6,7 +6,7 @@ This package is a self-contained Windows build. You do not need to install the .
 
 1. **Download** the release ZIP from the [Releases](https://github.com/raydeStar/sir-thaddeus/releases) page.
 2. **Unzip** to a local folder, for example `C:\Apps\SirThaddeus\`.
-3. **Run** `SirThaddeus.DesktopRuntime.exe`.
+3. **Run** `SirThaddeus.UI.Avalonia.exe`.
 
 That's it. Everything else happens automatically.
 
@@ -53,6 +53,9 @@ Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 3. Confirm an audit entry was written (see paths below).
 
 The MCP tool server (`SirThaddeus.McpServer.exe`) starts automatically as a child process when required.
+
+If the package includes a bundled SearXNG sidecar under `search\`, web search can auto-start it on `http://localhost:8080` when `webSearch.mode` is `auto` or `searxng`.
+The bundled SearXNG source and license notice are included under `search\source\searxng-upstream\` and `search\THIRD_PARTY_NOTICES.md`.
 
 ## Local data paths
 

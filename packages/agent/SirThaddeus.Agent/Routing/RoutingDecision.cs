@@ -47,6 +47,17 @@ public sealed record RoutingDecision
     [JsonPropertyName("reasonCode")]
     public string ReasonCode { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Typed block-reason parsed from <see cref="ReasonCode"/>.
+    /// When the Footman wants to veto a deterministic route, this must
+    /// be a value accepted by
+    /// <see cref="FootmanBlockReasonPolicy.IsValidBlockForTier"/>.
+    /// Populated during parse/validate in
+    /// <see cref="FastLlmFootmanRouter"/>.
+    /// </summary>
+    [JsonIgnore]
+    public FootmanBlockReason BlockReason { get; init; } = FootmanBlockReason.None;
+
     // ── Derived properties (not serialized from Footman) ─────────────
 
     /// <summary>

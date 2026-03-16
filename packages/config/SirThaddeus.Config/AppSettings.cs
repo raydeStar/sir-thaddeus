@@ -686,8 +686,10 @@ public sealed record WebSearchSettings
 {
     /// <summary>
     /// Provider selection mode:
-    ///   "auto"     — probe SearxNG, fall back to DuckDuckGo (default)
+    ///   "auto"       — prefer SearxNG, then hosted Search API, then Google News
     ///   "searxng"  — SearxNG only (error if unavailable)
+    ///   "search_api" — hosted Search API only
+    ///   "api"        — alias for search_api
     ///   "ddg_html" — DuckDuckGo HTML only (no SearxNG probe)
     ///   "manual"   — disable search; prompt user to paste URLs
     /// </summary>
@@ -700,6 +702,61 @@ public sealed record WebSearchSettings
     /// </summary>
     [JsonPropertyName("searxngBaseUrl")]
     public string SearxngBaseUrl { get; init; } = "http://localhost:8080";
+
+    /// <summary>
+    /// If true, runtime will try to start a local SearxNG process when
+    /// webSearch.mode is "auto" or "searxng" and the base URL is loopback.
+    /// </summary>
+    [JsonPropertyName("searxngAutoStart")]
+    public bool SearxngAutoStart { get; init; } = true;
+
+    /// <summary>
+    /// Launch command for managed SearxNG.
+    /// "auto" tries common local commands and bundled executables.
+    /// Any other value is treated as the executable path/command.
+    /// </summary>
+    [JsonPropertyName("searxngLaunchCommand")]
+    public string SearxngLaunchCommand { get; init; } = "auto";
+
+    /// <summary>
+    /// Arguments for managed SearxNG launch.
+    /// "auto" applies default host/port args for the selected command.
+    /// Supports tokens: {host}, {port}, {baseUrl}.
+    /// </summary>
+    [JsonPropertyName("searxngLaunchArguments")]
+    public string SearxngLaunchArguments { get; init; } = "auto";
+
+    /// <summary>
+    /// Startup timeout for managed SearxNG in milliseconds.
+    /// </summary>
+    [JsonPropertyName("searxngStartupTimeoutMs")]
+    public int SearxngStartupTimeoutMs { get; init; } = 120_000;
+
+    /// <summary>
+    /// Optional hosted Search API provider label.
+    /// Currently "searchapi" is supported.
+    /// </summary>
+    [JsonPropertyName("searchApiProvider")]
+    public string SearchApiProvider { get; init; } = "searchapi";
+
+    /// <summary>
+    /// API key for the hosted Search API fallback.
+    /// Empty means the hosted fallback is disabled.
+    /// </summary>
+    [JsonPropertyName("searchApiKey")]
+    public string SearchApiKey { get; init; } = "";
+
+    /// <summary>
+    /// Search API endpoint base URL.
+    /// </summary>
+    [JsonPropertyName("searchApiBaseUrl")]
+    public string SearchApiBaseUrl { get; init; } = "https://www.searchapi.io/api/v1/search";
+
+    /// <summary>
+    /// Search API engine identifier. Defaults to Google's organic search.
+    /// </summary>
+    [JsonPropertyName("searchApiEngine")]
+    public string SearchApiEngine { get; init; } = "google";
 
     /// <summary>
     /// HTTP timeout for search requests in milliseconds.

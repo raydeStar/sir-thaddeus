@@ -6,14 +6,14 @@ public static class CommandLineParser
 {
     public static string HelpText => """
 Usage:
-  harness run --suite <name> --mode live|replay|stub --max-iters N --min-score S [options]
+    harness run --suite <name> --mode live|headless|replay|stub --max-iters N --min-score S [options]
   harness record --suite <name> [options]
   harness replay --suite <name> [options]
-  harness smoke --mode live|replay|stub [options]
+    harness smoke --mode live|headless|replay|stub [options]
 
 Options:
   --suite <name>                 Suite name (directory under tools/SirThaddeus.Harness/Suites)
-  --mode <live|replay|stub>      Execution mode (command defaults may override)
+    --mode <live|headless|replay|stub> Execution mode (command defaults may override)
   --max-iters <N>                Max iteration count for score-gated runs (default: 1)
   --min-score <S>                Override minimum score threshold for all tests
   --allow-workspace-edits        Allow auto-iteration patch application
@@ -162,6 +162,7 @@ Options:
         return raw.Trim().ToLowerInvariant() switch
         {
             "live" => HarnessExecutionMode.Live,
+            "headless" => HarnessExecutionMode.Headless,
             "replay" => HarnessExecutionMode.Replay,
             "stub" => HarnessExecutionMode.Stub,
             _ => throw new CommandLineException($"Invalid --mode value '{raw}'.")

@@ -42,7 +42,7 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 Use these in your repository "About" settings:
 
-`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `desktop-runtime`, `tool-orchestration`, `permissioned-ai`
+`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `avalonia-ui`, `headless-runtime`, `tool-orchestration`, `permissioned-ai`
 
 ---
 
@@ -103,6 +103,8 @@ That same interaction model applies throughout the runtime:
 - **Reasoning pipeline** for breaking down logic questions step by step
 - **Small-model support** with routing assistance for better tool use
 - **Lightweight document reading** for text-based context
+- **Conversation-scoped memory retrieval** for better continuity across multi-turn chats
+- **Automatic history persistence** for chat and briefing context in memory-backed flows
 
 ### Permissioned Tooling via MCP
 
@@ -180,8 +182,12 @@ dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tool
 ```
 
 MCP now has a split tool model:
-- Core tools run cross-platform (`net8.0`)
+- Core tools run cross-platform (`net10.0`)
 - Windows-only tools (screen capture / OCR) load only on Windows
+
+Runtime API composition has also been modularized into focused endpoint groups
+(`core`, `memory`, `runs`, `profiles`, `personalities`) to reduce regression risk
+and improve production maintainability.
 
 ---
 
@@ -226,9 +232,9 @@ flowchart LR
     Repair[Targeted Repair]
   end
 
-  subgraph frontend [Layer 2: Interface - apps/desktop-runtime]
+  subgraph frontend [Layer 2: Interface - apps/ui-avalonia + apps/headless-runtime]
     Tray[System Tray]
-    Overlay[WPF Overlay]
+    Overlay[Avalonia UI]
     PTT[Audio Input]
     Playback[Audio Playback]
     Palette[Command Palette]
@@ -282,7 +288,7 @@ flowchart LR
 | Layer | Project(s) | Responsibility | Talks to |
 | --- | --- | --- | --- |
 | Layer 1: Loop | `packages/agent` | Route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
-| Layer 2: Interface | `apps/desktop-runtime` | Tray, overlay, hotkeys, command palette, push-to-talk UX | Loop, Voice |
+| Layer 2: Interface | `apps/ui-avalonia`, `apps/headless-runtime` | Avalonia UI + terminal runtime entry points | Loop, Voice |
 | Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
 | Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
 | Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
@@ -294,7 +300,8 @@ flowchart LR
 ```text
 sir-thaddeus/
 |-- apps/
-|   |-- desktop-runtime/
+|   |-- ui-avalonia/
+|   |-- headless-runtime/
 |   |-- voice-host/
 |   |-- voice-backend/
 |   `-- mcp-server/

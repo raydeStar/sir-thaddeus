@@ -68,8 +68,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
 
         lock (_writeLock)
         {
-            RotateIfNeeded(line);
-            File.AppendAllText(_filePath, line, Encoding.UTF8);
+            TryAppendLine(line);
         }
     }
 
@@ -88,8 +87,7 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         {
             lock (_writeLock)
             {
-                RotateIfNeeded(line);
-                File.AppendAllText(_filePath, line, Encoding.UTF8);
+                TryAppendLine(line);
             }
         }, cancellationToken);
     }
@@ -163,6 +161,21 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         }
     }
 
+    private void TryAppendLine(string lineToAppend)
+    {
+        try
+        {
+            RotateIfNeeded(lineToAppend);
+            File.AppendAllText(_filePath, lineToAppend, Encoding.UTF8);
+        }
+        catch (Exception ex) when (IsNonFatalWriteException(ex))
+        {
+            // Fail open: audit persistence issues must not crash the runtime.
+            // This keeps agent/tool execution alive even if the file is locked
+            // or temporarily inaccessible.
+        }
+    }
+
     private void RotateIfNeeded(string lineToAppend)
     {
         EnsureLogDirectoryExists();
@@ -204,4 +217,9 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
         if (File.Exists(_filePath))
             File.Move(_filePath, $"{_filePath}.1", overwrite: true);
     }
+
+    private static bool IsNonFatalWriteException(Exception ex)
+        => ex is IOException
+        || ex is UnauthorizedAccessException
+        || ex is System.Security.SecurityException;
 }

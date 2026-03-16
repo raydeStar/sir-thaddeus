@@ -376,6 +376,79 @@ public class ToolLoopExecutorTests
         Assert.Equal("I do not know about real-time events right now.", response.Text);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenWebToolTransportDrops_UsesBestEffortOfflineFallback()
+    {
+        var llmCallCount = 0;
+        IReadOnlyList<ToolDefinition>? fallbackTools = null;
+        IReadOnlyList<ChatMessage>? fallbackMessages = null;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"latest weather","recency":"day"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            fallbackTools = tools;
+            fallbackMessages = messages;
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Based on built-in knowledge, weather patterns vary by region.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "Error: Tool execution failed — The pipe is being closed.",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("what is the weather right now?")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal("Based on built-in knowledge, weather patterns vary by region.", response.Text);
+        Assert.Null(fallbackTools);
+        Assert.NotNull(fallbackMessages);
+        Assert.Contains(
+            fallbackMessages!,
+            m => m.Role.Equals("system", StringComparison.OrdinalIgnoreCase) &&
+                 m.Content?.Contains("tool-backed lookup is offline", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
     <ProjectReference Include="..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+    <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
     <ProjectReference Include="..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
   </ItemGroup>
 
@@ -48,23 +49,23 @@
   <!-- Compile VoiceHost process manager directly for focused supervision tests
        without introducing a WPF runtime dependency in this test assembly. -->
   <ItemGroup>
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Process.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Process.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.Process.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Session.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Session.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.Session.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Diagnostics.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostProcessManager.Diagnostics.cs"
              Link="DesktopRuntime\VoiceHostProcessManager.Diagnostics.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\VoiceHostModels.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\VoiceHostModels.cs"
              Link="DesktopRuntime\VoiceHostModels.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\YouTubeJobsHttpClient.cs"
              Link="DesktopRuntime\YouTubeJobsHttpClient.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\DeviceLocationProviders.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\DeviceLocationProviders.cs"
              Link="DesktopRuntime\DeviceLocationProviders.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\LocationAwareAgentOrchestrator.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\LocationAwareAgentOrchestrator.cs"
              Link="DesktopRuntime\LocationAwareAgentOrchestrator.cs" />
-    <Compile Include="..\..\apps\desktop-runtime\SirThaddeus.DesktopRuntime\Services\AttachedDocumentContext.cs"
+    <Compile Include="..\..\LEGACY\SirThaddeus.DesktopRuntime\Services\AttachedDocumentContext.cs"
              Link="DesktopRuntime\AttachedDocumentContext.cs" />
   </ItemGroup>
 

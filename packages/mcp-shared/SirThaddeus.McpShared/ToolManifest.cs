@@ -14,7 +14,7 @@ namespace SirThaddeus.McpShared;
 //   - Documentation generation
 //   - Tests (verify manifest completeness and consistency)
 //
-// This is a cross-platform (net8.0) package so tests can reference it
+// This is a cross-platform (net10.0) package so tests can reference it
 // without depending on the Windows-only MCP server project.
 // ─────────────────────────────────────────────────────────────────────────
 

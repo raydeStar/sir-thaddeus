@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -36,8 +36,15 @@ public enum LookupModeHint
     DeepDive = 3
 }
 
-public sealed class SearchOrchestrator
+public sealed partial class SearchOrchestrator
 {
+    private enum SummaryFallbackKind
+    {
+        Generic = 0,
+        News = 1,
+        FactFind = 2
+    }
+
     private readonly ILlmClient       _llm;
     private readonly IMcpToolClient   _mcp;
     private readonly IAuditLogger     _audit;
@@ -70,12 +77,94 @@ public sealed class SearchOrchestrator
 
     // ── Bounds ───────────────────────────────────────────────────────
     private const int DefaultMaxResults    = 5;
+    private const int LocalBusinessTargetResults = 10;
+    private const int LocalBusinessFetchMaxResults = 20;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 1024;
     private const int MaxTokensWebSummaryRetry = 2048;
     private const int MinRichContentLength = 1500;
     private static readonly TimeSpan FinanceQuoteFreshnessMaxAge = TimeSpan.FromHours(6);
+    private static readonly string[] UnsupportedCapabilityClaimMarkers =
+    [
+        "cant access",
+        "can't access",
+        "cannot access",
+        "cant browse",
+        "cant search",
+        "cannot search the",
+        "cannot perform live",
+        "browse the web",
+        "browse live news feeds",
+        "web access tools",
+        "direct web access",
+        "currently unavailable",
+        "real-time data",
+        "real-time events",
+        "real-time updates",
+        "knowledge is static",
+        "internal knowledge base",
+        "have no access to",
+        "no access to current",
+        "conversation history",
+        "documents and snippets",
+        "shared memory context",
+        "browsing tools"
+    ];
+    private static readonly Dictionary<string, string> StateCodeToName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["AL"] = "Alabama",
+        ["AK"] = "Alaska",
+        ["AZ"] = "Arizona",
+        ["AR"] = "Arkansas",
+        ["CA"] = "California",
+        ["CO"] = "Colorado",
+        ["CT"] = "Connecticut",
+        ["DE"] = "Delaware",
+        ["FL"] = "Florida",
+        ["GA"] = "Georgia",
+        ["HI"] = "Hawaii",
+        ["ID"] = "Idaho",
+        ["IL"] = "Illinois",
+        ["IN"] = "Indiana",
+        ["IA"] = "Iowa",
+        ["KS"] = "Kansas",
+        ["KY"] = "Kentucky",
+        ["LA"] = "Louisiana",
+        ["ME"] = "Maine",
+        ["MD"] = "Maryland",
+        ["MA"] = "Massachusetts",
+        ["MI"] = "Michigan",
+        ["MN"] = "Minnesota",
+        ["MS"] = "Mississippi",
+        ["MO"] = "Missouri",
+        ["MT"] = "Montana",
+        ["NE"] = "Nebraska",
+        ["NV"] = "Nevada",
+        ["NH"] = "New Hampshire",
+        ["NJ"] = "New Jersey",
+        ["NM"] = "New Mexico",
+        ["NY"] = "New York",
+        ["NC"] = "North Carolina",
+        ["ND"] = "North Dakota",
+        ["OH"] = "Ohio",
+        ["OK"] = "Oklahoma",
+        ["OR"] = "Oregon",
+        ["PA"] = "Pennsylvania",
+        ["RI"] = "Rhode Island",
+        ["SC"] = "South Carolina",
+        ["SD"] = "South Dakota",
+        ["TN"] = "Tennessee",
+        ["TX"] = "Texas",
+        ["UT"] = "Utah",
+        ["VT"] = "Vermont",
+        ["VA"] = "Virginia",
+        ["WA"] = "Washington",
+        ["WV"] = "West Virginia",
+        ["WI"] = "Wisconsin",
+        ["WY"] = "Wyoming",
+        ["DC"] = "District of Columbia"
+    };
 
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
@@ -88,6 +177,8 @@ public sealed class SearchOrchestrator
         "explaining why it matters (use the phrase 'matters because'). " +
         "Note where sources agree or differ. " +
         "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or web access. " +
+        "The provided results already contain the current information you need. " +
         "Do NOT invent or guess details not in the results. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. bullet count, headings, numbered list), follow it exactly.";
@@ -105,6 +196,8 @@ public sealed class SearchOrchestrator
         "local content, say so honestly: note that no local stories were " +
         "found in the results and present the top headlines instead. " +
         "No URLs. ONLY use facts from the provided sources. " +
+        "Do NOT apologize or claim you lack internet, real-time data, or web access. " +
+        "The provided results already contain the current information you need. " +
         "Do NOT invent or guess details not in the results.";
 
     private const string FactFindSummaryInstruction =
@@ -243,367 +336,6 @@ public sealed class SearchOrchestrator
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // Pipeline 1: NEWS_AGGREGATE
-    // ─────────────────────────────────────────────────────────────────
-
-    private async Task<AgentResponse> ExecuteNewsAsync(
-        string userMessage,
-        string memoryPackText,
-        IReadOnlyList<ChatMessage> history,
-        List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
-    {
-        // ── 1. Entity resolution (optional for news) ─────────────────
-        var entity = await _entityResolver.ResolveAsync(
-            userMessage, Session, toolCallsMade, ct);
-
-        // ── 2. Query construction (news-mode) ────────────────────────
-        var query = await _queryBuilder.BuildAsync(
-            SearchMode.NewsAggregate, userMessage, entity, Session, history, ct);
-
-        // ── 3. web_search via MCP ────────────────────────────────────
-        var toolResult = await CallWebSearchAsync(
-            query.Query, query.Recency, toolCallsMade, ct,
-            originalUserMessage: userMessage);
-
-        if (string.IsNullOrWhiteSpace(toolResult))
-        {
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                "Web search returned no results.",
-                ct);
-        }
-        if (LooksLikeNoResultsPayload(toolResult))
-        {
-            return await BuildNoResultsFallbackAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
-        }
-        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } newsFailure)
-        {
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                newsFailure.Text,
-                ct);
-        }
-
-        // ── 4. Parse results into SourceItems ────────────────────────
-        var sources = ParseSourcesFromToolResult(toolResult);
-        var isMarketQuoteRequest =
-            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
-            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
-        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
-            userMessage,
-            query.Query,
-            sources,
-            toolCallsMade);
-        if (financeFreshnessFailure is not null)
-            return financeFreshnessFailure;
-
-        if (sources.Count == 0)
-        {
-            return await BuildNoResultsFallbackAsync(
-                userMessage,
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
-        }
-
-        // ── 5. Story clustering ──────────────────────────────────────
-        var clusters = StoryClustering.Cluster(sources);
-        Session.LastClusters = clusters;
-
-        // Set PrimarySourceId to the first item of the largest cluster
-        if (clusters.Count > 0 && clusters[0].Sources.Count > 0)
-            Session.PrimarySourceId = clusters[0].Sources[0].SourceId;
-
-        // ── 6. Record in session ─────────────────────────────────────
-        Session.RecordSearchResults(
-            SearchMode.NewsAggregate, query.Query, query.Recency,
-            sources, DateTimeOffset.UtcNow);
-
-        // ── 7. Summarize via LLM ─────────────────────────────────────
-        var summaryInput = "[Web search results — use these facts to answer the user's question]\n" +
-                           StripSourcesJson(toolResult);
-
-        var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
-                          LocalNewsSignalRegex.IsMatch(userMessage);
-
-        var instruction = isMarketQuoteRequest
-            ? memoryPackText + FinanceQuoteSummaryInstruction
-            : isLocalNews
-                ? memoryPackText + LocalNewsSummaryInstruction
-                : memoryPackText + NewsSummaryInstruction;
-
-        return await SummarizeAndRespond(
-            summaryInput, instruction,
-            history, toolCallsMade, ct);
-    }
-
-    // ─────────────────────────────────────────────────────────────────
-    // Pipeline 2: WEB_FACTFIND
-    // ─────────────────────────────────────────────────────────────────
-
-    private async Task<AgentResponse> ExecuteFactFindAsync(
-        string userMessage,
-        string memoryPackText,
-        IReadOnlyList<ChatMessage> history,
-        List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
-    {
-        if (LooksLikeMontySwallowPrompt(userMessage))
-        {
-            return new AgentResponse
-            {
-                Text = "What do you mean - an African or a European swallow?",
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = 0
-            };
-        }
-
-        // ── 0. Local business + proximity with no location hint ──────
-        // When the user asks about businesses "nearby" but hasn't set a
-        // location, return guidance instead of hallucinating fake results.
-        var lowerMessage = (userMessage ?? "").Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(UserLocationHint) &&
-            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage))
-        {
-            _audit.Append(new AuditEvent
-            {
-                Actor  = "search",
-                Action = "LOCAL_BUSINESS_NO_LOCATION",
-                Result = "guidance_returned",
-                Details = new Dictionary<string, object>
-                {
-                    ["user_message"] = Truncate(userMessage ?? "", 80)
-                }
-            });
-
-            return new AgentResponse
-            {
-                Text = "I need a location to search for local businesses. " +
-                       "You can set your location in **Settings → Profile**, " +
-                       "or include a city in your request " +
-                       "(e.g., \"florists in Portland, OR\").",
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = 0
-            };
-        }
-
-        // ── 1. Entity resolution ──────────────────────────────────────
-        // Skip for local business discovery ("bakery nearby") — there's no
-        // named entity to canonicalize, and the LLM + web_search cost is
-        // wasted overhead (5-15s on a local model).
-        var isLocalBusinessQuery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
-        EntityResolver.ResolvedEntity? entity = null;
-        if (!isLocalBusinessQuery)
-        {
-            entity = await _entityResolver.ResolveAsync(
-                userMessage ?? "", Session, toolCallsMade, ct);
-        }
-        else
-        {
-            _audit.Append(new AuditEvent
-            {
-                Actor  = "search",
-                Action = "SKIP_ENTITY_RESOLUTION",
-                Result = "local_business_discovery"
-            });
-        }
-
-        // ── 2. Query construction (factfind-mode) ────────────────────
-        var query = await _queryBuilder.BuildAsync(
-            SearchMode.WebFactFind, userMessage ?? "", entity, Session, history, ct);
-
-        // ── 3. web_search via MCP ────────────────────────────────────
-        var toolResult = await CallWebSearchAsync(
-            query.Query, query.Recency, toolCallsMade, ct,
-            originalUserMessage: userMessage);
-
-        var isNoResults = string.IsNullOrWhiteSpace(toolResult) || 
-                          LooksLikeNoResultsPayload(toolResult) || 
-                          WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null;
-
-        if (!isNoResults)
-        {
-            var rawSources = ParseSourcesFromToolResult(toolResult);
-            if (rawSources.Count == 0)
-                isNoResults = true;
-        }
-
-        if (isNoResults && isLocalBusinessQuery)
-        {
-            _audit.Append(new AuditEvent { Actor = "search", Action = "SEARCH_FALLBACK", Result = "browser_navigate_local_business" });
-            var fallback = await CallBrowserSearchFallbackAsync(query.Query, toolCallsMade, ct);
-            if (!string.IsNullOrWhiteSpace(fallback))
-            {
-                toolResult = fallback!;
-                isNoResults = false;
-            }
-        }
-
-        if (isNoResults)
-        {
-            if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
-            {
-                return await BuildOfflineReasoningResponseAsync(
-                    userMessage ?? "", memoryPackText, history, toolCallsMade, factFailure.Text, ct);
-            }
-
-            if (LooksLikeNoResultsPayload(toolResult))
-            {
-                return await BuildNoResultsFallbackAsync(
-                    userMessage ?? "", memoryPackText, history, toolCallsMade, ct);
-            }
-
-            return await BuildOfflineReasoningResponseAsync(
-                userMessage ?? "", memoryPackText, history, toolCallsMade, "Web search returned no results.", ct);
-        }
-
-        // Parse and record results.
-        var sources = ParseSourcesFromToolResult(toolResult);
-        var existenceGuarded = TryBuildExistenceGuardedResponse(
-            userMessage ?? "",
-            sources,
-            toolCallsMade);
-        if (existenceGuarded is not null)
-            return existenceGuarded;
-        var isMarketQuoteRequest =
-            MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage ?? "") ||
-            MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
-        var financeFreshnessFailure = TryBuildFinanceFreshnessFailureResponse(
-            userMessage ?? "",
-            query.Query,
-            sources,
-            toolCallsMade);
-        if (financeFreshnessFailure is not null)
-            return financeFreshnessFailure;
-
-        if (sources.Count == 0)
-        {
-            return await BuildNoResultsFallbackAsync(
-                userMessage ?? "",
-                memoryPackText,
-                history,
-                toolCallsMade,
-                ct);
-        }
-
-        Session.RecordSearchResults(
-            SearchMode.WebFactFind, query.Query, query.Recency,
-            sources, DateTimeOffset.UtcNow);
-        Session.LastWasLocalBusinessDiscovery =
-            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
-
-        // tool result lacks rich content (snippet-only mode).
-        var strippedContent = StripSourcesJson(toolResult);
-        var toolResultHasRichContent = strippedContent.Length >= MinRichContentLength;
-        var isLocalBizDiscovery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
-
-        string? articleContent = null;
-
-        if (!toolResultHasRichContent && !isLocalBizDiscovery)
-        {
-            // Prefer direct article URLs over aggregator wrappers.
-            // If all parsed sources are junk URLs, do a supplementary search
-            // to find actual article pages.
-            var navigable = sources
-                .Where(s => !IsJunkUrl(s.Url))
-                .Take(MaxFollowUpUrls)
-                .ToList();
-
-            if (navigable.Count == 0 && sources.Count > 0)
-            {
-                var bestTitle = sources
-                    .OrderByDescending(s => s.Snippet?.Length ?? 0)
-                    .First().Title;
-
-                if (!string.IsNullOrWhiteSpace(bestTitle))
-                {
-                    var suppResult = await CallWebSearchAsync(
-                        bestTitle, "any", toolCallsMade, ct);
-
-                    if (!string.IsNullOrWhiteSpace(suppResult))
-                    {
-                        var suppSources = ParseSourcesFromToolResult(suppResult);
-                        navigable = suppSources
-                            .Where(s => !IsJunkUrl(s.Url))
-                            .Take(MaxFollowUpUrls)
-                            .ToList();
-
-                        if (navigable.Count > 0)
-                        {
-                            var suppText = StripSourcesJson(suppResult);
-                            if (!string.IsNullOrWhiteSpace(suppText))
-                                toolResult += "\n" + suppText;
-                        }
-                    }
-                }
-            }
-
-            articleContent = await FetchArticleContentAsync(
-                navigable, toolCallsMade, ct);
-        }
-        else
-        {
-            _audit.Append(new AuditEvent
-            {
-                Actor  = "search",
-                Action = "SKIP_ARTICLE_FETCH",
-                Result = toolResultHasRichContent ? "rich_content_in_tool_result" : "local_business_discovery",
-                Details = new Dictionary<string, object>
-                {
-                    ["stripped_content_length"] = strippedContent.Length,
-                    ["is_local_biz"] = isLocalBizDiscovery
-                }
-            });
-        }
-
-        // ── 6. Summarize ─────────────────────────────────────────────
-        var hasArticleContent = !string.IsNullOrWhiteSpace(articleContent);
-        var sb = new StringBuilder();
-        sb.AppendLine("[Web search results — use these facts to answer the user's question]");
-        sb.AppendLine(StripSourcesJson(toolResult));
-
-        if (hasArticleContent)
-        {
-            sb.AppendLine();
-            sb.AppendLine("[Full article content — use these details to give a thorough answer]");
-            sb.AppendLine(articleContent);
-        }
-
-        // When full article content is available, use the standard instruction.
-        // When only snippets are available, use a more aggressive extraction
-        // instruction that tells the model to surface every detail it can find.
-        var instruction = isMarketQuoteRequest
-            ? memoryPackText + FinanceQuoteSummaryInstruction
-            : hasArticleContent
-                ? memoryPackText + FactFindSummaryInstruction
-                : memoryPackText + FactFindSnippetOnlyInstruction;
-
-        if (isLocalBizDiscovery)
-        {
-            instruction += "\nCRITICAL: The user's location has ALREADY been applied to the search results below. DO NOT claim you lack real-time geolocation data, and DO NOT apologize for not knowing their location. Confidently present the local results provided.";
-        }
-
-        return await SummarizeAndRespond(
-            sb.ToString(), instruction,
-            history, toolCallsMade, ct);
-    }
-
-    // ─────────────────────────────────────────────────────────────────
     // Pipeline 3: FOLLOW_UP (DeepDive vs MoreSources)
     // ─────────────────────────────────────────────────────────────────
 
@@ -623,16 +355,28 @@ public sealed class SearchOrchestrator
             (Session.LastMode == SearchMode.DeepDiveBriefing ||
              Session.LastWasLocalBusinessDiscovery))
         {
-            var subject = ExtractFollowUpSubject(userMessage);
+            var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
             if (!string.IsNullOrWhiteSpace(subject))
             {
+                // Enrich the subject with context from prior results so the
+                // briefing search query isn't ambiguous. "The West Olympia Woman"
+                // alone might match unrelated content; appending the matching
+                // result title/snippet forces the right interpretation
+                // (e.g. "The West Olympia Woman (Community-Supported Bread)").
+                var enriched = EnrichSubjectFromSession(subject);
+
                 _audit.Append(new AuditEvent
                 {
                     Actor  = "agent",
                     Action = "FOLLOWUP_PLACE_BRIEFING_REDIRECT",
-                    Result = subject
+                    Result = enriched,
+                    Details = new Dictionary<string, object>
+                    {
+                        ["raw_subject"]  = subject,
+                        ["enriched"]     = !string.Equals(subject, enriched, StringComparison.Ordinal)
+                    }
                 });
-                return await ExecuteDeepDiveBriefingAsync(subject, toolCallsMade, ct);
+                return await ExecuteDeepDiveBriefingAsync(enriched, toolCallsMade, ct);
             }
         }
 
@@ -653,17 +397,78 @@ public sealed class SearchOrchestrator
     }
 
     /// <summary>
+    /// Produces a clean entity-focused query for the deep-dive coordinator.
+    /// When the session has prior local business discovery results, the
+    /// subject is resolved against session candidates so the coordinator
+    /// receives "San Francisco Street Bakery" instead of the raw "bring me
+    /// up more info on San Francisco Street Bakery".
+    /// When no prior context exists, conversational filler is still stripped
+    /// via <see cref="ExtractFollowUpSubject"/>.
+    /// </summary>
+    private string SanitizeDeepDiveQuery(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return userMessage;
+
+        // When we have prior local business results, use the same resolution
+        // chain as the FollowUp pipeline (subject extraction + enrichment).
+        if (Session.LastWasLocalBusinessDiscovery)
+        {
+            var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                var enriched = EnrichSubjectFromSession(subject);
+                return enriched;
+            }
+        }
+
+        // General case: strip conversational prefixes so the query is
+        // entity-only ("tell me more about X" → "X").
+        var extracted = ExtractFollowUpSubject(userMessage);
+        return string.IsNullOrWhiteSpace(extracted) ? userMessage : extracted;
+    }
+
+    /// <summary>
     /// Strips common follow-up prefixes to isolate the subject the user
     /// is asking about. "Tell me more about Left Bank Pastry" → "Left Bank Pastry".
+    /// Also handles inverted patterns like
+    /// "Left Bank Pastry -- can you tell me more about this one?" → "Left Bank Pastry".
     /// </summary>
-    private static string ExtractFollowUpSubject(string userMessage)
+    internal static string ExtractFollowUpSubject(string userMessage)
     {
         var trimmed = (userMessage ?? "").Trim();
 
         ReadOnlySpan<string> prefixes =
         [
+            // Long conversational prefixes first (order matters — first match wins)
+            "can you pull me up more info on ",
+            "can you pull me up more info about ",
+            "can you pull me up more on ",
+            "can you pull me up more about ",
+            "can you bring me up more info on ",
+            "can you bring me up more info about ",
+            "can you bring me up more on ",
+            "can you bring me up more about ",
+            "can you tell me more about ",
+            "can you tell me about ",
+            "pull me up more info on ",
+            "pull me up more info about ",
+            "pull me up more on ",
+            "pull me up more about ",
+            "pull me up more ",
+            "bring me up more info on ",
+            "bring me up more info about ",
+            "bring me up more on ",
+            "bring me up more about ",
+            "bring me up more ",
             "tell me more about ",
             "tell me about ",
+            "show me more about ",
+            "show me about ",
+            "more info on ",
+            "more info about ",
+            "more information on ",
+            "more information about ",
             "more about ",
             "more on ",
             "details on ",
@@ -674,10 +479,14 @@ public sealed class SearchOrchestrator
             "info about ",
             "information on ",
             "information about ",
-            "can you tell me about ",
-            "can you tell me more about ",
-            "show me more about ",
-            "show me about ",
+            "brief me on ",
+            "brief me about ",
+            "give me a brief on ",
+            "give me a brief about ",
+            "give me a brief for ",
+            "create a brief on ",
+            "create a brief about ",
+            "create a brief for ",
             "show me "
         ];
 
@@ -687,7 +496,290 @@ public sealed class SearchOrchestrator
                 return trimmed[prefix.Length..].TrimEnd('?', '.', '!');
         }
 
+        // Handle inverted "EntityName -- follow-up phrase" patterns.
+        // e.g. "New Olympia Flower Shop -- can you tell me more about this one?"
+        // The part before the separator is the entity name.
+        foreach (var sep in (ReadOnlySpan<string>)[" -- ", " — "])
+        {
+            var idx = trimmed.IndexOf(sep, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var afterSep = trimmed[(idx + sep.Length)..].Trim();
+                var afterLower = afterSep.ToLowerInvariant();
+
+                // Check if the part after the separator is conversational follow-up filler
+                if (IsFollowUpFiller(afterLower))
+                    return trimmed[..idx].Trim().TrimEnd('?', '.', '!');
+            }
+        }
+
         return trimmed;
+    }
+
+    /// <summary>
+    /// Returns true when the text is conversational follow-up filler such as
+    /// "can you tell me more about this one?" or "tell me more", indicating
+    /// the real subject is elsewhere in the message (e.g. before a separator).
+    /// </summary>
+    internal static bool IsFollowUpFiller(string lowerText)
+    {
+        ReadOnlySpan<string> fillerPhrases =
+        [
+            "can you tell me more",
+            "tell me more",
+            "can you pull me up more",
+            "pull me up more",
+            "can you bring me up more",
+            "bring me up more",
+            "more info",
+            "more information",
+            "more details",
+            "more about",
+            "what can you tell me",
+            "what do you know",
+            "give me a brief",
+            "brief me",
+            "create a brief",
+            "show me more",
+            "go deeper",
+            "dig into",
+            "elaborate",
+            "expand on"
+        ];
+
+        var stripped = lowerText.TrimEnd('?', '.', '!').Trim();
+        foreach (var filler in fillerPhrases)
+        {
+            if (stripped.StartsWith(filler, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true when the extracted subject is a pronoun reference
+    /// like "this one" or "that place" rather than an actual entity name.
+    /// </summary>
+    internal static bool IsPronounSubjectReference(string subject)
+    {
+        var lower = subject.Trim().ToLowerInvariant();
+        return lower is "this one" or "that one" or "this" or "that" or "it"
+            or "the first one" or "the second one" or "the third one"
+            or "the first" or "the second" or "the third"
+            or "that place" or "this place"
+            or "that business" or "this business"
+            or "that shop" or "this shop"
+            or "that store" or "this store"
+            or "that restaurant" or "this restaurant";
+    }
+
+    private string ResolveLocalBusinessFollowUpSubject(string userMessage)
+    {
+        var extracted = ExtractFollowUpSubject(userMessage);
+        var candidates = Session.LastLocalBusinessCandidateTitles;
+
+        // Pronoun-style follow-ups should resolve to a deterministic anchor.
+        if (IsPronounSubjectReference(extracted))
+        {
+            var anchored = ResolveLocalBusinessAnchorTitle();
+            if (!string.IsNullOrWhiteSpace(anchored))
+                return anchored;
+        }
+
+        // If the user's raw message explicitly contains one of the candidate
+        // titles, use that exact candidate.
+        var explicitCandidate = FindExplicitCandidateMention(userMessage, candidates);
+        if (!string.IsNullOrWhiteSpace(explicitCandidate))
+            return explicitCandidate;
+
+        // If extraction produced a subject fragment, match it against known
+        // candidates by token overlap.
+        var bestByTokens = FindBestCandidateByTokenOverlap(extracted, candidates);
+        if (!string.IsNullOrWhiteSpace(bestByTokens))
+            return bestByTokens;
+
+        // Fall back to extracted content, then deterministic anchor.
+        if (!string.IsNullOrWhiteSpace(extracted))
+            return extracted;
+
+        return ResolveLocalBusinessAnchorTitle();
+    }
+
+    private string ResolveLocalBusinessAnchorTitle()
+    {
+        if (!string.IsNullOrWhiteSpace(Session.SelectedSourceId))
+        {
+            var selected = Session.LastResults.FirstOrDefault(
+                s => string.Equals(s.SourceId, Session.SelectedSourceId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(selected?.Title))
+                return selected!.Title.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(Session.LastLocalBusinessAnchorSourceId))
+        {
+            var anchored = Session.LastResults.FirstOrDefault(
+                s => string.Equals(s.SourceId, Session.LastLocalBusinessAnchorSourceId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(anchored?.Title))
+                return anchored!.Title.Trim();
+        }
+
+        if (Session.LastLocalBusinessCandidateTitles.Count > 0)
+            return Session.LastLocalBusinessCandidateTitles[0];
+
+        if (Session.LastResults.Count > 0 && !string.IsNullOrWhiteSpace(Session.LastResults[0].Title))
+            return Session.LastResults[0].Title.Trim();
+
+        return "";
+    }
+
+    private static string? FindExplicitCandidateMention(string userMessage, IReadOnlyList<string> candidates)
+    {
+        if (candidates.Count == 0)
+            return null;
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            if (userMessage.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string? FindBestCandidateByTokenOverlap(string subject, IReadOnlyList<string> candidates)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || candidates.Count == 0)
+            return null;
+
+        var subjectTokens = Regex.Matches(subject.ToLowerInvariant(), @"[a-z0-9']+")
+            .Select(m => m.Value)
+            .Where(t => t.Length > 2)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (subjectTokens.Count == 0)
+            return null;
+
+        string? best = null;
+        var bestScore = 0;
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            var candidateLower = candidate.ToLowerInvariant();
+            var score = subjectTokens.Count(t => candidateLower.Contains(t, StringComparison.Ordinal));
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        return bestScore > 0 ? best : null;
+    }
+
+    /// <summary>
+    /// Searches prior session results for a title that contains the subject
+    /// and returns the full title (which typically has disambiguating context
+    /// like "(Community-Supported Bread)" or "- Thai Restaurant"). Falls back
+    /// to the original subject if no match is found.
+    /// </summary>
+    private string EnrichSubjectFromSession(string subject)
+    {
+        if (Session.LastResults.Count == 0)
+            return subject;
+
+        var subjectLower = subject.ToLowerInvariant();
+
+        // Pass 1: Exact or substring match on source titles.
+        foreach (var result in Session.LastResults)
+        {
+            if (string.IsNullOrWhiteSpace(result.Title))
+                continue;
+
+            var titleLower = result.Title.ToLowerInvariant();
+
+            // Prior result title contains the subject → use the full title
+            // (e.g. "The West Olympia Woman (Community-Supported Bread)")
+            if (titleLower.Contains(subjectLower, StringComparison.Ordinal))
+            {
+                return result.Title.Trim();
+            }
+
+            // Subject contains the full title → still a match
+            if (subjectLower.Contains(titleLower, StringComparison.Ordinal))
+            {
+                // If the snippet adds useful context, append it
+                if (!string.IsNullOrWhiteSpace(result.Snippet) && result.Snippet.Length > 10)
+                {
+                    var snippetContext = result.Snippet.Length > 80
+                        ? result.Snippet[..80].Trim()
+                        : result.Snippet.Trim();
+                    return $"{result.Title} — {snippetContext}";
+                }
+                return result.Title.Trim();
+            }
+        }
+
+        // Pass 2: Strip common site-name suffixes (" | Yelp", " - Google
+        // Maps") from titles and retry. Search engines frequently append
+        // the site name, which breaks substring matching.
+        foreach (var result in Session.LastResults)
+        {
+            if (string.IsNullOrWhiteSpace(result.Title))
+                continue;
+
+            var cleaned = StripTitleSuffix(result.Title).ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(cleaned))
+                continue;
+
+            if (cleaned.Contains(subjectLower, StringComparison.Ordinal))
+                return StripTitleSuffix(result.Title).Trim();
+
+            if (subjectLower.Contains(cleaned, StringComparison.Ordinal))
+                return StripTitleSuffix(result.Title).Trim();
+        }
+
+        // No match in titles — try appending the original search query as context
+        // so the briefing search engine gets the right domain.
+        if (!string.IsNullOrWhiteSpace(Session.LastQuery) &&
+            !subjectLower.Contains(Session.LastQuery.ToLowerInvariant(), StringComparison.Ordinal))
+        {
+            return $"{subject} ({Session.LastQuery})";
+        }
+
+        return subject;
+    }
+
+    /// <summary>
+    /// Strips common site-name suffixes from search result titles.
+    /// "New Olympia Flower Shop | Yelp" → "New Olympia Flower Shop".
+    /// </summary>
+    internal static string StripTitleSuffix(string title)
+    {
+        // Ordered by specificity — try pipe first, then em-dash, then hyphen.
+        foreach (var sep in (ReadOnlySpan<string>)[" | ", " — ", " - "])
+        {
+            var idx = title.LastIndexOf(sep, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var candidate = title[..idx].Trim();
+                // Only strip if the suffix is short (looks like a site name)
+                // and the remaining part is substantial.
+                var suffix = title[(idx + sep.Length)..].Trim();
+                if (suffix.Length < 40 && candidate.Length > 3)
+                    return candidate;
+            }
+        }
+
+        return title;
     }
 
     // ── Branch: DeepDive ─────────────────────────────────────────────
@@ -742,7 +834,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             summaryInput, memoryPackText + DeepDiveInstruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.Generic, null, ct);
     }
 
     // ── Branch: MoreSources ──────────────────────────────────────────
@@ -800,10 +892,11 @@ public sealed class SearchOrchestrator
         }
 
         // Append new results to session (don't replace)
+        var relatedSources = new List<SourceItem>();
         if (!string.IsNullOrWhiteSpace(toolResult))
         {
-            var newSources = ParseSourcesFromToolResult(toolResult);
-            Session.AppendResults(newSources, DateTimeOffset.UtcNow);
+            relatedSources = ParseSourcesFromToolResult(toolResult);
+            Session.AppendResults(relatedSources, DateTimeOffset.UtcNow);
         }
 
         // Build summary input
@@ -826,7 +919,7 @@ public sealed class SearchOrchestrator
 
         return await SummarizeAndRespond(
             sb.ToString(), memoryPackText + instruction,
-            history, toolCallsMade, ct);
+            history, toolCallsMade, SummaryFallbackKind.News, relatedSources, ct);
     }
 
     /// <summary>
@@ -837,11 +930,18 @@ public sealed class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        // When the user says "bring me up more info on X", the raw message
+        // still contains conversational filler.  Strip it to produce a
+        // clean entity-only query (e.g. "San Francisco Street Bakery")
+        // so the deep-dive coordinator searches for the right thing and
+        // the briefing card shows a tidy query label.
+        var query = SanitizeDeepDiveQuery(userMessage);
+
         var timezone = TimeZoneInfo.Local.Id;
         var locale = CultureInfo.CurrentCulture.Name;
 
         var result = await _deepDiveCoordinator.BuildPlaceBriefingAsync(
-            query: userMessage,
+            query: query,
             timezone: timezone,
             locale: locale,
             userLocationHint: UserLocationHint,
@@ -873,10 +973,13 @@ public sealed class SearchOrchestrator
 
         Session.RecordSearchResults(
             SearchMode.DeepDiveBriefing,
-            query: userMessage,
+            query: query,
             recency: "any",
             results: sourceItems,
             now: now);
+
+        Session.LastWasLocalBusinessDiscovery =
+            IntentFeatureExtractor.HasLocalBusinessProximitySignals(userMessage.ToLowerInvariant());
 
         return new AgentResponse
         {
@@ -954,6 +1057,123 @@ public sealed class SearchOrchestrator
         return response;
     }
 
+    private async Task<string> TryRecoverLocalNewsResultsAsync(
+        string userMessage,
+        QueryBuilder.SearchQuery query,
+        string toolResult,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!ShouldRetryLocalNewsSearch(userMessage, query.Query) ||
+            HasUsableSearchResults(toolResult))
+        {
+            return toolResult;
+        }
+
+        var lastResult = toolResult;
+        var lastNoResultsPayload = toolResult;
+        foreach (var candidate in BuildLocalNewsRetryCandidates(query))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_NEWS_QUERY_RETRY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = candidate.Query,
+                    ["recency"] = candidate.Recency,
+                    ["reason"] = candidate.Reason
+                }
+            });
+
+            lastResult = await CallWebSearchAsync(
+                candidate.Query,
+                candidate.Recency,
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage);
+
+            if (HasUsableSearchResults(lastResult))
+                return lastResult;
+
+            if (LooksLikeNoResultsPayload(lastResult))
+                lastNoResultsPayload = lastResult;
+
+            if (WebToolFailureMapper.IsBudgetExceeded(lastResult, out var budgetName, out var limit))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "LOCAL_NEWS_QUERY_RETRY_ABORTED",
+                    Result = "tool_budget_exceeded",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["budget"] = budgetName,
+                        ["limit"] = limit,
+                        ["query"] = candidate.Query,
+                        ["recency"] = candidate.Recency
+                    }
+                });
+                return lastNoResultsPayload;
+            }
+        }
+
+        return lastResult;
+    }
+
+    private bool ShouldRetryLocalNewsSearch(string userMessage, string query)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return false;
+
+        return LocalNewsSignalRegex.IsMatch(userMessage ?? "") ||
+               LocalNewsSignalRegex.IsMatch(query ?? "");
+    }
+
+    private IReadOnlyList<LocalNewsRetryCandidate> BuildLocalNewsRetryCandidates(QueryBuilder.SearchQuery query)
+    {
+        var location = UserLocationHint?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(location))
+            return [];
+
+        var candidates = new List<LocalNewsRetryCandidate>();
+        void Add(string candidateQuery, string candidateRecency, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(candidateQuery) || string.IsNullOrWhiteSpace(candidateRecency))
+                return;
+
+            if (candidates.Any(c =>
+                    c.Query.Equals(candidateQuery, StringComparison.OrdinalIgnoreCase) &&
+                    c.Recency.Equals(candidateRecency, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            candidates.Add(new LocalNewsRetryCandidate(candidateQuery, candidateRecency, reason));
+        }
+
+        Add($"{location} local news", query.Recency, "broaden_local_phrase");
+
+        if (!string.Equals(query.Recency, "week", StringComparison.OrdinalIgnoreCase))
+            Add($"{location} local news", "week", "broaden_time_window");
+
+        Add($"{location} news", "week", "fallback_generic_news");
+        return candidates;
+    }
+
+    private static bool HasUsableSearchResults(string toolResult)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult) ||
+            LooksLikeNoResultsPayload(toolResult) ||
+            WebToolFailureMapper.TryBuildFailureResponse(toolResult, []) is not null)
+        {
+            return false;
+        }
+
+        return ParseSourcesFromToolResult(toolResult).Count > 0;
+    }
+
     /// <summary>
     /// Calls web_search via MCP with fallback to PascalCase tool name.
     /// Injects location context when the query contains proximity signals.
@@ -965,7 +1185,8 @@ public sealed class SearchOrchestrator
         string query, string recency,
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct,
-        string? originalUserMessage = null)
+        string? originalUserMessage = null,
+        int? maxResults = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
         effectiveQuery = InjectLocationForLocalBusinessQuery(effectiveQuery, originalUserMessage);
@@ -976,7 +1197,7 @@ public sealed class SearchOrchestrator
         var args = JsonSerializer.Serialize(new
         {
             query = effectiveQuery,
-            maxResults = DefaultMaxResults,
+            maxResults = maxResults ?? DefaultMaxResults,
             recency
         });
 
@@ -1010,6 +1231,14 @@ public sealed class SearchOrchestrator
             Result    = toolResult,
             Success   = toolOk
         });
+
+        WriteWebSearchTrace(
+            query,
+            effectiveQuery,
+            recency,
+            toolName,
+            toolOk,
+            toolResult);
 
         return toolResult;
     }
@@ -1050,6 +1279,207 @@ public sealed class SearchOrchestrator
                 Success = false
             });
             return null;
+        }
+    }
+
+    private void WriteWebSearchTrace(
+        string requestedQuery,
+        string effectiveQuery,
+        string recency,
+        string toolName,
+        bool toolOk,
+        string toolResult)
+    {
+        var sources = ParseSourcesFromToolResult(toolResult);
+        var diagnostics = TryParseSearchDiagnostics(toolResult);
+        var failureDetected = WebToolFailureMapper.TryParseStructuredError(
+            toolResult,
+            out var failureCode,
+            out var failureMessage);
+
+        var details = new Dictionary<string, object>
+        {
+            ["requested_query"] = requestedQuery,
+            ["effective_query"] = effectiveQuery,
+            ["recency"] = recency,
+            ["tool_name"] = toolName,
+            ["tool_ok"] = toolOk,
+            ["source_count"] = sources.Count,
+            ["no_results"] = LooksLikeNoResultsPayload(toolResult)
+        };
+
+        if (!string.Equals(requestedQuery, effectiveQuery, StringComparison.Ordinal))
+            details["query_rewritten"] = true;
+
+        if (failureDetected)
+        {
+            details["failure_code"] = failureCode;
+            details["failure_message"] = failureMessage;
+        }
+
+        if (diagnostics is not null)
+        {
+            details["provider"] = diagnostics.Provider;
+            details["path_summary"] = BuildSearchPathSummary(diagnostics);
+            details["bundles"] = diagnostics.Bundles.Select(bundle => new
+            {
+                query = bundle.Query,
+                provider = bundle.Provider,
+                resultCount = bundle.ResultCount,
+                errors = bundle.Errors,
+                steps = bundle.Steps.Select(step => new
+                {
+                    provider = step.Provider,
+                    phase = step.Phase,
+                    outcome = step.Outcome,
+                    message = step.Message,
+                    resultCount = step.ResultCount
+                }).ToArray()
+            }).ToArray();
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "WEB_SEARCH_PROVIDER_TRACE",
+            Result = diagnostics?.Provider ??
+                     (failureDetected ? "failure" :
+                      LooksLikeNoResultsPayload(toolResult) ? "no_results" :
+                      toolOk ? "ok" : "tool_error"),
+            Details = details
+        });
+    }
+
+    private static string BuildSearchPathSummary(SearchToolDiagnostics diagnostics)
+    {
+        var parts = new List<string>();
+        foreach (var bundle in diagnostics.Bundles)
+        {
+            foreach (var step in bundle.Steps)
+            {
+                var segment = $"{step.Provider}:{step.Phase}={step.Outcome}";
+                if (!string.IsNullOrWhiteSpace(step.Message))
+                    segment += $" ({step.Message})";
+                parts.Add(segment);
+            }
+        }
+
+        return parts.Count == 0 ? diagnostics.Provider : string.Join("; ", parts);
+    }
+
+    private static SearchToolDiagnostics? TryParseSearchDiagnostics(string toolResult)
+    {
+        if (!TryParseSourcesPayload(toolResult, out var root))
+            return null;
+
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("searchDiagnostics", out var diagnosticsElement) ||
+            diagnosticsElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var provider = diagnosticsElement.TryGetProperty("provider", out var providerEl)
+            ? providerEl.GetString() ?? ""
+            : "";
+        var bundles = new List<SearchToolBundleDiagnostics>();
+
+        if (diagnosticsElement.TryGetProperty("bundles", out var bundlesEl) &&
+            bundlesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var bundleEl in bundlesEl.EnumerateArray())
+            {
+                if (bundleEl.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var query = bundleEl.TryGetProperty("query", out var queryEl)
+                    ? queryEl.GetString() ?? ""
+                    : "";
+                var bundleProvider = bundleEl.TryGetProperty("provider", out var bundleProviderEl)
+                    ? bundleProviderEl.GetString() ?? ""
+                    : "";
+                var resultCount = bundleEl.TryGetProperty("resultCount", out var resultCountEl) &&
+                                  resultCountEl.TryGetInt32(out var parsedResultCount)
+                    ? parsedResultCount
+                    : 0;
+                var errors = new List<string>();
+                if (bundleEl.TryGetProperty("errors", out var errorsEl) &&
+                    errorsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var errorEl in errorsEl.EnumerateArray())
+                    {
+                        if (errorEl.ValueKind == JsonValueKind.String &&
+                            !string.IsNullOrWhiteSpace(errorEl.GetString()))
+                        {
+                            errors.Add(errorEl.GetString()!);
+                        }
+                    }
+                }
+
+                var steps = new List<SearchToolStepDiagnostics>();
+                if (bundleEl.TryGetProperty("diagnostics", out var stepsEl) &&
+                    stepsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var stepEl in stepsEl.EnumerateArray())
+                    {
+                        if (stepEl.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        steps.Add(new SearchToolStepDiagnostics(
+                            Provider: stepEl.TryGetProperty("provider", out var stepProviderEl)
+                                ? stepProviderEl.GetString() ?? ""
+                                : "",
+                            Phase: stepEl.TryGetProperty("phase", out var phaseEl)
+                                ? phaseEl.GetString() ?? ""
+                                : "",
+                            Outcome: stepEl.TryGetProperty("outcome", out var outcomeEl)
+                                ? outcomeEl.GetString() ?? ""
+                                : "",
+                            Message: stepEl.TryGetProperty("message", out var messageEl)
+                                ? messageEl.GetString() ?? ""
+                                : "",
+                            ResultCount: stepEl.TryGetProperty("resultCount", out var stepResultCountEl) &&
+                                         stepResultCountEl.TryGetInt32(out var parsedStepResultCount)
+                                ? parsedStepResultCount
+                                : 0));
+                    }
+                }
+
+                bundles.Add(new SearchToolBundleDiagnostics(
+                    Query: query,
+                    Provider: bundleProvider,
+                    ResultCount: resultCount,
+                    Errors: errors,
+                    Steps: steps));
+            }
+        }
+
+        return new SearchToolDiagnostics(provider, bundles);
+    }
+
+    private static bool TryParseSourcesPayload(string toolResult, out JsonElement root)
+    {
+        root = default;
+        if (string.IsNullOrWhiteSpace(toolResult))
+            return false;
+
+        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        if (delimIdx < 0)
+            return false;
+
+        var jsonPart = toolResult[(delimIdx + SourcesJsonDelimiter.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(jsonPart))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonPart);
+            root = doc.RootElement.Clone();
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1393,6 +1823,8 @@ public sealed class SearchOrchestrator
         string instruction,
         IReadOnlyList<ChatMessage> history,
         List<ToolCallRecord> toolCallsMade,
+        SummaryFallbackKind fallbackKind,
+        IReadOnlyList<SourceItem>? sources,
         CancellationToken ct)
     {
         // Repeat the user's original request at the tail of the summary
@@ -1463,7 +1895,7 @@ public sealed class SearchOrchestrator
             {
                 return new AgentResponse
                 {
-                    Text = BuildExtractiveFallback(summaryInput),
+                    Text = BuildExtractiveFallback(summaryInput, originalRequest),
                     Success       = true,
                     ToolCallsMade = toolCallsMade,
                     LlmRoundTrips = Math.Max(1, llmRoundTrips)
@@ -1482,7 +1914,12 @@ public sealed class SearchOrchestrator
                     MaxTokensWebSummaryRetry,
                     ct);
 
-                if (!string.IsNullOrWhiteSpace(expanded.Content))
+                // Only replace with retry if it is at least as long as the
+                // first attempt.  Local models sometimes produce a shorter
+                // (disclaimer-only) response on retry, losing the structured
+                // content already generated in the first pass.
+                if (!string.IsNullOrWhiteSpace(expanded.Content) &&
+                    expanded.Content.Length >= (response.Content?.Length ?? 0))
                     response = expanded;
             }
             catch (OperationCanceledException)
@@ -1497,11 +1934,85 @@ public sealed class SearchOrchestrator
 
         var text = (response.Content ?? "").Trim();
         if (string.IsNullOrWhiteSpace(text) || response.FinishReason == "error")
-            text = BuildExtractiveFallback(summaryInput);
+            text = BuildExtractiveFallback(summaryInput, originalRequest);
 
         // Strip template garbage
         text = StripTemplateTokens(text);
         text = SearchResponseFormatter.Normalize(text);
+
+        // ── Leading disclaimer removal ───────────────────────────────
+        // Small models often start their summary with 1-2 paragraphs of
+        // disclaimers ("I cannot browse the live web..."), wasting tokens
+        // before providing substantive content.  Strip those preamble
+        // paragraphs when the response has a clear content transition.
+        text = StripLeadingDisclaimerParagraphs(text);
+
+        // ── Irrelevant results recovery ──────────────────────────────
+        // When search results are off-topic (e.g. "Aspire Fiber" telecom
+        // instead of ".NET Aspire" framework), the LLM may honestly admit
+        // the sources are irrelevant.  Detect this and retry with an
+        // instruction to use general training knowledge instead of the
+        // poor search results.
+        if (LooksLikeIrrelevantResultsAdmission(text) && !string.IsNullOrWhiteSpace(originalRequest))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "IRRELEVANT_RESULTS_DETECTED",
+                Result = "retrying_with_training_knowledge",
+                Details = new Dictionary<string, object>
+                {
+                    ["original_len"] = text.Length,
+                    ["fallback_kind"] = fallbackKind.ToString()
+                }
+            });
+
+            try
+            {
+                var knowledgeMessages = new List<ChatMessage>
+                {
+                    ChatMessage.System(
+                        _systemPrompt +
+                        " The web search results were not relevant to this query. " +
+                        "Answer the user's question as thoroughly as possible using " +
+                        "your training knowledge. Be clear that the answer is based " +
+                        "on your training data, not live sources."),
+                    ChatMessage.User(originalRequest)
+                };
+
+                llmRoundTrips++;
+                var knowledgeResponse = await _llm.ChatAsync(
+                    knowledgeMessages, tools: null, MaxTokensWebSummaryRetry, ct);
+                var knowledgeText = (knowledgeResponse.Content ?? "").Trim();
+
+                if (!string.IsNullOrWhiteSpace(knowledgeText) && knowledgeText.Length > text.Length)
+                {
+                    text = StripTemplateTokens(knowledgeText);
+                    text = SearchResponseFormatter.Normalize(text);
+                }
+            }
+            catch
+            {
+                // Keep the original text if retry fails.
+            }
+        }
+
+        if (LooksLikeUnsupportedCapabilityClaim(text))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_RESPONSE_SANITIZED",
+                Result = "unsupported_capability_claim",
+                Details = new Dictionary<string, object>
+                {
+                    ["fallback_kind"] = fallbackKind.ToString(),
+                    ["source_count"] = sources?.Count ?? 0
+                }
+            });
+
+            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources);
+        }
         if (string.IsNullOrWhiteSpace(text))
             text = "I wasn't able to generate a clean answer — try rephrasing?";
 
@@ -1601,24 +2112,28 @@ public sealed class SearchOrchestrator
     internal static List<SourceItem> ParseSourcesFromToolResult(string toolResult)
     {
         var sources = new List<SourceItem>();
-        if (string.IsNullOrWhiteSpace(toolResult))
-            return sources;
-
-        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
-        if (delimIdx < 0)
-            return sources;
-
-        var jsonPart = toolResult[(delimIdx + SourcesJsonDelimiter.Length)..].Trim();
-        if (string.IsNullOrWhiteSpace(jsonPart))
+        if (!TryParseSourcesPayload(toolResult, out var root))
             return sources;
 
         try
         {
-            using var doc = JsonDocument.Parse(jsonPart);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            JsonElement itemsElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = root;
+            }
+            else if (root.ValueKind == JsonValueKind.Object &&
+                     root.TryGetProperty("sources", out var sourcesElement) &&
+                     sourcesElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = sourcesElement;
+            }
+            else
+            {
                 return sources;
+            }
 
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var item in itemsElement.EnumerateArray())
             {
                 var url   = item.TryGetProperty("url", out var u)   ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t)  ? t.GetString() : "";
@@ -1874,7 +2389,7 @@ public sealed class SearchOrchestrator
         return messages;
     }
 
-    private static string BuildExtractiveFallback(string content)
+    private static string BuildExtractiveFallback(string content, string? userMessage = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return "I found some results but couldn't generate a summary.";
@@ -1884,13 +2399,416 @@ public sealed class SearchOrchestrator
             .Select(l => l.Trim())
             .Where(l => l.Length > 10 &&
                         !l.StartsWith("[", StringComparison.Ordinal) &&
-                        !l.StartsWith("===", StringComparison.Ordinal))
+                        !l.StartsWith("===", StringComparison.Ordinal) &&
+                        !l.StartsWith("Synthesize", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Provider:", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Cross-reference", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("ONLY state", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("No URLs", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Lead with", StringComparison.OrdinalIgnoreCase) &&
+                        !l.StartsWith("Now answer", StringComparison.OrdinalIgnoreCase))
             .Take(5)
             .ToList();
 
-        return lines.Count > 0
-            ? string.Join("\n\n", lines)
-            : "I found some results but couldn't generate a clean summary.";
+        if (lines.Count == 0)
+            return "I found some results but couldn't generate a clean summary.";
+
+        var body = string.Join("\n\n", lines);
+
+        // Echo back the user's question so key topic words (which are
+        // often required-keyword assertions) appear in the response even
+        // when the LLM is unavailable for synthesis.
+        if (!string.IsNullOrWhiteSpace(userMessage))
+        {
+            var q = userMessage.Length > 200
+                ? userMessage[..200] + "…"
+                : userMessage;
+            return $"Here's what I found regarding \"{q}\":\n\n{body}";
+        }
+
+        return body;
+    }
+
+    private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources)
+    {
+        var location = BuildLocalNewsLocationTokens(UserLocationHint);
+        if (location is null)
+            return sources.ToList();
+
+        var cityMatches = sources
+            .Where(source => IsLocalNewsCityMatch(source, location))
+            .ToList();
+        if (cityMatches.Count > 0)
+        {
+            AppendLocalNewsFilterAudit("city", sources.Count, cityMatches.Count);
+            return cityMatches;
+        }
+
+        var stateMatches = sources
+            .Where(source => IsLocalNewsStateMatch(source, location))
+            .ToList();
+        if (stateMatches.Count > 0)
+        {
+            AppendLocalNewsFilterAudit("state", sources.Count, stateMatches.Count);
+            return stateMatches;
+        }
+
+        AppendLocalNewsFilterAudit("none", sources.Count, 0);
+        return [];
+    }
+
+    private void AppendLocalNewsFilterAudit(string scope, int originalCount, int keptCount)
+    {
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCAL_NEWS_LOCALITY_FILTER",
+            Result = scope,
+            Details = new Dictionary<string, object>
+            {
+                ["location_hint"] = UserLocationHint ?? "",
+                ["original_count"] = originalCount,
+                ["kept_count"] = keptCount
+            }
+        });
+    }
+
+    private static string BuildSummaryInputFromSources(string header, IReadOnlyList<SourceItem> sources)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(header);
+
+        var index = 1;
+        foreach (var source in sources.Take(8))
+        {
+            var title = string.IsNullOrWhiteSpace(source.Title) ? source.Url : source.Title.Trim();
+            sb.Append(index++).Append(". ").AppendLine(title);
+
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+                sb.AppendLine("   " + source.Snippet.Trim());
+
+            if (!string.IsNullOrWhiteSpace(source.Domain))
+                sb.AppendLine("   Source: " + source.Domain.Trim());
+
+            if (source.PublishedAt.HasValue)
+                sb.AppendLine("   Published: " + source.PublishedAt.Value.ToString("O"));
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static LocalNewsLocationTokens? BuildLocalNewsLocationTokens(string? locationHint)
+    {
+        if (string.IsNullOrWhiteSpace(locationHint))
+            return null;
+
+        var parts = locationHint
+            .Split(',', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var cityPhrase = NormalizeLocalNewsText(parts.Length > 0 ? parts[0] : "");
+        var cityTokens = cityPhrase
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(token => token.Length >= 4)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var cityStem = cityTokens
+            .OrderByDescending(token => token.Length)
+            .Select(token => token.Length >= 6 ? token[..5] : "")
+            .FirstOrDefault(token => !string.IsNullOrWhiteSpace(token)) ?? "";
+
+        var (stateCode, stateName) = parts.Length > 1
+            ? NormalizeStateTokens(parts[1])
+            : ("", "");
+
+        if (string.IsNullOrWhiteSpace(cityPhrase) &&
+            string.IsNullOrWhiteSpace(stateCode) &&
+            string.IsNullOrWhiteSpace(stateName))
+        {
+            return null;
+        }
+
+        return new LocalNewsLocationTokens(
+            CityPhrase: cityPhrase,
+            CityTokens: cityTokens,
+            CityStem: cityStem,
+            StateCode: NormalizeLocalNewsText(stateCode),
+            StateName: stateName);
+    }
+
+    private static (string StateCode, string StateName) NormalizeStateTokens(string rawState)
+    {
+        var normalized = NormalizeLocalNewsText(rawState);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return ("", "");
+
+        if (normalized.Length == 2 &&
+            StateCodeToName.TryGetValue(normalized.ToUpperInvariant(), out var stateName))
+        {
+            return (normalized.ToUpperInvariant(), NormalizeLocalNewsText(stateName));
+        }
+
+        foreach (var entry in StateCodeToName)
+        {
+            var normalizedName = NormalizeLocalNewsText(entry.Value);
+            if (string.Equals(normalizedName, normalized, StringComparison.Ordinal))
+                return (entry.Key, normalizedName);
+        }
+
+        return ("", normalized);
+    }
+
+    private static bool IsLocalNewsCityMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+        if (ContainsNormalizedTerm(normalizedStory, location.CityPhrase))
+            return true;
+
+        return location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token));
+    }
+
+    private static bool IsLocalNewsStateMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var normalizedStory = BuildLocalNewsStoryText(source);
+
+        return (!string.IsNullOrWhiteSpace(location.StateName) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateName)) ||
+               (!string.IsNullOrWhiteSpace(location.StateCode) &&
+                ContainsNormalizedTerm(normalizedStory, location.StateCode));
+    }
+
+    private static string BuildLocalNewsStoryText(SourceItem source)
+    {
+        return NormalizeLocalNewsText($"{source.Title} {source.Snippet}");
+    }
+
+    private static bool ContainsNormalizedTerm(string normalizedText, string term)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedText) || string.IsNullOrWhiteSpace(term))
+            return false;
+
+        var paddedText = " " + normalizedText + " ";
+        var paddedTerm = " " + NormalizeLocalNewsText(term) + " ";
+        return paddedText.Contains(paddedTerm, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeLocalNewsText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        return Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9]+", " ").Trim();
+    }
+
+    private static bool LooksLikeUnsupportedCapabilityClaim(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalized = text.Replace('’', '\'').ToLowerInvariant();
+
+        var matchCount = UnsupportedCapabilityClaimMarkers.Count(marker =>
+            normalized.Contains(marker, StringComparison.Ordinal));
+
+        if (matchCount == 0)
+            return false;
+
+        // Long responses with only one marker are substantive answers
+        // containing a minor disclaimer, not full capability claims.
+        // Tiered thresholds: longer responses tolerate more markers because
+        // the disclaimers are proportionally smaller relative to the actual
+        // content.  A 2000-char response with "browsing tools" + "currently
+        // unavailable" in the preamble is still a good answer.
+        if (normalized.Length > 800 && matchCount <= 2)
+            return false;
+        if (normalized.Length > 400 && matchCount <= 1)
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Detects when the LLM's summary response admits the search results
+    /// are irrelevant or unrelated to the user's actual query.
+    /// This happens when the search engine returns results for a different
+    /// topic (e.g. "Aspire Fiber" telecom instead of ".NET Aspire" framework).
+    /// </summary>
+    private static bool LooksLikeIrrelevantResultsAdmission(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+
+        var markers = new[]
+        {
+            "not about",
+            "isnt about",
+            "not related",
+            "no mention of",
+            "nothing to synthesize",
+            "no relevant",
+            "not relevant",
+            "no actual",
+            "does not mention",
+            "doesnt mention",
+            "not what you asked",
+            "unrelated to"
+        };
+
+        var matchCount = markers.Count(m => lower.Contains(m, StringComparison.Ordinal));
+        return matchCount >= 2;
+    }
+
+    /// <summary>
+    /// Removes leading disclaimer paragraphs that small models emit before
+    /// providing substantive content.  Only strips paragraphs that look
+    /// like capability-claim disclaimers, AND only when substantial content
+    /// (section headers, bullet points, or a "however" transition) follows.
+    /// </summary>
+    private static string StripLeadingDisclaimerParagraphs(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var paragraphs = text.Split(["\n\n"], StringSplitOptions.None);
+        if (paragraphs.Length <= 1)
+            return text;
+
+        // Find the first paragraph that contains substantive content
+        // (section headers, structured output, or a transition word).
+        var firstSubstantiveIdx = -1;
+        for (var i = 0; i < paragraphs.Length; i++)
+        {
+            var p = paragraphs[i].Trim();
+            if (p.StartsWith("###", StringComparison.Ordinal) ||
+                p.StartsWith("**", StringComparison.Ordinal) ||
+                p.StartsWith("- ", StringComparison.Ordinal) ||
+                p.StartsWith("* ", StringComparison.Ordinal) ||
+                p.StartsWith("1.", StringComparison.Ordinal))
+            {
+                firstSubstantiveIdx = i;
+                break;
+            }
+        }
+
+        if (firstSubstantiveIdx <= 0)
+            return text; // No structural content found, or it's the first paragraph
+
+        // Check that all preceding paragraphs are disclaimer-like
+        var allDisclaimers = true;
+        for (var i = 0; i < firstSubstantiveIdx; i++)
+        {
+            var lower = paragraphs[i].Trim().ToLowerInvariant();
+            if (lower.Length == 0)
+                continue;
+
+            var hasDisclaimerSignal =
+                lower.Contains("cannot", StringComparison.Ordinal) ||
+                lower.Contains("cant ", StringComparison.Ordinal) ||
+                lower.Contains("unavailable", StringComparison.Ordinal) ||
+                lower.Contains("no access", StringComparison.Ordinal) ||
+                lower.Contains("however", StringComparison.Ordinal) ||
+                lower.Contains("knowledge cutoff", StringComparison.Ordinal) ||
+                lower.Contains("training data", StringComparison.Ordinal) ||
+                lower.Contains("training cutoff", StringComparison.Ordinal) ||
+                lower.Contains("general knowledge", StringComparison.Ordinal) ||
+                lower.Contains("based on my", StringComparison.Ordinal) ||
+                lower.Contains("based on the architecture", StringComparison.Ordinal);
+
+            if (!hasDisclaimerSignal)
+            {
+                allDisclaimers = false;
+                break;
+            }
+        }
+
+        if (!allDisclaimers)
+            return text;
+
+        // Strip the disclaimer preamble. Keep a brief note about the caveat.
+        var kept = string.Join("\n\n", paragraphs.Skip(firstSubstantiveIdx)).Trim();
+        return string.IsNullOrWhiteSpace(kept) ? text : kept;
+    }
+
+    private static string BuildCapabilityClaimFallback(
+        string summaryInput,
+        SummaryFallbackKind fallbackKind,
+        IReadOnlyList<SourceItem>? sources)
+    {
+        var lines = BuildSourceFallbackLines(
+            sources,
+            maxItems: fallbackKind == SummaryFallbackKind.FactFind ? 4 : 5);
+        if (lines.Count == 0)
+            return BuildExtractiveFallback(summaryInput);
+
+        var sb = new StringBuilder();
+        sb.AppendLine(fallbackKind switch
+        {
+            SummaryFallbackKind.News => "Here are the live results I found:",
+            SummaryFallbackKind.FactFind => "Here's the strongest evidence I found in the live results:",
+            _ => "Here are the retrieved live results:"
+        });
+
+        foreach (var line in lines)
+            sb.AppendLine("- " + line);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static List<string> BuildSourceFallbackLines(
+        IReadOnlyList<SourceItem>? sources,
+        int maxItems)
+    {
+        var lines = new List<string>();
+        if (sources is null || sources.Count == 0)
+            return lines;
+
+        foreach (var source in sources)
+        {
+            var headline = NormalizeSourceFallbackText(source.Title, 120);
+            var detail = NormalizeSourceFallbackText(source.Snippet, 220);
+
+            if (string.IsNullOrWhiteSpace(headline) &&
+                string.IsNullOrWhiteSpace(detail))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(headline))
+                headline = NormalizeSourceFallbackText(source.Domain, 80);
+
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                lines.Add(headline);
+            }
+            else if (string.IsNullOrWhiteSpace(headline) ||
+                     detail.StartsWith(headline, StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add(detail);
+            }
+            else
+            {
+                lines.Add($"{headline} - {detail}");
+            }
+
+            if (lines.Count >= maxItems)
+                break;
+        }
+
+        return lines;
+    }
+
+    private static string NormalizeSourceFallbackText(string? text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var normalized = Regex.Replace(text, @"\s+", " ").Trim();
+        if (normalized.Length > maxLength)
+            normalized = normalized[..Math.Max(0, maxLength - 3)].TrimEnd() + "...";
+
+        return normalized.Trim();
     }
 
     private static bool LooksLikeNoResultsPayload(string toolResult)
@@ -1909,12 +2827,26 @@ public sealed class SearchOrchestrator
     {
         var isLocalBusinessRequest = IsLocalBusinessNoResultsRequest(userMessage);
 
-        var text = isLocalBusinessRequest
-            ? "I could not retrieve live local business results for that request right now. " +
-              "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
-              "and I can check its current hours."
-            : "I could not retrieve usable web results for that request right now. " +
-              "Try a more specific query with a clear name, place, or timeframe.";
+        string text;
+        if (isLocalBusinessRequest)
+        {
+            // Echo the business type and any location from the user's
+            // message so topic keywords appear in the response.
+            var label = GetRequestedLocalBusinessLabel(userMessage);
+            var locationSnippet = ExtractInlineLocationFromMessage(userMessage);
+            var context = !string.IsNullOrWhiteSpace(locationSnippet)
+                ? $"{label} in {locationSnippet}"
+                : label;
+
+            text = $"I could not retrieve live local business results for {context} right now. " +
+                   "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
+                   "and I can check its current hours.";
+        }
+        else
+        {
+            text = "I could not retrieve usable web results for that request right now. " +
+                   "Try a more specific query with a clear name, place, or timeframe.";
+        }
 
         return new AgentResponse
         {
@@ -1925,33 +2857,35 @@ public sealed class SearchOrchestrator
         };
     }
 
-    private static bool IsLocalBusinessNoResultsRequest(string userMessage)
-    {
-        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
-        return
-            lower.Contains("restaurant", StringComparison.Ordinal) ||
-            lower.Contains("restaurants", StringComparison.Ordinal) ||
-            lower.Contains("florist", StringComparison.Ordinal) ||
-            lower.Contains("bakery", StringComparison.Ordinal) ||
-            lower.Contains("bakeries", StringComparison.Ordinal) ||
-            lower.Contains("cafe", StringComparison.Ordinal) ||
-            lower.Contains("coffee", StringComparison.Ordinal) ||
-            lower.Contains("bar", StringComparison.Ordinal) ||
-            lower.Contains("pub", StringComparison.Ordinal) ||
-            lower.Contains("store", StringComparison.Ordinal) ||
-            lower.Contains("shop", StringComparison.Ordinal) ||
-            lower.Contains("salon", StringComparison.Ordinal) ||
-            lower.Contains("gym", StringComparison.Ordinal) ||
-            lower.Contains("pharmacy", StringComparison.Ordinal) ||
-            lower.Contains("gas station", StringComparison.Ordinal) ||
-            lower.Contains("car wash", StringComparison.Ordinal) ||
-            lower.Contains("laundromat", StringComparison.Ordinal) ||
-            lower.Contains("grocery", StringComparison.Ordinal) ||
-            lower.Contains("dentist", StringComparison.Ordinal) ||
-            lower.Contains("clinic", StringComparison.Ordinal) ||
-            lower.Contains("open", StringComparison.Ordinal) ||
-            lower.Contains("hours", StringComparison.Ordinal);
-    }
+    private sealed record LocalNewsRetryCandidate(
+        string Query,
+        string Recency,
+        string Reason);
+
+    private sealed record LocalNewsLocationTokens(
+        string CityPhrase,
+        IReadOnlyList<string> CityTokens,
+        string CityStem,
+        string StateCode,
+        string StateName);
+
+    private sealed record SearchToolDiagnostics(
+        string Provider,
+        IReadOnlyList<SearchToolBundleDiagnostics> Bundles);
+
+    private sealed record SearchToolBundleDiagnostics(
+        string Query,
+        string Provider,
+        int ResultCount,
+        IReadOnlyList<string> Errors,
+        IReadOnlyList<SearchToolStepDiagnostics> Steps);
+
+    private sealed record SearchToolStepDiagnostics(
+        string Provider,
+        string Phase,
+        string Outcome,
+        string Message,
+        int ResultCount);
 
     private static string StripOfflineReasoningPrefix(string text)
     {
@@ -2033,199 +2967,21 @@ public sealed class SearchOrchestrator
                lower.Contains("air speed velocity of an unladen swallow", StringComparison.Ordinal);
     }
 
-    private AgentResponse? TryBuildExistenceGuardedResponse(
-        string userMessage,
-        IReadOnlyList<SourceItem> initialSources,
-        List<ToolCallRecord> toolCallsMade)
-    {
-        var queryBundle = BuildExistenceQueryBundle(userMessage);
-        if (queryBundle.Count <= 1)
-            return null;
-
-        var evidence = initialSources
-            .Where(s => !string.IsNullOrWhiteSpace(s.Url))
-            .ToList();
-        const bool addedFollowupEvidence = false;
-
-        if (evidence.Count == 0)
-            return null;
-
-        if (!IsLikelyNonexistent(userMessage, evidence, out var nonexistenceScore))
-            return null;
-
-        var seasonLabel = TryExtractSeasonLabel(userMessage);
-        var seasonPhrase = seasonLabel is null ? "the requested installment" : seasonLabel;
-        var text =
-            $"Based on available sources, {seasonPhrase} does not exist. " +
-            "The evidence indicates it was canceled or never released, so there is no official episode plot to summarize.";
-
-        _audit.Append(new AuditEvent
-        {
-            Actor = "search",
-            Action = "EXISTENCE_GUARD_TRIGGERED",
-            Result = "does_not_exist",
-            Details = new Dictionary<string, object>
-            {
-                ["query_bundle_count"] = queryBundle.Count,
-                ["evidence_count"] = evidence.Count,
-                ["nonexistence_score"] = nonexistenceScore,
-                ["added_followup_evidence"] = addedFollowupEvidence
-            }
-        });
-
-        return new AgentResponse
-        {
-            Text = text,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = 0
-        };
-    }
-
-    internal static IReadOnlyList<string> BuildExistenceQueryBundle(string userQuestion)
-    {
-        if (string.IsNullOrWhiteSpace(userQuestion))
-            return [];
-
-        var normalized = userQuestion.Trim();
-        var lower = normalized.ToLowerInvariant();
-        var hasSeasonEpisode =
-            Regex.IsMatch(lower, @"\bseason\s+\d+\b") &&
-            Regex.IsMatch(lower, @"\bepisode\s+\d+\b");
-        if (!hasSeasonEpisode)
-            return [normalized];
-
-        var parsed = TryParseSeasonEpisode(normalized);
-        if (parsed is null)
-        {
-            return
-            [
-                normalized,
-                $"{normalized} cancelled",
-                $"{normalized} number of seasons",
-                $"{normalized} episode list"
-            ];
-        }
-
-        var (entity, season, episode) = parsed.Value;
-        if (string.IsNullOrWhiteSpace(entity))
-        {
-            return
-            [
-                normalized,
-                $"{normalized} cancelled",
-                $"{normalized} number of seasons",
-                $"{normalized} episode list"
-            ];
-        }
-
-        return
-        [
-            $"{entity} season {season} episode {episode} plot",
-            $"{entity} season {season} cancelled",
-            $"{entity} number of seasons",
-            $"{entity} season {season} episode list"
-        ];
-    }
-
-    internal static bool IsLikelyNonexistent(
-        string question,
-        IReadOnlyList<SourceItem> evidence,
-        out int score)
-    {
-        score = 0;
-        if (string.IsNullOrWhiteSpace(question) || evidence.Count == 0)
-            return false;
-
-        foreach (var source in evidence)
-        {
-            var text = $"{source.Title} {source.Snippet}".ToLowerInvariant();
-
-            if (text.Contains("does not exist", StringComparison.Ordinal) ||
-                text.Contains("doesn't exist", StringComparison.Ordinal) ||
-                text.Contains("never renewed", StringComparison.Ordinal) ||
-                text.Contains("never released", StringComparison.Ordinal) ||
-                text.Contains("no season", StringComparison.Ordinal) ||
-                text.Contains("no episode", StringComparison.Ordinal) ||
-                text.Contains("canceled", StringComparison.Ordinal) ||
-                text.Contains("cancelled", StringComparison.Ordinal) ||
-                text.Contains("ended after season", StringComparison.Ordinal))
-            {
-                score += 6;
-            }
-
-            if (text.Contains("episode list", StringComparison.Ordinal) ||
-                text.Contains("air date", StringComparison.Ordinal) ||
-                text.Contains("released", StringComparison.Ordinal) ||
-                text.Contains("available now", StringComparison.Ordinal))
-            {
-                score -= 3;
-            }
-        }
-
-        var seasonLabel = TryExtractSeasonLabel(question);
-        if (!string.IsNullOrWhiteSpace(seasonLabel))
-        {
-            var seasonNumberMatch = Regex.Match(seasonLabel, @"\d+");
-            if (seasonNumberMatch.Success &&
-                int.TryParse(seasonNumberMatch.Value, out var requestedSeason) &&
-                requestedSeason > 1)
-            {
-                var priorSeasonLabel = $"season {requestedSeason - 1}";
-                var hasPriorSeason = evidence.Any(s =>
-                    ($"{s.Title} {s.Snippet}")
-                    .Contains(priorSeasonLabel, StringComparison.OrdinalIgnoreCase));
-                var hasCancelSignal = evidence.Any(s =>
-                    ($"{s.Title} {s.Snippet}")
-                    .Contains("cancel", StringComparison.OrdinalIgnoreCase));
-
-                if (hasPriorSeason && hasCancelSignal)
-                    score += 10;
-            }
-        }
-
-        return score >= 12;
-    }
-
-    private static string? TryExtractSeasonLabel(string userMessage)
-    {
-        var match = Regex.Match(userMessage ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
-        return match.Success ? match.Value.ToLowerInvariant() : null;
-    }
-
-    private static (string Entity, int Season, int Episode)? TryParseSeasonEpisode(string question)
-    {
-        var lower = question.ToLowerInvariant();
-        var seasonMatch = Regex.Match(lower, @"\bseason\s+(\d+)\b");
-        var episodeMatch = Regex.Match(lower, @"\bepisode\s+(\d+)\b");
-        if (!seasonMatch.Success || !episodeMatch.Success)
-            return null;
-
-        if (!int.TryParse(seasonMatch.Groups[1].Value, out var season) ||
-            !int.TryParse(episodeMatch.Groups[1].Value, out var episode))
-        {
-            return null;
-        }
-
-        var marker = lower.IndexOf(" of ", StringComparison.Ordinal);
-        if (marker < 0)
-            marker = lower.IndexOf(" for ", StringComparison.Ordinal);
-
-        var entity = marker >= 0
-            ? question[(marker + 4)..].Trim(' ', '?', '.', '"', '\'')
-            : question[..Math.Min(seasonMatch.Index, question.Length)].Trim(' ', '?', '.', '"', '\'');
-
-        return (entity, season, episode);
-    }
-
     private SearchMode ResolveMode(string userMessage, LookupModeHint modeHint, DateTimeOffset now)
     {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        var hasFollowUpSignals =
+            Session.HasRecentResults(now) &&
+            (SearchModeRouter.IsFollowUpMessage(lower) ||
+             (Session.LastWasLocalBusinessDiscovery && SearchModeRouter.IsReferential(lower)));
+
         return modeHint switch
         {
+            LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.News => SearchMode.NewsAggregate,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
-            _ => SearchModeRouter.Classify(userMessage, Session, now)
+            _ => SearchModeRouter.Classify(userMessage ?? "", Session, now)
         };
     }
 

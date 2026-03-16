@@ -3,8 +3,11 @@ using System.Net.Http;
 using System.Security.Principal;
 using System.Text.Json;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
+using SirThaddeus.Contracts;
 using SirThaddeus.LlmClient;
 using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.PersonalityEngine.Profiles;
@@ -25,50 +28,402 @@ var handles = ResolvePromptHandles(settings, personalityStore, profilePreferredN
 var settingsUndoStack = new Stack<AppSettings>();
 
 using var audit = JsonLineAuditLogger.CreateDefault();
-using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+using var searxngLauncher = new SearxngHostLauncher();
+var searxngStartupGate = new SemaphoreSlim(1, 1);
+var searxngLastLaunchStatus = options.ServerMode ? "Queued" : "Pending";
+var searxngLastLaunchMessage = options.ServerMode
+    ? "SearxNG startup has been queued for the background runtime."
+    : "SearxNG startup has not run yet.";
 
-var mcp = await CreateMcpClientAsync(options, settings, audit, CancellationToken.None);
+void RecordSearxngLaunchStatus(string status, string message)
+{
+    searxngLastLaunchStatus = string.IsNullOrWhiteSpace(status) ? "Unknown" : status.Trim();
+    searxngLastLaunchMessage = string.IsNullOrWhiteSpace(message) ? "" : message.Trim();
+}
+
+Task EnsureManagedSearxngSerializedAsync(AppSettings currentSettings, CancellationToken cancellationToken)
+    => EnsureManagedSearxngSerializedCoreAsync(currentSettings, cancellationToken);
+
+async Task EnsureManagedSearxngSerializedCoreAsync(AppSettings currentSettings, CancellationToken cancellationToken)
+{
+    await searxngStartupGate.WaitAsync(cancellationToken);
+    try
+    {
+        await EnsureManagedSearxngAsync(
+            currentSettings,
+            options.EnableTools,
+            searxngLauncher,
+            audit,
+            RecordSearxngLaunchStatus,
+            cancellationToken);
+    }
+    finally
+    {
+        searxngStartupGate.Release();
+    }
+}
+
+void QueueManagedSearxngUpdate(AppSettings currentSettings)
+{
+    _ = EnsureManagedSearxngSerializedAsync(currentSettings, CancellationToken.None);
+}
+
+if (options.ServerMode)
+{
+    QueueManagedSearxngUpdate(settings);
+}
+else
+{
+    await EnsureManagedSearxngSerializedAsync(settings, CancellationToken.None);
+}
+
+using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+using var gatekeeperLlm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
+
+var mcp = await RuntimeMcpClientFactory.CreateAsync(
+    enableTools: options.EnableTools,
+    allowDegradedStartup: options.ServerMode,
+    overrideServerPath: options.McpServerPath,
+    settings,
+    audit,
+    baseDirectory: Directory.GetCurrentDirectory(),
+    clientName: "HeadlessRuntime",
+    clientVersion: "0.1.0",
+    cancellationToken: CancellationToken.None);
 await using var mcpScope = mcp.Scope;
 ConsolePermissionGate? permissionGate = null;
+ApiPermissionGate? apiPermissionGate = null;
+
+var toolsAvailable = mcp.ToolsAvailable;
+if (options.EnableTools && !toolsAvailable)
+{
+    Console.WriteLine(mcp.Message);
+}
 
 IMcpToolClient agentMcp = mcp.Client;
-if (options.EnableTools)
+if (toolsAvailable)
 {
-    permissionGate = new ConsolePermissionGate(
-        audit,
-        settings,
-        persistGroupAsAlways: group =>
-        {
-            settings = PersistGroupPolicyAsAlways(settings, group);
-            permissionGate?.UpdateSettings(settings);
-        });
+    IToolPermissionGate toolPermissionGate;
+    if (options.ServerMode)
+    {
+        apiPermissionGate = new ApiPermissionGate(
+            settings,
+            () => RunExecutionContext.CurrentRunId);
+        toolPermissionGate = apiPermissionGate;
+    }
+    else
+    {
+        permissionGate = new ConsolePermissionGate(
+            audit,
+            settings,
+            persistGroupAsAlways: group =>
+            {
+                settings = PersistGroupPolicyAsAlways(settings, group);
+                permissionGate?.UpdateSettings(settings);
+            });
+        toolPermissionGate = permissionGate;
+    }
 
     agentMcp = new AuditedMcpToolClient(
         mcp.Client,
         audit,
-        permissionGate,
+        toolPermissionGate,
         sessionId: Guid.NewGuid().ToString("N")[..12],
         runtimeControls: () => RuntimeControlState.FromSettings(settings));
 }
 
-AgentOrchestrator BuildOrchestrator(AppSettings currentSettings) => new(
-    llm,
-    agentMcp,
-    audit,
-    currentSettings.Llm.SystemPrompt,
-    activePersonalityId: currentSettings.ActivePersonalityId,
-    personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings))
+AutoMemoryExtractor? autoMemoryExtractor = null;
+SqliteMemoryStore? autoMemoryStore = null;
+if (toolsAvailable && settings.Memory.Enabled)
 {
-    ActiveProfileId = currentSettings.ActiveProfileId,
-    MemoryEnabled = options.EnableTools && currentSettings.Memory.Enabled,
-    UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
-    UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
-    PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem()
-};
+    var dbPath = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath(settings.Memory.DbPath);
+    autoMemoryStore = new SqliteMemoryStore(dbPath);
+    await autoMemoryStore.EnsureSchemaAsync(CancellationToken.None);
+
+    autoMemoryExtractor = new AutoMemoryExtractor(
+        llm,
+        autoMemoryStore,
+        log: (action, message) => audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = action,
+            Result = "error",
+            Details = new Dictionary<string, object>
+            {
+                ["message"] = message
+            }
+        }));
+}
+
+AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
+{
+    llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
+    gatekeeperLlm.UpdateOptions(RuntimeLlmOptionsFactory.BuildGatekeeper(currentSettings));
+
+    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
+
+    return new AgentOrchestrator(
+        llm,
+        agentMcp,
+        audit,
+        currentSettings.Llm.SystemPrompt,
+        activePersonalityId: currentSettings.ActivePersonalityId,
+        personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings),
+        footmanRouter: footmanRouter,
+        autoMemoryExtractor: autoMemoryExtractor,
+        gatekeeperLlm: gatekeeperLlm)
+    {
+        ActiveProfileId = currentSettings.ActiveProfileId,
+        MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
+        UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
+        UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
+        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem(),
+        MaxTokensBudget = currentSettings.Llm.MaxTokens
+    };
+}
 
 var orchestrator = BuildOrchestrator(settings);
 
-PrintBanner(settings, options, handles);
+string ResolveCurrentMcpServerPath(AppSettings currentSettings)
+{
+    return string.IsNullOrWhiteSpace(options.McpServerPath)
+        ? RuntimePathResolver.ResolveMcpServerPath(currentSettings.Mcp.ServerPath, Directory.GetCurrentDirectory())
+        : Path.GetFullPath(options.McpServerPath.Trim());
+}
+
+async Task<SearchTraceStatusDto> BuildLastProviderTraceAsync(CancellationToken ct)
+{
+    var events = await audit.ReadTailAsync(200, ct);
+    var trace = events.LastOrDefault(evt =>
+        string.Equals(evt.Action, "WEB_SEARCH_PROVIDER_TRACE", StringComparison.OrdinalIgnoreCase));
+    if (trace is null)
+    {
+        return new SearchTraceStatusDto(
+            Status: "None",
+            RequestedQuery: "",
+            EffectiveQuery: "",
+            Provider: "",
+            PathSummary: "",
+            Failure: "",
+            RecordedAtUtc: default);
+    }
+
+    var requestedQuery = ReadAuditDetail(trace, "requested_query");
+    var effectiveQuery = ReadAuditDetail(trace, "effective_query");
+    var provider = ReadAuditDetail(trace, "provider");
+    var pathSummary = ReadAuditDetail(trace, "path_summary");
+    var failureCode = ReadAuditDetail(trace, "failure_code");
+    var failureMessage = ReadAuditDetail(trace, "failure_message");
+    var failure = !string.IsNullOrWhiteSpace(failureCode) ? failureCode : failureMessage;
+
+    return new SearchTraceStatusDto(
+        Status: string.IsNullOrWhiteSpace(failure) ? "Recorded" : "Failure",
+        RequestedQuery: requestedQuery,
+        EffectiveQuery: effectiveQuery,
+        Provider: provider,
+        PathSummary: pathSummary,
+        Failure: failure,
+        RecordedAtUtc: trace.Timestamp);
+}
+
+async Task<SearchStatusResponse> BuildSearchStatusAsync(CancellationToken ct)
+{
+    var currentSettings = settings;
+    var mode = NormalizeWebSearchMode(currentSettings.WebSearch.Mode);
+    var webPermission = ToolGroupPolicy.ResolveEffectivePolicy(
+        "web",
+        ToolGroupPolicy.BuildSnapshot(currentSettings, isDebugBuild: false));
+
+    var searxngBaseUrl = NormalizeBaseUrl(currentSettings.WebSearch.SearxngBaseUrl, "http://localhost:8080");
+    var searxngBaseUrlValid = Uri.TryCreate(searxngBaseUrl, UriKind.Absolute, out var searxngBaseUri);
+    var searxngReachable = searxngBaseUrlValid &&
+                           searxngBaseUri is not null &&
+                           await ProbeSearchEndpointAsync(searxngBaseUri, ct);
+
+    string searxngStatus;
+    string searxngMessage;
+    if (mode is not ("auto" or "searxng"))
+    {
+        searxngStatus = "Skipped";
+        searxngMessage = $"webSearch.mode '{mode}' does not use SearxNG.";
+    }
+    else if (!searxngBaseUrlValid || searxngBaseUri is null)
+    {
+        searxngStatus = "Invalid URL";
+        searxngMessage = $"Invalid SearxNG base URL: {currentSettings.WebSearch.SearxngBaseUrl}";
+    }
+    else if (searxngReachable)
+    {
+        searxngStatus = "Ready";
+        searxngMessage = $"SearxNG responded at {searxngBaseUrl}.";
+    }
+    else if (!currentSettings.WebSearch.SearxngAutoStart)
+    {
+        searxngStatus = "Disabled";
+        searxngMessage = "SearxNG auto-start is disabled and the local endpoint is not reachable.";
+    }
+    else
+    {
+        searxngStatus = searxngLastLaunchStatus;
+        searxngMessage = searxngLastLaunchMessage;
+    }
+
+    var searchApiConfigured = !string.IsNullOrWhiteSpace(currentSettings.WebSearch.SearchApiKey);
+    var searchApiStatus = searchApiConfigured ? "Configured" : "Unconfigured";
+    var searchApiMessage = searchApiConfigured
+        ? "Hosted Search API fallback is configured."
+        : "No hosted Search API key is configured.";
+
+    var mcpServerPath = ResolveCurrentMcpServerPath(currentSettings);
+    var mcpToolsEnabled = options.EnableTools;
+    var mcpToolsAvailable = false;
+    var mcpStatus = mcpToolsEnabled ? "Unavailable" : "Disabled";
+    var mcpMessage = mcpToolsEnabled
+        ? mcp.Message
+        : "Runtime started without --tools, so MCP-backed web search is unavailable.";
+
+    if (mcpToolsEnabled && toolsAvailable)
+    {
+        try
+        {
+            var toolList = await mcp.Client.ListToolsAsync(ct);
+            mcpToolsAvailable = toolList.Count > 0;
+            mcpStatus = mcpToolsAvailable ? "Ready" : "Degraded";
+            mcpMessage = mcpToolsAvailable
+                ? $"MCP responded with {toolList.Count} tool(s)."
+                : "MCP responded but reported no tools.";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            mcpStatus = "Unreachable";
+            mcpMessage = ex.Message;
+        }
+    }
+
+    var effectiveStatus = "Ready";
+    var effectiveMessage = "Web search is ready.";
+
+    if (mode == "manual")
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "webSearch.mode is manual, so live web search is turned off.";
+    }
+    else if (webPermission == "off")
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "MCP web permission is off, so web search calls are blocked.";
+    }
+    else if (!mcpToolsEnabled)
+    {
+        effectiveStatus = "Disabled";
+        effectiveMessage = "Runtime started without --tools, so MCP-backed web search is unavailable.";
+    }
+    else if (!mcpToolsAvailable)
+    {
+        effectiveStatus = "Unavailable";
+        effectiveMessage = mcpMessage;
+    }
+    else
+    {
+        (effectiveStatus, effectiveMessage) = mode switch
+        {
+            "auto" when searxngReachable => (
+                "Ready",
+                "Auto mode is ready. SearxNG is reachable, with hosted Search API and Google News still available as fallback."),
+            "auto" when searchApiConfigured => (
+                "Ready",
+                "Auto mode is running in fallback mode. SearxNG is unavailable, so hosted Search API or Google News will be used."),
+            "auto" => (
+                "Ready",
+                "Auto mode is running in fallback mode. SearxNG is unavailable and hosted Search API is not configured, so Google News fallback is all that remains."),
+            "searxng" when searxngReachable => (
+                "Ready",
+                "SearxNG-only mode is ready."),
+            "searxng" => (
+                "Unavailable",
+                "SearxNG-only mode is configured, but the endpoint is not reachable."),
+            "search_api" when searchApiConfigured => (
+                "Ready",
+                "Hosted Search API mode is configured."),
+            "search_api" => (
+                "Unavailable",
+                "Hosted Search API mode is selected, but no API key is configured."),
+            "google_news" => (
+                "Ready",
+                "Google News-only mode is ready."),
+            "ddg_html" => (
+                "Degraded",
+                "DDG HTML mode is legacy and may be blocked upstream."),
+            _ => (
+                "Ready",
+                "Web search is ready.")
+        };
+    }
+
+    var lastProviderTrace = await BuildLastProviderTraceAsync(ct);
+
+    return new SearchStatusResponse(
+        LiveSearchAvailable: string.Equals(effectiveStatus, "Ready", StringComparison.OrdinalIgnoreCase),
+        EffectiveStatus: effectiveStatus,
+        EffectiveMessage: effectiveMessage,
+        SearchMode: mode,
+        WebPermission: webPermission,
+        Searxng: new SearchProviderStatusDto(
+            Status: searxngStatus,
+            Message: searxngMessage,
+            BaseUrl: searxngBaseUrl,
+            Reachable: searxngReachable,
+            ManagedByRuntime: searxngLauncher.IsManagedSearxngRunning,
+            AutoStartEnabled: currentSettings.WebSearch.SearxngAutoStart,
+            LastLaunchStatus: searxngLastLaunchStatus),
+        SearchApi: new HostedSearchApiStatusDto(
+            Status: searchApiStatus,
+            Message: searchApiMessage,
+            Provider: currentSettings.WebSearch.SearchApiProvider,
+            BaseUrl: currentSettings.WebSearch.SearchApiBaseUrl,
+            Engine: currentSettings.WebSearch.SearchApiEngine,
+            Configured: searchApiConfigured),
+        Mcp: new McpRuntimeStatusDto(
+            Status: mcpStatus,
+            Message: mcpMessage,
+            ServerPath: mcpServerPath,
+            ToolsEnabled: mcpToolsEnabled,
+            ToolsAvailable: mcpToolsAvailable),
+        LastProviderTrace: lastProviderTrace,
+        CheckedAtUtc: DateTimeOffset.UtcNow);
+}
+
+if (options.ServerMode)
+{
+    using var serverCancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        serverCancellation.Cancel();
+    };
+
+    Console.WriteLine($"Runtime API listening on http://127.0.0.1:{options.ServerPort}");
+    await RuntimeApiServer.RunAsync(
+        options.ServerPort,
+        BuildOrchestrator,
+        () => settings,
+        updatedSettings =>
+        {
+            settings = updatedSettings;
+            QueueManagedSearxngUpdate(settings);
+        },
+        BuildSearchStatusAsync,
+        audit,
+        apiPermissionGate,
+        serverCancellation.Token);
+    return;
+}
+
+PrintBanner(settings, toolsAvailable, handles, options.EnableTools ? mcp.Message : null);
 PrintHelpHint();
 
 var cancellation = new CancellationTokenSource();
@@ -122,13 +477,13 @@ while (!cancellation.IsCancellationRequested)
     if (input.Equals("/who", StringComparison.OrdinalIgnoreCase) ||
         input.Equals("/whoami", StringComparison.OrdinalIgnoreCase))
     {
-        PrintRuntimeIdentity(settings, options, handles, personalityStore);
+        PrintRuntimeIdentity(settings, toolsAvailable, handles, personalityStore);
         continue;
     }
 
     if (input.Equals("/w", StringComparison.OrdinalIgnoreCase))
     {
-        PrintRuntimeIdentity(settings, options, handles, personalityStore);
+        PrintRuntimeIdentity(settings, toolsAvailable, handles, personalityStore);
         continue;
     }
 
@@ -140,13 +495,13 @@ while (!cancellation.IsCancellationRequested)
 
     if (input.Equals("/status", StringComparison.OrdinalIgnoreCase))
     {
-        await PrintStatusAsync(settings, options, orchestrator, cancellation.Token);
+        await PrintStatusAsync(settings, options, orchestrator, toolsAvailable, mcp.Message, cancellation.Token);
         continue;
     }
 
     if (input.Equals("/doctor", StringComparison.OrdinalIgnoreCase))
     {
-        await RunDoctorAsync(settings, options, orchestrator, cancellation.Token);
+        await RunDoctorAsync(settings, options, orchestrator, toolsAvailable, mcp.Message, cancellation.Token);
         continue;
     }
 
@@ -220,25 +575,11 @@ while (!cancellation.IsCancellationRequested)
     }
 }
 
-static async Task<(IMcpToolClient Client, IAsyncDisposable Scope)> CreateMcpClientAsync(
-    HeadlessOptions options,
+static void PrintBanner(
     AppSettings settings,
-    IAuditLogger audit,
-    CancellationToken cancellationToken)
-{
-    if (!options.EnableTools)
-        return (new NoToolsMcpClient(), AsyncNoop.Instance);
-
-    var serverPath = string.IsNullOrWhiteSpace(options.McpServerPath)
-        ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
-        : Path.GetFullPath(options.McpServerPath.Trim());
-    var env = RuntimeMcpEnvironmentBuilder.Build(settings);
-    var client = new StdioMcpToolClient(serverPath, env, "HeadlessRuntime", "0.1.0", audit);
-    await client.StartAsync(cancellationToken);
-    return (client, client);
-}
-
-static void PrintBanner(AppSettings settings, HeadlessOptions options, (string User, string Assistant) handles)
+    bool toolsAvailable,
+    (string User, string Assistant) handles,
+    string? toolsMessage)
 {
     Console.WriteLine("  ____  _        _____ _               _     _                 ");
     Console.WriteLine(" / ___|(_)_ __  |_   _| |__   __ _  __| | __| | ___ _   _ ___ ");
@@ -248,7 +589,12 @@ static void PrintBanner(AppSettings settings, HeadlessOptions options, (string U
     Console.WriteLine();
     Console.WriteLine($"Model: {settings.Llm.Model}");
     Console.WriteLine($"LLM:   {settings.Llm.BaseUrl}");
-    Console.WriteLine($"Tools: {(options.EnableTools ? "enabled" : "disabled")}");
+    Console.WriteLine($"Tools: {(toolsAvailable ? "enabled" : "disabled")}");
+    if (!toolsAvailable && !string.IsNullOrWhiteSpace(toolsMessage))
+    {
+        Console.WriteLine($"Note:  {toolsMessage}");
+    }
+
     Console.WriteLine($"Chat:  {handles.User} <-> {handles.Assistant}");
     Console.WriteLine();
 }
@@ -274,6 +620,8 @@ static async Task PrintStatusAsync(
     AppSettings settings,
     HeadlessOptions options,
     AgentOrchestrator orchestrator,
+    bool toolsAvailable,
+    string toolsMessage,
     CancellationToken cancellationToken)
 {
     var (llmReachable, llmDetail) = await CheckHttpEndpointReachableAsync(settings.Llm.BaseUrl, cancellationToken);
@@ -281,9 +629,11 @@ static async Task PrintStatusAsync(
         ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
         : Path.GetFullPath(options.McpServerPath.Trim());
     var mcpExists = File.Exists(mcpPath);
-    var toolInfo = options.EnableTools
+    var toolInfo = !options.EnableTools
+        ? "disabled"
+        : toolsAvailable
         ? await TryGetToolCountStatusAsync(orchestrator, cancellationToken)
-        : "disabled";
+        : $"unavailable ({toolsMessage})";
 
     Console.WriteLine("Status");
     Console.WriteLine($"LLM endpoint: {(llmReachable ? "reachable" : "unreachable")} ({settings.Llm.BaseUrl})");
@@ -299,6 +649,8 @@ static async Task RunDoctorAsync(
     AppSettings settings,
     HeadlessOptions options,
     AgentOrchestrator orchestrator,
+    bool toolsAvailable,
+    string toolsMessage,
     CancellationToken cancellationToken)
 {
     var findings = new List<string>();
@@ -314,16 +666,22 @@ static async Task RunDoctorAsync(
     var mcpPath = string.IsNullOrWhiteSpace(options.McpServerPath)
         ? RuntimePathResolver.ResolveMcpServerPath(settings.Mcp.ServerPath, Directory.GetCurrentDirectory())
         : Path.GetFullPath(options.McpServerPath.Trim());
+    if (options.EnableTools && !toolsAvailable)
+    {
+        findings.Add($"Tool startup degraded: {toolsMessage}");
+        recommendations.Add("Check MCP server launch path and startup health, then restart the runtime.");
+    }
+
     if (options.EnableTools && !File.Exists(mcpPath))
     {
         findings.Add($"MCP executable missing: {mcpPath}");
         recommendations.Add("Run ./dev/terminal.ps1 without --NoBuild to rebuild MCP artifacts.");
     }
 
-    var toolStatus = options.EnableTools
+    var toolStatus = toolsAvailable
         ? await TryGetToolCountStatusAsync(orchestrator, cancellationToken)
         : "disabled";
-    if (options.EnableTools && toolStatus.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
+    if (toolsAvailable && toolStatus.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
     {
         findings.Add($"Tool handshake issue: {toolStatus}");
         recommendations.Add("Check MCP server launch path and permissions, then restart terminal runtime.");
@@ -395,6 +753,160 @@ static async Task<string> TryGetToolCountStatusAsync(
     }
 }
 
+static async Task EnsureManagedSearxngAsync(
+    AppSettings settings,
+    bool toolsEnabled,
+    SearxngHostLauncher launcher,
+    IAuditLogger audit,
+    Action<string, string> recordLaunchStatus,
+    CancellationToken cancellationToken)
+{
+    if (!toolsEnabled)
+    {
+        launcher.StopManagedSearxng();
+        recordLaunchStatus("Disabled", "Runtime started without --tools, so SearxNG auto-start was skipped.");
+        return;
+    }
+
+    SearxngLaunchResult result;
+    try
+    {
+        result = await launcher.EnsureRunningAsync(settings.WebSearch, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "SEARXNG_AUTOSTART",
+            Target = settings.WebSearch.SearxngBaseUrl,
+            Result = "error",
+            Details = new Dictionary<string, object>
+            {
+                ["status"] = "exception",
+                ["message"] = ex.Message
+            }
+        });
+        recordLaunchStatus("Exception", ex.Message);
+        return;
+    }
+
+    var mode = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
+    var resultLabel = result.Status.ToString();
+    var auditResult = result.Status switch
+    {
+        SearxngLaunchStatus.Started => "ok",
+        SearxngLaunchStatus.AlreadyRunning => "ok",
+        SearxngLaunchStatus.NotRequired => "skipped",
+        SearxngLaunchStatus.Disabled => "skipped",
+        _ => "error"
+    };
+
+    audit.Append(new AuditEvent
+    {
+        Actor = "runtime",
+        Action = "SEARXNG_AUTOSTART",
+        Target = result.BaseUrl ?? settings.WebSearch.SearxngBaseUrl,
+        Result = auditResult,
+        Details = new Dictionary<string, object>
+        {
+            ["status"] = resultLabel,
+            ["mode"] = mode,
+            ["message"] = result.Message
+        }
+    });
+
+    recordLaunchStatus(resultLabel, result.Message);
+
+    if (result.Status is SearxngLaunchStatus.Started or SearxngLaunchStatus.AlreadyRunning)
+    {
+        Console.WriteLine($"SearxNG: {result.Message}");
+        return;
+    }
+
+    if (mode == "searxng")
+    {
+        Console.WriteLine($"SearxNG: {result.Message}");
+        Console.WriteLine("SearxNG-only mode is configured; web search will fail until SearxNG is reachable.");
+    }
+}
+
+static async Task<bool> ProbeSearchEndpointAsync(Uri baseUri, CancellationToken cancellationToken)
+{
+    using var http = new HttpClient
+    {
+        BaseAddress = baseUri,
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    try
+    {
+        using var response = await http.GetAsync("/search?q=thaddeus&format=json", cancellationToken);
+        if (response.IsSuccessStatusCode)
+            return true;
+    }
+    catch
+    {
+        // Best effort probe only.
+    }
+
+    try
+    {
+        using var response = await http.GetAsync("/", cancellationToken);
+        return response.IsSuccessStatusCode;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static string NormalizeBaseUrl(string? value, string fallback)
+{
+    var raw = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    return raw.TrimEnd('/');
+}
+
+static string NormalizeWebSearchMode(string? value)
+{
+    var normalized = (value ?? "auto").Trim().ToLowerInvariant();
+    return normalized switch
+    {
+        "auto" => "auto",
+        "searxng" => "searxng",
+        "search_api" => "search_api",
+        "api" => "search_api",
+        "google_news" => "google_news",
+        "ddg_html" => "ddg_html",
+        "manual" => "manual",
+        _ => "auto"
+    };
+}
+
+static string ReadAuditDetail(AuditEvent auditEvent, string key)
+{
+    if (auditEvent.Details is null ||
+        !auditEvent.Details.TryGetValue(key, out var value) ||
+        value is null)
+    {
+        return "";
+    }
+
+    return value switch
+    {
+        string text => text,
+        JsonElement jsonElement => jsonElement.ValueKind switch
+        {
+            JsonValueKind.String => jsonElement.GetString() ?? "",
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            JsonValueKind.Number => jsonElement.ToString(),
+            _ => jsonElement.ToString()
+        },
+        _ => value.ToString() ?? ""
+    };
+}
+
 static void PrintHelp()
 {
     Console.WriteLine("Headless Runtime Commands");
@@ -416,6 +928,8 @@ static void PrintHelp()
     Console.WriteLine("CLI options");
     Console.WriteLine("  --tools                 Enable MCP tool calls");
     Console.WriteLine("  --mcp-server <path>     MCP server executable path");
+    Console.WriteLine("  --server                Run HTTP runtime API host");
+    Console.WriteLine("  --port <number>         HTTP API port (default: 5378)");
     Console.WriteLine("  --help                  Show this help");
 }
 
@@ -1355,7 +1869,7 @@ static void ListUserProfiles(AppSettings settings)
 
 static void PrintRuntimeIdentity(
     AppSettings settings,
-    HeadlessOptions options,
+    bool toolsAvailable,
     (string User, string Assistant) handles,
     PersonalityProfileStore personalityStore)
 {
@@ -1374,7 +1888,7 @@ static void PrintRuntimeIdentity(
     Console.WriteLine($"Persona:   {activePersonalityId} (alias: {personalityAlias})");
     Console.WriteLine($"Model:     {settings.Llm.Model}");
     Console.WriteLine($"LLM:       {settings.Llm.BaseUrl}");
-    Console.WriteLine($"Tools:     {(options.EnableTools ? "enabled" : "disabled")}");
+    Console.WriteLine($"Tools:     {(toolsAvailable ? "enabled" : "disabled")}");
 }
 
 static (string User, string Assistant) ResolvePromptHandles(
@@ -1539,13 +2053,20 @@ static AppSettings PersistGroupPolicyAsAlways(AppSettings settings, string group
     return updated;
 }
 
-file sealed record HeadlessOptions(bool EnableTools, string? McpServerPath, bool ShowHelp)
+file sealed record HeadlessOptions(
+    bool EnableTools,
+    string? McpServerPath,
+    bool ShowHelp,
+    bool ServerMode,
+    int ServerPort)
 {
     public static HeadlessOptions Parse(string[] args)
     {
         var enableTools = false;
         string? mcpServerPath = null;
         var showHelp = false;
+        var serverMode = false;
+        var serverPort = 5378;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -1566,26 +2087,27 @@ file sealed record HeadlessOptions(bool EnableTools, string? McpServerPath, bool
             if (arg.Equals("--mcp-server", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 mcpServerPath = args[++i];
+                continue;
+            }
+
+            if (arg.Equals("--server", StringComparison.OrdinalIgnoreCase))
+            {
+                serverMode = true;
+                continue;
+            }
+
+            if (arg.Equals("--port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                if (int.TryParse(args[++i], out var parsedPort) &&
+                    parsedPort is >= 1 and <= 65535)
+                {
+                    serverPort = parsedPort;
+                }
             }
         }
 
-        return new HeadlessOptions(enableTools, mcpServerPath, showHelp);
+        return new HeadlessOptions(enableTools, mcpServerPath, showHelp, serverMode, serverPort);
     }
-}
-
-file sealed class NoToolsMcpClient : IMcpToolClient
-{
-    public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
-
-    public Task<string> CallToolAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
-        => Task.FromResult($"Error: Tool '{toolName}' is unavailable in no-tools mode.");
-}
-
-file sealed class AsyncNoop : IAsyncDisposable
-{
-    public static readonly AsyncNoop Instance = new();
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 file sealed class ConsolePermissionGate : IToolPermissionGate
@@ -1711,3 +2233,4 @@ file sealed class ConsolePermissionGate : IToolPermissionGate
         }
     }
 }
+
