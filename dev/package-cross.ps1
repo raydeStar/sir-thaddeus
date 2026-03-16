@@ -334,16 +334,27 @@ if ($IsWindows_Host) {
     Compress-Archive -Path "$stageSource*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
 } else {
     # tar.gz preserves execute bits set above
+    # Rename stage dir to desired archive root name so we avoid GNU --transform
+    # (BSD tar on macOS does not support --transform).
     $archiveNameInTar = $archiveStem
-    Push-Location (Split-Path $stageDir -Parent)
+    $parentDir = Split-Path $stageDir -Parent
+    $renamedDir = Join-Path $parentDir $archiveNameInTar
+    $stageDirLeaf = Split-Path $stageDir -Leaf
+    if ($stageDirLeaf -ne $archiveNameInTar) {
+        Rename-Item -Path $stageDir -NewName $archiveNameInTar
+    }
+    Push-Location $parentDir
     try {
-        $stageDirLeaf = Split-Path $stageDir -Leaf
-        tar -czf $archivePath --transform "s|^$stageDirLeaf|$archiveNameInTar|" $stageDirLeaf
+        tar -czf $archivePath $archiveNameInTar
         if ($LASTEXITCODE -ne 0) {
             Fail "tar failed (exit code $LASTEXITCODE)." $LASTEXITCODE
         }
     } finally {
         Pop-Location
+        # Restore original directory name
+        if ($stageDirLeaf -ne $archiveNameInTar) {
+            Rename-Item -Path $renamedDir -NewName $stageDirLeaf
+        }
     }
 }
 
