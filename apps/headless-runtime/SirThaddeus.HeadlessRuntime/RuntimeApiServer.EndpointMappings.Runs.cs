@@ -208,8 +208,14 @@ internal static partial class RuntimeApiServer
         var stopwatch = Stopwatch.StartNew();
         workflowDecorator?.SetRunBudget(workflowState!.Envelope.TimeBudget, stopwatch);
 
+        var firstPassPrompt = request.Prompt;
+        if (workflowState is not null && ShouldForceToolBackedLookup(workflowState.Envelope, request.Prompt))
+        {
+            firstPassPrompt = BuildToolBackedLookupPrompt(request.Prompt);
+        }
+
         var firstResponse = await effectiveOrchestrator.ProcessAsync(
-            request.Prompt,
+            firstPassPrompt,
             conversationId,
             runState.CancellationToken);
 
@@ -365,6 +371,7 @@ internal static partial class RuntimeApiServer
             new RunCompletedPayload(
                 selectedResponse.Text,
                 totalRoundTrips,
+                selectedResponse.ToolCallsMade.Count,
                 ToBriefingDto(selectedResponse.DeepDiveBriefing),
                 completionReason?.ToString(),
                 selectedConfidence?.Band,
@@ -529,6 +536,41 @@ internal static partial class RuntimeApiServer
         return $"{originalPrompt}\n\n" +
                "The previous answer may be low-confidence. Re-check with stronger evidence and explicit caveats.\n\n" +
                $"Previous answer for verification:\n{firstAnswer}";
+    }
+
+    private static bool ShouldForceToolBackedLookup(TaskEnvelope envelope, string prompt)
+    {
+        if (!envelope.NeedsTools)
+            return false;
+
+        if (envelope.Complexity == TaskComplexity.Trivial)
+            return false;
+
+        if (!string.Equals(envelope.Intent, "lookup", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var lower = (prompt ?? string.Empty).ToLowerInvariant();
+        return lower.Contains("find ") ||
+               lower.Contains("search") ||
+               lower.Contains("hours") ||
+               lower.Contains("price") ||
+               lower.Contains("stock") ||
+               lower.Contains("available") ||
+               lower.Contains("latest") ||
+               lower.Contains("closest") ||
+               lower.Contains("near me") ||
+               lower.Contains("flight") ||
+               lower.Contains("today");
+    }
+
+    private static string BuildToolBackedLookupPrompt(string originalPrompt)
+    {
+        return $"{originalPrompt}\n\n" +
+               "Execution requirements for this run:\n" +
+               "- Use web_search to gather current evidence before finalizing.\n" +
+               "- If search snippets are weak, use browser_navigate on one source.\n" +
+               "- Do not answer from memory alone for this request.\n" +
+               "- If tools fail, state that clearly and provide the best partial result.";
     }
 
     private static void PublishChecklist(RunState runState, TaskRunState workflowState)

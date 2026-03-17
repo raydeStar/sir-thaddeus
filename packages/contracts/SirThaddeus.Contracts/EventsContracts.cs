@@ -38,6 +38,7 @@ public sealed record ToolDecisionPayload(
 public sealed record RunCompletedPayload(
     string FinalText,
     int ToolLoopIterations,
+    int ToolCallsUsed,
     DeepDiveBriefingDto? Briefing = null,
     string? CompletionReason = null,
     string? ConfidenceBand = null,

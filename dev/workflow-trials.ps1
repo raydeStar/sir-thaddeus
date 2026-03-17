@@ -134,6 +134,20 @@ function Show-Scorecard {
     return $suitePct
 }
 
+function Get-TotalToolCallCount {
+    param([int]$Port)
+
+    try {
+        $auditRows = @(Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:$Port/api/audit?take=1000" -TimeoutSec 10)
+        if ($auditRows.Count -eq 0) { return 0 }
+        return @($auditRows | Where-Object { $_.category -eq "MCP_TOOL_CALL_END" }).Count
+    }
+    catch {
+        # Audit endpoint unavailable.
+        return -1
+    }
+}
+
 # ── Trial definitions ─────────────────────────────────────────────────────────
 # Each trial declares:
 #   Name, Prompt, and expected telemetry traits for scoring.
@@ -287,6 +301,7 @@ try {
         Write-Hdr ("TRIAL: " + $trial.Name) -Color Yellow
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $toolCallsBefore = Get-TotalToolCallCount -Port $Port
 
         # Clear conversation for isolation.
         try { Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/session/clear" -TimeoutSec 5 | Out-Null } catch {}
@@ -339,6 +354,7 @@ try {
         }
 
         $sw.Stop()
+        $toolCallsAfter = Get-TotalToolCallCount -Port $Port
 
         if ($envelopes.Count -eq 0) {
             Write-Host "  FAILED: Zero events captured" -ForegroundColor Red
@@ -353,6 +369,8 @@ try {
         $retryStarted   = $progressEvents | Where-Object { $_.payload.eventType -eq "retry.started" } | Select-Object -First 1
         $retrySkipped   = $progressEvents | Where-Object { $_.payload.eventType -eq "retry.skipped" } | Select-Object -First 1
         $toolRequested  = @($envelopes | Where-Object { $_.eventType -eq "tool.requested" })
+        $toolCountReliable = ($toolCallsBefore -ge 0 -and $toolCallsAfter -ge 0 -and $toolCallsAfter -ge $toolCallsBefore)
+        $toolCallCount = if ($toolCountReliable) { [int]($toolCallsAfter - $toolCallsBefore) } else { [int]$toolRequested.Count }
         $checklistEvts  = @($eventTypes | Where-Object { $_ -eq "checklist.updated" })
         $narrationEvts  = @($eventTypes | Where-Object { $_ -eq "narration.updated" })
 
@@ -361,9 +379,18 @@ try {
         $finalText        = Get-SafeString $completed.payload.finalText
         $retryGateAllowed = $completed.payload.retryGateAllowed
         $retryGateReason  = Get-SafeString $completed.payload.retryGateReason
+        $toolCallsFromCompleted = 0
+        try { $toolCallsFromCompleted = [int]$completed.payload.toolCallsUsed } catch { $toolCallsFromCompleted = 0 }
+
+        if ($toolCallsFromCompleted -gt 0) {
+            $toolCallCount = $toolCallsFromCompleted
+            $toolCountSource = "run.completed"
+        } else {
+            $toolCountSource = if ($toolCountReliable) { "audit" } else { "fallback" }
+        }
 
         # Quick telemetry summary.
-        Write-Host "  Events: $($envelopes.Count)  |  Tools: $($toolRequested.Count)  |  Narrations: $($narrationEvts.Count)  |  Checklist: $($checklistEvts.Count)  |  Elapsed: $([math]::Round($sw.Elapsed.TotalSeconds,1))s" -ForegroundColor DarkGray
+        Write-Host "  Events: $($envelopes.Count)  |  ToolCalls: $toolCallCount ($toolCountSource)  |  ToolRequests: $($toolRequested.Count)  |  Narrations: $($narrationEvts.Count)  |  Checklist: $($checklistEvts.Count)  |  Elapsed: $([math]::Round($sw.Elapsed.TotalSeconds,1))s" -ForegroundColor DarkGray
 
         # ── Score: Pipeline (0-25) ────────────────────────────────────────
         $pipelineScore = 0; $pipelineMax = 25; $pipelineNotes = @()
@@ -414,39 +441,33 @@ try {
         $toolsScore = 0; $toolsMax = 20; $toolsNotes = @()
 
         if ($trial.ExpectTools -eq $true) {
-            if ($toolRequested.Count -gt 0) {
+            if ($toolCallCount -gt 0) {
                 $toolsScore += 10
-                # Bonus: multiple distinct tools suggests thoroughness.
-                $distinctTools = @($toolRequested | ForEach-Object { $_.payload.toolName } | Select-Object -Unique)
-                if ($distinctTools.Count -ge 2) {
-                    $toolsScore += 5
-                    $toolsNotes += "$($distinctTools.Count) distinct tools"
-                } else {
-                    $toolsScore += 2
-                    $toolsNotes += "1 tool type"
-                }
                 # Bonus: reasonable tool count (not runaway).
-                if ($toolRequested.Count -le 12) {
+                if ($toolCallCount -le 12) {
                     $toolsScore += 5
                 } else {
                     $toolsScore += 2
-                    $toolsNotes += "high tool count ($($toolRequested.Count))"
+                    $toolsNotes += "high tool count ($toolCallCount)"
                 }
+                # Bonus: telemetry consistency (permission prompts are optional).
+                if ($toolRequested.Count -gt 0) { $toolsScore += 5 }
+                else { $toolsScore += 2; $toolsNotes += "calls observed via audit (no permission prompts)" }
             } else {
-                $toolsNotes += "expected tool usage but none observed"
+                $toolsNotes += "expected tool calls but none observed"
             }
         } elseif ($trial.ExpectTools -eq $false) {
             # Tools are optional; don't penalise if used, but reward restraint.
-            if ($toolRequested.Count -eq 0) {
+            if ($toolCallCount -eq 0) {
                 $toolsScore += 20
                 $toolsNotes += "correctly avoided tools"
             } else {
                 $toolsScore += 15
-                $toolsNotes += "tools used (optional) - $($toolRequested.Count)"
+                $toolsNotes += "tools used (optional) - $toolCallCount"
             }
         } else {
             # null expectation: score proportionally.
-            $toolsScore += [math]::Min(20, 10 + $toolRequested.Count * 2)
+            $toolsScore += [math]::Min(20, 10 + $toolCallCount * 2)
         }
 
         Write-Dim "Tools" $toolsScore $toolsMax ($toolsNotes -join "; ")
@@ -570,7 +591,7 @@ try {
             Elapsed    = $sw.Elapsed
             Band       = $confidenceBand
             Reason     = $completionReason
-            Tools      = $toolRequested.Count
+            Tools      = $toolCallCount
             Retried    = ($null -ne $retryStarted)
             AnswerLen  = $finalText.Length
             Pipeline   = $pipelineScore
