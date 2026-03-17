@@ -1921,7 +1921,48 @@ public partial class MainWindow : Window
                     if (string.Equals(progressEvent.EventType, "retry.started", StringComparison.OrdinalIgnoreCase))
                     {
                         _workflowRetryCount++;
+                        WorkflowNarrationText.Text = "Retrying with alternate verification strategy…";
+                        WorkflowProgressPanel.IsVisible = true;
                         UpdateWorkflowToolStrip();
+                    }
+                    else if (string.Equals(progressEvent.EventType, "retry.skipped", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Surface live confidence band from metadata before run.completed.
+                        var band = progressEvent.Metadata?.TryGetValue("confidenceBand", out var b) == true ? b : null;
+                        if (!string.IsNullOrWhiteSpace(band))
+                        {
+                            _workflowConfidenceBand = band;
+                        }
+
+                        var reason = progressEvent.Metadata?.TryGetValue("reason", out var r) == true ? r : null;
+                        var skipLabel = reason switch
+                        {
+                            "confidence_not_retry" => "Confidence is sufficient — no retry needed.",
+                            "retry_budget_exhausted" => "Retry budget exhausted — finalizing with current evidence.",
+                            "tool_budget_exhausted" => "Tool budget exhausted — finalizing with current evidence.",
+                            "time_budget_exhausted" => "Time budget exhausted — finalizing with current evidence.",
+                            _ => "Retry skipped — finalizing with current evidence."
+                        };
+
+                        WorkflowNarrationText.Text = skipLabel;
+                        WorkflowProgressPanel.IsVisible = true;
+                        UpdateWorkflowToolStrip();
+                    }
+                    else if (string.Equals(progressEvent.EventType, "task.started", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var complexity = progressEvent.Metadata?.TryGetValue("complexity", out var c) == true ? c : null;
+                        if (!string.IsNullOrWhiteSpace(complexity))
+                        {
+                            var label = complexity switch
+                            {
+                                "Trivial" => "Simple request — answering directly.",
+                                "SimpleLookup" => "Gathering information…",
+                                "MultiStepResearch" => "Multi-step research — building checklist…",
+                                _ => "Processing request…"
+                            };
+                            WorkflowNarrationText.Text = label;
+                            WorkflowProgressPanel.IsVisible = true;
+                        }
                     }
                 }
                 break;
