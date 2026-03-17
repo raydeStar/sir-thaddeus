@@ -550,15 +550,15 @@ internal static partial class RuntimeApiServer
             return false;
 
         var lower = (prompt ?? string.Empty).ToLowerInvariant();
-        return lower.Contains("find ") ||
-               lower.Contains("search") ||
-               lower.Contains("hours") ||
+         return lower.Contains("hours") ||
                lower.Contains("price") ||
+             lower.Contains("cheapest") ||
                lower.Contains("stock") ||
                lower.Contains("available") ||
+             lower.Contains("availability") ||
                lower.Contains("latest") ||
-               lower.Contains("closest") ||
-               lower.Contains("near me") ||
+             lower.Contains("verify") ||
+             lower.Contains("compare") ||
                lower.Contains("flight") ||
                lower.Contains("today");
     }
@@ -566,11 +566,9 @@ internal static partial class RuntimeApiServer
     private static string BuildToolBackedLookupPrompt(string originalPrompt)
     {
         return $"{originalPrompt}\n\n" +
-               "Execution requirements for this run:\n" +
-               "- Use web_search to gather current evidence before finalizing.\n" +
-               "- If search snippets are weak, use browser_navigate on one source.\n" +
-               "- Do not answer from memory alone for this request.\n" +
-               "- If tools fail, state that clearly and provide the best partial result.";
+             "Verification requirement: use web_search to gather live evidence before finalizing. " +
+             "If snippets are insufficient, use browser_navigate on one source. " +
+             "Do not answer from memory alone.";
     }
 
     private static void PublishChecklist(RunState runState, TaskRunState workflowState)

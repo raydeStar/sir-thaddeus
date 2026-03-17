@@ -82,6 +82,30 @@ public sealed class WorkflowTaskClassifierTests
         Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
     }
 
+    [Fact]
+    public async Task FlightAndAvailabilityPrompt_ClassifiesAsMultiStepResearch()
+    {
+        var envelope = await _classifier.ClassifyAsync(
+            "Can you find the cheapest flight from Boise to Tokyo next month and verify it's still available?",
+            CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
+        Assert.Equal(TimeSpan.FromSeconds(60), envelope.TimeBudget);
+        Assert.True(envelope.NeedsTools);
+    }
+
+    [Fact]
+    public async Task StockLookupPrompt_ClassifiesAsMultiStepResearch()
+    {
+        var envelope = await _classifier.ClassifyAsync(
+            "Find a PS5 in stock under $500 near me and check availability.",
+            CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
+        Assert.Equal(TimeSpan.FromSeconds(60), envelope.TimeBudget);
+        Assert.True(envelope.NeedsTools);
+    }
+
     // ── Envelope field invariants ────────────────────────────────────────────
 
     [Fact]

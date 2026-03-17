@@ -183,6 +183,16 @@ public sealed partial class SearchOrchestrator
             originalUserMessage: userMessage,
             maxResults: isLocalBusinessQuery ? LocalBusinessFetchMaxResults : null);
 
+        if (!isLocalBusinessQuery)
+        {
+            toolResult = await TryRecoverNoResultsWebFactFindAsync(
+                userMessage ?? string.Empty,
+                query.Query,
+                toolResult,
+                toolCallsMade,
+                ct);
+        }
+
         var isNoResults = string.IsNullOrWhiteSpace(toolResult) ||
                           LooksLikeNoResultsPayload(toolResult) ||
                           WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null;
@@ -382,5 +392,118 @@ public sealed partial class SearchOrchestrator
         return await SummarizeAndRespond(
             sb.ToString(), instruction,
             history, toolCallsMade, SummaryFallbackKind.FactFind, sources, ct);
+    }
+
+    private async Task<string> TryRecoverNoResultsWebFactFindAsync(
+        string userMessage,
+        string primaryQuery,
+        string initialToolResult,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!LooksLikeNoResultsPayload(initialToolResult) &&
+            WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is null)
+        {
+            return initialToolResult;
+        }
+
+        var retryCandidates = BuildNoResultsRetryCandidates(userMessage, primaryQuery);
+        var lastResult = initialToolResult;
+
+        foreach (var candidate in retryCandidates)
+        {
+            if (string.Equals(candidate, primaryQuery, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "NO_RESULTS_QUERY_RETRY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = candidate
+                }
+            });
+
+            lastResult = await CallWebSearchAsync(
+                candidate,
+                "any",
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage);
+
+            if (!LooksLikeNoResultsPayload(lastResult) &&
+                WebToolFailureMapper.TryBuildFailureResponse(lastResult, toolCallsMade) is null &&
+                ParseSourcesFromToolResult(lastResult).Count > 0)
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "NO_RESULTS_QUERY_RETRY",
+                    Result = "recovered",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["query"] = candidate
+                    }
+                });
+                return lastResult;
+            }
+        }
+
+        return lastResult;
+    }
+
+    private static IReadOnlyList<string> BuildNoResultsRetryCandidates(string userMessage, string primaryQuery)
+    {
+        var candidates = new List<string>();
+        var safeMessage = userMessage ?? string.Empty;
+
+        void AddCandidate(string? q)
+        {
+            if (string.IsNullOrWhiteSpace(q))
+                return;
+
+            var trimmed = q.Trim();
+            if (trimmed.Length > 90)
+                trimmed = trimmed[..90].TrimEnd();
+            if (trimmed.Length < 8)
+                return;
+            if (!candidates.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+                candidates.Add(trimmed);
+        }
+
+        AddCandidate(primaryQuery);
+
+        var lower = safeMessage.ToLowerInvariant();
+        if (lower.Contains("flight") && lower.Contains(" from ") && lower.Contains(" to "))
+        {
+            var fromIdx = lower.IndexOf(" from ", StringComparison.Ordinal);
+            var toIdx = lower.IndexOf(" to ", StringComparison.Ordinal);
+            if (fromIdx >= 0 && toIdx > fromIdx)
+            {
+            var fromPart = safeMessage.Substring(fromIdx + 6, toIdx - (fromIdx + 6)).Trim();
+            var tail = safeMessage[(toIdx + 4)..];
+                var endIdx = tail.IndexOfAny([',', '.', '?']);
+                var toPart = (endIdx >= 0 ? tail[..endIdx] : tail).Trim();
+                AddCandidate($"cheap flights {fromPart} to {toPart}");
+                AddCandidate($"{fromPart} to {toPart} flights");
+            }
+        }
+
+        var relaxed = safeMessage
+            .Replace("verify it's still available", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("verify it is still available", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("still available", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("and verify", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("can you", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("please", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("next month", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("?", " ")
+            .Replace("  ", " ")
+            .Trim();
+
+        AddCandidate(relaxed);
+        return candidates.Take(3).ToList();
     }
 }

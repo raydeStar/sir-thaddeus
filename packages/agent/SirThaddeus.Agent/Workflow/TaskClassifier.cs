@@ -22,7 +22,12 @@ public sealed class TaskClassifier : ITaskClassifier
                  lower.Contains("details") ||
                  lower.Contains("pricing") ||
                  lower.Contains("github") ||
-                 lower.Contains("billing"))
+                 lower.Contains("billing") ||
+                 lower.Contains("flight") ||
+                 lower.Contains("cheapest") ||
+                 lower.Contains("in stock") ||
+                 lower.Contains("availability") ||
+                 lower.Contains("verify"))
         {
             complexity = TaskComplexity.MultiStepResearch;
         }
