@@ -1092,7 +1092,7 @@ public sealed partial class SearchOrchestrator
 
         var lastResult = toolResult;
         var lastNoResultsPayload = toolResult;
-        foreach (var candidate in BuildLocalNewsRetryCandidates(query))
+        foreach (var candidate in BuildLocalNewsRetryCandidates(userMessage, query))
         {
             _audit.Append(new AuditEvent
             {
@@ -1144,16 +1144,26 @@ public sealed partial class SearchOrchestrator
 
     private bool ShouldRetryLocalNewsSearch(string userMessage, string query)
     {
-        if (string.IsNullOrWhiteSpace(UserLocationHint))
+        var hasSignal = LocalNewsSignalRegex.IsMatch(userMessage ?? "") ||
+                        LocalNewsSignalRegex.IsMatch(query ?? "");
+        if (!hasSignal)
             return false;
 
-        return LocalNewsSignalRegex.IsMatch(userMessage ?? "") ||
-               LocalNewsSignalRegex.IsMatch(query ?? "");
+        // Retry is worthwhile when we have any location source:
+        // the user's message may contain an explicit location even
+        // when UserLocationHint is empty.
+        if (!string.IsNullOrWhiteSpace(UserLocationHint))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(userMessage) &&
+               ExplicitLocationScopeRegex.IsMatch(userMessage);
     }
 
-    private IReadOnlyList<LocalNewsRetryCandidate> BuildLocalNewsRetryCandidates(QueryBuilder.SearchQuery query)
+    private IReadOnlyList<LocalNewsRetryCandidate> BuildLocalNewsRetryCandidates(string? userMessage, QueryBuilder.SearchQuery query)
     {
-        var location = UserLocationHint?.Trim() ?? "";
+        // Prefer the explicit location named in the user's message
+        // ("local news in Boise, ID") over the profile-based hint.
+        var location = ExtractExplicitNewsLocation(userMessage) ?? UserLocationHint?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(location))
             return [];
 
@@ -1180,6 +1190,33 @@ public sealed partial class SearchOrchestrator
 
         Add($"{location} news", "week", "fallback_generic_news");
         return candidates;
+    }
+
+    /// <summary>
+    /// Extracts a location from the user message when a local-news request
+    /// names a specific place, e.g. "local news in Boise, ID" → "Boise, ID".
+    /// Returns null when no explicit location is detected.
+    /// </summary>
+    private static string? ExtractExplicitNewsLocation(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        if (!LocalNewsSignalRegex.IsMatch(message))
+            return null;
+
+        var match = ExplicitLocationScopeRegex.Match(message);
+        if (!match.Success)
+            return null;
+
+        // The regex captures the preposition + location; strip the preposition.
+        var raw = match.Value.Trim();
+        var prefixMatch = Regex.Match(raw, @"^(?:in|near|around|for)\s+", RegexOptions.IgnoreCase);
+        if (prefixMatch.Success)
+            raw = raw[prefixMatch.Length..];
+
+        var location = raw.Trim().TrimEnd('.', '!', '?', ',');
+        return string.IsNullOrWhiteSpace(location) ? null : location;
     }
 
     private static bool HasUsableSearchResults(string toolResult)
@@ -1209,6 +1246,7 @@ public sealed partial class SearchOrchestrator
         int? maxResults = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
+        effectiveQuery = InjectLocationForClosestNearestQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationForLocalBusinessQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoLocalNewsQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoDistanceQuery(effectiveQuery);
@@ -1508,6 +1546,10 @@ public sealed partial class SearchOrchestrator
         @"\b(near\s*(?:me|by|here)|around\s*here|close\s*by|in\s+my\s+area)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex ClosestNearestSignalRegex = new(
+        @"\b(?:the\s+)?(?:closest|nearest)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly Regex DistanceIntentRegex = new(
         @"\bhow\s+far(?:\s+away)?\s+(?:is|are)\b|\bdistance\s+(?:to|between)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -1549,6 +1591,46 @@ public sealed partial class SearchOrchestrator
         {
             Actor = "search",
             Action = "LOCATION_INJECTED_INTO_QUERY",
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["original"] = query,
+                ["effective"] = result,
+                ["locationHint"] = UserLocationHint.Trim()
+            }
+        });
+
+        return result;
+    }
+
+    /// <summary>
+    /// When the user's query or original message contains "closest" or "nearest"
+    /// and a manual location hint is available, appends "near {location}" to
+    /// the query (rather than replacing the word, preserving search precision).
+    /// </summary>
+    private string InjectLocationForClosestNearestQuery(string query, string? originalUserMessage)
+    {
+        if (string.IsNullOrWhiteSpace(UserLocationHint))
+            return query;
+
+        // Already contains location — nothing to do.
+        if (query.Contains(UserLocationHint, StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        // Check both the constructed query and the original user message.
+        var hasSignal = ClosestNearestSignalRegex.IsMatch(query) ||
+                        (!string.IsNullOrWhiteSpace(originalUserMessage) &&
+                         ClosestNearestSignalRegex.IsMatch(originalUserMessage));
+
+        if (!hasSignal)
+            return query;
+
+        var result = $"{query.TrimEnd('?', '.', '!', ',')} near {UserLocationHint.Trim()}";
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCATION_INJECTED_CLOSEST_NEAREST",
             Result = "ok",
             Details = new Dictionary<string, object>
             {
@@ -2449,9 +2531,14 @@ public sealed partial class SearchOrchestrator
         return body;
     }
 
-    private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources)
+    private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources, string? explicitLocation = null)
     {
-        var location = BuildLocalNewsLocationTokens(UserLocationHint);
+        // Prefer the explicit location from the user's message
+        // ("local news in Boise, ID") over the profile-based hint.
+        var effectiveHint = !string.IsNullOrWhiteSpace(explicitLocation)
+            ? explicitLocation
+            : UserLocationHint;
+        var location = BuildLocalNewsLocationTokens(effectiveHint);
         if (location is null)
             return sources.ToList();
 

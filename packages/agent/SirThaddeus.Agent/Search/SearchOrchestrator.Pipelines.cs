@@ -52,8 +52,10 @@ public sealed partial class SearchOrchestrator
         }
 
         var sources = ParseSourcesFromToolResult(toolResult);
-        var isLocalNews = !string.IsNullOrWhiteSpace(UserLocationHint) &&
-                          LocalNewsSignalRegex.IsMatch(userMessage);
+        var explicitNewsLocation = ExtractExplicitNewsLocation(userMessage);
+        var isLocalNews = LocalNewsSignalRegex.IsMatch(userMessage) &&
+                          (!string.IsNullOrWhiteSpace(UserLocationHint) ||
+                           !string.IsNullOrWhiteSpace(explicitNewsLocation));
         var isMarketQuoteRequest =
             MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage) ||
             MarketQuoteHeuristics.IsMarketQuoteRequest(query.Query);
@@ -72,7 +74,7 @@ public sealed partial class SearchOrchestrator
 
         if (isLocalNews)
         {
-            sources = FilterSourcesForLocalNews(sources);
+            sources = FilterSourcesForLocalNews(sources, explicitNewsLocation);
             if (sources.Count == 0)
                 return BuildNewsNoResultsResponse(userMessage, toolCallsMade, entityLocationName);
         }
@@ -476,6 +478,8 @@ public sealed partial class SearchOrchestrator
         AddCandidate(primaryQuery);
 
         var lower = safeMessage.ToLowerInvariant();
+
+        // Flight-specific retry candidates.
         if (lower.Contains("flight") && lower.Contains(" from ") && lower.Contains(" to "))
         {
             var fromIdx = lower.IndexOf(" from ", StringComparison.Ordinal);
@@ -491,12 +495,30 @@ public sealed partial class SearchOrchestrator
             }
         }
 
+        // Product availability retry candidates.
+        if (lower.Contains("in stock") || lower.Contains("purchase") || lower.Contains("buy"))
+        {
+            var productRelaxed = safeMessage
+                .Replace("give me a direct purchase link", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("and give me", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("find me", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("can you", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("online", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("?", " ")
+                .Replace("  ", " ")
+                .Trim();
+            AddCandidate(productRelaxed);
+        }
+
         var relaxed = safeMessage
             .Replace("verify it's still available", "", StringComparison.OrdinalIgnoreCase)
             .Replace("verify it is still available", "", StringComparison.OrdinalIgnoreCase)
             .Replace("still available", "", StringComparison.OrdinalIgnoreCase)
             .Replace("and verify", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("can you find", "", StringComparison.OrdinalIgnoreCase)
             .Replace("can you", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("find me", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("give me", "", StringComparison.OrdinalIgnoreCase)
             .Replace("please", "", StringComparison.OrdinalIgnoreCase)
             .Replace("next month", "", StringComparison.OrdinalIgnoreCase)
             .Replace("?", " ")

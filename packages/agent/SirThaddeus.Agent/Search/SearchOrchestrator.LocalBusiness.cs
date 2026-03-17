@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -291,7 +292,36 @@ public sealed partial class SearchOrchestrator
         if (lower.Contains("grocery", StringComparison.Ordinal))
             return ["grocery", "market", "supermarket"];
 
+        // Chain / brand name detection — match by the brand name itself.
+        var brandKeyword = ExtractBrandKeyword(lower);
+        if (brandKeyword is not null)
+            return [brandKeyword];
+
         return [];
+    }
+
+    private static string? ExtractBrandKeyword(string lower)
+    {
+        ReadOnlySpan<string> brands =
+        [
+            "starbucks", "mcdonald", "walmart", "target", "costco",
+            "walgreens", "cvs", "home depot", "lowe's", "lowes",
+            "taco bell", "burger king", "wendy's", "wendys",
+            "subway", "chick-fil-a", "chipotle", "domino's", "dominos",
+            "dunkin", "panda express", "pizza hut", "papa john",
+            "whole foods", "kroger", "safeway", "albertsons",
+            "best buy", "gamestop", "petco", "petsmart",
+            "ikea", "nordstrom", "aldi", "sprouts", "fred meyer", "winco",
+            "trader joe"
+        ];
+
+        foreach (var brand in brands)
+        {
+            if (lower.Contains(brand, StringComparison.Ordinal))
+                return brand;
+        }
+
+        return null;
     }
 
     private static string GetRequestedLocalBusinessLabel(string userMessage)
@@ -312,6 +342,11 @@ public sealed partial class SearchOrchestrator
             return "coffee shops";
         if (lower.Contains("salon", StringComparison.Ordinal))
             return "salons";
+
+        // Brand name as label (e.g. "Starbucks locations").
+        var brand = ExtractBrandKeyword(lower);
+        if (brand is not null)
+            return $"{CultureInfo.InvariantCulture.TextInfo.ToTitleCase(brand)} locations";
 
         return "places";
     }
@@ -419,9 +454,14 @@ public sealed partial class SearchOrchestrator
         string? resolvedLocationName = null)
     {
         var isLocalNewsRequest = LocalNewsSignalRegex.IsMatch(userMessage ?? "");
-        var locationHint = UserLocationHint?.Trim();
+        // Prefer explicit location from the message, then resolved entity,
+        // then the profile-based location hint.
+        var explicitLocation = ExtractExplicitNewsLocation(userMessage);
+        var locationHint = explicitLocation?.Trim();
         if (string.IsNullOrWhiteSpace(locationHint))
             locationHint = resolvedLocationName?.Trim();
+        if (string.IsNullOrWhiteSpace(locationHint))
+            locationHint = UserLocationHint?.Trim();
 
         var text = isLocalNewsRequest switch
         {

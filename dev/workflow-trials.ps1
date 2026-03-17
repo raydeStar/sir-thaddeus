@@ -247,6 +247,82 @@ if (-not (Test-Path $settingsPath)) {
     throw "settings.json not found at $settingsPath"
 }
 
+# ── Process Cleanup Helpers ───────────────────────────────────────────────
+
+function Stop-OrphanedRuntimeProcesses {
+    <#
+    .SYNOPSIS
+        Kills any orphaned dotnet processes that are running the headless runtime
+        on the target port. Called on startup and teardown to prevent zombies.
+    #>
+    param([int]$TargetPort)
+
+    # Kill any process listening on our port.
+    $listeners = @(Get-NetTCPConnection -LocalPort $TargetPort -State Listen -ErrorAction SilentlyContinue)
+    foreach ($conn in $listeners) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        if ($null -ne $proc -and -not $proc.HasExited) {
+            Write-Host "  Cleanup: killing orphaned process $($proc.ProcessName) (PID $($proc.Id)) on port $TargetPort" -ForegroundColor Yellow
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Kill any dotnet processes whose command line contains HeadlessRuntime.
+    $dotnetProcs = @(Get-Process -Name dotnet -ErrorAction SilentlyContinue)
+    foreach ($proc in $dotnetProcs) {
+        try {
+            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            if ($null -ne $cmdLine -and $cmdLine -like "*HeadlessRuntime*") {
+                Write-Host "  Cleanup: killing orphaned HeadlessRuntime process (PID $($proc.Id))" -ForegroundColor Yellow
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            # CimInstance may fail for protected processes — skip.
+        }
+    }
+}
+
+function Stop-RuntimeProcessTree {
+    <#
+    .SYNOPSIS
+        Kills the launched runtime process and all its child processes
+        (including the actual dotnet host spawned by 'dotnet run').
+    #>
+    param([System.Diagnostics.Process]$ParentProcess, [int]$TargetPort)
+
+    if ($null -eq $ParentProcess) { return }
+
+    # Kill child processes first (the actual runtime host).
+    try {
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($ParentProcess.Id)" -ErrorAction SilentlyContinue)
+        foreach ($child in $children) {
+            $childProc = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+            if ($null -ne $childProc -and -not $childProc.HasExited) {
+                Write-Host "  Teardown: killing child process $($childProc.ProcessName) (PID $($childProc.Id))" -ForegroundColor DarkGray
+                Stop-Process -Id $childProc.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {}
+
+    # Kill the parent dotnet process.
+    if (-not $ParentProcess.HasExited) {
+        try {
+            Write-Host "  Teardown: killing runtime process (PID $($ParentProcess.Id))" -ForegroundColor DarkGray
+            Stop-Process -Id $ParentProcess.Id -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    # Final safety sweep: anything still on the port.
+    Stop-OrphanedRuntimeProcesses -TargetPort $TargetPort
+
+    # Brief pause to let OS release port.
+    Start-Sleep -Milliseconds 500
+}
+
+# ── Pre-flight: clean up any orphans from a previous crashed run ──────────
+Write-Host "Pre-flight: checking for orphaned runtime processes..." -ForegroundColor DarkGray
+Stop-OrphanedRuntimeProcesses -TargetPort $Port
+
 Copy-Item -Path $settingsPath -Destination $settingsBackupPath -Force
 
 $runtimeProcess = $null
@@ -614,10 +690,10 @@ try {
     Write-Host "SUITE PASSED" -ForegroundColor Green
 }
 finally {
-    if ($runtimeProcess -and -not $runtimeProcess.HasExited) {
-        try { Stop-Process -Id $runtimeProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
-    }
+    Write-Host "`nTeardown: cleaning up runtime processes..." -ForegroundColor DarkGray
+    Stop-RuntimeProcessTree -ParentProcess $runtimeProcess -TargetPort $Port
     if (Test-Path $settingsBackupPath) {
         Move-Item -Path $settingsBackupPath -Destination $settingsPath -Force
     }
+    Write-Host "Teardown complete." -ForegroundColor DarkGray
 }

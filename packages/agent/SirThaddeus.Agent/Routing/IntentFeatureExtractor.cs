@@ -1040,7 +1040,19 @@ public static class IntentFeatureExtractor
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
             "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
-            "gym", "dentist", "clinic", "doctor", "urgent care"
+            "gym", "dentist", "clinic", "doctor", "urgent care",
+            // Popular chains / brand names that imply local business lookup.
+            "starbucks", "mcdonald", "mcdonalds", "mcdonald's",
+            "walmart", "target", "costco", "trader joe",
+            "walgreens", "cvs", "rite aid",
+            "home depot", "lowe's", "lowes",
+            "taco bell", "burger king", "wendy's", "wendys",
+            "subway", "chick-fil-a", "chipotle", "domino's", "dominos",
+            "dunkin", "panda express", "pizza hut", "papa john",
+            "whole foods", "kroger", "safeway", "albertsons",
+            "best buy", "gamestop", "petco", "petsmart",
+            "ikea", "nordstrom", "marshalls", "tj maxx",
+            "aldi", "sprouts", "fred meyer", "winco"
         ];
 
         if (!ContainsAny(lower, businessTerms))
@@ -1052,6 +1064,8 @@ public static class IntentFeatureExtractor
                lower.Contains("close by", StringComparison.Ordinal) ||
                lower.Contains("in my area", StringComparison.Ordinal) ||
                lower.Contains("around here", StringComparison.Ordinal) ||
+               lower.Contains("closest", StringComparison.Ordinal) ||
+               lower.Contains("nearest", StringComparison.Ordinal) ||
                lower.Contains("local", StringComparison.Ordinal);
     }
 
