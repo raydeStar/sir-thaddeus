@@ -199,6 +199,8 @@ try {
         $remainingRetriesRaw = [string]$retrySkipMetadata.remainingRetries
         $remainingToolCallsRaw = [string]$retrySkipMetadata.remainingToolCalls
         $remainingTimeMsRaw = [string]$retrySkipMetadata.remainingTimeMs
+        $confidenceBandRaw = [string]$retrySkipMetadata.confidenceBand
+        $confidenceScoreRaw = [string]$retrySkipMetadata.confidenceScore
 
         if ([string]::IsNullOrWhiteSpace($remainingRetriesRaw)) {
             throw "retry.skipped metadata missing remainingRetries"
@@ -210,6 +212,14 @@ try {
 
         if ([string]::IsNullOrWhiteSpace($remainingTimeMsRaw)) {
             throw "retry.skipped metadata missing remainingTimeMs"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($confidenceBandRaw)) {
+            throw "retry.skipped metadata missing confidenceBand"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($confidenceScoreRaw)) {
+            throw "retry.skipped metadata missing confidenceScore"
         }
 
         $remainingRetries = 0
@@ -227,8 +237,17 @@ try {
             throw "retry.skipped metadata remainingTimeMs is not an integer: '$remainingTimeMsRaw'"
         }
 
+        $confidenceScore = 0.0
+        if (-not [double]::TryParse($confidenceScoreRaw, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$confidenceScore)) {
+            throw "retry.skipped metadata confidenceScore is not a floating-point number: '$confidenceScoreRaw'"
+        }
+
         if ($remainingRetries -lt 0 -or $remainingToolCalls -lt 0 -or $remainingTimeMs -lt 0) {
             throw "retry.skipped metadata contains negative budget values"
+        }
+
+        if ($confidenceScore -lt 0.0 -or $confidenceScore -gt 1.0) {
+            throw "retry.skipped metadata confidenceScore is out of range [0,1]: $confidenceScore"
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -310,7 +311,9 @@ internal static partial class RuntimeApiServer
                         ["reason"] = retryGate.ReasonCode,
                         ["remainingRetries"] = retryGate.RemainingRetries.ToString(),
                         ["remainingToolCalls"] = retryGate.RemainingToolCalls.ToString(),
-                        ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString()
+                        ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString(),
+                        ["confidenceBand"] = firstConfidence.Band,
+                        ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
                     });
             }
 
