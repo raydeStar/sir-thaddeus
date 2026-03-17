@@ -356,7 +356,9 @@ internal static partial class RuntimeApiServer
                 totalRoundTrips,
                 ToBriefingDto(selectedResponse.DeepDiveBriefing),
                 completionReason?.ToString(),
-                selectedConfidence?.Band));
+                selectedConfidence?.Band,
+                workflowState?.LastRetryGateDecision?.IsAllowed,
+                workflowState?.LastRetryGateDecision?.ReasonCode));
     }
 
     private static void WriteWorkflowAuditSnapshot(

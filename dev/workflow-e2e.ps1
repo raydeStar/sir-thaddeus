@@ -8,6 +8,7 @@ param(
     [switch]$ExpectRetrySkipped,
     [string]$ExpectedRetrySkipReason,
     [switch]$AssertRetrySkipMetadata,
+    [switch]$AssertRunCompletedRetryGate,
     [switch]$ForceToolBudgetZero,
     [switch]$AllowChecklistMissing
 )
@@ -152,6 +153,8 @@ try {
     $completionReason = $completed.payload.completionReason
     $confidenceBand = $completed.payload.confidenceBand
     $finalText = $completed.payload.finalText
+    $retryGateAllowed = $completed.payload.retryGateAllowed
+    $retryGateReason = [string]$completed.payload.retryGateReason
 
     if ([string]::IsNullOrWhiteSpace($completionReason)) {
         throw "run.completed is missing completionReason"
@@ -251,6 +254,22 @@ try {
         }
     }
 
+    if ($AssertRunCompletedRetryGate) {
+        if ($null -eq $retryGateAllowed) {
+            throw "run.completed is missing retryGateAllowed"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($retryGateReason)) {
+            throw "run.completed is missing retryGateReason"
+        }
+
+        if ($ExpectRetrySkipped -and -not [string]::IsNullOrWhiteSpace($ExpectedRetrySkipReason)) {
+            if (-not [string]::Equals($retryGateReason, $ExpectedRetrySkipReason, [StringComparison]::Ordinal)) {
+                throw "run.completed retryGateReason '$retryGateReason' did not match expected '$ExpectedRetrySkipReason'"
+            }
+        }
+    }
+
     if ($ExpectRetry -and [string]::IsNullOrWhiteSpace($completionReason)) {
         throw "Retry scenario did not provide completionReason"
     }
@@ -264,6 +283,10 @@ try {
     Write-Host "  retry skipped:    $([bool]$retrySkipped)"
     if ($null -ne $retrySkipped) {
         Write-Host "  retry skip reason: $([string]$retrySkipped.payload.metadata.reason)"
+    }
+    Write-Host "  retry gate allowed (run.completed): $retryGateAllowed"
+    if (-not [string]::IsNullOrWhiteSpace($retryGateReason)) {
+        Write-Host "  retry gate reason  (run.completed): $retryGateReason"
     }
     Write-Host "  runtime out log:  $runtimeLogPath"
     Write-Host "  runtime err log:  $runtimeErrPath"

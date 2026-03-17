@@ -40,7 +40,9 @@ public sealed record RunCompletedPayload(
     int ToolLoopIterations,
     DeepDiveBriefingDto? Briefing = null,
     string? CompletionReason = null,
-    string? ConfidenceBand = null);
+    string? ConfidenceBand = null,
+    bool? RetryGateAllowed = null,
+    string? RetryGateReason = null);
 
 public sealed record RunFailedPayload(
     string Error,
