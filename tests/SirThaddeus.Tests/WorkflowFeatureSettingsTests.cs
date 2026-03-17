@@ -6,14 +6,14 @@ namespace SirThaddeus.Tests;
 public sealed class WorkflowFeatureSettingsTests
 {
     [Fact]
-    public void AppSettings_Defaults_WorkflowFeaturesAreDisabled()
+    public void AppSettings_Defaults_WorkflowFeaturesAreEnabled()
     {
         var settings = new AppSettings();
 
-        Assert.False(settings.WorkflowFeatures.ChecklistProgressUiEnabled);
-        Assert.False(settings.WorkflowFeatures.ConfidenceScoringEnabled);
-        Assert.False(settings.WorkflowFeatures.ConstrainedRetryEnabled);
-        Assert.False(settings.WorkflowFeatures.TaskRunAuditSnapshotsEnabled);
+        Assert.True(settings.WorkflowFeatures.ChecklistProgressUiEnabled);
+        Assert.True(settings.WorkflowFeatures.ConfidenceScoringEnabled);
+        Assert.True(settings.WorkflowFeatures.ConstrainedRetryEnabled);
+        Assert.True(settings.WorkflowFeatures.TaskRunAuditSnapshotsEnabled);
     }
 
     [Fact]
@@ -23,7 +23,10 @@ public sealed class WorkflowFeatureSettingsTests
         {
             WorkflowFeatures = new WorkflowFeatureSettings
             {
-                ConfidenceScoringEnabled = true
+                ChecklistProgressUiEnabled = false,
+                ConfidenceScoringEnabled = true,
+                ConstrainedRetryEnabled = false,
+                TaskRunAuditSnapshotsEnabled = false
             }
         };
 

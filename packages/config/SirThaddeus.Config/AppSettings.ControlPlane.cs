@@ -87,16 +87,16 @@ public sealed record ToolBudgetSettings
 public sealed record WorkflowFeatureSettings
 {
     [JsonPropertyName("checklistProgressUiEnabled")]
-    public bool ChecklistProgressUiEnabled { get; init; }
+    public bool ChecklistProgressUiEnabled { get; init; } = true;
 
     [JsonPropertyName("confidenceScoringEnabled")]
-    public bool ConfidenceScoringEnabled { get; init; }
+    public bool ConfidenceScoringEnabled { get; init; } = true;
 
     [JsonPropertyName("constrainedRetryEnabled")]
-    public bool ConstrainedRetryEnabled { get; init; }
+    public bool ConstrainedRetryEnabled { get; init; } = true;
 
     [JsonPropertyName("taskRunAuditSnapshotsEnabled")]
-    public bool TaskRunAuditSnapshotsEnabled { get; init; }
+    public bool TaskRunAuditSnapshotsEnabled { get; init; } = true;
 
     [JsonPropertyName("retryGateTestOverrideReason")]
     public string RetryGateTestOverrideReason { get; init; } = "";

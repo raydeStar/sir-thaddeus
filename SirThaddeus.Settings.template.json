@@ -13,10 +13,10 @@
     "ttsEnabled": true
   },
   "workflowFeatures": {
-    "checklistProgressUiEnabled": false,
-    "confidenceScoringEnabled": false,
-    "constrainedRetryEnabled": false,
-    "taskRunAuditSnapshotsEnabled": false,
+    "checklistProgressUiEnabled": true,
+    "confidenceScoringEnabled": true,
+    "constrainedRetryEnabled": true,
+    "taskRunAuditSnapshotsEnabled": true,
     "retryGateTestOverrideReason": ""
   },
   "memory": {
