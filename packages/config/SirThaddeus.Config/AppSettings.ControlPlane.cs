@@ -97,4 +97,7 @@ public sealed record WorkflowFeatureSettings
 
     [JsonPropertyName("taskRunAuditSnapshotsEnabled")]
     public bool TaskRunAuditSnapshotsEnabled { get; init; }
+
+    [JsonPropertyName("retryGateTestOverrideReason")]
+    public string RetryGateTestOverrideReason { get; init; } = "";
 }

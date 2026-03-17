@@ -11,6 +11,7 @@ public sealed class TaskEnvelope
     public TimeSpan TimeBudget { get; init; } = TimeSpan.FromSeconds(30);
     public int MaxRetries { get; init; } = 1;
     public int MaxToolCalls { get; init; } = 8;
+    public string RetryGateOverrideReason { get; init; } = string.Empty;
 }
 
 public sealed class ChecklistItem

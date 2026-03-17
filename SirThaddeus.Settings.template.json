@@ -16,7 +16,8 @@
     "checklistProgressUiEnabled": false,
     "confidenceScoringEnabled": false,
     "constrainedRetryEnabled": false,
-    "taskRunAuditSnapshotsEnabled": false
+    "taskRunAuditSnapshotsEnabled": false,
+    "retryGateTestOverrideReason": ""
   },
   "memory": {
     "enabled": true,

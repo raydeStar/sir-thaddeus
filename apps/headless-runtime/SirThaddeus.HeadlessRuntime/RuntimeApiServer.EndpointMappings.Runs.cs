@@ -419,7 +419,8 @@ internal static partial class RuntimeApiServer
             ShowChecklist = envelope.ShowChecklist,
             TimeBudget = envelope.TimeBudget,
             MaxRetries = envelope.MaxRetries,
-            MaxToolCalls = settings.ToolBudgets.MaxToolCallsPerTurn
+            MaxToolCalls = settings.ToolBudgets.MaxToolCallsPerTurn,
+            RetryGateOverrideReason = settings.WorkflowFeatures.RetryGateTestOverrideReason
         };
 
         var checklist = await WorkflowChecklistPlanner.BuildChecklistAsync(envelope, ct);

@@ -10,6 +10,7 @@ param(
     [switch]$AssertRetrySkipMetadata,
     [switch]$AssertRunCompletedRetryGate,
     [switch]$AssertWorkflowAuditSnapshot,
+    [string]$RetryGateOverrideReason,
     [switch]$ForceToolBudgetZero,
     [switch]$AllowChecklistMissing
 )
@@ -60,6 +61,7 @@ try {
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "confidenceScoringEnabled" -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "constrainedRetryEnabled" -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "taskRunAuditSnapshotsEnabled" -Value $true
+    Set-OrAddProperty -Object $settings.workflowFeatures -Name "retryGateTestOverrideReason" -Value $RetryGateOverrideReason
 
     if ($ForceToolBudgetZero) {
         $toolBudgetsProp = $settings.PSObject.Properties['toolBudgets']
