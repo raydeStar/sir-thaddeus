@@ -7,6 +7,7 @@ param(
     [switch]$ExpectRetry,
     [switch]$ExpectRetrySkipped,
     [string]$ExpectedRetrySkipReason,
+    [switch]$AssertRetrySkipMetadata,
     [switch]$ForceToolBudgetZero,
     [switch]$AllowChecklistMissing
 )
@@ -182,6 +183,52 @@ try {
         $actualRetrySkipReason = [string]$retrySkipped.payload.metadata.reason
         if (-not [string]::Equals($actualRetrySkipReason, $ExpectedRetrySkipReason, [StringComparison]::Ordinal)) {
             throw "Expected retry.skipped reason '$ExpectedRetrySkipReason' but got '$actualRetrySkipReason'"
+        }
+    }
+
+    if ($AssertRetrySkipMetadata) {
+        if ($null -eq $retrySkipped) {
+            throw "Cannot assert retry.skipped metadata when retry.skipped event is missing"
+        }
+
+        $retrySkipMetadata = $retrySkipped.payload.metadata
+        if ($null -eq $retrySkipMetadata) {
+            throw "retry.skipped payload is missing metadata"
+        }
+
+        $remainingRetriesRaw = [string]$retrySkipMetadata.remainingRetries
+        $remainingToolCallsRaw = [string]$retrySkipMetadata.remainingToolCalls
+        $remainingTimeMsRaw = [string]$retrySkipMetadata.remainingTimeMs
+
+        if ([string]::IsNullOrWhiteSpace($remainingRetriesRaw)) {
+            throw "retry.skipped metadata missing remainingRetries"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($remainingToolCallsRaw)) {
+            throw "retry.skipped metadata missing remainingToolCalls"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($remainingTimeMsRaw)) {
+            throw "retry.skipped metadata missing remainingTimeMs"
+        }
+
+        $remainingRetries = 0
+        if (-not [int]::TryParse($remainingRetriesRaw, [ref]$remainingRetries)) {
+            throw "retry.skipped metadata remainingRetries is not an integer: '$remainingRetriesRaw'"
+        }
+
+        $remainingToolCalls = 0
+        if (-not [int]::TryParse($remainingToolCallsRaw, [ref]$remainingToolCalls)) {
+            throw "retry.skipped metadata remainingToolCalls is not an integer: '$remainingToolCallsRaw'"
+        }
+
+        $remainingTimeMs = 0
+        if (-not [int]::TryParse($remainingTimeMsRaw, [ref]$remainingTimeMs)) {
+            throw "retry.skipped metadata remainingTimeMs is not an integer: '$remainingTimeMsRaw'"
+        }
+
+        if ($remainingRetries -lt 0 -or $remainingToolCalls -lt 0 -or $remainingTimeMs -lt 0) {
+            throw "retry.skipped metadata contains negative budget values"
         }
     }
 
