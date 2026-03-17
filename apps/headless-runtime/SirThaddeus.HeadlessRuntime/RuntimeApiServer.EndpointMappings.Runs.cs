@@ -297,7 +297,7 @@ internal static partial class RuntimeApiServer
                 workflowState.Evidence.Clear();
                 workflowState.Evidence.AddRange(retryState.Evidence);
             }
-            else if (features.ConstrainedRetryEnabled && firstConfidence.ShouldRetry)
+            else if (features.ConstrainedRetryEnabled)
             {
                 PublishProgressEvent(
                     runState,

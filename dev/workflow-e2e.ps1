@@ -4,7 +4,11 @@ param(
     [int]$Port = 5391,
     [string]$Prompt = "Can you get me details on GitHub pricing?",
     [int]$TimeoutSec = 120,
-    [switch]$ExpectRetry
+    [switch]$ExpectRetry,
+    [switch]$ExpectRetrySkipped,
+    [string]$ExpectedRetrySkipReason,
+    [switch]$ForceToolBudgetZero,
+    [switch]$AllowChecklistMissing
 )
 
 Set-StrictMode -Version Latest
@@ -53,6 +57,15 @@ try {
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "confidenceScoringEnabled" -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "constrainedRetryEnabled" -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "taskRunAuditSnapshotsEnabled" -Value $true
+
+    if ($ForceToolBudgetZero) {
+        $toolBudgetsProp = $settings.PSObject.Properties['toolBudgets']
+        if ($null -eq $toolBudgetsProp -or $null -eq $toolBudgetsProp.Value) {
+            $settings | Add-Member -MemberType NoteProperty -Name toolBudgets -Value ([pscustomobject]@{})
+        }
+
+        Set-OrAddProperty -Object $settings.toolBudgets -Name "maxToolCallsPerTurn" -Value 0
+    }
 
     $settings | ConvertTo-Json -Depth 30 | Set-Content -Path $settingsPath -Encoding UTF8
 
@@ -120,7 +133,10 @@ try {
     }
 
     $eventTypes = @($envelopes | ForEach-Object { $_.eventType })
-    $requiredEventTypes = @("checklist.updated", "narration.updated", "run.completed")
+    $requiredEventTypes = @("narration.updated", "run.completed")
+    if (-not $AllowChecklistMissing) {
+        $requiredEventTypes = @("checklist.updated") + $requiredEventTypes
+    }
     foreach ($required in $requiredEventTypes) {
         if (-not ($eventTypes -contains $required)) {
             throw "Missing required event type: $required"
@@ -148,13 +164,25 @@ try {
         throw "run.completed is missing finalText"
     }
 
-    $checklistCount = ($eventTypes | Where-Object { $_ -eq "checklist.updated" }).Count
-    $narrationCount = ($eventTypes | Where-Object { $_ -eq "narration.updated" }).Count
+    $checklistCount = @($eventTypes | Where-Object { $_ -eq "checklist.updated" }).Count
+    $narrationCount = @($eventTypes | Where-Object { $_ -eq "narration.updated" }).Count
     $progressEvents = @($envelopes | Where-Object { $_.eventType -eq "progress.event" })
     $retryStarted = $progressEvents | Where-Object { $_.payload.eventType -eq "retry.started" } | Select-Object -First 1
+    $retrySkipped = $progressEvents | Where-Object { $_.payload.eventType -eq "retry.skipped" } | Select-Object -First 1
 
     if ($ExpectRetry -and $null -eq $retryStarted) {
         throw "Expected retry.started progress event but none was observed"
+    }
+
+    if ($ExpectRetrySkipped -and $null -eq $retrySkipped) {
+        throw "Expected retry.skipped progress event but none was observed"
+    }
+
+    if ($ExpectRetrySkipped -and -not [string]::IsNullOrWhiteSpace($ExpectedRetrySkipReason)) {
+        $actualRetrySkipReason = [string]$retrySkipped.payload.metadata.reason
+        if (-not [string]::Equals($actualRetrySkipReason, $ExpectedRetrySkipReason, [StringComparison]::Ordinal)) {
+            throw "Expected retry.skipped reason '$ExpectedRetrySkipReason' but got '$actualRetrySkipReason'"
+        }
     }
 
     if ($ExpectRetry -and [string]::IsNullOrWhiteSpace($completionReason)) {
@@ -167,6 +195,10 @@ try {
     Write-Host "  checklist events: $checklistCount"
     Write-Host "  narration events: $narrationCount"
     Write-Host "  retry observed:   $([bool]$retryStarted)"
+    Write-Host "  retry skipped:    $([bool]$retrySkipped)"
+    if ($null -ne $retrySkipped) {
+        Write-Host "  retry skip reason: $([string]$retrySkipped.payload.metadata.reason)"
+    }
     Write-Host "  runtime out log:  $runtimeLogPath"
     Write-Host "  runtime err log:  $runtimeErrPath"
 }
