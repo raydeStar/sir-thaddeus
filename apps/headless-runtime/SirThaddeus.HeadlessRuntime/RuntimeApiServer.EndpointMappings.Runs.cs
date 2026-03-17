@@ -196,8 +196,19 @@ internal static partial class RuntimeApiServer
             await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.TaskStarted, runState.CancellationToken);
         }
 
+        // Wrap with time-budget-enforcing decorator when workflow is active.
+        IAgentOrchestrator effectiveOrchestrator = orchestrator;
+        ChecklistAwareAgentOrchestrator? workflowDecorator = null;
+        if (workflowState is not null)
+        {
+            workflowDecorator = new ChecklistAwareAgentOrchestrator(orchestrator);
+            effectiveOrchestrator = workflowDecorator;
+        }
+
         var stopwatch = Stopwatch.StartNew();
-        var firstResponse = await orchestrator.ProcessAsync(
+        workflowDecorator?.SetRunBudget(workflowState!.Envelope.TimeBudget, stopwatch);
+
+        var firstResponse = await effectiveOrchestrator.ProcessAsync(
             request.Prompt,
             conversationId,
             runState.CancellationToken);
@@ -263,7 +274,7 @@ internal static partial class RuntimeApiServer
                 await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.RetryStarted, runState.CancellationToken);
 
                 var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text, retryAction);
-                var retryResponse = await orchestrator.ProcessAsync(
+                var retryResponse = await effectiveOrchestrator.ProcessAsync(
                     retryPrompt,
                     conversationId,
                     runState.CancellationToken);
