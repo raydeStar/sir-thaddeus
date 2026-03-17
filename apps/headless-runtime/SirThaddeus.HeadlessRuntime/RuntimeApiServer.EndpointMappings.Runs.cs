@@ -16,6 +16,7 @@ internal static partial class RuntimeApiServer
     private static readonly IConfidenceEvaluator WorkflowConfidenceEvaluator = new ConfidenceEvaluator();
     private static readonly IRetryPlanner WorkflowRetryPlanner = new RetryPlanner();
     private static readonly IRetryGateEvaluator WorkflowRetryGateEvaluator = new RetryGateEvaluator();
+    private static readonly ICompletionReasonResolver WorkflowCompletionReasonResolver = new CompletionReasonResolver();
     private static readonly IProgressNarrator WorkflowNarrator = new ProgressNarrator();
 
     private static void MapRunEndpoints(
@@ -236,6 +237,7 @@ internal static partial class RuntimeApiServer
             }
 
             var retryGate = WorkflowRetryGateEvaluator.Evaluate(workflowState, firstConfidence, stopwatch.Elapsed);
+            workflowState.LastRetryGateDecision = retryGate;
 
             if (features.ConstrainedRetryEnabled && retryGate.IsAllowed)
             {
@@ -461,33 +463,7 @@ internal static partial class RuntimeApiServer
         ConfidenceSnapshot? confidence,
         TimeSpan elapsed)
     {
-        if (!response.Success)
-        {
-            return CompletionReason.Failed;
-        }
-
-        if (elapsed > workflowState.Envelope.TimeBudget)
-        {
-            return CompletionReason.Timeout;
-        }
-
-        if (workflowState.ToolCallsUsed >= workflowState.Envelope.MaxToolCalls)
-        {
-            return CompletionReason.ToolBudgetExhausted;
-        }
-
-        if (confidence?.Band == "High")
-        {
-            return CompletionReason.SuccessHighConfidence;
-        }
-
-        if ((confidence?.Band is "Low" or "VeryLow") &&
-            workflowState.RetriesUsed >= workflowState.Envelope.MaxRetries)
-        {
-            return CompletionReason.RetryBudgetExhausted;
-        }
-
-        return CompletionReason.SuccessMediumConfidence;
+        return WorkflowCompletionReasonResolver.Resolve(response, workflowState, confidence, elapsed);
     }
 
     private static string BuildRetryPrompt(string originalPrompt, string firstAnswer, PlannedAction? retryAction)

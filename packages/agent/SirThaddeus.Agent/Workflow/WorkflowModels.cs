@@ -105,6 +105,7 @@ public sealed class TaskRunState
     public string? DraftAnswer { get; set; }
     public TaskLifecycleState RuntimeState { get; set; } = TaskLifecycleState.Received;
     public CompletionReason? CompletionReason { get; set; }
+    public RetryGateDecision? LastRetryGateDecision { get; set; }
     public string? LastPublishedChecklistStamp { get; set; }
     public string? LastPublishedNarration { get; set; }
 }
