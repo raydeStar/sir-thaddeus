@@ -74,11 +74,15 @@ public sealed partial class SearchOrchestrator
     private const string WebSearchToolNameAlt = "WebSearch";
     private const string BrowseToolName       = "browser_navigate";
     private const string BrowseToolNameAlt    = "BrowserNavigate";
+    private const string PlacesLookupToolName    = "places_lookup";
+    private const string PlacesLookupToolNameAlt = "PlacesLookup";
 
     // ── Bounds ───────────────────────────────────────────────────────
     private const int DefaultMaxResults    = 5;
     private const int LocalBusinessTargetResults = 10;
     private const int LocalBusinessFetchMaxResults = 20;
+    private const int LocalBusinessMaxArticleFetches = 2;
+    private const int LocalBusinessMaxPlaceLookups = 5;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
     private const int MaxTokensWebSummary  = 1024;

@@ -87,8 +87,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        _viewTabs = [ChatTabButton, BriefingTabButton, SettingsTabButton];
-        _viewPanels = [ChatView, BriefingView, SettingsView];
+        _viewTabs = [ChatTabButton, BriefingTabButton, ProgressTabButton, SettingsTabButton];
+        _viewPanels = [ChatView, BriefingView, ProgressView, SettingsView];
 
         _uiSettings = _uiSettingsStore.Load();
         ApplyUiSettingsToControls();
@@ -440,7 +440,7 @@ public partial class MainWindow : Window
             _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
         }
 
-        InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true;
+        InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true || ProgressTabButton.IsChecked == true;
     }
 
     private void SettingsTabControl_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -1754,15 +1754,9 @@ public partial class MainWindow : Window
                     var confidenceText = string.IsNullOrWhiteSpace(completed?.ConfidenceBand)
                         ? "n/a"
                         : completed!.ConfidenceBand;
-                    var reasonText = string.IsNullOrWhiteSpace(completed?.CompletionReason)
-                        ? "unknown"
-                        : completed!.CompletionReason;
+                    var reasonText = FormatCompletionReasonForDisplay(completed?.CompletionReason);
                     _workflowConfidenceBand = confidenceText;
                     UpdateWorkflowToolStrip();
-                    if (!string.IsNullOrWhiteSpace(WorkflowNarrationText.Text))
-                    {
-                        WorkflowNarrationText.Text = $"{WorkflowNarrationText.Text} ({reasonText})";
-                    }
                 }
 
                 // Extract thought/reasoning content and update the last assistant message.
@@ -1839,7 +1833,7 @@ public partial class MainWindow : Window
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
-                WorkflowProgressPanel.IsVisible = false;
+                HideProgressTab();
                 UpdateComposerState();
                 break;
             case RuntimeEventTypes.ToolRequested:
@@ -1874,7 +1868,7 @@ public partial class MainWindow : Window
                 {
                     _lastWorkflowNarration = narration.Message;
                     WorkflowNarrationText.Text = narration.Message;
-                    WorkflowProgressPanel.IsVisible = true;
+                    ShowProgressTab();
                 }
                 break;
             case RuntimeEventTypes.ChecklistUpdated:
@@ -1888,28 +1882,34 @@ public partial class MainWindow : Window
                         _workflowChecklistItems.Clear();
                         foreach (var item in checklist.Items.OrderBy(i => i.Order))
                         {
-                            var stateTag = item.State switch
+                            var stateIcon = item.State switch
                             {
-                                "Completed" => "[x]",
-                                "InProgress" => "[~]",
-                                "Failed" => "[!]",
-                                "Blocked" => "[-]",
-                                "Skipped" => "[>]",
-                                _ => "[ ]"
+                                "Completed"  => "\u2713",  // ✓
+                                "InProgress" => "\u25CF",  // ●
+                                "Failed"     => "\u2717",  // ✗
+                                "Blocked"    => "\u2014",  // —
+                                "Skipped"    => "\u203A",  // ›
+                                _            => "\u25CB"   // ○
                             };
-                            var label = string.IsNullOrWhiteSpace(item.StatusNote)
-                                ? $"{stateTag} {item.Title}"
-                                : $"{stateTag} {item.Title} — {item.StatusNote}";
+                            var titleText = (item.Title ?? "").Trim();
+                            var noteText = (item.StatusNote ?? "").Trim();
+                            var label = string.IsNullOrWhiteSpace(noteText)
+                                ? $"{stateIcon} {titleText}"
+                                : $"{stateIcon} {titleText} \u2014 {noteText}";
                             _workflowChecklistItems.Add(new WorkflowChecklistItemViewModel
                             {
                                 Id = item.Id,
                                 Order = item.Order,
                                 State = item.State,
-                                Label = label
+                                Label = label,
+                                StateIcon = stateIcon,
+                                Title = titleText,
+                                StatusNote = noteText
                             });
                         }
 
-                        WorkflowProgressPanel.IsVisible = _workflowChecklistItems.Count > 0;
+                        if (_workflowChecklistItems.Count > 0)
+                            ShowProgressTab();
                     }
                 }
                 break;
@@ -1921,8 +1921,8 @@ public partial class MainWindow : Window
                     if (string.Equals(progressEvent.EventType, "retry.started", StringComparison.OrdinalIgnoreCase))
                     {
                         _workflowRetryCount++;
-                        WorkflowNarrationText.Text = "Retrying with alternate verification strategy…";
-                        WorkflowProgressPanel.IsVisible = true;
+                        WorkflowNarrationText.Text = "Retrying with alternate verification strategy\u2026";
+                        ShowProgressTab();
                         UpdateWorkflowToolStrip();
                     }
                     else if (string.Equals(progressEvent.EventType, "retry.skipped", StringComparison.OrdinalIgnoreCase))
@@ -1945,7 +1945,7 @@ public partial class MainWindow : Window
                         };
 
                         WorkflowNarrationText.Text = skipLabel;
-                        WorkflowProgressPanel.IsVisible = true;
+                        ShowProgressTab();
                         UpdateWorkflowToolStrip();
                     }
                     else if (string.Equals(progressEvent.EventType, "task.started", StringComparison.OrdinalIgnoreCase))
@@ -1961,7 +1961,7 @@ public partial class MainWindow : Window
                                 _ => "Processing request…"
                             };
                             WorkflowNarrationText.Text = label;
-                            WorkflowProgressPanel.IsVisible = true;
+                            ShowProgressTab();
                         }
                     }
                 }
@@ -1982,14 +1982,59 @@ public partial class MainWindow : Window
         _workflowRetryCount = 0;
         WorkflowNarrationText.Text = string.Empty;
         WorkflowToolStripText.Text = string.Empty;
-        WorkflowProgressPanel.IsVisible = false;
+        HideProgressTab();
+    }
+
+    private void ShowProgressTab()
+    {
+        if (ProgressTabButton.IsVisible)
+            return; // Already showing.
+        ProgressTabButton.IsVisible = true;
+    }
+
+    private void HideProgressTab()
+    {
+        if (!ProgressTabButton.IsVisible)
+            return;
+        ProgressTabButton.IsVisible = false;
+        ProgressTabButton.IsChecked = false;
+        ProgressView.IsVisible = false;
+        // If we were on the Progress tab, switch back to Chat.
+        if (_viewTabs.All(t => t.IsChecked != true))
+            SetActiveView(ChatTabButton);
     }
 
     private void UpdateWorkflowToolStrip()
     {
-        var confidence = string.IsNullOrWhiteSpace(_workflowConfidenceBand) ? "n/a" : _workflowConfidenceBand;
-        WorkflowToolStripText.Text = $"Tools: {_toolCallsInCurrentRun.Count}   Retries: {_workflowRetryCount}   Confidence: {confidence}";
+        var parts = new System.Collections.Generic.List<string>();
+        if (_toolCallsInCurrentRun.Count > 0)
+            parts.Add($"Tools: {_toolCallsInCurrentRun.Count}");
+        if (_workflowRetryCount > 0)
+            parts.Add($"Retries: {_workflowRetryCount}");
+        if (!string.IsNullOrWhiteSpace(_workflowConfidenceBand) &&
+            !string.Equals(_workflowConfidenceBand, "n/a", StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Confidence: {_workflowConfidenceBand}");
+        WorkflowToolStripText.Text = parts.Count > 0 ? string.Join("  \u00B7  ", parts) : string.Empty;
     }
+
+    private static string FormatCompletionReasonForDisplay(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return string.Empty;
+        return reason switch
+        {
+            "SuccessHighConfidence"   => "High confidence",
+            "SuccessMediumConfidence" => "Medium confidence",
+            "Timeout"                => "Timed out",
+            "ToolBudgetExhausted"    => "Tool budget reached",
+            "RetryBudgetExhausted"   => "Retry budget reached",
+            "BlockedByPolicy"        => "Blocked by policy",
+            "Cancelled"              => "Cancelled",
+            "Failed"                 => "Failed",
+            _                        => reason
+        };
+    }
+
     private async Task SubmitPermissionDecisionAsync(bool approved, bool rememberForSession = false, bool persistAsAlways = false)
     {
         if (_runtimeApiClient is null || string.IsNullOrWhiteSpace(_pendingPermissionRequestId))

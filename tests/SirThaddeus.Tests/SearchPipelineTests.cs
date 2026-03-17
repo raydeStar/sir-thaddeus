@@ -2555,7 +2555,7 @@ public class LocalBusinessDetectionTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Contains("bakeries nearby", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bakery nearby", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("West Olympia Woman", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Dairy-Free Restaurant Guide", result.Text, StringComparison.OrdinalIgnoreCase);
     }
@@ -2620,7 +2620,7 @@ public class LocalBusinessDetectionTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Contains("top 10 florists", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("florists nearby", result.Text, StringComparison.OrdinalIgnoreCase);
 
         var bulletCount = Regex.Matches(result.Text, "^- \\*\\*", RegexOptions.Multiline).Count;
         Assert.Equal(10, bulletCount);
@@ -2761,7 +2761,7 @@ public class LocalBusinessDetectionTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Contains("delis nearby in Essex County, New Jersey", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("deli nearby in Essex County, New Jersey", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("I need a location", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -3026,3 +3026,135 @@ public class AuditedMcpToolClientBudgetTests
 }
 
 #endregion
+
+// ── Local Business Name Extraction Tests ────────────────────────────
+public class LocalBusinessNameExtractionTests
+{
+    [Fact]
+    public void ExtractBusinessNames_NumberedList_ReturnsNames()
+    {
+        var article = """
+            Best Bakeries in Olympia, WA
+            1. Left Bank Pastry
+            Incredible croissants and fresh bread daily.
+            2. The Bread Peddler
+            Known for artisan sourdough loaves.
+            3. Olympia Coffee Roasters
+            Also serves amazing pastries.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Left Bank Pastry", names);
+        Assert.Contains("The Bread Peddler", names);
+        Assert.Contains("Olympia Coffee Roasters", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_HeadingFollowedByDetails_ReturnsNames()
+    {
+        var article = """
+            Top local bakeries
+
+            Wagner's European Bakery
+            123 Main St, Olympia, WA 98501
+            Authentic German breads and pastries.
+
+            San Francisco Street Bakery
+            4.5 stars - Open now
+            Fresh sourdough and artisan bread daily.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Wagner's European Bakery", names);
+        Assert.Contains("San Francisco Street Bakery", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_SkipsGenericPhrases()
+    {
+        var article = """
+            Best Bakeries
+            1. Read More
+            2. Left Bank Pastry
+            Great bread.
+            3. Advertisement
+            4. Show More
+            5. Sweet Flour Baking Co
+            Artisan cakes.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.DoesNotContain("Read More", names);
+        Assert.DoesNotContain("Advertisement", names);
+        Assert.DoesNotContain("Show More", names);
+        Assert.Contains("Left Bank Pastry", names);
+        Assert.Contains("Sweet Flour Baking Co", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_DeduplicatesAcrossArticles()
+    {
+        var article1 = """
+            1. Left Bank Pastry
+            Great croissants.
+            2. Some Other Bakery
+            Fine bread.
+            """;
+        var article2 = """
+            1. Left Bank Pastry
+            Best pastries in town.
+            2. Third Place Bakery
+            Wonderful pies.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article1, article2], "bakeries nearby");
+
+        Assert.Single(names, n => n.Equals("Left Bank Pastry", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Some Other Bakery", names);
+        Assert.Contains("Third Place Bakery", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_CleansTrailingJunk()
+    {
+        var article = """
+            1. Wagner's Bakery - Best in Town
+            Amazing bread.
+            2. The Flour Shop (Olympia)
+            Fresh daily.
+            3. Bread & Butter Co. 4.5 stars
+            Artisan loaves.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Wagner's Bakery", names);
+        Assert.Contains("The Flour Shop", names);
+        Assert.Contains("Bread & Butter Co.", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_EmptyArticles_ReturnsEmpty()
+    {
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [], "bakeries nearby");
+        Assert.Empty(names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_NoMatchableContent_ReturnsEmpty()
+    {
+        var article = "This is just a paragraph about the history of bread baking in the Pacific Northwest.";
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+        Assert.Empty(names);
+    }
+}

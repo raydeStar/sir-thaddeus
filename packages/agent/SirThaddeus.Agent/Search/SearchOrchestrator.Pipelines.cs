@@ -303,7 +303,8 @@ public sealed partial class SearchOrchestrator
             Session.RecordLocalBusinessCandidates(
                 GetRequestedLocalBusinessLabel(userMessage ?? ""),
                 sources);
-            return BuildLocalBusinessDiscoveryResponse(userMessage ?? "", sources, toolCallsMade);
+            return await EnrichLocalBusinessDiscoveryAsync(
+                userMessage ?? "", sources, localBusinessLocation, toolCallsMade, ct);
         }
 
         Session.ClearLocalBusinessCandidates();

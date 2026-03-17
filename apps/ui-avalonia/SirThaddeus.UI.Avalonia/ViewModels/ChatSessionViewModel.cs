@@ -11,6 +11,9 @@ public sealed class WorkflowChecklistItemViewModel
     public int Order { get; init; }
     public string State { get; init; } = string.Empty;
     public string Label { get; init; } = string.Empty;
+    public string StateIcon { get; init; } = "\u25CB";  // ○
+    public string Title { get; init; } = string.Empty;
+    public string StatusNote { get; init; } = string.Empty;
 }
 
 public class ChatMessageItem : INotifyPropertyChanged

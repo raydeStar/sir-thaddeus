@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -514,5 +516,595 @@ public sealed partial class SearchOrchestrator
             lower.Contains("clinic", StringComparison.Ordinal) ||
             lower.Contains("open", StringComparison.Ordinal) ||
             lower.Contains("hours", StringComparison.Ordinal);
+    }
+
+    // ── Enriched Local Business Discovery ────────────────────────────
+    // Three-phase pipeline: web_search → browser_navigate (read articles)
+    // → places_lookup (get real business details).
+
+    private sealed record EnrichedBusiness(
+        string Name,
+        string? Address,
+        string? Phone,
+        string? Website,
+        bool? OpenNow,
+        double? Rating,
+        int? TotalRatings,
+        string? Snippet);
+
+    private async Task<AgentResponse> EnrichLocalBusinessDiscoveryAsync(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        string? locationContext,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        // ── Phase 1: Extract candidate business names from two sources ──
+        // a) Non-aggregator source titles (individual business websites).
+        // b) Aggregator article content (read the top 1-2 list articles).
+
+        var candidateNames = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1a. Individual business sites — their title IS the business name.
+        foreach (var source in sources)
+        {
+            if (IsDirectoryAggregatorSource(source))
+                continue;
+            var name = ExtractBusinessNameFromSourceTitle(source.Title, userMessage);
+            if (name is not null && name.Length >= 3 && !seen.Contains(name))
+            {
+                seen.Add(name);
+                candidateNames.Add(name);
+            }
+        }
+
+        // 1b. Aggregator articles — read and extract numbered/heading names.
+        var aggregators = sources
+            .Where(s => IsDirectoryAggregatorSource(s) && !IsJunkUrl(s.Url))
+            .Take(LocalBusinessMaxArticleFetches)
+            .ToList();
+
+        if (aggregators.Count > 0)
+        {
+            var articleTexts = new List<string>();
+            foreach (var source in aggregators)
+            {
+                var content = await FetchSingleUrlAsync(source.Url, toolCallsMade, ct);
+                if (!string.IsNullOrWhiteSpace(content))
+                    articleTexts.Add(content!);
+            }
+
+            foreach (var name in ExtractBusinessNamesFromArticles(articleTexts, userMessage))
+            {
+                if (!seen.Contains(name))
+                {
+                    seen.Add(name);
+                    candidateNames.Add(name);
+                }
+            }
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCAL_BUSINESS_ENRICH_EXTRACT",
+            Result = candidateNames.Count > 0 ? "ok" : "no_names",
+            Details = new Dictionary<string, object>
+            {
+                ["names_extracted"] = string.Join(" | ", candidateNames),
+                ["from_titles"] = candidateNames.Count - (aggregators.Count > 0 ? 0 : 0),
+                ["aggregators_read"] = aggregators.Count
+            }
+        });
+
+        if (candidateNames.Count == 0)
+            return BuildLocalBusinessDiscoveryResponse(userMessage, sources, toolCallsMade);
+
+        // ── Phase 2: Look up each candidate via places_lookup ──
+        var enriched = new List<EnrichedBusiness>();
+        var lookups = Math.Min(candidateNames.Count, LocalBusinessMaxPlaceLookups);
+
+        for (var i = 0; i < lookups; i++)
+        {
+            var name = candidateNames[i];
+            var placeQuery = string.IsNullOrWhiteSpace(locationContext)
+                ? name
+                : $"{name} {locationContext}";
+
+            var business = await LookupPlaceAsync(placeQuery, locationContext, toolCallsMade, ct);
+            if (business is not null)
+                enriched.Add(business);
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "LOCAL_BUSINESS_ENRICH_LOOKUP",
+            Result = enriched.Count > 0 ? "ok" : "no_places",
+            Details = new Dictionary<string, object>
+            {
+                ["lookups_attempted"] = lookups,
+                ["places_found"] = enriched.Count
+            }
+        });
+
+        // If places_lookup returned nothing (tool unavailable, etc.),
+        // build a cleaned-up response using just the extracted names.
+        if (enriched.Count == 0)
+            return BuildCleanedLocalBusinessResponse(userMessage, candidateNames, locationContext, toolCallsMade);
+
+        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, locationContext, toolCallsMade);
+    }
+
+    /// <summary>
+    /// Extracts a business name from a source title by stripping common
+    /// suffixes like site taglines, location qualifiers, and separators.
+    /// e.g. "San Francisco Street Bakery – Olympia's Neighborhood Bakery" → "San Francisco Street Bakery"
+    /// </summary>
+    private static string? ExtractBusinessNameFromSourceTitle(string? title, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var name = title!.Trim();
+
+        // Strip everything after common separators (–, —, |, :) when
+        // the trailing portion is a tagline or description.
+        name = Regex.Replace(name, @"\s*[–—|]\s+.*$", "").Trim();
+        name = Regex.Replace(name, @"\s*:\s+(?:Find|Shop|Order|Browse|Welcome|Home|About|Our).*$", "", RegexOptions.IgnoreCase).Trim();
+
+        // Strip "(City, ST)" or location parenthetical.
+        name = Regex.Replace(name, @"\s*\(.*\)\s*$", "").Trim();
+
+        // Strip trailing "- City" or "- Yelp" etc.
+        name = Regex.Replace(name, @"\s+-\s+(?:Yelp|Google|TripAdvisor|Facebook|Foursquare|Reddit).*$", "", RegexOptions.IgnoreCase).Trim();
+
+        // If what's left is too short or is a generic directory phrase, skip.
+        if (name.Length < 3 || name.Length > 60)
+            return null;
+        if (IsGenericNonBusinessName(name))
+            return null;
+
+        // Skip if the name starts with "r/" (Reddit subreddit).
+        if (name.StartsWith("r/", StringComparison.Ordinal))
+            return null;
+
+        // Skip titles that are clearly aggregator-style ("Best X in Y", "Top 10 X").
+        if (Regex.IsMatch(name, @"^(?:Best|Top)\s+\d*\s*", RegexOptions.IgnoreCase))
+            return null;
+
+        // Skip if the name matches the generic business label ("Bakeries", "Restaurants").
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        if (string.Equals(name, label, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return name;
+    }
+
+    private async Task<string?> FetchSingleUrlAsync(
+        string url,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var args = JsonSerializer.Serialize(new { url });
+        string? content = null;
+        var resolvedToolName = BrowseToolName;
+
+        try
+        {
+            content = await _mcp.CallToolAsync(BrowseToolName, args, ct);
+        }
+        catch
+        {
+            try
+            {
+                resolvedToolName = BrowseToolNameAlt;
+                content = await _mcp.CallToolAsync(BrowseToolNameAlt, args, ct);
+            }
+            catch (Exception ex)
+            {
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName  = resolvedToolName,
+                    Arguments = args,
+                    Result    = $"Error: {ex.Message}",
+                    Success   = false
+                });
+                return null;
+            }
+        }
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName  = resolvedToolName,
+            Arguments = args,
+            Result    = content!.Length > 200 ? content[..200] + "…" : content,
+            Success   = true
+        });
+
+        if (content!.Length > MaxArticleChars)
+            content = content[..MaxArticleChars];
+
+        return content;
+    }
+
+    private static readonly Regex NumberedListRegex = new(
+        @"^\s*\d{1,2}[.)]\s+(.+)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex DashBulletRegex = new(
+        @"^\s*[-–—•]\s+(.+)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex HeadingStyleNameRegex = new(
+        @"^([A-Z][A-Za-z''&\-]+(?:\s+[A-Za-z''&\-]+){0,5})\s*$",
+        RegexOptions.Compiled);
+
+    // "Our current favorites are: 1: Left Bank Pastry, 2: Gotti Sweets..."
+    private static readonly Regex InlineNumberedRegex = new(
+        @"\d+:\s*([A-Z][A-Za-z''&\s\-]+?)(?:,\s*\d+:|$)",
+        RegexOptions.Compiled);
+
+    internal static IReadOnlyList<string> ExtractBusinessNamesFromArticles(
+        IReadOnlyList<string> articleTexts,
+        string userMessage)
+    {
+        var keywords = GetLocalBusinessMatchKeywords(userMessage);
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var text in articleTexts)
+        {
+            // Try inline numbered format first ("1: Name, 2: Name, 3: Name").
+            var inlineMatches = InlineNumberedRegex.Matches(text);
+            foreach (Match m in inlineMatches)
+            {
+                var inlineName = CleanExtractedBusinessName(m.Groups[1].Value);
+                if (inlineName.Length >= 3 && inlineName.Length <= 60
+                    && !IsGenericNonBusinessName(inlineName)
+                    && !seen.Contains(inlineName))
+                {
+                    seen.Add(inlineName);
+                    candidates.Add(inlineName);
+                }
+            }
+
+            var lines = text.Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].Trim();
+                if (string.IsNullOrWhiteSpace(line) || line.Length < 3)
+                    continue;
+
+                string? name = null;
+
+                // Pattern 1: Numbered list items "1. Left Bank Pastry"
+                var numberedMatch = NumberedListRegex.Match(line);
+                if (numberedMatch.Success)
+                {
+                    name = CleanExtractedBusinessName(numberedMatch.Groups[1].Value);
+                }
+
+                // Pattern 2: Dash/bullet list items "- Left Bank Pastry" or "• Left Bank Pastry"
+                if (name is null)
+                {
+                    var dashMatch = DashBulletRegex.Match(line);
+                    if (dashMatch.Success && line.Length <= 80)
+                    {
+                        var candidate = CleanExtractedBusinessName(dashMatch.Groups[1].Value);
+                        // Only accept if it looks like a proper name (starts with uppercase).
+                        if (candidate.Length >= 3 && candidate.Length <= 60
+                            && char.IsUpper(candidate[0]))
+                            name = candidate;
+                    }
+                }
+
+                // Pattern 3: Short standalone line that looks like a proper name,
+                // followed by a detail line (address, rating, description).
+                if (name is null && line.Length <= 60 && HeadingStyleNameRegex.IsMatch(line))
+                {
+                    var nextLine = i + 1 < lines.Length ? lines[i + 1].Trim() : "";
+                    if (LooksLikeBusinessDetailLine(nextLine))
+                        name = CleanExtractedBusinessName(line);
+                }
+
+                if (name is null)
+                    continue;
+
+                // Filter out non-business names (generic phrases, location names, etc.).
+                if (name.Length < 3 || name.Length > 60)
+                    continue;
+                if (IsGenericNonBusinessName(name))
+                    continue;
+                if (seen.Contains(name))
+                    continue;
+
+                seen.Add(name);
+                candidates.Add(name);
+            }
+        }
+
+        return candidates;
+    }
+
+    private static string CleanExtractedBusinessName(string raw)
+    {
+        // Strip trailing punctuation, HTML artifacts, numbering.
+        var cleaned = raw.Trim().TrimEnd('.', ':', '-', '–', '—');
+        cleaned = Regex.Replace(cleaned, @"\s*[-–—|]\s+.*$", "").Trim();
+        cleaned = Regex.Replace(cleaned, @"\s+\d+(\.\d+)?\s*stars?$", "", RegexOptions.IgnoreCase).Trim();
+        cleaned = Regex.Replace(cleaned, @"\s*\(.*\)\s*$", "").Trim();
+        return cleaned;
+    }
+
+    private static bool LooksLikeBusinessDetailLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+
+        // Address patterns: digits + street types.
+        if (Regex.IsMatch(line, @"\d+\s+\w+\s+(St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl|Hwy)", RegexOptions.IgnoreCase))
+            return true;
+        // Rating patterns: "4.5 stars", "★", "⭐"
+        if (Regex.IsMatch(line, @"\d+\.\d+\s*stars?|★|⭐|\brating\b", RegexOptions.IgnoreCase))
+            return true;
+        // Phone patterns.
+        if (Regex.IsMatch(line, @"\(\d{3}\)\s*\d{3}-\d{4}"))
+            return true;
+        // Price/description patterns.
+        if (Regex.IsMatch(line, @"\$+|price range|open|closed|hours", RegexOptions.IgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsGenericNonBusinessName(string name)
+    {
+        var lower = name.ToLowerInvariant();
+        ReadOnlySpan<string> skip =
+        [
+            "best", "top", "the best", "our picks", "see also",
+            "related", "nearby", "more", "advertisement",
+            "featured", "sponsored", "about", "contact",
+            "map", "directions", "overview", "reviews",
+            "read more", "view all", "show more", "menu",
+            "skip to content", "search", "home", "back to top"
+        ];
+        foreach (var s in skip)
+        {
+            if (lower.Equals(s, StringComparison.Ordinal) ||
+                lower.StartsWith(s + " ", StringComparison.Ordinal))
+                return true;
+        }
+        // All-lowercase single words are unlikely business names.
+        if (!name.Any(char.IsUpper) && !name.Contains(' '))
+            return true;
+        return false;
+    }
+
+    private async Task<EnrichedBusiness?> LookupPlaceAsync(
+        string query,
+        string? locationHint,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var args = JsonSerializer.Serialize(new
+        {
+            query,
+            timezone = "America/Los_Angeles",
+            locale = "en-US",
+            userLocationHint = locationHint ?? UserLocationHint,
+            maxReviewSnippets = 1
+        });
+
+        string? result = null;
+        var resolvedToolName = PlacesLookupToolName;
+
+        try
+        {
+            result = await _mcp.CallToolAsync(PlacesLookupToolName, args, ct);
+        }
+        catch
+        {
+            try
+            {
+                resolvedToolName = PlacesLookupToolNameAlt;
+                result = await _mcp.CallToolAsync(PlacesLookupToolNameAlt, args, ct);
+            }
+            catch (Exception ex)
+            {
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName  = resolvedToolName,
+                    Arguments = args,
+                    Result    = $"Error: {ex.Message}",
+                    Success   = false
+                });
+                return null;
+            }
+        }
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName  = resolvedToolName,
+            Arguments = args,
+            Result    = result!.Length > 200 ? result[..200] + "…" : result,
+            Success   = true
+        });
+
+        return ParsePlaceLookupResult(result!);
+    }
+
+    private static EnrichedBusiness? ParsePlaceLookupResult(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) ||
+            json.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+            json.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("error", out var err) &&
+                err.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(err.GetString()))
+                return null;
+
+            if (!root.TryGetProperty("place", out var place) ||
+                place.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var name = place.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (string.IsNullOrWhiteSpace(name))
+                return null;
+
+            var address = place.TryGetProperty("address", out var a) ? a.GetString() : null;
+            var phone = place.TryGetProperty("phone", out var p) ? p.GetString() : null;
+            var website = place.TryGetProperty("website", out var w) ? w.GetString() : null;
+            bool? openNow = place.TryGetProperty("openNow", out var o) && o.ValueKind == JsonValueKind.True
+                ? true
+                : place.TryGetProperty("openNow", out var o2) && o2.ValueKind == JsonValueKind.False ? false : null;
+            double? rating = place.TryGetProperty("rating", out var r) && r.TryGetDouble(out var rv)
+                ? rv : null;
+            int? totalRatings = place.TryGetProperty("userRatingsTotal", out var t) && t.TryGetInt32(out var tv)
+                ? tv : null;
+
+            // Extract a review snippet if available.
+            string? snippet = null;
+            if (place.TryGetProperty("reviews", out var reviews) &&
+                reviews.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var review in reviews.EnumerateArray())
+                {
+                    if (review.TryGetProperty("text", out var rt) && !string.IsNullOrWhiteSpace(rt.GetString()))
+                    {
+                        snippet = rt.GetString();
+                        break;
+                    }
+                }
+            }
+
+            return new EnrichedBusiness(name!, address, phone, website, openNow, rating, totalRatings, snippet);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private AgentResponse BuildEnrichedLocalBusinessResponse(
+        string userMessage,
+        IReadOnlyList<EnrichedBusiness> businesses,
+        string? locationContext,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
+        var locText = string.IsNullOrWhiteSpace(locationContext)
+            ? " nearby"
+            : $" nearby in {locationContext}";
+
+        var sb = new StringBuilder();
+        sb.Append(businesses.Count == 1
+            ? $"Here's a {SingularizeBusinessLabel(businessLabel)} I found{locText}:"
+            : $"Here are {businesses.Count} {businessLabel} I found{locText}:");
+        sb.AppendLine();
+        sb.AppendLine();
+
+        foreach (var biz in businesses)
+        {
+            sb.Append("- **");
+            sb.Append(biz.Name);
+            sb.Append("**");
+
+            var details = new List<string>();
+            if (!string.IsNullOrWhiteSpace(biz.Address))
+                details.Add(biz.Address);
+            if (biz.Rating.HasValue)
+            {
+                var ratingText = biz.TotalRatings.HasValue
+                    ? $"{biz.Rating:F1}\u2605 ({biz.TotalRatings:N0} reviews)"
+                    : $"{biz.Rating:F1}\u2605";
+                details.Add(ratingText);
+            }
+            if (biz.OpenNow.HasValue)
+                details.Add(biz.OpenNow.Value ? "Open now" : "Closed now");
+
+            if (details.Count > 0)
+            {
+                sb.Append(" — ");
+                sb.Append(string.Join(" · ", details));
+            }
+
+            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(biz.Snippet))
+            {
+                sb.Append("  _\"");
+                sb.Append(TrimSentence(biz.Snippet, 120));
+                sb.Append("\"_");
+                sb.AppendLine();
+            }
+        }
+
+        sb.AppendLine();
+        sb.Append("If you want, I can bring up more info on any one of these ");
+        sb.Append(businessLabel);
+        sb.Append('.');
+
+        return new AgentResponse
+        {
+            Text = sb.ToString(),
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    /// <summary>
+    /// Fallback when we extracted business names but places_lookup is unavailable.
+    /// Presents a clean list of just the names without article fluff.
+    /// </summary>
+    private AgentResponse BuildCleanedLocalBusinessResponse(
+        string userMessage,
+        IReadOnlyList<string> businessNames,
+        string? locationContext,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
+        var locText = string.IsNullOrWhiteSpace(locationContext)
+            ? " nearby"
+            : $" nearby in {locationContext}";
+
+        var names = businessNames.Take(LocalBusinessTargetResults).ToList();
+        var sb = new StringBuilder();
+        sb.Append(names.Count == 1
+            ? $"Here's a {SingularizeBusinessLabel(businessLabel)}{locText} that came up:"
+            : $"Here are {names.Count} {businessLabel}{locText} that came up:");
+        sb.AppendLine();
+        sb.AppendLine();
+
+        foreach (var name in names)
+        {
+            sb.Append("- **");
+            sb.Append(name);
+            sb.Append("**");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine();
+        sb.Append("If you want, I can bring up more info on any one of these ");
+        sb.Append(businessLabel);
+        sb.Append('.');
+
+        return new AgentResponse
+        {
+            Text = sb.ToString(),
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
     }
 }
