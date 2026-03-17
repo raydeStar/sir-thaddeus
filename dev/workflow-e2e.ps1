@@ -9,6 +9,7 @@ param(
     [string]$ExpectedRetrySkipReason,
     [switch]$AssertRetrySkipMetadata,
     [switch]$AssertRunCompletedRetryGate,
+    [switch]$AssertWorkflowAuditSnapshot,
     [switch]$ForceToolBudgetZero,
     [switch]$AllowChecklistMissing
 )
@@ -270,6 +271,47 @@ try {
         }
     }
 
+    if ($AssertWorkflowAuditSnapshot) {
+        $auditResponse = Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:$Port/api/audit?take=200" -TimeoutSec 30
+        $auditEntries = @($auditResponse)
+        $workflowSnapshots = @($auditEntries | Where-Object { $_.category -eq "WORKFLOW_RUN_SNAPSHOT" })
+
+        if ($workflowSnapshots.Count -eq 0) {
+            throw "No WORKFLOW_RUN_SNAPSHOT entries found in /api/audit"
+        }
+
+        $snapshot = $workflowSnapshots | Select-Object -Last 1
+        if ([string]::IsNullOrWhiteSpace([string]$snapshot.metadataJson)) {
+            throw "WORKFLOW_RUN_SNAPSHOT entry has no metadataJson"
+        }
+
+        $snapshotDetails = [string]$snapshot.metadataJson | ConvertFrom-Json
+        $auditRetryGateReasonProp = $snapshotDetails.PSObject.Properties['retry_gate_reason']
+        $auditRetryGateAllowedProp = $snapshotDetails.PSObject.Properties['retry_gate_allowed']
+        $auditRetryGateReason = if ($null -eq $auditRetryGateReasonProp) { "" } else { [string]$auditRetryGateReasonProp.Value }
+        $auditRetryGateAllowed = if ($null -eq $auditRetryGateAllowedProp) { $null } else { $auditRetryGateAllowedProp.Value }
+
+        if ([string]::IsNullOrWhiteSpace($auditRetryGateReason)) {
+            throw "WORKFLOW_RUN_SNAPSHOT metadata missing retry_gate_reason"
+        }
+
+        if ($null -eq $auditRetryGateAllowed) {
+            throw "WORKFLOW_RUN_SNAPSHOT metadata missing retry_gate_allowed"
+        }
+
+        if ($AssertRunCompletedRetryGate -and -not [string]::IsNullOrWhiteSpace($retryGateReason)) {
+            if (-not [string]::Equals($auditRetryGateReason, $retryGateReason, [StringComparison]::Ordinal)) {
+                throw "Audit retry_gate_reason '$auditRetryGateReason' does not match run.completed retryGateReason '$retryGateReason'"
+            }
+        }
+
+        if ($ExpectRetrySkipped -and -not [string]::IsNullOrWhiteSpace($ExpectedRetrySkipReason)) {
+            if (-not [string]::Equals($auditRetryGateReason, $ExpectedRetrySkipReason, [StringComparison]::Ordinal)) {
+                throw "Audit retry_gate_reason '$auditRetryGateReason' does not match expected '$ExpectedRetrySkipReason'"
+            }
+        }
+    }
+
     if ($ExpectRetry -and [string]::IsNullOrWhiteSpace($completionReason)) {
         throw "Retry scenario did not provide completionReason"
     }
@@ -288,6 +330,11 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($retryGateReason)) {
         Write-Host "  retry gate reason  (run.completed): $retryGateReason"
     }
+
+    if ($AssertWorkflowAuditSnapshot) {
+        Write-Host "  audit snapshot assertion: passed"
+    }
+
     Write-Host "  runtime out log:  $runtimeLogPath"
     Write-Host "  runtime err log:  $runtimeErrPath"
 }

@@ -382,6 +382,8 @@ internal static partial class RuntimeApiServer
                 ["completion_reason"] = workflowState.CompletionReason?.ToString() ?? "unknown",
                 ["confidence_band"] = confidence?.Band ?? "n/a",
                 ["confidence_score"] = confidence?.Score ?? 0.0,
+                ["retry_gate_allowed"] = workflowState.LastRetryGateDecision?.IsAllowed,
+                ["retry_gate_reason"] = workflowState.LastRetryGateDecision?.ReasonCode ?? "n/a",
                 ["retries_used"] = workflowState.RetriesUsed,
                 ["tool_calls_used"] = workflowState.ToolCallsUsed,
                 ["checklist_phase"] = workflowState.Checklist.CurrentPhase,
