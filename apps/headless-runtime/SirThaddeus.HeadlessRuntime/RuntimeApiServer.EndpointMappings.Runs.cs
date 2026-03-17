@@ -449,13 +449,27 @@ internal static partial class RuntimeApiServer
     {
         foreach (var call in response.ToolCallsMade)
         {
+            var resultLength = call.Result?.Length ?? 0;
+
+            // Category-based trust: docs/files > web/search > memory > default.
+            var trust = call.Success ? TrustScoreForTool(call.ToolName) : 0.28;
+
+            // Downgrade if result is suspiciously short (empty or no-data response).
+            if (call.Success && resultLength < 20)
+                trust = Math.Min(trust, 0.40);
+
+            // Relevance bonus for rich results (> 500 chars suggests substantive content).
+            var relevance = call.Success && resultLength > 500 ? 0.72 : 0.62;
+
             state.Evidence.Add(new EvidenceRecord
             {
                 SourceType = sourceType,
                 Title = call.ToolName,
-                Summary = call.Success ? "Tool call succeeded" : "Tool call failed",
-                TrustScore = call.Success ? 0.70 : 0.30,
-                RelevanceScore = 0.65,
+                Summary = call.Success
+                    ? $"Tool succeeded ({resultLength} chars)"
+                    : "Tool call failed",
+                TrustScore = trust,
+                RelevanceScore = relevance,
                 SupportsCandidateAnswer = call.Success,
                 ContradictsCandidateAnswer = !call.Success
             });
@@ -463,17 +477,37 @@ internal static partial class RuntimeApiServer
 
         if (response.ToolCallsMade.Count == 0)
         {
+            // LLM-only: longer replies suggest a grounded answer rather than a stub.
+            var textLength = response.Text?.Length ?? 0;
+            var llmTrust = textLength > 200 ? 0.50 : 0.40;
+
             state.Evidence.Add(new EvidenceRecord
             {
                 SourceType = sourceType,
                 Title = "llm_response",
                 Summary = "Answer produced without explicit tool evidence.",
-                TrustScore = 0.45,
+                TrustScore = llmTrust,
                 RelevanceScore = 0.60,
                 SupportsCandidateAnswer = true,
                 ContradictsCandidateAnswer = false
             });
         }
+    }
+
+    /// <summary>
+    /// Returns a baseline trust score for a tool call based on its name.
+    /// Docs/file reads score highest; web/search next; memory tools lower.
+    /// </summary>
+    private static double TrustScoreForTool(string toolName)
+    {
+        var lower = (toolName ?? string.Empty).ToLowerInvariant();
+        if (lower.Contains("read") || lower.Contains("doc") || lower.Contains("file"))
+            return 0.82;
+        if (lower.Contains("search") || lower.Contains("web") || lower.Contains("fetch") || lower.Contains("browse"))
+            return 0.76;
+        if (lower.Contains("memory") || lower.Contains("recall") || lower.Contains("remember"))
+            return 0.62;
+        return 0.70;
     }
 
     private static CompletionReason ResolveCompletionReason(
