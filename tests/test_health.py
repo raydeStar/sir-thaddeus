@@ -3,8 +3,12 @@ import requests
 import subprocess
 import os
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.dirname(script_dir)
+voice_backend_dir = os.path.join(repo_root, 'apps', 'voice-backend')
+
 print('Starting backend...')
-proc = subprocess.Popen(['uv', 'run', 'server.py', '--port', '17845'], cwd='apps/voice-backend')
+proc = subprocess.Popen(['uv', 'run', 'server.py', '--port', '17845'], cwd=voice_backend_dir)
 time.sleep(2)
 
 print('Polling /health for 10 seconds...')

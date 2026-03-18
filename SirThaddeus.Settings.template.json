@@ -12,9 +12,6 @@
   "audio": {
     "ttsEnabled": true
   },
-  "workflowFeatures": {
-    "retryGateTestOverrideReason": ""
-  },
   "memory": {
     "enabled": true,
     "dbPath": "auto"

@@ -73,32 +73,6 @@ public sealed class WorkflowRetryGateEvaluatorTests
         Assert.Equal("confidence_not_retry", decision.ReasonCode);
     }
 
-    [Fact]
-    public void Evaluate_UsesOverrideReason_WhenConfigured()
-    {
-        var evaluator = new RetryGateEvaluator();
-        var state = new TaskRunState
-        {
-            Envelope = new TaskEnvelope
-            {
-                UserRequest = "Find details",
-                Complexity = TaskComplexity.MultiStepResearch,
-                MaxRetries = 2,
-                MaxToolCalls = 8,
-                TimeBudget = TimeSpan.FromSeconds(30),
-                RetryGateOverrideReason = "tool_budget_exhausted"
-            },
-            RetriesUsed = 0,
-            ToolCallsUsed = 1
-        };
-
-        var confidence = new ConfidenceSnapshot { ShouldRetry = true };
-        var decision = evaluator.Evaluate(state, confidence, TimeSpan.FromSeconds(5));
-
-        Assert.False(decision.IsAllowed);
-        Assert.Equal("tool_budget_exhausted", decision.ReasonCode);
-    }
-
     private static TaskRunState CreateState(int maxRetries, int retriesUsed, int maxToolCalls, int toolCallsUsed, int timeBudgetSec)
     {
         return new TaskRunState

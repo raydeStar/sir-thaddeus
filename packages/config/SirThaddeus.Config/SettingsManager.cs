@@ -236,7 +236,6 @@ public static class SettingsManager
         var dialogue = settings.Dialogue is null ? defaults.Dialogue : settings.Dialogue;
         var runtimeSafety = settings.RuntimeSafety is null ? defaults.RuntimeSafety : settings.RuntimeSafety;
         var toolBudgets = settings.ToolBudgets is null ? defaults.ToolBudgets : settings.ToolBudgets;
-        var workflowFeatures = settings.WorkflowFeatures is null ? defaults.WorkflowFeatures : settings.WorkflowFeatures;
         var userProfile = settings.UserProfile is null ? defaults.UserProfile : settings.UserProfile;
 
         var normalizedBudgets = toolBudgets.Normalize();
@@ -402,8 +401,7 @@ public static class SettingsManager
                     ? "1.0"
                     : runtimeSafety.RequiredServerContractVersion.Trim()
             },
-            ToolBudgets = normalizedBudgets,
-            WorkflowFeatures = workflowFeatures
+            ToolBudgets = normalizedBudgets
         };
     }
 

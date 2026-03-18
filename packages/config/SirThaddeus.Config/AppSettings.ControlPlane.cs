@@ -19,9 +19,6 @@ public sealed partial record AppSettings
 
     [JsonPropertyName("toolBudgets")]
     public ToolBudgetSettings ToolBudgets { get; init; } = new();
-
-    [JsonPropertyName("workflowFeatures")]
-    public WorkflowFeatureSettings WorkflowFeatures { get; init; } = new();
 }
 
 /// <summary>
@@ -80,12 +77,3 @@ public sealed record ToolBudgetSettings
     };
 }
 
-/// <summary>
-/// Workflow settings kept for the retry-gate test-override hook.
-/// All workflow features are always enabled.
-/// </summary>
-public sealed record WorkflowFeatureSettings
-{
-    [JsonPropertyName("retryGateTestOverrideReason")]
-    public string RetryGateTestOverrideReason { get; init; } = "";
-}
