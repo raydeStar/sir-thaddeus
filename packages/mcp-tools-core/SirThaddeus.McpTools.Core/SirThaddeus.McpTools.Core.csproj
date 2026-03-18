@@ -28,7 +28,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\*.cs"
-             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs"
+             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs;..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ClipboardTools.cs"
              Link="Tools\%(Filename)%(Extension)" />
   </ItemGroup>
 

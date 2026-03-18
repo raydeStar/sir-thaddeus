@@ -369,6 +369,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "document_read",
+            Aliases     = ["DocumentRead"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Reads and extracts text from local document formats (PDF, DOCX, XLSX, CSV, RTF, Markdown, plain text).",
+            Limits      = "Default max 4000 chars in output; supports maxChars override."
+        },
+        new()
+        {
             Name        = "file_list",
             Aliases     = ["FileList"],
             Category    = "file",
@@ -431,6 +441,26 @@ public static class ToolManifest
         },
 
         // ── Screen Tools ─────────────────────────────────────────────
+        new()
+        {
+            Name        = "clipboard_read",
+            Aliases     = ["ClipboardRead"],
+            Category    = "system",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Reads text content from the Windows clipboard.",
+            Limits      = "Requires clipboard to contain text."
+        },
+        new()
+        {
+            Name        = "clipboard_write",
+            Aliases     = ["ClipboardWrite"],
+            Category    = "system",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Writes text to the Windows clipboard.",
+            Limits      = "Text-only write operation."
+        },
         new()
         {
             Name        = "screen_capture",

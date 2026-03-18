@@ -29,6 +29,12 @@ public static class ToolNames
     public const string FeedFetchAlt        = "FeedFetch";
     public const string StatusCheck         = "status_check_url";
     public const string StatusCheckAlt      = "StatusCheckUrl";
+    public const string DocumentRead        = "document_read";
+    public const string DocumentReadAlt     = "DocumentRead";
+    public const string ClipboardRead       = "clipboard_read";
+    public const string ClipboardReadAlt    = "ClipboardRead";
+    public const string ClipboardWrite      = "clipboard_write";
+    public const string ClipboardWriteAlt   = "ClipboardWrite";
     public const string MemoryRetrieve      = "memory_retrieve";
     public const string MemoryRetrieveAlt   = "MemoryRetrieve";
     public const string MemoryListFacts     = "memory_list_facts";

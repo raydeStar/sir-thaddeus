@@ -47,6 +47,7 @@ public static class ToolGroupPolicy
 
         // Files
         ["file_read"]            = "files",
+        ["document_read"]        = "files",
         ["file_list"]            = "files",
         ["file_read_preview"]    = "files",
         ["file_read_apply"]      = "files",
@@ -57,6 +58,8 @@ public static class ToolGroupPolicy
         ["system_execute"]       = "system",
         ["system_execute_preview"] = "system",
         ["system_execute_apply"] = "system",
+        ["clipboard_read"]       = "files",
+        ["clipboard_write"]      = "system",
 
         // Web
         ["web_search"]           = "web",
