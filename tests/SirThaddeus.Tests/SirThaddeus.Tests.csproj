@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
     <ProjectReference Include="..\..\packages\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+    <ProjectReference Include="..\..\packages\mcp-tools-core\SirThaddeus.McpTools.Core\SirThaddeus.McpTools.Core.csproj" />
     <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
     <ProjectReference Include="..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
     <ProjectReference Include="..\..\packages\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
