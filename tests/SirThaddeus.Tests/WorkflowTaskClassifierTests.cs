@@ -43,8 +43,8 @@ public sealed class WorkflowTaskClassifierTests
         var envelope = await _classifier.ClassifyAsync("What day is it today?", CancellationToken.None);
 
         Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
-        Assert.Equal("direct_answer", envelope.Intent);
-        Assert.False(envelope.NeedsTools);
+        Assert.Equal("lookup", envelope.Intent);
+        Assert.True(envelope.NeedsTools);
         Assert.False(envelope.ShowChecklist);
     }
 

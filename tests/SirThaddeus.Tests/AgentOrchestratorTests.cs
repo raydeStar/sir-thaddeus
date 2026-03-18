@@ -141,8 +141,9 @@ public class IntentClassificationTests
     public async Task ClassificationFailure_FallsBackToCasual()
     {
         using var t = TestTimer.Start(_output, "ClassificationFailure");
-        // LLM throws on EVERY call — classification fails, falls back to casual.
-        // The casual path also fails, but the error is caught at the top level.
+        // Use a non-deterministic casual prompt so the first LLM call is the
+        // classifier. If classification fails, the router should still fall
+        // back to the casual response path on the second call.
         var callCount = 0;
         var llm = new FakeLlmClient(_ =>
         {
@@ -157,7 +158,7 @@ public class IntentClassificationTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
 
-        var result = await agent.ProcessAsync("hey there!");
+        var result = await agent.ProcessAsync("tell me a joke");
 
         // Should succeed — classification failure falls back to casual
         Assert.True(result.Success);
