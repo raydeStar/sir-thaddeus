@@ -167,7 +167,7 @@ public class IntentClassificationTests
             memoryContextProvider: new StubMemoryContextProvider(),
             guardrailsCoordinator: new StubGuardrailsCoordinator());
 
-        var result = await agent.ProcessAsync("hey there!");
+        var result = await agent.ProcessAsync("tell me a joke");
 
         // Should succeed — classification failure falls back to casual
         Assert.True(result.Success);
