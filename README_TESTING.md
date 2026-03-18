@@ -16,7 +16,8 @@ folder, and runs `dotnet restore` against the solution.
 ```
 
 Builds in Debug, runs all tests, and writes a TRX report to
-`./artifacts/test-results/`.
+`./artifacts/test-results/`. On unfiltered runs it also executes the
+`screen-observe` harness suite.
 
 ## Run a focused subset
 
@@ -26,6 +27,8 @@ Builds in Debug, runs all tests, and writes a TRX report to
 
 Any valid `dotnet test --filter` expression works here.
 
+Filtered runs skip the screen-observe harness so the fast loop stays fast.
+
 ## Run all tests (slower, Release build)
 
 ```powershell
@@ -33,6 +36,7 @@ Any valid `dotnet test --filter` expression works here.
 ```
 
 Restores packages, builds in Release, then runs the full suite.
+This includes the `screen-observe` harness suite.
 
 ## Production preflight (before release)
 
@@ -90,6 +94,62 @@ Recommended policy:
 - Keep `--max-iters 1` for PR runs.
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
 - Use `--all` before merges when you want one full headless pass.
+
+## Screen awareness validation
+
+Fast automated gate:
+
+```powershell
+./dev/test.ps1
+```
+
+This now covers:
+
+- the standard .NET test suite
+- the Windows-only `SirThaddeus.Windows.Tests` helper tests
+- the `screen-observe` harness suite
+
+Target just the screen-observe harness:
+
+```powershell
+./dev/harness.ps1 --suites-root ./artifacts/harness-suites --suite screen-observe --max-iters 1 --judge none
+```
+
+Target the browser-aware screen suite:
+
+```powershell
+./dev/harness.ps1 --suites-root ./artifacts/harness-suites --suite screen-observe-browser --max-iters 1 --judge none
+```
+
+This suite is intended for targeted local validation when you want to verify
+browser URL reading and page-summary behavior without making the default CI gate
+depend on a browser being open.
+
+Best manual desktop test on Windows:
+
+1. Open a real native app such as File Explorer, Notepad, or Settings.
+2. Ask: `What can you see on my screen right now?`
+3. Confirm the reply mentions the active window and visible UI text rather than OCR-like word soup.
+4. Open a browser on a public page and repeat the same prompt.
+5. Confirm the reply includes structured on-screen context and, for browsers, fetched page content when the address bar is readable.
+6. Try an unsupported or visually noisy surface, then confirm the reply clearly labels the OCR fallback.
+
+Best browser-specific manual test:
+
+1. Open Edge or Chrome to a public page with obvious content, such as a Wikipedia article.
+2. Keep the browser as the foreground window with the address bar visible.
+3. Ask: `What can you see on my screen right now?`
+4. Ask: `If I'm looking at a browser page right now, summarize that page.`
+5. Confirm the response identifies the site or page title and summarizes page content rather than just listing OCR text.
+6. Repeat once on a localhost page or authenticated app to see the graceful behavior when HTTP fetch cannot provide useful content.
+
+Recommended manual matrix:
+
+- Edge or Chrome on a normal public page
+- File Explorer in a folder with recognizable filenames
+- Notepad with a few lines of text
+- Windows Settings
+- An app with weak accessibility support to confirm graceful OCR fallback
 
 ## Optional pre-push hook
 

@@ -21,7 +21,9 @@ param(
     # dotnet test --filter value. Examples:
     #   "FullyQualifiedName~MyNamespace"
     #   "Category=Unit"
-    [string]$Filter = ''
+    [string]$Filter = '',
+
+    [switch]$SkipScreenObserveHarness
 )
 
 Set-StrictMode -Version Latest
@@ -54,6 +56,7 @@ Set-Location $RepoRoot
 $SlnFile       = Join-Path $RepoRoot "SirThaddeus.sln"
 $Artifacts     = Join-Path $RepoRoot "artifacts"
 $TestArtifacts = Join-Path $Artifacts "test-results"
+$HarnessSuitesRoot = Join-Path $Artifacts "harness-suites"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
@@ -66,6 +69,7 @@ if ($isCi -and -not $Restore) {
     Write-Host "  CI override   : enabled (restore forced)"
 }
 if ($Filter) { Write-Host "  Filter        : $Filter" }
+Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } else { 'enabled' })"
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
 # ── Policy Guard: no device geolocation APIs ─────────────────
@@ -119,18 +123,45 @@ if ($Filter) {
 & dotnet @testArgs
 $testExit = $LASTEXITCODE
 
+$harnessExit = 0
+if (-not $Filter -and -not $SkipScreenObserveHarness) {
+    Write-Section "Screen Observe Harness"
+
+    $harnessArgs = @(
+        '--suites-root', $HarnessSuitesRoot,
+        '--suite', 'screen-observe',
+        '--max-iters', '1',
+        '--judge', 'none'
+    )
+
+    & "$PSScriptRoot\harness.ps1" @harnessArgs
+    $harnessExit = $LASTEXITCODE
+
+    if ($harnessExit -ne 0) {
+        Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+    }
+}
+
 # ── Summary ───────────────────────────────────────────────────
 Write-Section "Summary"
 
-if ($testExit -eq 0) {
+if ($testExit -eq 0 -and $harnessExit -eq 0) {
     Write-Host "  OK  All tests passed." -ForegroundColor Green
     Write-Host "  TRX : $TestArtifacts\$trxName"
     exit 0
 }
 
-Write-Host "  FAIL  Tests failed." -ForegroundColor Red
+if ($testExit -ne 0) {
+    Write-Host "  FAIL  Tests failed." -ForegroundColor Red
+}
+else {
+    Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+}
 Write-Host "  TRX : $TestArtifacts\$trxName"
 Write-Host ""
 Write-Host "  Tip: run with -Filter to focus, e.g."
 Write-Host "    .\dev\test.ps1 -Filter 'FullyQualifiedName~MyProject.Tests.MyClassTests'"
-exit $testExit
+if (-not $SkipScreenObserveHarness -and -not $Filter) {
+    Write-Host "  Screen harness: .\dev\harness.ps1 --suites-root .\artifacts\harness-suites --suite screen-observe --max-iters 1 --judge none"
+}
+exit $(if ($testExit -ne 0) { $testExit } else { $harnessExit })

@@ -55,6 +55,15 @@ jobs:
             **/TestResults/**/*.trx
           if-no-files-found: ignore
 
+      - name: Upload harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: harness-artifacts
+          path: |
+            artifacts/harness/**
+          if-no-files-found: ignore
+
   package-windows:
     name: Package Windows Build Artifact
     needs: test

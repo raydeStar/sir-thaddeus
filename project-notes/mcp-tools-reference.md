@@ -469,37 +469,44 @@ This gives a deterministic dry-run contract without opening raw shell power.
 
 **Tool name(s):** `ScreenCapture`, `screen_capture`
 
-**What it does:** Takes a picture of your screen, then reads all the text it can see using built-in Windows OCR (text recognition). The assistant gets the extracted text — not the image itself.
+**What it does:** Reads the active screen using a layered strategy. It first tries the accessibility tree (UI Automation) for structured UI data, then attempts browser page extraction when a URL can be read from the address bar, and only falls back to OCR screenshot when structured data is unavailable. The assistant gets extracted text — not raw images.
 
 **When it's used:** When you say things like:
 - "Look at my screen"
 - "What do you see?"
 - "Can you read what's on my monitor?"
+- "Summarize this page"
 
 **Two capture modes:**
-- **`full_screen`** (default) — captures your entire monitor. This is what's used almost always.
-- **`active_window`** — captures only the currently focused window. Only used if you specifically say "this window" or "the active window."
+- **`active_window`** (default) — reads the currently focused window. This is what's used almost always.
+- **`full_screen`** — captures the entire monitor. Only used if you specifically ask about "the whole screen" or "my monitor."
 
 **What it returns:** A text report with:
 - What window is currently active (title + app name)
-- Your screen resolution
-- All readable text extracted from the screenshot via OCR
+- Screen resolution
+- Structured UI text from the accessibility tree (preferred), or OCR text as fallback
+- For browsers: fetched page content when the address bar URL is readable
 
-**Limits:** OCR text is capped at 8,000 characters. Single snapshot — no video or continuous capture.
+**Limits:** Accessibility tree text capped at 6,000 characters. OCR fallback capped at 8,000 characters. Page content capped at 6,000 characters. Single snapshot — no video or continuous capture.
 
-**Safety:** Observation-only — it looks at the screen but can't click, type, or change anything. Requires permission.
+**Safety:** Observation-only — it reads the screen but can't click, type, or change anything. Requires permission.
 
-**Audit retention:** Capture mode is logged. OCR text is never stored — only char count + SHA-256 hash.
+**Audit retention:** Capture mode is logged. Extracted text is never stored — only char count + SHA-256 hash.
 
 **Quick flow:**
 
 ```mermaid
 flowchart TD
-  Agent["Agent"] -->|"calls screen_capture (target=full_screen or active_window)"| ScreenTool["ScreenCapture (MCP)"]
-  ScreenTool --> Capture["Capture pixels"]
-  Capture --> Ocr["Windows OCR"]
-  Ocr -->|"text (max 8000 chars)"| ScreenTool
-  ScreenTool -->|"report text"| Agent
+  Agent["Agent"] -->|"calls screen_capture"| ScreenTool["ScreenCapture (MCP)"]
+  ScreenTool --> UIA["UI Automation tree"]
+  UIA -->|structured text| HasContent{"Has content?"}
+  HasContent -->|yes| Browser{"Browser?"}
+  Browser -->|"yes + URL"| Fetch["HTTP page fetch"]
+  Browser -->|no| Done["Return report"]
+  HasContent -->|no| OCR["OCR fallback"]
+  Fetch --> Done
+  OCR --> Done
+  Done -->|"report text"| Agent
 ```
 
 ---

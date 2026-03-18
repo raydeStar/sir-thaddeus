@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
+using System.Threading;
 using ModelContextProtocol.Server;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -16,9 +16,12 @@ namespace SirThaddeus.McpServer.Tools;
 // ─────────────────────────────────────────────────────────────────────────
 // Screen Observation Tools
 //
-// Captures the display and extracts visible text via Windows 10 OCR.
-// When the active window is a web browser, also fetches the actual page
-// content via HTTP for much richer text than OCR alone can provide.
+// Reads the active screen using a layered strategy:
+//   1. Accessibility tree (UI Automation)
+//   2. Active window context (title/process metadata)
+//   3. Browser URL from UI Automation address bar
+//   4. HTTP page extraction for browser windows
+//   5. OCR fallback for unsupported windows
 // These are observation-only tools — they read the screen but never
 // modify it. All results are text; no raw image data crosses the wire.
 //
@@ -41,34 +44,28 @@ public static class ScreenTools
         "chromium", "iexplore", "ApplicationFrameHost" // Edge PWA / UWP
     };
 
-    private static readonly Regex UrlPattern = new(
-        @"https?://[^\s""<>\]\)]{8,}",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
     // ═══════════════════════════════════════════════════════════════════
     // MCP Tool: ScreenCapture
     // ═══════════════════════════════════════════════════════════════════
 
     [McpServerTool, Description(
-        "Captures the user's screen and extracts visible text via OCR. " +
-        "If the active window is a web browser, also fetches the actual " +
-        "page content via HTTP for a much richer summary. Returns active " +
-        "window info, screen resolution, OCR text, and (for browsers) " +
-        "the full page content. Use this when the user asks about what " +
-        "is on their screen, asks to summarize a page, or wants you to " +
-        "read what they are looking at.")]
+        "Captures the user's current screen context with a layered reader. " +
+        "It first tries the active window accessibility tree, then browser " +
+        "page extraction when a browser URL can be read from the address " +
+        "bar, and only falls back to OCR when structured UI data is not " +
+        "available. Use this when the user asks what is on their screen, " +
+        "asks to summarize a page, or wants you to read what they are " +
+        "looking at.")]
     public static async Task<string> ScreenCapture(
         [Description(
-            "'full_screen' (default — captures the entire monitor, use this " +
-            "almost always) or 'active_window' (only when user explicitly " +
-            "asks about 'this window' or 'the active window')"
-        )] string target = "full_screen",
+            "'active_window' (default) or 'full_screen'. Use 'full_screen' " +
+            "only when the user explicitly asks about the whole monitor."
+        )] string target = "active_window",
         CancellationToken cancellationToken = default)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("=== Screen Capture Report ===");
+        sb.AppendLine("=== Screen Report ===");
 
-        // ── Phase 1: Window & display info (lightweight, rarely fails) ──
         WindowInfo? windowInfo = null;
         int screenW = 0, screenH = 0;
         try
@@ -76,89 +73,70 @@ public static class ScreenTools
             SetProcessDpiAwareness();
             windowInfo = GetActiveWindowInfo();
             (screenW, screenH) = GetPrimaryScreenSize();
-
-            sb.AppendLine($"Active Window: \"{windowInfo.Title}\"");
-            sb.AppendLine($"Process: {windowInfo.ProcessName} (PID {windowInfo.ProcessId})");
-            sb.AppendLine($"Screen: {screenW}x{screenH}");
-
-            var isBrowser = IsBrowserProcess(windowInfo.ProcessName);
-            sb.AppendLine($"Browser Detected: {(isBrowser ? "yes" : "no")}");
         }
-        catch (Exception ex)
+        catch
         {
-            sb.AppendLine($"[Window info error: {ex.GetType().Name}: {ex.Message}]");
         }
 
-        // ── Phase 2: Screen capture (needs desktop access) ──────────────
-        Bitmap? bitmap = null;
+        AppendWindowContext(sb, windowInfo, screenW, screenH);
+
+        UiaReadResult? uiaResult = null;
         try
         {
-            Rectangle captureRect;
-            if (target.Equals("active_window", StringComparison.OrdinalIgnoreCase) &&
-                windowInfo?.Bounds is { Width: > 0, Height: > 0 } bounds)
-            {
-                captureRect = bounds;
-            }
-            else
-            {
-                captureRect = new Rectangle(0, 0,
-                    screenW > 0 ? screenW : 1920,
-                    screenH > 0 ? screenH : 1080);
-            }
-
-            bitmap = CaptureRegion(captureRect);
-            sb.AppendLine($"Captured: {captureRect.Width}x{captureRect.Height} ({target})");
+            uiaResult = await UiaScreenReader.ReadForegroundWindowAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            sb.AppendLine($"[Capture error: {ex.GetType().Name}: {ex.Message}]");
+            throw;
+        }
+        catch
+        {
+            uiaResult = UiaReadResult.Empty("Accessibility tree unavailable");
         }
 
-        // ── Phase 3: OCR (requires WinRT, may fail on threading) ────────
-        string? ocrText = null;
+        var browserProcessName = uiaResult?.ProcessName ?? windowInfo?.ProcessName;
+        var isBrowser = IsBrowserProcess(browserProcessName);
+
+        if (uiaResult is { IsEmpty: false })
+        {
+            sb.AppendLine();
+            sb.AppendLine("Source: Accessibility Tree");
+            sb.AppendLine();
+            sb.AppendLine(uiaResult.Text);
+
+            if (isBrowser && !string.IsNullOrWhiteSpace(uiaResult.BrowserUrl))
+            {
+                await TryFetchBrowserPageAsync(sb, uiaResult.BrowserUrl!, cancellationToken, "Accessibility Tree URL");
+            }
+            else if (isBrowser)
+            {
+                sb.AppendLine();
+                sb.AppendLine("=== Browser Page Content ===");
+                sb.AppendLine("(Browser detected, but the address bar could not be read from the accessibility tree.)");
+            }
+
+            return sb.ToString();
+        }
+
+        var browserFetchSucceeded = false;
+        if (isBrowser && !string.IsNullOrWhiteSpace(uiaResult?.BrowserUrl))
+        {
+            browserFetchSucceeded = await TryFetchBrowserPageAsync(
+                sb,
+                uiaResult.BrowserUrl!,
+                cancellationToken,
+                "Accessibility Tree URL");
+
+            if (browserFetchSucceeded)
+                return sb.ToString();
+        }
+
         sb.AppendLine();
-        if (bitmap != null)
-        {
-            try
-            {
-                ocrText = await RunOcrAsync(bitmap);
+        sb.AppendLine("Source: Active Window Context");
+        if (!string.IsNullOrWhiteSpace(uiaResult?.FailureReason))
+            sb.AppendLine($"Accessibility: {uiaResult.FailureReason}");
 
-                if (string.IsNullOrWhiteSpace(ocrText))
-                {
-                    sb.AppendLine("=== Extracted Text (OCR) ===");
-                    sb.AppendLine("(No readable text detected on screen)");
-                }
-                else
-                {
-                    var trimmed = ocrText.Length > MaxOcrChars
-                        ? ocrText[..MaxOcrChars] + "\n[...truncated]"
-                        : ocrText;
-
-                    sb.AppendLine("=== Extracted Text (OCR) ===");
-                    sb.AppendLine(trimmed);
-                }
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine($"[OCR error: {ex.GetType().Name}: {ex.Message}]");
-                sb.AppendLine("Screen was captured but text extraction failed.");
-            }
-            finally
-            {
-                bitmap.Dispose();
-            }
-        }
-        else
-        {
-            sb.AppendLine("[No bitmap available for OCR]");
-        }
-
-        // ── Phase 4: Browser page fetch (if active window is a browser) ─
-        if (windowInfo is not null && IsBrowserProcess(windowInfo.ProcessName))
-        {
-            await TryFetchBrowserPageAsync(sb, windowInfo, ocrText, cancellationToken);
-        }
-
+        await AppendOcrFallbackAsync(sb, target, windowInfo, screenW, screenH).ConfigureAwait(false);
         return sb.ToString();
     }
 
@@ -195,29 +173,93 @@ public static class ScreenTools
         return BrowserProcessNames.Contains(processName);
     }
 
-    /// <summary>
-    /// When the active window is a browser, try to extract a URL from the
-    /// OCR text (the address bar is visible on screen) and fetch the
-    /// actual page content for a much richer result.
-    /// </summary>
-    private static async Task TryFetchBrowserPageAsync(
-        StringBuilder sb,
-        WindowInfo windowInfo,
-        string? ocrText,
-        CancellationToken cancellationToken)
+    private static void AppendWindowContext(StringBuilder sb, WindowInfo? windowInfo, int screenW, int screenH)
     {
-        sb.AppendLine();
-
-        // Try to extract a URL from the OCR text (address bar is captured)
-        var url = TryExtractBrowserUrl(ocrText, windowInfo.Title);
-        if (url is null)
+        if (windowInfo is not null)
         {
-            sb.AppendLine("=== Browser Page Content ===");
-            sb.AppendLine("(Could not determine the page URL from screen content. " +
-                          "The OCR text above is the best available information.)");
-            return;
+            sb.AppendLine($"Window: \"{windowInfo.Title}\"");
+            sb.AppendLine($"Process: {windowInfo.ProcessName} (PID {windowInfo.ProcessId})");
+        }
+        else
+        {
+            sb.AppendLine("Window: (unavailable)");
+            sb.AppendLine("Process: (unavailable)");
         }
 
+        if (screenW > 0 && screenH > 0)
+            sb.AppendLine($"Screen: {screenW}x{screenH}");
+    }
+
+    private static async Task AppendOcrFallbackAsync(
+        StringBuilder sb,
+        string target,
+        WindowInfo? windowInfo,
+        int screenW,
+        int screenH)
+    {
+        Bitmap? bitmap = null;
+        try
+        {
+            var captureRect = ResolveCaptureRect(target, windowInfo?.Bounds, screenW, screenH);
+            bitmap = CaptureRegion(captureRect);
+
+            sb.AppendLine();
+            sb.AppendLine("Source: OCR Fallback");
+            sb.AppendLine($"Captured Region: {captureRect.Width}x{captureRect.Height} ({target})");
+            sb.AppendLine();
+            sb.AppendLine("=== OCR Text ===");
+
+            var ocrText = await RunOcrAsync(bitmap).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(ocrText))
+            {
+                sb.AppendLine("No readable text detected.");
+                return;
+            }
+
+            var trimmed = ocrText.Length > MaxOcrChars
+                ? ocrText[..MaxOcrChars] + "\n[...truncated]"
+                : ocrText;
+
+            sb.AppendLine(trimmed);
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Source: OCR Fallback");
+            sb.AppendLine($"(Screen text extraction failed: {ex.GetType().Name}: {ex.Message})");
+        }
+        finally
+        {
+            bitmap?.Dispose();
+        }
+    }
+
+    internal static Rectangle ResolveCaptureRect(string target, Rectangle? windowBounds, int screenW, int screenH)
+    {
+        if (target.Equals("full_screen", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Rectangle(0, 0,
+                screenW > 0 ? screenW : 1920,
+                screenH > 0 ? screenH : 1080);
+        }
+
+        if (windowBounds is { Width: > 0, Height: > 0 } bounds)
+            return bounds;
+
+        return new Rectangle(0, 0,
+            screenW > 0 ? screenW : 1920,
+            screenH > 0 ? screenH : 1080);
+    }
+
+    private static async Task<bool> TryFetchBrowserPageAsync(
+        StringBuilder sb,
+        string url,
+        CancellationToken cancellationToken,
+        string sourceLabel)
+    {
+        sb.AppendLine();
+        sb.AppendLine("=== Browser Page Content ===");
+        sb.AppendLine($"URL Source: {sourceLabel}");
         sb.AppendLine($"Detected URL: {url}");
 
         try
@@ -226,9 +268,8 @@ public static class ScreenTools
 
             if (result.Error is not null)
             {
-                sb.AppendLine($"=== Browser Page Content ===");
-                sb.AppendLine($"(Page fetch failed: {result.Error}. Using OCR text above.)");
-                return;
+                sb.AppendLine($"(Page fetch failed: {result.Error}.)");
+                return false;
             }
 
             sb.AppendLine();
@@ -254,89 +295,15 @@ public static class ScreenTools
 
             sb.AppendLine();
             sb.AppendLine("NOTE: The content above was fetched directly from the web page " +
-                          "and is much more accurate than the OCR text. Prefer this content " +
+                          "and is much more accurate than OCR text. Prefer this content " +
                           "for summarization and answering questions about the page.");
+            return true;
         }
         catch (Exception ex)
         {
-            sb.AppendLine($"=== Browser Page Content ===");
-            sb.AppendLine($"(Page fetch error: {ex.GetType().Name}: {ex.Message}. " +
-                          "Using OCR text above.)");
+            sb.AppendLine($"(Page fetch error: {ex.GetType().Name}: {ex.Message}.)");
+            return false;
         }
-    }
-
-    /// <summary>
-    /// Extracts a URL from OCR text or the window title.
-    /// The browser address bar is typically captured by OCR as a line
-    /// containing https:// near the top of the text.
-    /// </summary>
-    private static string? TryExtractBrowserUrl(string? ocrText, string? windowTitle)
-    {
-        // First: look for URLs in the OCR text
-        if (!string.IsNullOrWhiteSpace(ocrText))
-        {
-            // Search the first ~1500 chars (address bar is near the top)
-            var searchRegion = ocrText.Length > 1500 ? ocrText[..1500] : ocrText;
-            var match = UrlPattern.Match(searchRegion);
-            if (match.Success)
-            {
-                var candidate = CleanOcrUrl(match.Value);
-                if (IsPlausiblePageUrl(candidate))
-                    return candidate;
-            }
-
-            // Fallback: search full OCR text
-            match = UrlPattern.Match(ocrText);
-            if (match.Success)
-            {
-                var candidate = CleanOcrUrl(match.Value);
-                if (IsPlausiblePageUrl(candidate))
-                    return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Cleans up OCR artifacts from a captured URL.
-    /// </summary>
-    private static string CleanOcrUrl(string raw)
-    {
-        // Trim trailing punctuation that OCR might attach
-        var cleaned = raw.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '\u2026');
-
-        // OCR sometimes captures trailing UI text
-        var spaceIdx = cleaned.IndexOf(' ');
-        if (spaceIdx > 0)
-            cleaned = cleaned[..spaceIdx];
-
-        return cleaned;
-    }
-
-    /// <summary>
-    /// Checks if a URL looks like a real page URL (not an internal/resource URL).
-    /// </summary>
-    private static bool IsPlausiblePageUrl(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-
-        // Skip localhost, internal, and resource URLs
-        if (uri.Host is "localhost" or "127.0.0.1" or "0.0.0.0")
-            return false;
-
-        // Must have a real domain
-        if (!uri.Host.Contains('.'))
-            return false;
-
-        // Skip obvious non-page resources
-        var path = uri.AbsolutePath.ToLowerInvariant();
-        if (path.EndsWith(".png") || path.EndsWith(".jpg") || path.EndsWith(".gif") ||
-            path.EndsWith(".css") || path.EndsWith(".js") || path.EndsWith(".ico"))
-            return false;
-
-        return true;
     }
 
     // ─────────────────────────────────────────────────────────────────

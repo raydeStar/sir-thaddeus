@@ -65,6 +65,15 @@ jobs:
             **/TestResults/**/*.trx
           if-no-files-found: ignore
 
+      - name: Upload harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: preflight-harness-artifacts
+          path: |
+            artifacts/harness/**
+          if-no-files-found: ignore
+
   package:
     name: Package Windows (win-x64)
     needs: preflight
