@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
     <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+    <ProjectReference Include="..\..\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
   </ItemGroup>
 
   <ItemGroup>

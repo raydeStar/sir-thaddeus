@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SirThaddeus.DocumentReader;
 
 namespace SirThaddeus.McpServer.Tools;
 
@@ -20,6 +21,7 @@ public static class FileTools
     {
         WriteIndented = false
     };
+    private static readonly DocumentReaderFactory DocumentReaderFactory = new();
 
     [McpServerTool, Description("Read the contents of a file at the specified path.")]
     public static async Task<string> FileRead(
@@ -46,6 +48,50 @@ public static class FileTools
         catch (Exception ex)
         {
             return $"Error reading file: {ex.Message}";
+        }
+    }
+
+    [McpServerTool, Description("Read and extract text from local document formats: PDF, DOCX, XLSX, CSV, RTF, Markdown, and plain text.")]
+    public static async Task<string> DocumentRead(
+        [Description("Absolute or relative path to the local document")] string path,
+        [Description("Maximum number of characters to return (default 4000)")] int maxChars = 4000,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return "Error: path is required.";
+
+        if (maxChars <= 0)
+            return "Error: maxChars must be greater than 0.";
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+
+            if (!File.Exists(fullPath))
+                return $"Error: File not found at '{fullPath}'.";
+
+            var info = new FileInfo(fullPath);
+            if (info.Length > 10_485_760) // 10 MB safety limit
+                return $"Error: File is too large ({info.Length:N0} bytes). Max is 10 MB.";
+
+            var content = await DocumentReaderFactory.ReadAsync(fullPath, cancellationToken);
+            var truncated = DocumentTruncator.TruncateWithNotice(content.TextContent, maxChars);
+
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                format = content.Format.ToString(),
+                title = content.Title,
+                author = content.Author,
+                pageCount = content.PageCount,
+                metadata = content.Metadata,
+                textContent = truncated,
+                totalChars = content.TextContent.Length
+            }, JsonOpts);
+        }
+        catch (Exception ex)
+        {
+            return $"Error reading document: {ex.Message}";
         }
     }
 
