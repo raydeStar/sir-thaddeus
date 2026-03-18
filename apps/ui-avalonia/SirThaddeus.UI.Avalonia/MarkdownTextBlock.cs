@@ -8,25 +8,53 @@ using Avalonia.Media;
 namespace SirThaddeus.UI.Avalonia;
 
 /// <summary>
-/// A lightweight <see cref="SelectableTextBlock"/> that renders a small
-/// subset of Markdown inline formatting (bold, italic) as rich inlines.
+/// A lightweight <see cref="SelectableTextBlock"/> that renders a small subset of
+/// Markdown inline formatting (<c>**bold**</c>, <c>*italic*</c>, <c>_italic_</c>)
+/// as rich <see cref="Inline"/> runs.
+/// <para>
+/// Used in the chat message list to give assistant replies basic text emphasis
+/// without pulling in a full Markdown rendering library.
+/// </para>
 /// </summary>
-public sealed class MarkdownTextBlock : SelectableTextBlock
+/// <remarks>
+/// <list type="bullet">
+///   <item>Bold (<c>**</c>) is matched before italic (<c>*</c>) to avoid ambiguity.</item>
+///   <item>Word-boundary guards prevent mid-word false positives for <c>*</c> and <c>_</c>.</item>
+///   <item>A 100 ms regex timeout protects against pathological back-tracking; on timeout
+///         the control falls back to unstyled plain text.</item>
+/// </list>
+/// </remarks>
+public sealed partial class MarkdownTextBlock : SelectableTextBlock
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
 
-    // Matches **bold**, *italic*, _italic_ — non-greedy, single-line only.
-    // Order matters: bold (**) must be tried before italic (*).
-    private static readonly Regex InlineMarkdownRegex = new(
-        @"\*\*(.+?)\*\*" +          // group 1: bold
-        @"|(?<!\w)\*([^*\r\n]+?)\*(?!\w)" +  // group 2: italic (asterisk)
-        @"|(?<!\w)_([^_\r\n]+?)_(?!\w)",      // group 3: italic (underscore)
-        RegexOptions.Compiled,
-        RegexTimeout);
+    // ── Source-generated regexes ────────────────────────────────────────
+    // Bold (**) must be tried before italic (*) in the combined pattern.
 
+    [GeneratedRegex(@"\*\*(.+?)\*\*|(?<!\w)\*([^*\r\n]+?)\*(?!\w)|(?<!\w)_([^_\r\n]+?)_(?!\w)",
+        RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex InlineMarkdownRegex();
+
+    [GeneratedRegex(@"\*\*(.+?)\*\*", RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex BoldStripRegex();
+
+    [GeneratedRegex(@"(?<!\w)\*([^*\r\n]+?)\*(?!\w)", RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex ItalicAsteriskStripRegex();
+
+    [GeneratedRegex(@"(?<!\w)_([^_\r\n]+?)_(?!\w)", RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex ItalicUnderscoreStripRegex();
+
+    // ── Styled property ────────────────────────────────────────────────
+
+    /// <summary>
+    /// The raw Markdown source text. When set, inlines are rebuilt automatically.
+    /// </summary>
     public static readonly StyledProperty<string> MarkdownProperty =
         AvaloniaProperty.Register<MarkdownTextBlock, string>(nameof(Markdown), defaultValue: "");
 
+    /// <summary>
+    /// Gets or sets the raw Markdown source text that drives the rendered inlines.
+    /// </summary>
     public string Markdown
     {
         get => GetValue(MarkdownProperty);
@@ -36,12 +64,20 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
     static MarkdownTextBlock()
     {
         MarkdownProperty.Changed.AddClassHandler<MarkdownTextBlock>(
-            (block, _) => block.RebuildInlines());
+            static (block, _) => block.RebuildInlines());
     }
 
+    // ── Inline rendering ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Parses <see cref="Markdown"/> and replaces the control's inline collection
+    /// with styled <see cref="Run"/> elements. Falls back to plain text on timeout.
+    /// </summary>
     private void RebuildInlines()
     {
         var text = Markdown;
+
+        // Keep Text in sync for clipboard / accessibility / screen-readers.
         Text = StripMarkdown(text);
 
         Inlines?.Clear();
@@ -53,35 +89,22 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
 
         try
         {
-            foreach (Match match in InlineMarkdownRegex.Matches(text))
+            foreach (Match match in InlineMarkdownRegex().Matches(text))
             {
-                // Plain text before this match.
                 if (match.Index > pos)
                     Inlines.Add(new Run(text[pos..match.Index]));
 
                 if (match.Groups[1].Success)
                 {
-                    // **bold**
-                    Inlines.Add(new Run(match.Groups[1].Value)
-                    {
-                        FontWeight = FontWeight.Bold
-                    });
+                    Inlines.Add(new Run(match.Groups[1].Value) { FontWeight = FontWeight.Bold });
                 }
                 else if (match.Groups[2].Success)
                 {
-                    // *italic*
-                    Inlines.Add(new Run(match.Groups[2].Value)
-                    {
-                        FontStyle = FontStyle.Italic
-                    });
+                    Inlines.Add(new Run(match.Groups[2].Value) { FontStyle = FontStyle.Italic });
                 }
                 else if (match.Groups[3].Success)
                 {
-                    // _italic_
-                    Inlines.Add(new Run(match.Groups[3].Value)
-                    {
-                        FontStyle = FontStyle.Italic
-                    });
+                    Inlines.Add(new Run(match.Groups[3].Value) { FontStyle = FontStyle.Italic });
                 }
 
                 pos = match.Index + match.Length;
@@ -89,29 +112,27 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
         }
         catch (RegexMatchTimeoutException)
         {
-            // Fall back to plain text on pathological input.
             Inlines.Clear();
             Inlines.Add(new Run(Text ?? string.Empty));
             return;
         }
 
-        // Remaining plain text after the last match.
         if (pos < text.Length)
             Inlines.Add(new Run(text[pos..]));
     }
 
+    /// <summary>
+    /// Returns a plain-text copy of <paramref name="text"/> with Markdown markers removed.
+    /// Used to populate <see cref="SelectableTextBlock.Text"/> for clipboard and accessibility.
+    /// </summary>
     private static string StripMarkdown(string? text)
     {
         if (string.IsNullOrEmpty(text))
             return string.Empty;
 
-        var plainText = MarkdownBoldRegex().Replace(text, "$1");
-        plainText = MarkdownItalicAsteriskRegex().Replace(plainText, "$1");
-        plainText = MarkdownItalicUnderscoreRegex().Replace(plainText, "$1");
-        return plainText;
+        var plain = BoldStripRegex().Replace(text, "$1");
+        plain = ItalicAsteriskStripRegex().Replace(plain, "$1");
+        plain = ItalicUnderscoreStripRegex().Replace(plain, "$1");
+        return plain;
     }
-
-    private static Regex MarkdownBoldRegex() => new(@"\*\*(.+?)\*\*", RegexOptions.Compiled, RegexTimeout);
-    private static Regex MarkdownItalicAsteriskRegex() => new(@"(?<!\w)\*([^*\r\n]+?)\*(?!\w)", RegexOptions.Compiled, RegexTimeout);
-    private static Regex MarkdownItalicUnderscoreRegex() => new(@"(?<!\w)_([^_\r\n]+?)_(?!\w)", RegexOptions.Compiled, RegexTimeout);
 }

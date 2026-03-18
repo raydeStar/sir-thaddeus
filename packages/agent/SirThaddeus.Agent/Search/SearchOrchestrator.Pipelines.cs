@@ -201,6 +201,7 @@ public sealed partial class SearchOrchestrator
             toolResult = await TryRecoverNoResultsWebFactFindAsync(
                 userMessage ?? string.Empty,
                 query.Query,
+                query.Recency,
                 toolResult,
                 toolCallsMade,
                 ct);
@@ -335,7 +336,11 @@ public sealed partial class SearchOrchestrator
 
         if (!toolResultHasRichContent && !isLocalBizDiscovery)
         {
-            var navigable = sources
+            // Resolve Google News RSS redirect URLs to actual article
+            // URLs before filtering. This recovers navigable sources
+            // that would otherwise be discarded as junk.
+            var resolved = ResolveSourceUrls(sources);
+            var navigable = resolved
                 .Where(s => !IsJunkUrl(s.Url))
                 .Take(MaxFollowUpUrls)
                 .ToList();
@@ -354,17 +359,17 @@ public sealed partial class SearchOrchestrator
                     if (!string.IsNullOrWhiteSpace(suppResult))
                     {
                         var suppSources = ParseSourcesFromToolResult(suppResult);
-                        navigable = suppSources
+                        navigable = ResolveSourceUrls(suppSources)
                             .Where(s => !IsJunkUrl(s.Url))
                             .Take(MaxFollowUpUrls)
                             .ToList();
 
-                        if (navigable.Count > 0)
-                        {
-                            var suppText = StripSourcesJson(suppResult);
-                            if (!string.IsNullOrWhiteSpace(suppText))
-                                toolResult += "\n" + suppText;
-                        }
+                        // Always enrich toolResult with supplementary
+                        // snippets — the LLM benefits from wider context
+                        // even when no navigable URLs are found.
+                        var suppText = StripSourcesJson(suppResult);
+                        if (!string.IsNullOrWhiteSpace(suppText))
+                            toolResult += "\n" + suppText;
                     }
                 }
             }
@@ -418,6 +423,7 @@ public sealed partial class SearchOrchestrator
     private async Task<string> TryRecoverNoResultsWebFactFindAsync(
         string userMessage,
         string primaryQuery,
+        string primaryRecency,
         string initialToolResult,
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
@@ -428,8 +434,50 @@ public sealed partial class SearchOrchestrator
             return initialToolResult;
         }
 
-        var retryCandidates = BuildNoResultsRetryCandidates(userMessage, primaryQuery);
+        // ── Phase 1: broaden recency with the same query ─────────────
+        // When the LLM chose a tight recency (day/week/month) and got
+        // zero results, widen the time window before rewriting the query.
         var lastResult = initialToolResult;
+        var broaderWindows = GetBroaderRecencyWindows(primaryRecency);
+
+        foreach (var broader in broaderWindows)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "NO_RESULTS_RECENCY_BROADEN",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = primaryQuery,
+                    ["original_recency"] = primaryRecency,
+                    ["broadened_recency"] = broader
+                }
+            });
+
+            lastResult = await CallWebSearchAsync(
+                primaryQuery, broader, toolCallsMade, ct,
+                originalUserMessage: userMessage);
+
+            if (HasUsableSearchResults(lastResult))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "NO_RESULTS_RECENCY_BROADEN",
+                    Result = "recovered",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["query"] = primaryQuery,
+                        ["broadened_recency"] = broader
+                    }
+                });
+                return lastResult;
+            }
+        }
+
+        // ── Phase 2: rewrite query text with "any" recency ───────────
+        var retryCandidates = BuildNoResultsRetryCandidates(userMessage, primaryQuery);
 
         foreach (var candidate in retryCandidates)
         {
@@ -454,9 +502,7 @@ public sealed partial class SearchOrchestrator
                 ct,
                 originalUserMessage: userMessage);
 
-            if (!LooksLikeNoResultsPayload(lastResult) &&
-                WebToolFailureMapper.TryBuildFailureResponse(lastResult, toolCallsMade) is null &&
-                ParseSourcesFromToolResult(lastResult).Count > 0)
+            if (HasUsableSearchResults(lastResult))
             {
                 _audit.Append(new AuditEvent
                 {
@@ -546,5 +592,22 @@ public sealed partial class SearchOrchestrator
 
         AddCandidate(relaxed);
         return candidates.Take(3).ToList();
+    }
+
+    /// <summary>
+    /// Returns progressively broader recency windows to try when the
+    /// initial search returned zero results. For example, if the LLM
+    /// chose "day", returns ["week", "any"]. Already-broad windows
+    /// return an empty list.
+    /// </summary>
+    private static IReadOnlyList<string> GetBroaderRecencyWindows(string currentRecency)
+    {
+        return (currentRecency ?? "any").ToLowerInvariant() switch
+        {
+            "day"   => ["week", "any"],
+            "week"  => ["month", "any"],
+            "month" => ["any"],
+            _       => []
+        };
     }
 }
