@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using SirThaddeus.Agent.Dialogue;
-
 namespace SirThaddeus.Agent.Workflow;
 
 /// <summary>
@@ -61,21 +59,4 @@ public sealed class TimeBudgetedAgentOrchestrator : IAgentOrchestrator
         return await _inner.ProcessAsync(userMessage, conversationId, cancellationToken);
     }
 
-    public void ResetConversation()
-        => _inner.ResetConversation();
-
-    public void SeedDialogueState(DialogueState state)
-        => _inner.SeedDialogueState(state);
-
-    public DialogueContextSnapshot GetContextSnapshot()
-        => _inner.GetContextSnapshot();
-
-    public bool ContextLocked
-    {
-        get => _inner.ContextLocked;
-        set => _inner.ContextLocked = value;
-    }
-
-    public Task<int> GetAvailableToolCountAsync(CancellationToken cancellationToken = default)
-        => _inner.GetAvailableToolCountAsync(cancellationToken);
 }

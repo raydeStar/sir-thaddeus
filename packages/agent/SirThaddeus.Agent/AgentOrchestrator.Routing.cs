@@ -19,6 +19,11 @@ namespace SirThaddeus.Agent;
 
 public sealed partial class AgentOrchestrator
 {
+    private sealed record RouteResolutionResult(
+        RouterOutput Route,
+        IntentFeatureExtractor.WebLookupHeuristicEvidence WebEvidence,
+        RoutingDecision? FootmanDecision);
+
     /// <summary>
     /// Maps a <see cref="RouterOutput"/> back to the legacy
     /// <see cref="ChatIntent"/> enum for code that still uses it
@@ -82,220 +87,156 @@ public sealed partial class AgentOrchestrator
     private static bool IsDeterministicInlineRoute(RouterOutput route) =>
         string.Equals(route.Intent, Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsLookupIntent(string intent) =>
-        intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
-        intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
-        intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
-        intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Decides whether the Footman LLM router should run for this request.
-    /// Uses <see cref="ActionTier"/> to enforce the authority model:
-    /// <list type="bullet">
-    ///   <item>Tier 0 (RetrievalSafeLocal): Footman always bypassed.</item>
-    ///   <item>Tier 1 (RetrievalSafeExternal): Footman bypassed when the
-    ///         deterministic signal is strong (confirmed by intent-specific
-    ///         heuristics). Runs only when confidence is low and the
-    ///         deterministic match is weak — but even then, its output is
-    ///         subject to typed-block-reason enforcement.</item>
-    ///   <item>Tier 2 (PlanComplex): Footman always runs.</item>
-    /// </list>
-    /// </summary>
-    internal static bool ShouldRunFootmanForRoute(
-        RouterOutput route,
+    private async Task<RouteResolutionResult> ResolveRouteAsync(
+        string userMessage,
         string lowerIncoming,
-        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+        CancellationToken cancellationToken)
     {
-        var tier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
-
-        // Tier 0 — deterministic direct execution, no Footman.
-        if (tier == ActionTier.RetrievalSafeLocal)
-            return false;
-
-        // Tier 2 — Footman retains full authority.
-        if (tier == ActionTier.PlanComplex)
-            return true;
-
-        // Tier 1 — retrieval-safe-external.
-        // Bypass Footman for strong deterministic signals to prevent
-        // stochastic downgrades into chat-only paths.
-
-        if (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        var hasRecentRationale = HasRecentFirstPrinciplesRationale();
+        var hasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow());
+        var routeRequest = new RouterRequest
         {
-            return false;
+            UserMessage = userMessage,
+            HasRecentFirstPrinciplesRationale = hasRecentRationale,
+            HasRecentSearchResults = hasRecentSearchResults
+        };
+
+        var route = await _router.RouteAsync(routeRequest, cancellationToken);
+        var webEvidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lowerIncoming);
+        var routeIntentBeforeFootman = route.Intent;
+        var routeConfidenceBeforeFootman = route.Confidence;
+
+        LogEvent("ROUTER_WEB_EVIDENCE",
+            $"phase=pre_footman, score={webEvidence.Score:0.0}, " +
+            $"reason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}, " +
+            $"confidence={webEvidence.Confidence:0.00}");
+
+        LogEvent("ROUTER_OUTPUT",
+            $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
+            $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
+            $"file={route.NeedsFileAccess}, memory_w={route.NeedsMemoryWrite}, " +
+            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
+            $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
+
+        RoutingDecision? footmanDecision = null;
+        var actionTier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
+        if (_footmanRouter is not null && RouteArbitrationPolicy.ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
+        {
+            var features = RoutingFeatures.Extract(
+                userMessage,
+                hasRecentRationale: hasRecentRationale,
+                hasRecentSearchResults: hasRecentSearchResults);
+
+            footmanDecision = await _footmanRouter.RouteAsync(
+                userMessage, features, cancellationToken);
+
+            if (footmanDecision.IsAuthoritative)
+            {
+                var footmanIntent = AgentStateMapper.ToIntentString(footmanDecision.NextState);
+                var footmanRoute = DefaultRouter.MakeRoute(
+                    footmanIntent,
+                    confidence: footmanDecision.Confidence,
+                    needsWeb: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.WebSearch),
+                    needsBrowser: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.BrowserNavigate),
+                    needsScreen: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.ScreenCapture),
+                    needsFile: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.FileSystem),
+                    needsSystem: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.SystemExecute),
+                    needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
+                    needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
+
+                if (RouteArbitrationPolicy.ShouldBlockFootmanLookupDowngrade(
+                        lowerIncoming, route, footmanRoute, webEvidence,
+                        footmanDecision.BlockReason))
+                {
+                    LogEvent("FOOTMAN_DOWNGRADE_BLOCKED",
+                        $"baseIntent={route.Intent}, proposedIntent={footmanIntent}, " +
+                        $"reason={footmanDecision.ReasonCode}, blockReason={footmanDecision.BlockReason}, " +
+                        $"actionTier={actionTier}, webScore={webEvidence.Score:0.0}, " +
+                        $"webReason={webEvidence.ReasonCode}");
+
+                    LogRouterDisagreement(
+                        userMessage, route, footmanIntent,
+                        footmanDecision, actionTier, "downgrade_blocked");
+                }
+                else
+                {
+                    var isDisagreement = !string.Equals(
+                        route.Intent, footmanIntent, StringComparison.OrdinalIgnoreCase);
+
+                    route = footmanRoute;
+                    LogEvent("FOOTMAN_OVERRIDE",
+                        $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
+                        $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
+                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}, " +
+                        $"actionTier={actionTier}");
+
+                    if (isDisagreement)
+                    {
+                        LogRouterDisagreement(
+                            userMessage, routeBeforeFootman: new RouterOutput
+                            {
+                                Intent = routeIntentBeforeFootman,
+                                Confidence = routeConfidenceBeforeFootman,
+                                NeedsWeb = true,
+                                NeedsSearch = true
+                            },
+                            footmanIntent, footmanDecision, actionTier,
+                            "footman_accepted");
+                    }
+                }
+            }
+            else
+            {
+                LogEvent("FOOTMAN_DEFERRED",
+                    $"abstain={footmanDecision.Abstain}, confidence={footmanDecision.Confidence:F2}, " +
+                    $"reason={footmanDecision.ReasonCode}, actionTier={actionTier} — keeping tripwire route");
+            }
+        }
+        else
+        {
+            LogEvent("FOOTMAN_SKIPPED",
+                $"actionTier={actionTier}, intent={route.Intent}, " +
+                $"confidence={route.Confidence:F2}");
         }
 
-        if (route.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        LogEvent("ROUTER_WEB_EVIDENCE",
+            $"phase=post_footman, baseIntent={routeIntentBeforeFootman}, " +
+            $"baseConfidence={routeConfidenceBeforeFootman:F2}, finalIntent={route.Intent}, " +
+            $"finalConfidence={route.Confidence:F2}, needsWeb={route.NeedsWeb}, " +
+            $"needsSearch={route.NeedsSearch}");
+
+        if (footmanDecision is { IsAuthoritative: true })
+            ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
+
+        var lookupFloorIntent = RouteArbitrationPolicy.GetLookupFloorIntent(lowerIncoming, route, webEvidence);
+        if (!string.IsNullOrWhiteSpace(lookupFloorIntent))
         {
-            return false;
+            route = lookupFloorIntent switch
+            {
+                Intents.LookupDeepDive => DefaultRouter.MakeRoute(
+                    Intents.LookupDeepDive,
+                    confidence: 0.95,
+                    needsWeb: true,
+                    needsSearch: true,
+                    needsBrowser: true),
+                Intents.LookupNews => DefaultRouter.MakeRoute(
+                    Intents.LookupNews,
+                    confidence: 0.93,
+                    needsWeb: true,
+                    needsSearch: true),
+                _ => DefaultRouter.MakeRoute(
+                    Intents.LookupFact,
+                    confidence: Math.Clamp(Math.Max(0.88, webEvidence.Confidence), 0.88, 0.96),
+                    needsWeb: true,
+                    needsSearch: true)
+            };
+
+            LogEvent("LOOKUP_FLOOR_UPGRADE",
+                $"intent={route.Intent}, webScore={webEvidence.Score:0.0}, " +
+                $"webReason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}");
         }
 
-        // Local business discovery has a strong deterministic signal:
-        // "business term + proximity cue" is unambiguous.
-        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
-        {
-            return false;
-        }
-
-        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            webEvidence.ShouldLookup &&
-            webEvidence.Score >= 2.8)
-        {
-            return false;
-        }
-
-        // LookupSearch follow-ups are validated by Tier-1 via
-        // IsFollowUpMessage + HasRecentSearchResults. The deterministic
-        // session context is authoritative — skip the Footman to prevent
-        // stochastic downgrades from losing web_search on follow-ups.
-        if (route.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) &&
-            Search.SearchModeRouter.IsFollowUpMessage(lowerIncoming))
-        {
-            return false;
-        }
-
-        // ScreenObserve with a confirmed screen-request signal.
-        if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming))
-        {
-            return false;
-        }
-
-        // Low-confidence Tier 1 — let Footman refine (but its downgrade
-        // authority is still limited by typed block reasons).
-        if (route.Confidence < 0.95)
-            return true;
-
-        // High-confidence Tier 1 without a matching heuristic bypass:
-        // still allow Footman to refine arguments when the route already
-        // carries web/search needs.
-        if (IsLookupIntent(route.Intent))
-            return true;
-
-        return route.NeedsWeb || route.NeedsSearch || route.NeedsBrowserAutomation;
-    }
-
-    /// <summary>
-    /// Determines whether a Footman downgrade from a lookup intent to a
-    /// non-lookup intent should be blocked.
-    ///
-    /// Uses the <see cref="ActionTier"/> model:
-    /// <list type="bullet">
-    ///   <item>Tier 0/1: downgrade blocked unless the Footman provides a
-    ///         typed <see cref="FootmanBlockReason"/> that is valid for
-    ///         the tier.</item>
-    ///   <item>Tier 2: existing behavior (Footman authoritative).</item>
-    /// </list>
-    /// </summary>
-    internal static bool ShouldBlockFootmanLookupDowngrade(
-        string lowerIncoming,
-        RouterOutput baseRoute,
-        RouterOutput footmanRoute,
-        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence,
-        FootmanBlockReason blockReason = FootmanBlockReason.None)
-    {
-        if (!IsLookupIntent(baseRoute.Intent))
-            return false;
-
-        // Footman kept it as a lookup — no downgrade, nothing to block.
-        if (IsLookupIntent(footmanRoute.Intent))
-            return false;
-
-        // Classify the base route to determine authority boundaries.
-        var tier = ActionTierClassifier.Classify(baseRoute, lowerIncoming, webEvidence);
-
-        // For Tier 0 and Tier 1, block the downgrade unless the Footman
-        // supplied a valid typed block reason for this tier.
-        if (tier == ActionTier.RetrievalSafeLocal ||
-            tier == ActionTier.RetrievalSafeExternal)
-        {
-            return !FootmanBlockReasonPolicy.IsValidBlockForTier(blockReason, tier);
-        }
-
-        // Tier 2 — preserve legacy heuristic blocks for important intent
-        // families (deep-dive, news, strong fact, search follow-up).
-        if (baseRoute.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
-        {
-            return true;
-        }
-
-        if (baseRoute.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
-        {
-            return true;
-        }
-
-        if (baseRoute.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            IsLookupFloorEligiblePrompt(lowerIncoming) &&
-            webEvidence.ShouldLookup &&
-            webEvidence.Score >= 2.8)
-        {
-            return true;
-        }
-
-        if (baseRoute.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string? GetLookupFloorIntent(
-        string lowerIncoming,
-        RouterOutput finalRoute,
-        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
-    {
-        if (IsLookupIntent(finalRoute.Intent))
-            return null;
-
-        if (!IsLookupFloorEligiblePrompt(lowerIncoming))
-            return null;
-
-        if (IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
-            return Intents.LookupDeepDive;
-
-        if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
-            return Intents.LookupNews;
-
-        // Local business discovery is a strong deterministic signal.
-        if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
-            return Intents.LookupFact;
-
-        if (webEvidence.ShouldLookup && webEvidence.Score >= 2.8)
-            return Intents.LookupFact;
-
-        return null;
-    }
-
-    private static bool IsLookupFloorEligiblePrompt(string lowerIncoming)
-    {
-        if (string.IsNullOrWhiteSpace(lowerIncoming))
-            return false;
-
-        if (IntentFeatureExtractor.LooksLikeGreeting(lowerIncoming) ||
-            IntentFeatureExtractor.LooksLikeConversationalCheckIn(lowerIncoming) ||
-            IntentFeatureExtractor.LooksLikeVoiceMicCheck(lowerIncoming) ||
-            IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) ||
-            IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) ||
-            IntentFeatureExtractor.LooksLikeSystemCommand(lowerIncoming) ||
-            lowerIncoming.Contains("tell me about yourself", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("about your favorite", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("favorite thing", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("what do you think", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("what's your opinion", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("whats your opinion", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("what's your take", StringComparison.Ordinal) ||
-            lowerIncoming.Contains("whats your take", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return true;
+        return new RouteResolutionResult(route, webEvidence, footmanDecision);
     }
 
     private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
