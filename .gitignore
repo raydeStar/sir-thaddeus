@@ -64,6 +64,7 @@ secrets.json
 local.settings.json
 appsettings.Local.json
 appsettings.*.local.json
+SirThaddeus.Settings.json
 *.db
 
 # Common local caches / envs
