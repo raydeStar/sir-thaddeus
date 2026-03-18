@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: promote-test-results
           path: |
@@ -127,7 +127,7 @@ jobs:
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -LiteBundle -Version "${{ inputs.version }}"
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: promote-package-windows
           path: |
@@ -172,7 +172,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -LiteBundle -Version "${{ inputs.version }}"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: promote-package-linux
           path: |
@@ -218,7 +218,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -LiteBundle -Version "${{ inputs.version }}"
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: promote-package-macos
           path: |

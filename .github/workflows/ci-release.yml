@@ -56,7 +56,7 @@ jobs:
 
       - name: Upload test results (TRX)
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: preflight-test-results-trx
           path: |
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload harness artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: preflight-harness-artifacts
           path: |
@@ -124,7 +124,7 @@ jobs:
           ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
 
       - name: Upload Windows package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-package-windows
           path: |
@@ -166,7 +166,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -LiteBundle -Version "${{ github.ref_name }}"
 
       - name: Upload Linux package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-package-linux
           path: |
@@ -208,7 +208,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -LiteBundle -Version "${{ github.ref_name }}"
 
       - name: Upload macOS package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-package-macos
           path: |
