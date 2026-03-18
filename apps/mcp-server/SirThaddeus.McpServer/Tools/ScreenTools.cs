@@ -200,7 +200,7 @@ public static class ScreenTools
         Bitmap? bitmap = null;
         try
         {
-            var captureRect = GetCaptureRect(target, windowInfo, screenW, screenH);
+            var captureRect = ResolveCaptureRect(target, windowInfo?.Bounds, screenW, screenH);
             bitmap = CaptureRegion(captureRect);
 
             sb.AppendLine();
@@ -232,11 +232,6 @@ public static class ScreenTools
         {
             bitmap?.Dispose();
         }
-    }
-
-    private static Rectangle GetCaptureRect(string target, WindowInfo? windowInfo, int screenW, int screenH)
-    {
-        return ResolveCaptureRect(target, windowInfo?.Bounds, screenW, screenH);
     }
 
     internal static Rectangle ResolveCaptureRect(string target, Rectangle? windowBounds, int screenW, int screenH)
