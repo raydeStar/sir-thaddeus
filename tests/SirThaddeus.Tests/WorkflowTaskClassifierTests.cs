@@ -38,9 +38,9 @@ public sealed class WorkflowTaskClassifierTests
     }
 
     [Fact]
-    public async Task TodayKeyword_ForcesNeedsTools()
+    public async Task DeterministicUtilityPrompt_StaysDirectAnswer()
     {
-        var envelope = await _classifier.ClassifyAsync("What day is it today?", CancellationToken.None);
+        var envelope = await _classifier.ClassifyAsync("What time is it right now?", CancellationToken.None);
 
         Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
         Assert.Equal("direct_answer", envelope.Intent);

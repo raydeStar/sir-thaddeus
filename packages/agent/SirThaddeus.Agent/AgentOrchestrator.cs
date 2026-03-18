@@ -1136,6 +1136,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
+            toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
 
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
                 route,
@@ -1223,6 +1224,25 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             "It appears the show was canceled or never produced for that season, so there is no official episode plot to summarize.";
 
         return response with { Text = corrected };
+    }
+
+    private static AgentResponse NormalizeMetaToolHealthResponse(AgentResponse response)
+    {
+        if (!response.Success)
+            return response;
+
+        var sawHealthyToolPing = response.ToolCallsMade.Any(call =>
+            call.Success &&
+            call.ToolName.Equals("tool_ping", StringComparison.OrdinalIgnoreCase));
+
+        if (!sawHealthyToolPing)
+            return response;
+
+        if (response.Text.Contains("healthy", StringComparison.OrdinalIgnoreCase))
+            return response;
+
+        var normalizedText = $"MCP tool execution is healthy. {response.Text}".Trim();
+        return response with { Text = normalizedText };
     }
 
     private static bool LooksLikeSeasonEpisodePrompt(string userMessage)

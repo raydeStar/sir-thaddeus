@@ -7,13 +7,13 @@ namespace SirThaddeus.Agent.Workflow;
 /// Decorator that intercepts IAgentOrchestrator calls to enforce workflow
 /// time-budget constraints. Set budget via SetRunBudget before each run.
 /// </summary>
-public sealed class ChecklistAwareAgentOrchestrator : IAgentOrchestrator
+public sealed class TimeBudgetedAgentOrchestrator : IAgentOrchestrator
 {
     private readonly IAgentOrchestrator _inner;
     private Stopwatch? _runStopwatch;
     private TimeSpan _runTimeBudget;
 
-    public ChecklistAwareAgentOrchestrator(IAgentOrchestrator inner)
+    public TimeBudgetedAgentOrchestrator(IAgentOrchestrator inner)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     }
