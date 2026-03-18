@@ -1,5 +1,3 @@
-using SirThaddeus.Agent.Dialogue;
-
 namespace SirThaddeus.Agent;
 
 /// <summary>
@@ -30,30 +28,4 @@ public interface IAgentOrchestrator
         string? conversationId,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Clears the conversation history, starting a fresh session.
-    /// </summary>
-    void ResetConversation();
-
-    /// <summary>
-    /// Seeds dialogue continuity state from runtime-owned sources.
-    /// Agent remains in-memory; runtime owns optional persistence.
-    /// </summary>
-    void SeedDialogueState(DialogueState state);
-
-    /// <summary>
-    /// Current compact continuity snapshot for UI/state consumers.
-    /// </summary>
-    DialogueContextSnapshot GetContextSnapshot();
-
-    /// <summary>
-    /// Locks context updates to explicit user location changes only.
-    /// </summary>
-    bool ContextLocked { get; set; }
-
-    /// <summary>
-    /// Queries the MCP server for available tools and returns the count.
-    /// Returns 0 if the MCP server is unreachable. Useful for diagnostics.
-    /// </summary>
-    Task<int> GetAvailableToolCountAsync(CancellationToken cancellationToken = default);
 }

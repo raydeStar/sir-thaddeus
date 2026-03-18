@@ -135,16 +135,41 @@ public sealed class EntityResolver
         });
 
         // ── Step 2: Web search for canonicalization ──────────────────
-        var canonical = await CanonicalizeAsync(extracted, toolCallsMade, ct);
-        if (canonical is null)
+        // Skip the search call for Place-type entities that are already
+        // well-formed (city + state/country). Searching for "Boise, ID"
+        // or "Portland, OR" wastes a web_search slot for zero value.
+        ResolvedEntity? canonical;
+        if (IsSelfCanonicalizingPlace(extracted))
         {
-            // Canonicalization failed — use the raw extraction as-is
+            _audit.Append(new AuditEvent
+            {
+                Actor  = "agent",
+                Action = "ENTITY_SKIP_CANONICALIZATION",
+                Result = extracted.Name,
+                Details = new Dictionary<string, object>
+                {
+                    ["reason"] = "self_canonicalizing_place"
+                }
+            });
             canonical = new ResolvedEntity
             {
                 CanonicalName  = extracted.Name,
                 Type           = extracted.Type,
                 Disambiguation = extracted.Hint
             };
+        }
+        else
+        {
+            canonical = await CanonicalizeAsync(extracted, toolCallsMade, ct);
+            if (canonical is null)
+            {
+                canonical = new ResolvedEntity
+                {
+                    CanonicalName  = extracted.Name,
+                    Type           = extracted.Type,
+                    Disambiguation = extracted.Hint
+                };
+            }
         }
 
         // ── Step 3: Cache in session ─────────────────────────────────
@@ -209,9 +234,16 @@ public sealed class EntityResolver
             if (string.IsNullOrWhiteSpace(name) || type == "none")
                 return null;
 
+            var trimmedName = name!.Trim();
+
+            // Reject degenerate extractions — single-char names like "."
+            // from small models mishandling acronyms (e.g. ".NET" → ".").
+            if (trimmedName.Length < 2)
+                return null;
+
             return new ExtractedEntity
             {
-                Name = name!.Trim(),
+                Name = trimmedName,
                 Type = type ?? "unknown",
                 Hint = hint ?? ""
             };
@@ -477,4 +509,76 @@ public sealed class EntityResolver
             content = content[..^3];
         return content.Trim();
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Self-Canonicalizing Place Detection
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns true when the extracted entity is a well-formed place name
+    /// that doesn't need a web search to canonicalize. Matches patterns:
+    /// "City, ST", "City, StateName", "City, Country", and bare
+    /// US state / well-known country names.
+    /// </summary>
+    private static bool IsSelfCanonicalizingPlace(ExtractedEntity entity)
+    {
+        if (!string.Equals(entity.Type, "Place", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(entity.Type, "place", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = entity.Name.Trim();
+        if (name.Length < 2)
+            return false;
+
+        // "City, ST" or "City, State Name" — comma-separated location
+        var commaIdx = name.IndexOf(',');
+        if (commaIdx > 0 && commaIdx < name.Length - 1)
+        {
+            var suffix = name[(commaIdx + 1)..].Trim();
+            // US state code (2 letters) or US state name
+            if (suffix.Length == 2 && char.IsLetter(suffix[0]) && char.IsLetter(suffix[1]))
+                return true;
+            if (UsStateNames.Contains(suffix))
+                return true;
+            // Common country names
+            if (WellKnownCountries.Contains(suffix))
+                return true;
+        }
+
+        // Bare US state name
+        if (UsStateNames.Contains(name))
+            return true;
+
+        // Bare well-known country name
+        if (WellKnownCountries.Contains(name))
+            return true;
+
+        return false;
+    }
+
+    private static readonly HashSet<string> UsStateNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+        "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+        "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+        "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+        "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+        "New Hampshire", "New Jersey", "New Mexico", "New York",
+        "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+        "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+        "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+        "West Virginia", "Wisconsin", "Wyoming", "District of Columbia"
+    };
+
+    private static readonly HashSet<string> WellKnownCountries = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "USA", "US", "United States", "United Kingdom", "UK", "Canada",
+        "Australia", "Germany", "France", "Japan", "China", "India",
+        "Brazil", "Mexico", "Italy", "Spain", "South Korea", "Russia",
+        "Netherlands", "Sweden", "Switzerland", "Norway", "Denmark",
+        "Finland", "Ireland", "New Zealand", "Singapore", "Israel",
+        "Poland", "Belgium", "Austria", "Portugal", "Greece", "Turkey"
+    };
 }

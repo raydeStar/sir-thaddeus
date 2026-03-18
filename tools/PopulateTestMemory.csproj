@@ -17,7 +17,10 @@
 
   <ItemGroup>
     <!-- Prevent this utility project from globbing harness sources under tools/. -->
+    <Compile Remove="query_audit.cs" />
     <Compile Remove="SirThaddeus.Harness\**\*.cs" />
+    <EmbeddedResource Remove="query_audit.cs" />
+    <None Remove="query_audit.cs" />
     <EmbeddedResource Remove="SirThaddeus.Harness\**\*" />
     <None Remove="SirThaddeus.Harness\**\*" />
   </ItemGroup>

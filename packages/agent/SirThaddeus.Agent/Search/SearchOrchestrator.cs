@@ -2443,6 +2443,108 @@ public sealed partial class SearchOrchestrator
     }
 
     /// <summary>
+    /// Attempts to resolve Google News RSS redirect URLs to the actual
+    /// article URLs embedded in the Base64-encoded path segment. Returns
+    /// a new list with resolved URLs where possible; non-Google-News
+    /// sources pass through unchanged.
+    /// </summary>
+    private static List<SourceItem> ResolveSourceUrls(IReadOnlyList<SourceItem> sources)
+    {
+        var result = new List<SourceItem>(sources.Count);
+        foreach (var source in sources)
+        {
+            var resolved = TryResolveGoogleNewsRssUrl(source.Url);
+            if (resolved is not null && !string.Equals(resolved, source.Url, StringComparison.Ordinal))
+            {
+                result.Add(source with { Url = resolved });
+            }
+            else
+            {
+                result.Add(source);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Google News RSS article URLs embed the actual article URL in a
+    /// Base64-encoded protobuf path segment. This method attempts to
+    /// extract the embedded <c>https://</c> URL so the real article
+    /// can be fetched via browser_navigate.
+    /// </summary>
+    private static string? TryResolveGoogleNewsRssUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return null;
+
+        if (!uri.Host.Contains("news.google.com", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var path = uri.AbsolutePath;
+
+        // Locate the encoded segment after /rss/articles/ or /articles/
+        const string rssPrefix = "/rss/articles/";
+        const string plainPrefix = "/articles/";
+        int startIdx;
+
+        if (path.StartsWith(rssPrefix, StringComparison.OrdinalIgnoreCase))
+            startIdx = rssPrefix.Length;
+        else if (path.StartsWith(plainPrefix, StringComparison.OrdinalIgnoreCase))
+            startIdx = plainPrefix.Length;
+        else
+            return null;
+
+        var encoded = path[startIdx..];
+        var qIdx = encoded.IndexOf('?');
+        if (qIdx >= 0)
+            encoded = encoded[..qIdx];
+        if (encoded.Length < 8)
+            return null;
+
+        try
+        {
+            // Normalize URL-safe Base64 → standard Base64 and pad.
+            var padded = encoded.Replace('-', '+').Replace('_', '/');
+            switch (padded.Length % 4)
+            {
+                case 2: padded += "=="; break;
+                case 3: padded += "="; break;
+            }
+
+            var bytes = Convert.FromBase64String(padded);
+            var text = System.Text.Encoding.UTF8.GetString(bytes);
+
+            // Find the first embedded http(s) URL.
+            var httpIdx = text.IndexOf("https://", StringComparison.Ordinal);
+            if (httpIdx < 0)
+                httpIdx = text.IndexOf("http://", StringComparison.Ordinal);
+            if (httpIdx < 0)
+                return null;
+
+            // Extract URL up to the first non-URL byte.
+            var span = text.AsSpan(httpIdx);
+            int end = 0;
+            while (end < span.Length && IsUrlByte(span[end]))
+                end++;
+
+            var resolved = span[..end].ToString();
+            return Uri.TryCreate(resolved, UriKind.Absolute, out _) ? resolved : null;
+        }
+        catch
+        {
+            return null;
+        }
+
+        static bool IsUrlByte(char c) =>
+            c > ' ' && c != '"' && c != '<' && c != '>' &&
+            c != '{' && c != '}' && c != '|' && c != '\\' &&
+            c != '^' && c != '`' && c < (char)127;
+    }
+
+    /// <summary>
     /// Rejects URLs that are ad redirects, tracker scripts, or domains
     /// known to return no useful article content. Prevents wasting a
     /// browser_navigate call on junk pages.

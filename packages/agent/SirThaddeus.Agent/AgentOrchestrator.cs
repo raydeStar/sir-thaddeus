@@ -480,159 +480,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             MemoryEnabled, PanicModeEnabled, SafeModeEnabled, LogEvent, cancellationToken);
 
         // ── Route: classify intent + determine requirements ──────────
-        var routeRequest = new RouterRequest
-        {
-            UserMessage = userMessage,
-            HasRecentFirstPrinciplesRationale = HasRecentFirstPrinciplesRationale(),
-            HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
-        };
-        var route = await _router.RouteAsync(routeRequest, cancellationToken);
-        var webEvidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lowerIncoming);
-        var routeIntentBeforeFootman = route.Intent;
-        var routeConfidenceBeforeFootman = route.Confidence;
-
-        LogEvent("ROUTER_WEB_EVIDENCE",
-            $"phase=pre_footman, score={webEvidence.Score:0.0}, " +
-            $"reason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}, " +
-            $"confidence={webEvidence.Confidence:0.00}");
-
-        LogEvent("ROUTER_OUTPUT",
-            $"intent={route.Intent}, confidence={route.Confidence:F2}, " +
-            $"web={route.NeedsWeb}, screen={route.NeedsScreenRead}, " +
-            $"file={route.NeedsFileAccess}, memory_w={route.NeedsMemoryWrite}, " +
-            $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
-            $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
-
-        // ── Footman: LLM-based routing refinement ────────────────────
-        // When the tripwire router didn't make a high-confidence
-        // deterministic match (< 0.95), invoke the Footman for a
-        // second opinion using a small, fast gatekeeper model.
-        // Authority boundaries are enforced by ActionTier — see
-        // ShouldRunFootmanForRoute and ShouldBlockFootmanLookupDowngrade.
-        RoutingDecision? footmanDecision = null;
-        var actionTier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
-        if (_footmanRouter is not null && ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
-        {
-            var features = RoutingFeatures.Extract(
-                userMessage,
-                hasRecentRationale: HasRecentFirstPrinciplesRationale(),
-                hasRecentSearchResults: _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow()));
-
-            footmanDecision = await _footmanRouter.RouteAsync(
-                userMessage, features, cancellationToken);
-
-            if (footmanDecision.IsAuthoritative)
-            {
-                var footmanIntent = AgentStateMapper.ToIntentString(footmanDecision.NextState);
-                var footmanRoute = DefaultRouter.MakeRoute(
-                    footmanIntent,
-                    confidence: footmanDecision.Confidence,
-                    needsWeb: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.WebSearch),
-                    needsBrowser: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.BrowserNavigate),
-                    needsScreen: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.ScreenCapture),
-                    needsFile: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.FileSystem),
-                    needsSystem: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.SystemExecute),
-                    needsMemoryWrite: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryWrite),
-                    needsMemoryRead: footmanDecision.AllowedToolFamilies.HasFlag(ToolFamily.MemoryRead));
-
-                if (ShouldBlockFootmanLookupDowngrade(
-                        lowerIncoming, route, footmanRoute, webEvidence,
-                        footmanDecision.BlockReason))
-                {
-                    LogEvent("FOOTMAN_DOWNGRADE_BLOCKED",
-                        $"baseIntent={route.Intent}, proposedIntent={footmanIntent}, " +
-                        $"reason={footmanDecision.ReasonCode}, blockReason={footmanDecision.BlockReason}, " +
-                        $"actionTier={actionTier}, webScore={webEvidence.Score:0.0}, " +
-                        $"webReason={webEvidence.ReasonCode}");
-
-                    // ── Disagreement log (structured) ────────────────
-                    LogRouterDisagreement(
-                        userMessage, route, footmanIntent,
-                        footmanDecision, actionTier, "downgrade_blocked");
-                }
-                else
-                {
-                    // Check if this is a genuine disagreement even though
-                    // we accepted the Footman's decision.
-                    var isDisagreement = !string.Equals(
-                        route.Intent, footmanIntent, StringComparison.OrdinalIgnoreCase);
-
-                    route = footmanRoute;
-                    LogEvent("FOOTMAN_OVERRIDE",
-                        $"state={footmanDecision.NextState}, intent={footmanIntent}, " +
-                        $"contextPolicy={footmanDecision.EffectiveContextPolicy}, " +
-                        $"confidence={footmanDecision.Confidence:F2}, reason={footmanDecision.ReasonCode}, " +
-                        $"actionTier={actionTier}");
-
-                    if (isDisagreement)
-                    {
-                        LogRouterDisagreement(
-                            userMessage, routeBeforeFootman: new RouterOutput
-                            {
-                                Intent = routeIntentBeforeFootman,
-                                Confidence = routeConfidenceBeforeFootman,
-                                NeedsWeb = true, NeedsSearch = true
-                            },
-                            footmanIntent, footmanDecision, actionTier,
-                            "footman_accepted");
-                    }
-                }
-            }
-            else
-            {
-                LogEvent("FOOTMAN_DEFERRED",
-                    $"abstain={footmanDecision.Abstain}, confidence={footmanDecision.Confidence:F2}, " +
-                    $"reason={footmanDecision.ReasonCode}, actionTier={actionTier} — keeping tripwire route");
-            }
-        }
-        else
-        {
-            LogEvent("FOOTMAN_SKIPPED",
-                $"actionTier={actionTier}, intent={route.Intent}, " +
-                $"confidence={route.Confidence:F2}");
-        }
-
-        // ── Apply Footman context policy ─────────────────────────────
-        LogEvent("ROUTER_WEB_EVIDENCE",
-            $"phase=post_footman, baseIntent={routeIntentBeforeFootman}, " +
-            $"baseConfidence={routeConfidenceBeforeFootman:F2}, finalIntent={route.Intent}, " +
-            $"finalConfidence={route.Confidence:F2}, needsWeb={route.NeedsWeb}, " +
-            $"needsSearch={route.NeedsSearch}");
-
-        if (footmanDecision is { IsAuthoritative: true })
-        {
-            ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
-        }
-
-        // ── Policy: determine which tools the executor may see ───────
-
-        var lookupFloorIntent = GetLookupFloorIntent(lowerIncoming, route, webEvidence);
-        if (!string.IsNullOrWhiteSpace(lookupFloorIntent))
-        {
-            route = lookupFloorIntent switch
-            {
-                Intents.LookupDeepDive => DefaultRouter.MakeRoute(
-                    Intents.LookupDeepDive,
-                    confidence: 0.95,
-                    needsWeb: true,
-                    needsSearch: true,
-                    needsBrowser: true),
-                Intents.LookupNews => DefaultRouter.MakeRoute(
-                    Intents.LookupNews,
-                    confidence: 0.93,
-                    needsWeb: true,
-                    needsSearch: true),
-                _ => DefaultRouter.MakeRoute(
-                    Intents.LookupFact,
-                    confidence: Math.Clamp(Math.Max(0.88, webEvidence.Confidence), 0.88, 0.96),
-                    needsWeb: true,
-                    needsSearch: true)
-            };
-
-            LogEvent("LOOKUP_FLOOR_UPGRADE",
-                $"intent={route.Intent}, webScore={webEvidence.Score:0.0}, " +
-                $"webReason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}");
-        }
+        var routeResolution = await ResolveRouteAsync(userMessage, lowerIncoming, cancellationToken);
+        var route = routeResolution.Route;
+        var webEvidence = routeResolution.WebEvidence;
 
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
         LogEvent("POLICY_DECISION",
@@ -711,7 +561,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
 
         if (SafeModeEnabled &&
-            (route.NeedsWeb || route.NeedsSearch || IsLookupIntent(route.Intent)))
+            (route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent)))
         {
             const string safeModeWebBlockMessage =
                 "Web search is currently blocked because Safe Mode is enabled. " +
@@ -1072,7 +922,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     }, usageBaseline);
                 }
 
-                var lookupAlreadyExecuted = IsLookupIntent(route.Intent);
+                var lookupAlreadyExecuted = RouteArbitrationPolicy.IsLookupIntent(route.Intent);
                 var fallbackEligible =
                     hasRefusalOrUncertaintySignals &&
                     route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
@@ -1136,6 +986,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
+            toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
 
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
                 route,
@@ -1223,6 +1074,25 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             "It appears the show was canceled or never produced for that season, so there is no official episode plot to summarize.";
 
         return response with { Text = corrected };
+    }
+
+    private static AgentResponse NormalizeMetaToolHealthResponse(AgentResponse response)
+    {
+        if (!response.Success)
+            return response;
+
+        var sawHealthyToolPing = response.ToolCallsMade.Any(call =>
+            call.Success &&
+            call.ToolName.Equals("tool_ping", StringComparison.OrdinalIgnoreCase));
+
+        if (!sawHealthyToolPing)
+            return response;
+
+        if (response.Text.Contains("healthy", StringComparison.OrdinalIgnoreCase))
+            return response;
+
+        var normalizedText = $"MCP tool execution is healthy. {response.Text}".Trim();
+        return response with { Text = normalizedText };
     }
 
     private static bool LooksLikeSeasonEpisodePrompt(string userMessage)

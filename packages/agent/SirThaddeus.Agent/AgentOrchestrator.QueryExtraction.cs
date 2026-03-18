@@ -20,93 +20,10 @@ namespace SirThaddeus.Agent;
 public sealed partial class AgentOrchestrator
 {
     private static string NormalizeQueryText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return "";
-
-        var input = text.Trim();
-        var sb = new StringBuilder(input.Length);
-        var lastWasSpace = false;
-
-        foreach (var c in input)
-        {
-            // Keep letters/digits. Convert most punctuation to spaces so
-            // tokens like "thadds!" become "thadds" for filtering.
-            if (char.IsLetterOrDigit(c))
-            {
-                sb.Append(c);
-                lastWasSpace = false;
-                continue;
-            }
-
-            // Keep a few token-internal characters.
-            if (c is '\'' or '-' or '+')
-            {
-                sb.Append(c);
-                lastWasSpace = false;
-                continue;
-            }
-
-            if (!lastWasSpace)
-            {
-                sb.Append(' ');
-                lastWasSpace = true;
-            }
-        }
-
-        return sb.ToString().Trim();
-    }
+        => SearchQueryText.Normalize(text);
 
     private static bool IsBannedSearchToken(string tokenLower)
-    {
-        if (string.IsNullOrWhiteSpace(tokenLower))
-            return true;
-
-        // Assistant name variants (common greetings / nicknames).
-        if (tokenLower == "thaddeus" || tokenLower.StartsWith("thadd"))
-            return true;
-
-        // Greetings, casual filler, discourse markers, pronouns, and
-        // request-framing verbs. Anything that isn't a real search topic.
-        return tokenLower is
-            // ── Greetings / salutations ───────────────────────────
-            "sir" or "hey" or "hi" or "hello" or "yo" or "sup" or
-            "homie" or "buddy" or "pal" or
-            "good" or "morning" or "afternoon" or "evening" or
-            // ── Discourse markers / interjections ─────────────────
-            "well" or "ok" or "okay" or "alright" or "so" or
-            "anyway" or "actually" or "basically" or "like" or
-            "heck" or "hell" or "gosh" or "gee" or
-            // ── Speech fillers ────────────────────────────────────
-            "um" or "uh" or "hmm" or "huh" or "er" or "ah" or
-            // ── Pronouns / contractions ───────────────────────────
-            "i" or "im" or "i'm" or "we" or "our" or "us" or
-            "you" or "me" or "my" or "he" or "she" or "it" or
-            "its" or "it's" or "they" or "them" or "their" or
-            // ── Modals / auxiliaries ──────────────────────────────
-            "can" or "could" or "would" or "will" or "shall" or
-            "should" or "might" or "may" or "do" or "does" or
-            "did" or "is" or "are" or "was" or "were" or "been" or
-            "being" or "have" or "has" or "had" or
-            // ── Request framing verbs ─────────────────────────────
-            "want" or "wanted" or "need" or "needed" or "check" or
-            "look" or "up" or "search" or "find" or "pull" or
-            "show" or "get" or "bring" or "grab" or "fetch" or
-            "tell" or "give" or
-            // ── Polite filler ─────────────────────────────────────
-            "please" or "plz" or "thanks" or "thank" or
-            "danke" or "dank" or
-            // ── Prepositions / articles / connectors ──────────────
-            "for" or "to" or "on" or "about" or "into" or "in" or
-            "at" or "of" or "with" or "from" or "by" or "or" or
-            "and" or "but" or "if" or "then" or "than" or
-            "the" or "a" or "an" or "this" or "that" or
-            "there" or "here" or "some" or "any" or
-            // ── Other low-signal words ────────────────────────────
-            "just" or "really" or "very" or "also" or "too" or
-            "what" or "how" or "when" or "where" or "know" or
-            "think" or "see" or "go" or "going" or "went";
-    }
+        => SearchQueryText.IsBannedToken(tokenLower);
 
     private static bool LooksLikeLogicPuzzlePrompt(string lower)
         => IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower);
@@ -369,7 +286,7 @@ public sealed partial class AgentOrchestrator
         var useConversationContext =
             SearchModeRouter.IsFollowUpMessage(lowerMsg) ||
             SearchModeRouter.IsReferential(lowerMsg) ||
-            LooksLikeFollowUpDepthRequest(userMessage ?? "");
+            WebSearchFollowUpSupport.LooksLikeFollowUpDepthRequest(userMessage ?? "");
         var wantsUs = WantsUsRegion(userMessage ?? "");
         var isIdentity = LooksLikeIdentityLookup(lowerMsg);
         var identityPrefix = IdentityPrefix(lowerMsg);
@@ -478,10 +395,10 @@ public sealed partial class AgentOrchestrator
 
                 // Follow-up: if we already have sources from the prior search,
                 // prefer a concrete title over a generic query like "more X news".
-                if (LooksLikeFollowUpDepthRequest(userMessage ?? "") &&
+                if (WebSearchFollowUpSupport.LooksLikeFollowUpDepthRequest(userMessage ?? "") &&
                     _searchOrchestrator.Session.LastResults.Count > 0)
                 {
-                    var candidates = PickRelevantSources(userMessage ?? "", _searchOrchestrator.Session.LastResults.Select(r => (r.Url, r.Title)).ToList(), maxUrls: 1);
+                    var candidates = WebSearchFollowUpSupport.PickRelevantSources(userMessage ?? "", _searchOrchestrator.Session.LastResults.Select(r => (r.Url, r.Title)).ToList(), maxUrls: 1);
                     if (candidates.Count > 0 && !string.IsNullOrWhiteSpace(candidates[0].Title))
                     {
                         var titleQuery = candidates[0].Title.Trim();

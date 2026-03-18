@@ -150,75 +150,74 @@ public sealed partial class AgentOrchestrator
         return msg.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase);
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    // Web Search Execution (shared pipeline)
-    //
-    // Single implementation of the extract → search → summarize flow.
-    // Called from the primary WebLookup intent path and from the
-    // chat-only fallback. Keeps all tool-name negotiation, raw-dump
-    // rewriting, and template stripping in one place.
-    // ─────────────────────────────────────────────────────────────────
+    private sealed record UtilityLocationResolution(
+        (string Name, string CountryCode, string? RegionCode, double Latitude, double Longitude)? Location,
+        string MismatchWarning,
+        AgentResponse? EarlyResponse);
 
-    /// <summary>
-    /// Executes the weather utility flow using dedicated MCP tools:
-    /// weather_geocode -> weather_forecast. Returns a short deterministic
-    /// weather summary without re-entering the web search pipeline.
-    /// </summary>
-    private async Task<AgentResponse> ExecuteWeatherUtilityAsync(
-        string userMessage,
-        UtilityRouter.UtilityResult utilityResult,
+    private AgentResponse CreateUtilityResponse(
+        string text,
+        bool success,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        bool logResponse = false)
+    {
+        AppendAssistantMessage(text);
+
+        if (logResponse)
+            LogEvent("AGENT_RESPONSE", text);
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = success,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<UtilityLocationResolution> ResolveLocationBackedUtilityAsync(
+        string geocodeArgsJson,
+        string geocodeFailureText,
+        string noLocationText,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
         CancellationToken cancellationToken,
         ValidatedSlots? validatedSlots = null)
     {
-        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
-            return AgentResponse.FromError("Weather utility is missing required geocode args.");
-
         var geocodeCall = await CallToolWithAliasAsync(
             WeatherGeocodeToolName, WeatherGeocodeToolNameAlt,
-            utilityResult.McpToolArgs, cancellationToken);
+            geocodeArgsJson, cancellationToken);
 
         toolCallsMade.Add(new ToolCallRecord
         {
             ToolName = geocodeCall.ToolName,
-            Arguments = utilityResult.McpToolArgs,
+            Arguments = geocodeArgsJson,
             Result = geocodeCall.Result,
             Success = geocodeCall.Success
         });
 
         if (!geocodeCall.Success)
         {
-            var errorText = "I couldn't resolve that location for weather lookup. " +
-                            "Try a city and region like \"Portland, OR\".";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
+            return new UtilityLocationResolution(
+                null,
+                "",
+                CreateUtilityResponse(geocodeFailureText, false, toolCallsMade, roundTrips));
         }
 
         if (!TryParseBestGeocodeCandidate(geocodeCall.Result, out var geo))
         {
-            var noLocationText = "I couldn't find coordinates for that location. " +
-                                 "Try a more specific place name.";
-            AppendAssistantMessage(noLocationText);
-            return new AgentResponse
-            {
-                Text = noLocationText,
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
+            return new UtilityLocationResolution(
+                null,
+                "",
+                CreateUtilityResponse(noLocationText, true, toolCallsMade, roundTrips));
         }
 
         var activeState = _dialogueStore.Get();
         var explicitLocationChange = validatedSlots?.ExplicitLocationChange ?? false;
         var mismatchReason = "";
         var geocodeMismatch = false;
+
         if (!explicitLocationChange)
         {
             geocodeMismatch = ValidateSlots.IsStronglyDivergent(
@@ -229,8 +228,8 @@ public sealed partial class AgentOrchestrator
                 geo.Longitude,
                 out mismatchReason);
         }
-        var mismatchWarning = "";
 
+        var mismatchWarning = "";
         if (geocodeMismatch)
         {
             if (_validateSlots.ShouldRequireConfirm())
@@ -239,15 +238,12 @@ public sealed partial class AgentOrchestrator
                     $"I found **{geo.Name}**, but that conflicts with your current location context " +
                     $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
 
-                AppendAssistantMessage(confirmText);
                 _dialogueStore.Update(activeState with { GeocodeMismatch = true });
-                return new AgentResponse
-                {
-                    Text = confirmText,
-                    Success = true,
-                    ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = roundTrips
-                };
+
+                return new UtilityLocationResolution(
+                    null,
+                    "",
+                    CreateUtilityResponse(confirmText, true, toolCallsMade, roundTrips));
             }
 
             if (!activeState.ContextLocked &&
@@ -279,6 +275,85 @@ public sealed partial class AgentOrchestrator
                 locationInferred: validatedSlots?.LocationInferred ?? false,
                 geocodeMismatch: geocodeMismatch,
                 explicitLocationChange: validatedSlots?.ExplicitLocationChange ?? false));
+
+        return new UtilityLocationResolution(geo, mismatchWarning, null);
+    }
+
+    private async Task<AgentResponse> ExecuteSingleCallUtilityAsync(
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken,
+        string missingArgsError,
+        string toolFailureText,
+        Func<string, string> buildResponse)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError(missingArgsError);
+
+        var toolCall = await CallUtilityToolWithAliasAsync(
+            utilityResult.McpToolName,
+            utilityResult.McpToolArgs,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = toolCall.ToolName,
+            Arguments = utilityResult.McpToolArgs,
+            Result = toolCall.Result,
+            Success = toolCall.Success
+        });
+
+        if (!toolCall.Success)
+            return CreateUtilityResponse(toolFailureText, false, toolCallsMade, roundTrips);
+
+        return CreateUtilityResponse(
+            buildResponse(toolCall.Result),
+            true,
+            toolCallsMade,
+            roundTrips,
+            logResponse: true);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Web Search Execution (shared pipeline)
+    //
+    // Single implementation of the extract → search → summarize flow.
+    // Called from the primary WebLookup intent path and from the
+    // chat-only fallback. Keeps all tool-name negotiation, raw-dump
+    // rewriting, and template stripping in one place.
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Executes the weather utility flow using dedicated MCP tools:
+    /// weather_geocode -> weather_forecast. Returns a short deterministic
+    /// weather summary without re-entering the web search pipeline.
+    /// </summary>
+    private async Task<AgentResponse> ExecuteWeatherUtilityAsync(
+        string userMessage,
+        UtilityRouter.UtilityResult utilityResult,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken,
+        ValidatedSlots? validatedSlots = null)
+    {
+        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
+            return AgentResponse.FromError("Weather utility is missing required geocode args.");
+
+        var locationResolution = await ResolveLocationBackedUtilityAsync(
+            utilityResult.McpToolArgs,
+            "I couldn't resolve that location for weather lookup. Try a city and region like \"Portland, OR\".",
+            "I couldn't find coordinates for that location. Try a more specific place name.",
+            toolCallsMade,
+            roundTrips,
+            cancellationToken,
+            validatedSlots);
+
+        if (locationResolution.EarlyResponse is not null)
+            return locationResolution.EarlyResponse;
+
+        var geo = locationResolution.Location!.Value;
+        var mismatchWarning = locationResolution.MismatchWarning;
 
         var forecastArgs = JsonSerializer.Serialize(new
         {
@@ -305,14 +380,7 @@ public sealed partial class AgentOrchestrator
         {
             var errorText = "I couldn't fetch the weather details right now. " +
                             "Please try again in a moment.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
+            return CreateUtilityResponse(errorText, false, toolCallsMade, roundTrips);
         }
 
         var weatherBrief = TryBuildWeatherBriefFromForecastJson(
@@ -327,16 +395,7 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
             weatherBrief = $"{mismatchWarning}\n\n{weatherBrief}";
 
-        AppendAssistantMessage(weatherBrief);
-        LogEvent("AGENT_RESPONSE", weatherBrief);
-
-        return new AgentResponse
-        {
-            Text = weatherBrief,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = roundTrips
-        };
+        return CreateUtilityResponse(weatherBrief, true, toolCallsMade, roundTrips, logResponse: true);
     }
 
     private async Task<AgentResponse> ExecuteTimeUtilityAsync(
@@ -350,108 +409,20 @@ public sealed partial class AgentOrchestrator
         if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
             return AgentResponse.FromError("Time utility is missing required geocode args.");
 
-        var geocodeCall = await CallToolWithAliasAsync(
-            WeatherGeocodeToolName, WeatherGeocodeToolNameAlt,
-            utilityResult.McpToolArgs, cancellationToken);
+        var locationResolution = await ResolveLocationBackedUtilityAsync(
+            utilityResult.McpToolArgs,
+            "I couldn't resolve that location for a timezone lookup.",
+            "I couldn't find coordinates for that location. Try a more specific city/country.",
+            toolCallsMade,
+            roundTrips,
+            cancellationToken,
+            validatedSlots);
 
-        toolCallsMade.Add(new ToolCallRecord
-        {
-            ToolName = geocodeCall.ToolName,
-            Arguments = utilityResult.McpToolArgs,
-            Result = geocodeCall.Result,
-            Success = geocodeCall.Success
-        });
+        if (locationResolution.EarlyResponse is not null)
+            return locationResolution.EarlyResponse;
 
-        if (!geocodeCall.Success)
-        {
-            var errorText = "I couldn't resolve that location for a timezone lookup.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
-        }
-
-        if (!TryParseBestGeocodeCandidate(geocodeCall.Result, out var geo))
-        {
-            var noLocationText = "I couldn't find coordinates for that location. Try a more specific city/country.";
-            AppendAssistantMessage(noLocationText);
-            return new AgentResponse
-            {
-                Text = noLocationText,
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
-        }
-
-        var activeState = _dialogueStore.Get();
-        var explicitLocationChange = validatedSlots?.ExplicitLocationChange ?? false;
-        var mismatchReason = "";
-        var geocodeMismatch = false;
-        if (!explicitLocationChange)
-        {
-            geocodeMismatch = ValidateSlots.IsStronglyDivergent(
-                activeState,
-                geo.CountryCode,
-                geo.RegionCode,
-                geo.Latitude,
-                geo.Longitude,
-                out mismatchReason);
-        }
-        var mismatchWarning = "";
-
-        if (geocodeMismatch)
-        {
-            if (_validateSlots.ShouldRequireConfirm())
-            {
-                var confirmText =
-                    $"I found **{geo.Name}**, but that conflicts with your current location context " +
-                    $"(**{activeState.LocationName ?? "unknown"}**). Please confirm if you want me to switch.";
-
-                AppendAssistantMessage(confirmText);
-                _dialogueStore.Update(activeState with { GeocodeMismatch = true });
-                return new AgentResponse
-                {
-                    Text = confirmText,
-                    Success = true,
-                    ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = roundTrips
-                };
-            }
-
-            if (!activeState.ContextLocked &&
-                activeState.Latitude.HasValue &&
-                activeState.Longitude.HasValue &&
-                !string.IsNullOrWhiteSpace(activeState.LocationName))
-            {
-                mismatchWarning =
-                    $"I detected a location mismatch ({mismatchReason.Replace('_', ' ')}), " +
-                    $"so I kept your prior location context: **{activeState.LocationName}**.";
-
-                geo = (
-                    activeState.LocationName!,
-                    activeState.CountryCode ?? geo.CountryCode,
-                    activeState.RegionCode ?? geo.RegionCode,
-                    activeState.Latitude.Value,
-                    activeState.Longitude.Value
-                );
-            }
-        }
-
-        _contextAnchoringService.ApplyPatch(
-            _contextAnchoringService.CreatePlacePatch(
-                geo.Name,
-                geo.CountryCode,
-                geo.RegionCode,
-                geo.Latitude,
-                geo.Longitude,
-                locationInferred: validatedSlots?.LocationInferred ?? false,
-                geocodeMismatch: geocodeMismatch,
-                explicitLocationChange: validatedSlots?.ExplicitLocationChange ?? false));
+        var geo = locationResolution.Location!.Value;
+        var mismatchWarning = locationResolution.MismatchWarning;
 
         var timezoneArgs = JsonSerializer.Serialize(new
         {
@@ -475,14 +446,7 @@ public sealed partial class AgentOrchestrator
         if (!timezoneCall.Success)
         {
             var errorText = "I couldn't resolve the timezone for that location right now.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
+            return CreateUtilityResponse(errorText, false, toolCallsMade, roundTrips);
         }
 
         var timeBrief = TryBuildTimeBriefFromTimezoneJson(
@@ -496,163 +460,50 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
             timeBrief = $"{mismatchWarning}\n\n{timeBrief}";
 
-        AppendAssistantMessage(timeBrief);
-        LogEvent("AGENT_RESPONSE", timeBrief);
-
-        return new AgentResponse
-        {
-            Text = timeBrief,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = roundTrips
-        };
+        return CreateUtilityResponse(timeBrief, true, toolCallsMade, roundTrips, logResponse: true);
     }
 
-    private async Task<AgentResponse> ExecuteHolidayUtilityAsync(
+    private Task<AgentResponse> ExecuteHolidayUtilityAsync(
         UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
         CancellationToken cancellationToken)
-    {
-        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
-            return AgentResponse.FromError("Holiday utility is missing tool args.");
+        => ExecuteSingleCallUtilityAsync(
+            utilityResult,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken,
+            "Holiday utility is missing tool args.",
+            "I couldn't fetch holiday data right now. Please try again in a moment.",
+            toolResult => BuildHolidayUtilityResponse(utilityResult.McpToolName!, toolResult));
 
-        var holidayCall = await CallUtilityToolWithAliasAsync(
-            utilityResult.McpToolName,
-            utilityResult.McpToolArgs,
-            cancellationToken);
-
-        toolCallsMade.Add(new ToolCallRecord
-        {
-            ToolName = holidayCall.ToolName,
-            Arguments = utilityResult.McpToolArgs,
-            Result = holidayCall.Result,
-            Success = holidayCall.Success
-        });
-
-        if (!holidayCall.Success)
-        {
-            var errorText = "I couldn't fetch holiday data right now. Please try again in a moment.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
-        }
-
-        var holidayText = BuildHolidayUtilityResponse(
-            utilityResult.McpToolName, holidayCall.Result);
-
-        AppendAssistantMessage(holidayText);
-        LogEvent("AGENT_RESPONSE", holidayText);
-
-        return new AgentResponse
-        {
-            Text = holidayText,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = roundTrips
-        };
-    }
-
-    private async Task<AgentResponse> ExecuteFeedUtilityAsync(
+    private Task<AgentResponse> ExecuteFeedUtilityAsync(
         UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
         CancellationToken cancellationToken)
-    {
-        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
-            return AgentResponse.FromError("Feed utility is missing tool args.");
+        => ExecuteSingleCallUtilityAsync(
+            utilityResult,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken,
+            "Feed utility is missing tool args.",
+            "I couldn't fetch that feed right now.",
+            BuildFeedUtilityResponse);
 
-        var feedCall = await CallUtilityToolWithAliasAsync(
-            utilityResult.McpToolName,
-            utilityResult.McpToolArgs,
-            cancellationToken);
-
-        toolCallsMade.Add(new ToolCallRecord
-        {
-            ToolName = feedCall.ToolName,
-            Arguments = utilityResult.McpToolArgs,
-            Result = feedCall.Result,
-            Success = feedCall.Success
-        });
-
-        if (!feedCall.Success)
-        {
-            var errorText = "I couldn't fetch that feed right now.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
-        }
-
-        var feedText = BuildFeedUtilityResponse(feedCall.Result);
-        AppendAssistantMessage(feedText);
-        LogEvent("AGENT_RESPONSE", feedText);
-
-        return new AgentResponse
-        {
-            Text = feedText,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = roundTrips
-        };
-    }
-
-    private async Task<AgentResponse> ExecuteStatusUtilityAsync(
+    private Task<AgentResponse> ExecuteStatusUtilityAsync(
         UtilityRouter.UtilityResult utilityResult,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
         CancellationToken cancellationToken)
-    {
-        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
-            return AgentResponse.FromError("Status utility is missing tool args.");
-
-        var statusCall = await CallUtilityToolWithAliasAsync(
-            utilityResult.McpToolName,
-            utilityResult.McpToolArgs,
-            cancellationToken);
-
-        toolCallsMade.Add(new ToolCallRecord
-        {
-            ToolName = statusCall.ToolName,
-            Arguments = utilityResult.McpToolArgs,
-            Result = statusCall.Result,
-            Success = statusCall.Success
-        });
-
-        if (!statusCall.Success)
-        {
-            var errorText = "I couldn't complete that reachability check right now.";
-            AppendAssistantMessage(errorText);
-            return new AgentResponse
-            {
-                Text = errorText,
-                Success = false,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = roundTrips
-            };
-        }
-
-        var statusText = BuildStatusUtilityResponse(statusCall.Result);
-        AppendAssistantMessage(statusText);
-        LogEvent("AGENT_RESPONSE", statusText);
-
-        return new AgentResponse
-        {
-            Text = statusText,
-            Success = true,
-            ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = roundTrips
-        };
-    }
+        => ExecuteSingleCallUtilityAsync(
+            utilityResult,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken,
+            "Status utility is missing tool args.",
+            "I couldn't complete that reachability check right now.",
+            BuildStatusUtilityResponse);
 
     // ── Tool alias resolution — delegates to ToolAliasResolver ──────
 

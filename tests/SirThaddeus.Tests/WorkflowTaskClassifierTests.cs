@@ -49,6 +49,17 @@ public sealed class WorkflowTaskClassifierTests
     }
 
     [Fact]
+    public async Task DeterministicUtilityPrompt_StaysDirectAnswer()
+    {
+        var envelope = await _classifier.ClassifyAsync("What time is it right now?", CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
+        Assert.Equal("direct_answer", envelope.Intent);
+        Assert.False(envelope.NeedsTools);
+        Assert.False(envelope.ShowChecklist);
+    }
+
+    [Fact]
     public async Task CasualCheckInWithToday_StaysDirectAnswer()
     {
         var envelope = await _classifier.ClassifyAsync(

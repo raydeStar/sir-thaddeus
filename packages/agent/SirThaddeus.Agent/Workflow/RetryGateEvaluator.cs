@@ -11,25 +11,6 @@ public sealed class RetryGateEvaluator : IRetryGateEvaluator
         var remainingToolCalls = Math.Max(0, state.Envelope.MaxToolCalls - state.ToolCallsUsed);
         var remainingTimeMs = Math.Max(0, (int)Math.Floor((state.Envelope.TimeBudget - elapsed).TotalMilliseconds));
 
-        var overrideReason = (state.Envelope.RetryGateOverrideReason ?? string.Empty).Trim();
-        if (!string.IsNullOrWhiteSpace(overrideReason))
-        {
-            if (string.Equals(overrideReason, "allowed", StringComparison.OrdinalIgnoreCase))
-            {
-                return new RetryGateDecision
-                {
-                    IsAllowed = true,
-                    ReasonCode = "allowed",
-                    ReasonMessage = "Retry allowed by test override.",
-                    RemainingRetries = remainingRetries,
-                    RemainingToolCalls = remainingToolCalls,
-                    RemainingTimeMs = remainingTimeMs
-                };
-            }
-
-            return BuildBlocked(overrideReason.ToLowerInvariant(), "Retry blocked by test override.");
-        }
-
         if (!confidence.ShouldRetry)
         {
             return BuildBlocked("confidence_not_retry", "Confidence does not require retry.");

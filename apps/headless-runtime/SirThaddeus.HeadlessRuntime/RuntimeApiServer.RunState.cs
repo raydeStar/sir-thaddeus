@@ -4,7 +4,7 @@ using SirThaddeus.Contracts;
 
 internal static partial class RuntimeApiServer
 {
-    private sealed class RunState
+    internal sealed class RunState
     {
         private readonly object _gate = new();
         private readonly List<RuntimeEventEnvelope> _history = [];
