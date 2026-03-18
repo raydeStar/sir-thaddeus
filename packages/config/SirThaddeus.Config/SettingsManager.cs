@@ -231,6 +231,8 @@ public static class SettingsManager
         var mcpPerms = mcp.Permissions is null ? defaults.Mcp.Permissions : mcp.Permissions;
         var webSearch = settings.WebSearch is null ? defaults.WebSearch : settings.WebSearch;
         var cache = settings.Cache is null ? defaults.Cache : settings.Cache;
+        var documentReader = settings.DocumentReader is null ? defaults.DocumentReader : settings.DocumentReader;
+        var clipboard = settings.Clipboard is null ? defaults.Clipboard : settings.Clipboard;
         var weather = settings.Weather is null ? defaults.Weather : settings.Weather;
         var deepDive = settings.DeepDive is null ? defaults.DeepDive : settings.DeepDive;
         var memory = settings.Memory is null ? defaults.Memory : settings.Memory;
@@ -343,7 +345,7 @@ public static class SettingsManager
                 SearchApiBaseUrl = StringOrFallback(webSearch.SearchApiBaseUrl, defaults.WebSearch.SearchApiBaseUrl),
                 SearchApiEngine = NormalizeSearchApiEngine(webSearch.SearchApiEngine, defaults.WebSearch.SearchApiEngine),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
-                MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
+                MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 20)
             },
             Cache = cache with
             {
@@ -368,6 +370,18 @@ public static class SettingsManager
                     min: 50,
                     max: 5_000)
             },
+            DocumentReader = documentReader with
+            {
+                MaxDefaultChars = IntOrFallback(
+                    documentReader.MaxDefaultChars,
+                    defaults.DocumentReader.MaxDefaultChars,
+                    min: 100,
+                    max: 100_000),
+                AllowedExtensions = NormalizeAllowedExtensions(
+                    documentReader.AllowedExtensions,
+                    defaults.DocumentReader.AllowedExtensions)
+            },
+            Clipboard = clipboard,
             Weather = weather with
             {
                 ProviderMode = NormalizeWeatherProviderMode(weather.ProviderMode, defaults.Weather.ProviderMode),
@@ -640,5 +654,21 @@ public static class SettingsManager
         if (string.IsNullOrWhiteSpace(trimmed))
             return "/";
         return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedExtensions(
+        IReadOnlyList<string>? configured,
+        IReadOnlyList<string> fallback)
+    {
+        var source = configured is { Count: > 0 } ? configured : fallback;
+
+        var normalized = source
+            .Select(value => (value ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.StartsWith('.') ? value : "." + value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length > 0 ? normalized : fallback;
     }
 }

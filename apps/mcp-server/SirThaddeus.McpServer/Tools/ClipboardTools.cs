@@ -21,6 +21,9 @@ public static class ClipboardTools
     [McpServerTool, Description("Read the current contents of the system clipboard as text")]
     public static Task<string> ClipboardRead()
     {
+        if (!ParseClipboardEnabled())
+            return Task.FromResult("Clipboard tools are disabled by configuration.");
+
         return RunStaAsync(() =>
         {
             if (!Accessor.ContainsText())
@@ -36,6 +39,9 @@ public static class ClipboardTools
     [McpServerTool, Description("Write text to the system clipboard")]
     public static Task<string> ClipboardWrite([Description("Text to place on the clipboard")] string text)
     {
+        if (!ParseClipboardEnabled())
+            return Task.FromResult("Clipboard tools are disabled by configuration.");
+
         if (text is null)
             return Task.FromResult("Error: text is required.");
 
@@ -75,5 +81,15 @@ public static class ClipboardTools
         public string GetText() => System.Windows.Forms.Clipboard.GetText();
 
         public void SetText(string text) => System.Windows.Forms.Clipboard.SetText(text);
+    }
+
+    private static bool ParseClipboardEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_CLIPBOARD_ENABLED");
+        return raw?.Trim().ToLowerInvariant() switch
+        {
+            "0" or "false" or "no" or "off" => false,
+            _ => true
+        };
     }
 }

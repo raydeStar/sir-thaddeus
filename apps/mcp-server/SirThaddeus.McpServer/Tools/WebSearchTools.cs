@@ -79,7 +79,7 @@ public static class WebSearchTools
         "question that needs current information: news, facts, prices, etc.")]
     public static async Task<string> WebSearch(
         [Description("The search query")] string query,
-        [Description("Number of results to fetch, 1 to 10, default 5")] int maxResults = 5,
+        [Description("Number of results to fetch, 1 to 20, default 5")] int maxResults = 5,
         [Description("Recency filter: day, week, month, or any (default)")] string recency = "any",
         CancellationToken cancellationToken = default)
     {
@@ -112,10 +112,10 @@ public static class WebSearchTools
     private static async Task<string> ExecuteSearchAsync(
         string query, int maxResults, string recency, CancellationToken cancellationToken)
     {
-        var configuredDefaultMaxResults = ParseIntEnv("WEBSEARCH_MAX_RESULTS", DefaultMaxResults, 1, 10);
+        var configuredDefaultMaxResults = ParseIntEnv("WEBSEARCH_MAX_RESULTS", DefaultMaxResults, 1, 20);
         if (maxResults <= 0)
             maxResults = configuredDefaultMaxResults;
-        maxResults = Math.Clamp(maxResults, 1, 10);
+        maxResults = Math.Clamp(maxResults, 1, 20);
         var searchTimeoutMs = ParseIntEnv("WEBSEARCH_TIMEOUT_MS", DefaultSearchTimeoutMs, 2_000, 30_000);
 
         // Normalize recency to a known value

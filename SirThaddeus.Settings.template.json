@@ -37,6 +37,18 @@
     "placesAndHolidaysTtlHours": 24,
     "maxEntries": 500
   },
+  "documentReader": {
+    "maxDefaultChars": 4000,
+    "allowedExtensions": [
+      ".pdf",
+      ".docx",
+      ".xlsx",
+      ".csv",
+      ".rtf",
+      ".md",
+      ".txt"
+    ]
+  },
   "clipboard": {
     "enabled": true
   },

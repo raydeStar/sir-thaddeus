@@ -70,7 +70,7 @@ public static class RuntimeMcpEnvironmentBuilder
         if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiEngine))
             env["WEBSEARCH_API_ENGINE"] = settings.WebSearch.SearchApiEngine.Trim();
         env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
-        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
+        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 20).ToString();
 
         env["ST_CACHE_ENABLED"] = settings.Cache.Enabled ? "true" : "false";
         env["ST_CACHE_WEBSEARCH_TTL_MINUTES"] =
@@ -81,6 +81,12 @@ public static class RuntimeMcpEnvironmentBuilder
             Math.Clamp(settings.Cache.PlacesAndHolidaysTtlHours, 1, 720).ToString();
         env["ST_CACHE_MAX_ENTRIES"] =
             Math.Clamp(settings.Cache.MaxEntries, 50, 5_000).ToString();
+
+        env["ST_DOCUMENT_READER_MAX_DEFAULT_CHARS"] =
+            Math.Clamp(settings.DocumentReader.MaxDefaultChars, 100, 100_000).ToString();
+        env["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] =
+            string.Join(",", settings.DocumentReader.AllowedExtensions);
+        env["ST_CLIPBOARD_ENABLED"] = settings.Clipboard.Enabled ? "true" : "false";
 
         if (!string.IsNullOrWhiteSpace(settings.DeepDive.PlacesApiKey))
             env["ST_DEEPDIVE_PLACES_API_KEY"] = settings.DeepDive.PlacesApiKey.Trim();

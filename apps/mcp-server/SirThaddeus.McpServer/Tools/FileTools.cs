@@ -54,14 +54,14 @@ public static class FileTools
     [McpServerTool, Description("Read and extract text from local document formats: PDF, DOCX, XLSX, CSV, RTF, Markdown, and plain text.")]
     public static async Task<string> DocumentRead(
         [Description("Absolute or relative path to the local document")] string path,
-        [Description("Maximum number of characters to return (default 4000)")] int maxChars = 4000,
+        [Description("Maximum number of characters to return (default from settings, fallback 4000)")] int maxChars = 0,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(path))
             return "Error: path is required.";
 
         if (maxChars <= 0)
-            return "Error: maxChars must be greater than 0.";
+            maxChars = ParseIntEnv("ST_DOCUMENT_READER_MAX_DEFAULT_CHARS", fallback: 4000, min: 100, max: 100_000);
 
         try
         {
@@ -69,6 +69,13 @@ public static class FileTools
 
             if (!File.Exists(fullPath))
                 return $"Error: File not found at '{fullPath}'.";
+
+            var allowedExtensions = ParseAllowedExtensionsEnv(
+                "ST_DOCUMENT_READER_ALLOWED_EXTENSIONS",
+                [".pdf", ".docx", ".xlsx", ".csv", ".rtf", ".md", ".txt"]);
+            var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+                return $"Error: Extension '{extension}' is not allowed. Allowed: {string.Join(", ", allowedExtensions)}";
 
             var info = new FileInfo(fullPath);
             if (info.Length > 10_485_760) // 10 MB safety limit
@@ -300,5 +307,28 @@ public static class FileTools
             error = code,
             path = path ?? ""
         }, JsonOpts);
+    }
+
+    private static int ParseIntEnv(string key, int fallback, int min, int max)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        if (!int.TryParse(raw, out var parsed))
+            return fallback;
+
+        return Math.Clamp(parsed, min, max);
+    }
+
+    private static HashSet<string> ParseAllowedExtensionsEnv(string key, IReadOnlyList<string> fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        var source = string.IsNullOrWhiteSpace(raw)
+            ? fallback
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return source
+            .Select(value => value.Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.StartsWith('.') ? value : "." + value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -29,6 +29,12 @@ public sealed partial record AppSettings
     [JsonPropertyName("cache")]
     public CacheSettings Cache { get; init; } = new();
 
+    [JsonPropertyName("documentReader")]
+    public DocumentReaderSettings DocumentReader { get; init; } = new();
+
+    [JsonPropertyName("clipboard")]
+    public ClipboardSettings Clipboard { get; init; } = new();
+
     [JsonPropertyName("weather")]
     public WeatherSettings Weather { get; init; } = new();
 
@@ -793,6 +799,30 @@ public sealed record CacheSettings
 
     [JsonPropertyName("maxEntries")]
     public int MaxEntries { get; init; } = 500;
+}
+
+public sealed record DocumentReaderSettings
+{
+    [JsonPropertyName("maxDefaultChars")]
+    public int MaxDefaultChars { get; init; } = 4_000;
+
+    [JsonPropertyName("allowedExtensions")]
+    public IReadOnlyList<string> AllowedExtensions { get; init; } =
+    [
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".csv",
+        ".rtf",
+        ".md",
+        ".txt"
+    ];
+}
+
+public sealed record ClipboardSettings
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; } = true;
 }
 
 /// <summary>
