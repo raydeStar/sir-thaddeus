@@ -1,18 +1,27 @@
-# Tool-Aware E2E Harness
+# Tool-Aware Headless Harness
 
-Conversation-level harness for replayable regression checks and score-gated iteration.
+Conversation-level regression harness for the real headless runtime.
 
-## Commands
+## Entry point
 
 From repo root:
 
-- `./dev/harness.ps1 run --suite smoke --mode live --max-iters 1`
-- `./dev/harness.ps1 record --suite smoke`
-- `./dev/harness.ps1 replay --suite smoke`
-- `./dev/harness.ps1 smoke --mode live`
-- `./dev/harness_e2e.ps1` (preflight + smoke + web-search live)
+- `./dev/harness.ps1 --all --judge none`
+- `./dev/harness.ps1 --suite smoke --judge none`
+- `./dev/harness.ps1 --category web-search --judge none`
+- `./dev/harness.ps1 --test smoke_casual_no_tools --judge none`
+- `./dev/harness.ps1 --suite smoke --test smoke_casual_no_tools --judge none`
 
-Common options:
+`./dev/harness.ps1` automatically inserts `run` when you pass only options.
+
+## Selection model
+
+- `--all` runs every suite under `tools/SirThaddeus.Harness/Suites`
+- `--suite <name>` runs one suite directory
+- `--category <name>` is an alias for `--suite`
+- `--test <id>` runs one test id across suites and requires a unique match unless paired with `--suite`
+
+## Common options
 
 - `--max-iters <N>`
 - `--min-score <0..10>`
@@ -23,23 +32,24 @@ Common options:
 - `--judge-timeout-ms <N>`
 - `--judge-required true|false`
 
-## Suite Specs
+## Suite specs
 
 One test file per suite entry:
 
-- Location: `tools/SirThaddeus.Harness/suites/<suite-name>/*.yaml`
-  - (Windows path in repo: `tools/SirThaddeus.Harness/Suites/<suite-name>/*.yaml`)
+- Location: `tools/SirThaddeus.Harness/Suites/<suite-name>/*.yaml`
 - Required fields:
   - `id`
   - `name`
   - `user_message`
   - `allowed_tools`
-  - `mode`
   - `assertions`
   - `expectations`
   - `min_score`
 
-## Artifacts (Flight Recorder)
+The legacy `mode` field is still tolerated in YAML for older specs, but the
+harness now runs everything through headless mode.
+
+## Artifacts
 
 Per iteration output:
 
@@ -50,7 +60,7 @@ Per iteration output:
 - `diff.md`
 - `judge_packet.json` and `judge_result.json` when judge mode is enabled
 
-## Judge Contract (`--judge cursor`)
+## Judge contract (`--judge cursor`)
 
 Harness writes `judge_packet.json` and waits for `judge_result.json`.
 
@@ -71,17 +81,7 @@ Expected judge schema:
 }
 ```
 
-If `--judge-required true`, missing/invalid judge output is a hard failure.
-
-## Record / Replay Workflow
-
-1. Record fixtures locally:
-   - `./dev/harness.ps1 record --suite smoke`
-2. Commit fixture updates if desired.
-3. Replay in CI or local:
-   - `./dev/harness.ps1 replay --suite smoke`
-
-Replay mode uses fixture LLM/tool turns and does not call live MCP tools.
+If `--judge-required true`, missing or invalid judge output is a hard failure.
 
 ---
 
@@ -104,7 +104,7 @@ the live UI.
 ### Front-to-Back Practical Setup (Recommended)
 
 Use this workflow when you want results that mirror real app behavior end-to-end:
-router -> agent -> MCP tools -> providers -> response scoring.
+router -> runtime -> MCP tools -> providers -> response scoring.
 
 1. Configure `%LOCALAPPDATA%/SirThaddeus/settings.json` with live providers:
 
@@ -115,8 +115,12 @@ router -> agent -> MCP tools -> providers -> response scoring.
     "model": "local-model"
   },
   "webSearch": {
-    "mode": "ddg_html",
+    "mode": "auto",
     "searxngBaseUrl": "http://localhost:8080",
+    "searchApiProvider": "searchapi",
+    "searchApiKey": "",
+    "searchApiBaseUrl": "https://www.searchapi.io/api/v1/search",
+    "searchApiEngine": "google",
     "timeoutMs": 8000,
     "maxResults": 5
   },
@@ -132,7 +136,8 @@ router -> agent -> MCP tools -> providers -> response scoring.
 ```
 
 Notes:
-- If you have no local SearxNG running, prefer `"webSearch.mode": "ddg_html"` for predictable non-empty results.
+- `auto` prefers local SearxNG first, then the hosted Search API when `searchApiKey` is configured, then Google News for news-style queries.
+- If you have no local SearxNG running, configure `webSearch.searchApiKey` so auto mode has a general-purpose fallback.
 - If `deepDive.placesApiKey` is missing, place lookups degrade to web fallback and often return lower confidence.
 
 2. Validate external dependencies before running:
@@ -148,16 +153,9 @@ Invoke-WebRequest -UseBasicParsing "http://localhost:8080" | Select-Object -Expa
 3. Run full baseline tests:
 
 ```powershell
-# One-command practical run (preflight + live suites)
-./dev/harness_e2e.ps1
-```
-
-Equivalent manual commands:
-
-```powershell
 ./dev/test.ps1
-./dev/harness.ps1 smoke --mode live
-./dev/harness.ps1 run --suite web-search --mode live
+./dev/harness.ps1 --suite smoke --judge none
+./dev/harness.ps1 --suite web-search --judge none
 ```
 
 4. Verify deep-dive provider path from artifacts:
@@ -195,17 +193,17 @@ These run in `./dev/test.ps1` and require zero external dependencies.
 | `Coordinator_FallbackWithConflictingHours_AddsWarningsAndLowConfidence` | Full coordinator fallback path with conflict handling |
 | `AgentOrchestrator_DeepDiveQuery_ReturnsBriefingPayload` | End-to-end orchestrator → coordinator → response with briefing |
 
-### 2) Harness E2E Tests (Live LLM Required)
+### 2) Headless Harness Tests (Live LLM Required)
 
-These are conversation-level integration tests that run against a live LM Studio
-instance and (optionally) live MCP tools.
+These are conversation-level integration tests that run through the real
+headless runtime against a live LM Studio instance and live MCP tools.
 
 ```powershell
 # Run the entire web-search suite (all 7 tests including deep-dive)
-./dev/harness.ps1 run --suite web-search --mode live
+./dev/harness.ps1 --suite web-search --judge none
 
 # Run only the deep-dive tests
-./dev/harness.ps1 run --suite web-search --mode live --min-score 7.0
+./dev/harness.ps1 --suite web-search --test web_deep_dive_place_briefing --judge none
 ```
 
 **Deep-dive harness tests:**
@@ -228,21 +226,6 @@ The harness starts at 10.0 and deducts for:
 - Hard assertion failures (wrong tools, missing tools): score forced to 0.0
 
 Tests pass when `final_score >= min_score` (default 7.0) AND all hard assertions pass.
-
-### 3) Recording Fixtures for Replay
-
-Once a live run succeeds, record it so future runs can replay without a live LLM:
-
-```powershell
-./dev/harness.ps1 record --suite web-search
-```
-
-This writes fixtures to `tools/SirThaddeus.Harness/fixtures/web-search/`.
-Then replay:
-
-```powershell
-./dev/harness.ps1 replay --suite web-search
-```
 
 ### 4) Manual UI Smoke Test
 

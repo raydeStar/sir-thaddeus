@@ -1,5 +1,6 @@
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Search.DeepDive;
+using SirThaddeus.Agent.Workflow;
 
 namespace SirThaddeus.Agent;
 
@@ -112,6 +113,18 @@ public sealed record AgentResponse
     /// "evidence_or_count_requirements_unmet".
     /// </summary>
     public string? CompletionStopReason { get; init; }
+
+    /// <summary>
+    /// High-level workflow completion reason used by checklist/confidence runs.
+    /// Null when workflow orchestration is not enabled.
+    /// </summary>
+    public CompletionReason? WorkflowCompletionReason { get; init; }
+
+    /// <summary>
+    /// User-facing confidence band for workflow-enabled runs.
+    /// Null when confidence evaluation is disabled.
+    /// </summary>
+    public string? WorkflowConfidenceBand { get; init; }
 
     public static AgentResponse FromError(string error) => new()
     {

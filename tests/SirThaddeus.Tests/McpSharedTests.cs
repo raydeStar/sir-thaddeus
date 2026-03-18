@@ -10,7 +10,7 @@ namespace SirThaddeus.Tests;
 //   - ToolManifest: completeness, consistency, determinism
 //   - TimeHelper: format correctness, boundary conditions
 //
-// These run on net8.0 without Windows dependencies.
+// These run on net10.0 without Windows dependencies.
 // ─────────────────────────────────────────────────────────────────────────
 
 public class ToolManifestTests

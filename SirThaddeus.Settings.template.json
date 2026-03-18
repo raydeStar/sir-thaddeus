@@ -12,9 +12,26 @@
   "audio": {
     "ttsEnabled": true
   },
+  "workflowFeatures": {
+    "retryGateTestOverrideReason": ""
+  },
   "memory": {
     "enabled": true,
     "dbPath": "auto"
+  },
+  "webSearch": {
+    "mode": "auto",
+    "searxngBaseUrl": "http://localhost:8080",
+    "searxngAutoStart": true,
+    "searxngLaunchCommand": "auto",
+    "searxngLaunchArguments": "auto",
+    "searxngStartupTimeoutMs": 120000,
+    "searchApiProvider": "searchapi",
+    "searchApiKey": "",
+    "searchApiBaseUrl": "https://www.searchapi.io/api/v1/search",
+    "searchApiEngine": "google",
+    "timeoutMs": 8000,
+    "maxResults": 5
   },
   "activePersonalityId": "helpful_default"
 }

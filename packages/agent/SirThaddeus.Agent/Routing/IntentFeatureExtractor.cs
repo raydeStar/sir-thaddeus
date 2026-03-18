@@ -548,6 +548,9 @@ public static class IntentFeatureExtractor
         if (LooksLikeSeasonEpisodePlotLookup(lower))
             return new WebLookupHeuristicEvidence(3.0, "season_episode_lookup", true, 0.96);
 
+        if (LooksLikeReleasedProductExistenceLookup(lower))
+            return new WebLookupHeuristicEvidence(3.0, "released_product_existence", true, 0.95);
+
         if (lower.Contains("web_search", StringComparison.Ordinal) ||
             lower.Contains("web search", StringComparison.Ordinal))
         {
@@ -832,6 +835,36 @@ public static class IntentFeatureExtractor
         if (ContainsAny(lower, explicitSignals))
             return true;
 
+        ReadOnlySpan<string> followUpDeepDiveSignals =
+        [
+            "pull me up more info on",
+            "pull me up more info about",
+            "bring me up more info on",
+            "bring me up more info about",
+            "tell me more about",
+            "more info on",
+            "more info about"
+        ];
+
+        if (ContainsAny(lower, followUpDeepDiveSignals))
+        {
+            ReadOnlySpan<string> businessTerms =
+            [
+                "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+                "florist", "florists", "bakery", "bakeries",
+                "bar", "pub", "store", "shop",
+                "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+                "bank", "banks", "credit union",
+                "park", "parks", "playground",
+                "hotel", "motel",
+                "gas station", "car wash", "laundromat", "salon", "barber",
+                "gym", "dentist", "clinic", "doctor", "urgent care"
+            ];
+
+            if (ContainsAny(lower, businessTerms) && !LooksLikeLocalBusinessDiscovery(lower))
+                return true;
+        }
+
         // Natural phrasing often includes "tell me when <place> is open/closed".
         var hasTellMeWhen = lower.Contains("tell me when", StringComparison.Ordinal);
         var hasWhatTime = lower.Contains("what time", StringComparison.Ordinal);
@@ -935,9 +968,12 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "bank", "banks", "credit union",
+            "park", "parks", "playground",
             "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
             "gym", "dentist", "clinic", "doctor", "urgent care"
@@ -1005,12 +1041,27 @@ public static class IntentFeatureExtractor
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",
+            "deli", "delis", "delicatessen", "delicatessens",
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "bank", "banks", "credit union",
+            "park", "parks", "playground",
             "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
-            "gym", "dentist", "clinic", "doctor", "urgent care"
+            "gym", "dentist", "clinic", "doctor", "urgent care",
+            // Popular chains / brand names that imply local business lookup.
+            "starbucks", "mcdonald", "mcdonalds", "mcdonald's",
+            "walmart", "target", "costco", "trader joe",
+            "walgreens", "cvs", "rite aid",
+            "home depot", "lowe's", "lowes",
+            "taco bell", "burger king", "wendy's", "wendys",
+            "subway", "chick-fil-a", "chipotle", "domino's", "dominos",
+            "dunkin", "panda express", "pizza hut", "papa john",
+            "whole foods", "kroger", "safeway", "albertsons",
+            "best buy", "gamestop", "petco", "petsmart",
+            "ikea", "nordstrom", "marshalls", "tj maxx",
+            "aldi", "sprouts", "fred meyer", "winco"
         ];
 
         if (!ContainsAny(lower, businessTerms))
@@ -1022,6 +1073,8 @@ public static class IntentFeatureExtractor
                lower.Contains("close by", StringComparison.Ordinal) ||
                lower.Contains("in my area", StringComparison.Ordinal) ||
                lower.Contains("around here", StringComparison.Ordinal) ||
+               lower.Contains("closest", StringComparison.Ordinal) ||
+               lower.Contains("nearest", StringComparison.Ordinal) ||
                lower.Contains("local", StringComparison.Ordinal);
     }
 
@@ -1035,6 +1088,9 @@ public static class IntentFeatureExtractor
 
         if (LooksLikeExplicitNewsLookup(lower))
             return false;
+
+        if (LooksLikeReleasedProductExistenceLookup(lower))
+            return true;
 
         if (LooksLikeIdentityLookup(lower))
             return true;
@@ -1075,6 +1131,51 @@ public static class IntentFeatureExtractor
             return true;
 
         return false;
+    }
+
+    public static bool LooksLikeReleasedProductExistenceLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasExistenceCue =
+            lower.StartsWith("does ", StringComparison.Ordinal) ||
+            lower.StartsWith("did ", StringComparison.Ordinal) ||
+            lower.Contains(" exist ", StringComparison.Ordinal) ||
+            lower.EndsWith(" exist?", StringComparison.Ordinal) ||
+            lower.Contains(" real ", StringComparison.Ordinal);
+
+        if (!hasExistenceCue)
+            return false;
+
+        ReadOnlySpan<string> releaseSignals =
+        [
+            "released product",
+            "released device",
+            "released model",
+            "officially released",
+            "ever released",
+            "shipping product",
+            "real product",
+            "real device"
+        ];
+
+        if (ContainsAny(lower, releaseSignals))
+            return true;
+
+        var hasReleaseVerb =
+            lower.Contains("released", StringComparison.Ordinal) ||
+            lower.Contains("launch", StringComparison.Ordinal) ||
+            lower.Contains("shipped", StringComparison.Ordinal) ||
+            lower.Contains("available", StringComparison.Ordinal);
+
+        var hasArtifactNoun =
+            lower.Contains("product", StringComparison.Ordinal) ||
+            lower.Contains("device", StringComparison.Ordinal) ||
+            lower.Contains("model", StringComparison.Ordinal) ||
+            lower.Contains("phone", StringComparison.Ordinal);
+
+        return hasReleaseVerb && hasArtifactNoun;
     }
 
     public static bool LooksLikeLogicPuzzlePrompt(string lower)

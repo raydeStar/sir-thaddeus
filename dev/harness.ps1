@@ -18,6 +18,13 @@ if (-not (Test-Path $ProjectPath)) {
     exit 1
 }
 
-$argsToRun = @('run', '--project', $ProjectPath, '--') + $HarnessArgs
+$effectiveHarnessArgs = if ($HarnessArgs.Count -eq 0 -or $HarnessArgs[0].StartsWith('--')) {
+    @('run') + $HarnessArgs
+}
+else {
+    $HarnessArgs
+}
+
+$argsToRun = @('run', '--project', $ProjectPath, '--') + $effectiveHarnessArgs
 & dotnet @argsToRun
 exit $LASTEXITCODE

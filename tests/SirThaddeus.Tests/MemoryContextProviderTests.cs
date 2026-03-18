@@ -1,6 +1,8 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
+using SirThaddeus.LlmClient;
+using System.Text.Json;
 
 namespace SirThaddeus.Tests;
 
@@ -32,6 +34,7 @@ public class MemoryContextProviderTests
         var result = await provider.GetContextAsync(new MemoryContextRequest
         {
             UserMessage = "hey there",
+            ConversationId = "conv-123",
             MemoryEnabled = true,
             IsColdGreeting = true,
             ActiveProfileId = "user-1",
@@ -52,6 +55,11 @@ public class MemoryContextProviderTests
         Assert.Equal(1, result.Provenance.Nuggets);
         Assert.True(result.Provenance.HasProfile);
         Assert.Contains("[PROFILE]", result.Provenance.Summary, StringComparison.Ordinal);
+
+        Assert.Single(mcp.Calls);
+        using var argsDoc = JsonDocument.Parse(mcp.Calls[0].Args);
+        Assert.True(argsDoc.RootElement.TryGetProperty("conversationId", out var conversationId));
+        Assert.Equal("conv-123", conversationId.GetString());
     }
 
     [Fact]
@@ -93,6 +101,53 @@ public class MemoryContextProviderTests
         Assert.Empty(mcp.Calls);
     }
 
+    [Fact]
+    public async Task GetContextAsync_SkipsWhenClassifierSuppressesNonGreeting()
+    {
+        var mcp = new FakeMcpClient("should-not-run");
+        var audit = new TestAuditLogger();
+        var provider = new MemoryContextProvider(
+            mcp,
+            audit,
+            new FakeSmartIntentClassifier(MemoryIntentDecision.Suppress),
+            TimeProvider.System);
+
+        var result = await provider.GetContextAsync(new MemoryContextRequest
+        {
+            UserMessage = "Hey, how are you doing today? Just wanted to say thanks for helping me out.",
+            MemoryEnabled = true,
+            IsColdGreeting = false,
+            Timeout = TimeSpan.FromMilliseconds(500)
+        });
+
+        Assert.True(result.Provenance.Skipped);
+        Assert.False(result.Provenance.Success);
+        Assert.Equal("Memory retrieve explicitly suppressed by intent classifier.", result.Provenance.Summary);
+        Assert.Empty(mcp.Calls);
+    }
+
+    [Fact]
+    public async Task GetContextAsync_SkipsUtilityTimePrompt_WithoutCallingMemoryTool()
+    {
+        var mcp = new FakeMcpClient("should-not-run");
+        var audit = new TestAuditLogger();
+        var classifier = new SmartIntentClassifier(new ThrowingLlmClient());
+        var provider = new MemoryContextProvider(mcp, audit, classifier, TimeProvider.System);
+
+        var result = await provider.GetContextAsync(new MemoryContextRequest
+        {
+            UserMessage = "What time is it right now? Tell me in one sentence.",
+            MemoryEnabled = true,
+            IsColdGreeting = false,
+            Timeout = TimeSpan.FromMilliseconds(500)
+        });
+
+        Assert.True(result.Provenance.Skipped);
+        Assert.False(result.Provenance.Success);
+        Assert.Equal("Memory retrieve explicitly suppressed by intent classifier.", result.Provenance.Summary);
+        Assert.Empty(mcp.Calls);
+    }
+
     private sealed class SlowMcpClient : IMcpToolClient
     {
         private readonly int _delayMs;
@@ -120,6 +175,25 @@ public class MemoryContextProviderTests
         private readonly MemoryIntentDecision _decision;
         public FakeSmartIntentClassifier(MemoryIntentDecision decision = MemoryIntentDecision.Unsure) => _decision = decision;
         public Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default) => Task.FromResult(_decision);
+    }
+
+    private sealed class ThrowingLlmClient : ILlmClient
+    {
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools = null,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("LLM should not be called for deterministic suppression.");
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("LLM should not be called for deterministic suppression.");
+
+        public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>("throwing-test-client");
     }
 }
 

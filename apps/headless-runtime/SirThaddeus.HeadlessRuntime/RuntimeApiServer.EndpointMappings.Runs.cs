@@ -1,0 +1,651 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using SirThaddeus.Agent;
+using SirThaddeus.Agent.Workflow;
+using SirThaddeus.AuditLog;
+using SirThaddeus.Config;
+using SirThaddeus.Contracts;
+
+internal static partial class RuntimeApiServer
+{
+    private static readonly ITaskClassifier WorkflowClassifier = new TaskClassifier();
+    private static readonly IChecklistPlanner WorkflowChecklistPlanner = new ChecklistPlanner();
+    private static readonly IConfidenceEvaluator WorkflowConfidenceEvaluator = new ConfidenceEvaluator();
+    private static readonly IRetryPlanner WorkflowRetryPlanner = new RetryPlanner();
+    private static readonly IRetryGateEvaluator WorkflowRetryGateEvaluator = new RetryGateEvaluator();
+    private static readonly ICompletionReasonResolver WorkflowCompletionReasonResolver = new CompletionReasonResolver();
+    private static readonly IProgressNarrator WorkflowNarrator = new ProgressNarrator();
+
+    private static void MapRunEndpoints(
+        WebApplication app,
+        ConcurrentDictionary<string, RunState> runs,
+        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings> getSettings,
+        ApiPermissionGate? permissionGate,
+        Action<AppSettings> persistSettings,
+        IAuditLogger audit)
+    {
+        app.MapPost("/api/session/clear", () =>
+        {
+            permissionGate?.ClearSessionGrants();
+            return Results.Ok();
+        });
+
+        app.MapPost("/api/chat", (ChatRequest request) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Prompt))
+            {
+                return Results.BadRequest("Prompt is required.");
+            }
+
+            var runId = $"run_{Guid.NewGuid():N}"[..16];
+            var state = new RunState(runId);
+            runs[runId] = state;
+
+            _ = Task.Run(async () =>
+            {
+                using var runContext = RunExecutionContext.Enter(runId);
+                try
+                {
+                    await ExecuteChatRunAsync(
+                        request,
+                        state,
+                        buildOrchestrator,
+                        getSettings,
+                        audit);
+                }
+                catch (OperationCanceledException)
+                {
+                    state.Append(RuntimeEventTypes.RunFailed, new RunFailedPayload("Cancelled", true));
+                }
+                catch (Exception ex)
+                {
+                    state.Append(RuntimeEventTypes.RunFailed, new RunFailedPayload(ex.Message, false));
+                }
+                finally
+                {
+                    state.Complete();
+                }
+            }, CancellationToken.None);
+
+            return Results.Json(new ChatStartResponse(runId, DateTimeOffset.UtcNow), JsonOptions);
+        });
+
+        app.MapPost("/api/runs/{runId}/cancel", (string runId) =>
+        {
+            if (!runs.TryGetValue(runId, out var state))
+            {
+                return Results.NotFound();
+            }
+
+            state.Cancel();
+            return Results.Json(new CancelRunResponse(runId, true), JsonOptions);
+        });
+
+        app.MapPost("/api/permissions/{requestId}/decision", (string requestId, PermissionDecisionRequest request) =>
+        {
+            if (permissionGate is null)
+            {
+                return Results.NotFound();
+            }
+
+            var applied = permissionGate.TryApplyDecision(requestId, request.Approved, request.RememberForSession, request.PersistAsAlways);
+
+            if (applied && request.Approved && request.PersistAsAlways)
+            {
+                var toolGroup = permissionGate.GetLastResolvedGroup(requestId);
+                if (toolGroup is not null)
+                {
+                    var currentSettings = getSettings();
+                    var perms = currentSettings.Mcp.Permissions;
+                    var updatedPerms = toolGroup switch
+                    {
+                        "screen" => perms with { Screen = "always" },
+                        "files" => perms with { Files = "always" },
+                        "system" => perms with { System = "always" },
+                        "web" => perms with { Web = "always" },
+                        "memoryRead" => perms with { MemoryRead = "always" },
+                        "memoryWrite" => perms with { MemoryWrite = "always" },
+                        _ => perms
+                    };
+                    if (!ReferenceEquals(perms, updatedPerms))
+                    {
+                        var updatedSettings = currentSettings with
+                        {
+                            Mcp = currentSettings.Mcp with { Permissions = updatedPerms }
+                        };
+                        persistSettings(updatedSettings);
+                    }
+                }
+            }
+
+            return Results.Json(new PermissionDecisionResponse(requestId, applied), JsonOptions);
+        });
+
+        app.MapGet("/api/runs/{runId}/events", async (string runId, HttpContext context, CancellationToken ct) =>
+        {
+            if (!runs.TryGetValue(runId, out var state))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers.Connection = "keep-alive";
+            context.Response.ContentType = "text/event-stream";
+
+            await foreach (var evt in state.StreamEventsAsync(ct))
+            {
+                var json = JsonSerializer.Serialize(evt, JsonOptions);
+                await context.Response.WriteAsync($"data: {json}\n\n", ct);
+                await context.Response.Body.FlushAsync(ct);
+            }
+        });
+    }
+
+    private static async Task ExecuteChatRunAsync(
+        ChatRequest request,
+        RunState runState,
+        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings> getSettings,
+        IAuditLogger audit)
+    {
+        var settings = getSettings();
+
+        var orchestrator = buildOrchestrator(settings);
+        if (request.Messages is { Count: > 0 })
+        {
+            orchestrator.SeedHistory(request.Messages.Select(m => (m.Role, m.Content)));
+        }
+
+        var conversationId = string.IsNullOrWhiteSpace(request.ConversationId)
+            ? request.SessionId
+            : request.ConversationId;
+
+        var workflowState = await InitializeWorkflowStateAsync(request.Prompt, settings, runState.CancellationToken);
+        PublishProgressEvent(
+            runState,
+            "task.started",
+            "Workflow run started.",
+            true,
+            null,
+            new Dictionary<string, string>
+            {
+                ["complexity"] = workflowState.Envelope.Complexity.ToString(),
+                ["showChecklist"] = workflowState.Envelope.ShowChecklist.ToString()
+            });
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 1, ChecklistItemState.InProgress, "Understanding request");
+            PublishChecklist(runState, workflowState);
+        }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.TaskStarted, runState.CancellationToken);
+
+        // Wrap with time-budget-enforcing decorator.
+        var workflowDecorator = new ChecklistAwareAgentOrchestrator(orchestrator);
+        IAgentOrchestrator effectiveOrchestrator = workflowDecorator;
+
+        var stopwatch = Stopwatch.StartNew();
+        workflowDecorator.SetRunBudget(workflowState.Envelope.TimeBudget, stopwatch);
+
+        var firstPassPrompt = request.Prompt;
+        if (ShouldForceToolBackedLookup(workflowState.Envelope, request.Prompt))
+        {
+            firstPassPrompt = BuildToolBackedLookupPrompt(request.Prompt);
+        }
+
+        var firstResponse = await effectiveOrchestrator.ProcessAsync(
+            firstPassPrompt,
+            conversationId,
+            runState.CancellationToken);
+
+        var selectedResponse = firstResponse;
+        var totalRoundTrips = firstResponse.LlmRoundTrips;
+        var totalToolCallsUsed = firstResponse.ToolCallsMade.Count;
+        ConfidenceSnapshot? firstConfidence = null;
+        ConfidenceSnapshot? selectedConfidence = null;
+        CompletionReason? completionReason = null;
+
+        CaptureEvidence(workflowState, firstResponse, "primary");
+        workflowState.DraftAnswer = firstResponse.Text;
+        workflowState.ToolCallsUsed = totalToolCallsUsed;
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 1, ChecklistItemState.Completed, "Request understood");
+            UpdateChecklistStep(workflowState, 2, ChecklistItemState.InProgress, "Gathering evidence");
+            workflowState.Checklist.CurrentPhase = "Gathering evidence";
+            PublishChecklist(runState, workflowState);
+        }
+
+        firstConfidence = WorkflowConfidenceEvaluator.Evaluate(workflowState);
+
+        workflowState.LatestConfidence = firstConfidence;
+        selectedConfidence = firstConfidence;
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 2, ChecklistItemState.Completed, "Evidence captured");
+            UpdateChecklistStep(workflowState, 3, ChecklistItemState.InProgress, "Comparing findings");
+            workflowState.Checklist.CurrentPhase = "Comparing evidence";
+            PublishChecklist(runState, workflowState);
+        }
+
+        var retryGate = WorkflowRetryGateEvaluator.Evaluate(workflowState, firstConfidence, stopwatch.Elapsed);
+        workflowState.LastRetryGateDecision = retryGate;
+
+        if (retryGate.IsAllowed)
+        {
+            var retryPlan = await WorkflowRetryPlanner.BuildRetryPlanAsync(workflowState, runState.CancellationToken);
+            var retryAction = retryPlan.FirstOrDefault();
+            var retryStrategy = retryAction?.RetryStrategy ?? "fallback_retry";
+
+            workflowState.RetriesUsed += 1;
+            workflowState.RuntimeState = TaskLifecycleState.Retrying;
+            PublishProgressEvent(
+                runState,
+                "retry.started",
+                "Confidence below threshold, starting alternate verification strategy.",
+                true,
+                workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
+                new Dictionary<string, string>
+                {
+                    ["retry"] = workflowState.RetriesUsed.ToString(),
+                    ["reason"] = "confidence_below_threshold",
+                    ["strategy"] = retryStrategy
+                });
+            await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.RetryStarted, runState.CancellationToken);
+
+            var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text, retryAction);
+            var retryResponse = await effectiveOrchestrator.ProcessAsync(
+                retryPrompt,
+                conversationId,
+                runState.CancellationToken);
+
+            totalRoundTrips += retryResponse.LlmRoundTrips;
+            totalToolCallsUsed += retryResponse.ToolCallsMade.Count;
+            workflowState.ToolCallsUsed = totalToolCallsUsed;
+
+            var retryState = new TaskRunState
+            {
+                Envelope = workflowState.Envelope,
+                Checklist = workflowState.Checklist,
+                ToolCallsUsed = totalToolCallsUsed,
+                RetriesUsed = workflowState.RetriesUsed,
+                DraftAnswer = retryResponse.Text,
+                RuntimeState = TaskLifecycleState.Retrying
+            };
+            retryState.Evidence.AddRange(workflowState.Evidence);
+            CaptureEvidence(retryState, retryResponse, "retry");
+
+            var retryConfidence = WorkflowConfidenceEvaluator.Evaluate(retryState);
+
+            if (retryConfidence.Score >= firstConfidence.Score)
+            {
+                selectedResponse = retryResponse;
+                selectedConfidence = retryConfidence;
+                workflowState.DraftAnswer = retryResponse.Text;
+            }
+
+            workflowState.LatestConfidence = selectedConfidence;
+            workflowState.Evidence.Clear();
+            workflowState.Evidence.AddRange(retryState.Evidence);
+        }
+        else
+        {
+            PublishProgressEvent(
+                runState,
+                "retry.skipped",
+                retryGate.ReasonMessage,
+                true,
+                workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
+                new Dictionary<string, string>
+                {
+                    ["reason"] = retryGate.ReasonCode,
+                    ["remainingRetries"] = retryGate.RemainingRetries.ToString(),
+                    ["remainingToolCalls"] = retryGate.RemainingToolCalls.ToString(),
+                    ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString(),
+                    ["confidenceBand"] = firstConfidence.Band,
+                    ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
+                });
+        }
+
+        completionReason = ResolveCompletionReason(
+            selectedResponse,
+            workflowState,
+            selectedConfidence,
+            stopwatch.Elapsed);
+
+        workflowState.CompletionReason = completionReason;
+        workflowState.RuntimeState = TaskLifecycleState.Finalizing;
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 3, ChecklistItemState.Completed, "Comparison complete");
+            UpdateChecklistStep(workflowState, 4, ChecklistItemState.InProgress, "Preparing answer");
+            workflowState.Checklist.CurrentPhase = "Preparing answer";
+            PublishChecklist(runState, workflowState);
+        }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Finalizing, runState.CancellationToken);
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 4, ChecklistItemState.Completed, "Answer prepared");
+            UpdateChecklistStep(workflowState, 5, ChecklistItemState.InProgress, "Delivering response");
+            workflowState.Checklist.CurrentPhase = "Delivering response";
+            PublishChecklist(runState, workflowState);
+        }
+
+        runState.Append(RuntimeEventTypes.TokenDelta, new TokenDeltaPayload(selectedResponse.Text, 0));
+        runState.Append(
+            RuntimeEventTypes.RunCompleted,
+            new RunCompletedPayload(
+                selectedResponse.Text,
+                totalRoundTrips,
+                totalToolCallsUsed,
+                ToBriefingDto(selectedResponse.DeepDiveBriefing),
+                completionReason?.ToString(),
+                selectedConfidence?.Band,
+                workflowState.LastRetryGateDecision?.IsAllowed,
+                workflowState.LastRetryGateDecision?.ReasonCode));
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 5, ChecklistItemState.Completed, "Finalized");
+            workflowState.Checklist.CurrentPhase = "Done";
+            PublishChecklist(runState, workflowState);
+        }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Completed, runState.CancellationToken);
+
+        WriteWorkflowAuditSnapshot(audit, runState.RunId, workflowState, selectedConfidence, selectedResponse);
+    }
+
+    private static void WriteWorkflowAuditSnapshot(
+        IAuditLogger audit,
+        string runId,
+        TaskRunState workflowState,
+        ConfidenceSnapshot? confidence,
+        AgentResponse response)
+    {
+        audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "WORKFLOW_RUN_SNAPSHOT",
+            Target = runId,
+            Result = response.Success ? "ok" : "error",
+            Details = new Dictionary<string, object>
+            {
+                ["task_id"] = workflowState.Envelope.TaskId,
+                ["complexity"] = workflowState.Envelope.Complexity.ToString(),
+                ["runtime_state"] = workflowState.RuntimeState.ToString(),
+                ["completion_reason"] = workflowState.CompletionReason?.ToString() ?? "unknown",
+                ["confidence_band"] = confidence?.Band ?? "n/a",
+                ["confidence_score"] = confidence?.Score ?? 0.0,
+                ["retry_gate_allowed"] = workflowState.LastRetryGateDecision?.IsAllowed is bool allowed ? allowed : "n/a",
+                ["retry_gate_reason"] = workflowState.LastRetryGateDecision?.ReasonCode ?? "n/a",
+                ["retries_used"] = workflowState.RetriesUsed,
+                ["tool_calls_used"] = workflowState.ToolCallsUsed,
+                ["checklist_phase"] = workflowState.Checklist.CurrentPhase,
+                ["checklist_items"] = workflowState.Checklist.Items
+                    .OrderBy(i => i.Order)
+                    .Select(i => new Dictionary<string, object>
+                    {
+                        ["order"] = i.Order,
+                        ["title"] = i.Title,
+                        ["state"] = i.State.ToString(),
+                        ["note"] = i.StatusNote ?? ""
+                    })
+                    .ToArray(),
+                ["event_count"] = workflowState.Events.Count,
+                ["evidence_count"] = workflowState.Evidence.Count
+            }
+        });
+    }
+
+    private static async Task<TaskRunState> InitializeWorkflowStateAsync(
+        string prompt,
+        AppSettings settings,
+        CancellationToken ct)
+    {
+        var envelope = await WorkflowClassifier.ClassifyAsync(prompt, ct);
+        envelope = new TaskEnvelope
+        {
+            TaskId = envelope.TaskId,
+            UserRequest = envelope.UserRequest,
+            Intent = envelope.Intent,
+            Complexity = envelope.Complexity,
+            NeedsTools = envelope.NeedsTools,
+            ShowChecklist = envelope.ShowChecklist,
+            TimeBudget = envelope.TimeBudget,
+            MaxRetries = envelope.MaxRetries,
+            MaxToolCalls = settings.ToolBudgets.MaxToolCallsPerTurn,
+            RetryGateOverrideReason = settings.WorkflowFeatures.RetryGateTestOverrideReason
+        };
+
+        var checklist = await WorkflowChecklistPlanner.BuildChecklistAsync(envelope, ct);
+        var state = new TaskRunState
+        {
+            Envelope = envelope,
+            Checklist = checklist,
+            RuntimeState = TaskLifecycleState.Planning
+        };
+
+        return state;
+    }
+
+    private static void CaptureEvidence(TaskRunState state, AgentResponse response, string sourceType)
+    {
+        foreach (var call in response.ToolCallsMade)
+        {
+            var resultLength = call.Result?.Length ?? 0;
+
+            // Category-based trust: docs/files > web/search > memory > default.
+            var trust = call.Success ? TrustScoreForTool(call.ToolName) : 0.28;
+
+            // Downgrade if result is suspiciously short (empty or no-data response).
+            if (call.Success && resultLength < 20)
+                trust = Math.Min(trust, 0.40);
+
+            // Relevance bonus for rich results (> 500 chars suggests substantive content).
+            var relevance = call.Success && resultLength > 500 ? 0.72 : 0.62;
+
+            state.Evidence.Add(new EvidenceRecord
+            {
+                SourceType = sourceType,
+                Title = call.ToolName,
+                Summary = call.Success
+                    ? $"Tool succeeded ({resultLength} chars)"
+                    : "Tool call failed",
+                TrustScore = trust,
+                RelevanceScore = relevance,
+                SupportsCandidateAnswer = call.Success,
+                ContradictsCandidateAnswer = !call.Success
+            });
+        }
+
+        if (response.ToolCallsMade.Count == 0)
+        {
+            // LLM-only: longer replies suggest a grounded answer rather than a stub.
+            var textLength = response.Text?.Length ?? 0;
+            var llmTrust = textLength > 200 ? 0.50 : 0.40;
+
+            state.Evidence.Add(new EvidenceRecord
+            {
+                SourceType = sourceType,
+                Title = "llm_response",
+                Summary = "Answer produced without explicit tool evidence.",
+                TrustScore = llmTrust,
+                RelevanceScore = 0.60,
+                SupportsCandidateAnswer = true,
+                ContradictsCandidateAnswer = false
+            });
+        }
+    }
+
+    /// <summary>
+    /// Returns a baseline trust score for a tool call based on its name.
+    /// Docs/file reads score highest; web/search next; memory tools lower.
+    /// </summary>
+    private static double TrustScoreForTool(string toolName)
+    {
+        var lower = (toolName ?? string.Empty).ToLowerInvariant();
+        if (lower.Contains("read") || lower.Contains("doc") || lower.Contains("file"))
+            return 0.82;
+        if (lower.Contains("search") || lower.Contains("web") || lower.Contains("fetch") || lower.Contains("browse"))
+            return 0.76;
+        if (lower.Contains("memory") || lower.Contains("recall") || lower.Contains("remember"))
+            return 0.62;
+        return 0.70;
+    }
+
+    private static CompletionReason ResolveCompletionReason(
+        AgentResponse response,
+        TaskRunState workflowState,
+        ConfidenceSnapshot? confidence,
+        TimeSpan elapsed)
+    {
+        return WorkflowCompletionReasonResolver.Resolve(response, workflowState, confidence, elapsed);
+    }
+
+    private static string BuildRetryPrompt(string originalPrompt, string firstAnswer, PlannedAction? retryAction)
+    {
+        if (retryAction is not null && !string.IsNullOrWhiteSpace(retryAction.Instruction))
+        {
+            return retryAction.Instruction;
+        }
+
+        return $"{originalPrompt}\n\n" +
+               "The previous answer may be low-confidence. Re-check with stronger evidence and explicit caveats.\n\n" +
+               $"Previous answer for verification:\n{firstAnswer}";
+    }
+
+    private static bool ShouldForceToolBackedLookup(TaskEnvelope envelope, string prompt)
+    {
+        var lower = (prompt ?? string.Empty).Trim().ToLowerInvariant();
+        if (TaskClassifier.IsWorkflowDirectAnswerPrompt(lower))
+            return false;
+
+        if (!envelope.NeedsTools)
+            return false;
+
+        if (envelope.Complexity == TaskComplexity.Trivial)
+            return false;
+
+        if (!string.Equals(envelope.Intent, "lookup", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+         return lower.Contains("hours") ||
+               lower.Contains("price") ||
+             lower.Contains("cheapest") ||
+               lower.Contains("stock") ||
+               lower.Contains("available") ||
+             lower.Contains("availability") ||
+               lower.Contains("latest") ||
+             lower.Contains("verify") ||
+             lower.Contains("compare") ||
+               lower.Contains("flight") ||
+               lower.Contains("today");
+    }
+
+    private static string BuildToolBackedLookupPrompt(string originalPrompt)
+    {
+        return $"{originalPrompt}\n\n" +
+             "Verification requirement: use web_search to gather live evidence before finalizing. " +
+             "If snippets are insufficient, use browser_navigate on one source. " +
+             "Do not answer from memory alone.";
+    }
+
+    private static void PublishChecklist(RunState runState, TaskRunState workflowState)
+    {
+        var stamp = string.Join("|", workflowState.Checklist.Items
+            .OrderBy(i => i.Order)
+            .Select(i => $"{i.Order}:{i.State}:{i.StatusNote}"));
+
+        if (string.Equals(stamp, workflowState.LastPublishedChecklistStamp, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        workflowState.LastPublishedChecklistStamp = stamp;
+
+        runState.Append(
+            RuntimeEventTypes.ChecklistUpdated,
+            new ChecklistUpdatedPayload(
+                workflowState.Checklist.TaskId,
+                workflowState.Checklist.CurrentPhase,
+                workflowState.Checklist.Items
+                    .OrderBy(i => i.Order)
+                    .Select(i => new ChecklistItemPayload(
+                        i.Id,
+                        i.Title,
+                        i.State.ToString(),
+                        i.Order,
+                        i.StatusNote))
+                    .ToArray()));
+    }
+
+    private static void PublishProgressEvent(
+        RunState runState,
+        string eventType,
+        string message,
+        bool userVisible,
+        string? relatedStepId,
+        Dictionary<string, string>? metadata = null)
+    {
+        runState.Append(
+            RuntimeEventTypes.ProgressEvent,
+            new ProgressEventPayload(eventType, message, userVisible, relatedStepId, metadata));
+    }
+
+    private static async Task PublishNarrationIfAnyAsync(
+        RunState runState,
+        TaskRunState workflowState,
+        ProgressTrigger trigger,
+        CancellationToken ct)
+    {
+        var message = await WorkflowNarrator.BuildUpdateAsync(workflowState, trigger, ct);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (string.Equals(message, workflowState.LastPublishedNarration, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        workflowState.LastPublishedNarration = message;
+
+        runState.Append(
+            RuntimeEventTypes.NarrationUpdated,
+            new NarrationUpdatedPayload(message, workflowState.Checklist.CurrentPhase));
+    }
+
+    private static void UpdateChecklistStep(TaskRunState workflowState, int order, ChecklistItemState state, string? note = null)
+    {
+        var item = workflowState.Checklist.Items.FirstOrDefault(i => i.Order == order);
+        if (item is null)
+        {
+            return;
+        }
+
+        item.State = state;
+        item.StatusNote = note;
+        var now = DateTimeOffset.UtcNow;
+        if (state == ChecklistItemState.InProgress)
+        {
+            item.StartedAt ??= now;
+        }
+        else if (state is ChecklistItemState.Completed or ChecklistItemState.Failed or ChecklistItemState.Skipped or ChecklistItemState.Blocked)
+        {
+            item.CompletedAt ??= now;
+        }
+    }
+}

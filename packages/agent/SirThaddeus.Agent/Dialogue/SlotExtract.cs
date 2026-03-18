@@ -26,8 +26,10 @@ public sealed class SlotExtract
 {
     private readonly ILlmClient _llm;
     private readonly IAuditLogger _audit;
+    private readonly TimeSpan _timeout;
 
     private const int MaxTokens = 180;
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
 
     private static readonly Regex ScopedLocationRegex = new(
         @"\b(?:in|at|for|near)\s+(?<location>.+)$",
@@ -40,10 +42,14 @@ public sealed class SlotExtract
         @"[^a-z]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public SlotExtract(ILlmClient llm, IAuditLogger audit)
+    public SlotExtract(
+        ILlmClient llm,
+        IAuditLogger audit,
+        TimeSpan? timeout = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _timeout = timeout ?? DefaultTimeout;
     }
 
     public async Task<ExtractedSlots> RunAsync(
@@ -98,6 +104,9 @@ public sealed class SlotExtract
     {
         try
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(_timeout);
+
             var system =
                 "You extract continuity slots for a local assistant. " +
                 "Return STRICT JSON only with keys: " +
@@ -122,7 +131,7 @@ public sealed class SlotExtract
                     $"message={userMessage}")
             };
 
-            var response = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: MaxTokens, cancellationToken);
+            var response = await _llm.ChatAsync(messages, tools: null, maxTokensOverride: MaxTokens, cts.Token);
             var raw = response.Content;
             if (string.IsNullOrWhiteSpace(raw))
                 return null;
@@ -132,6 +141,22 @@ public sealed class SlotExtract
                 return null;
 
             return parsed;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "DIALOGUE_SLOT_EXTRACT_FAIL",
+                Result = "error",
+                Details = new Dictionary<string, object>
+                {
+                    ["strict"] = strict,
+                    ["timed_out"] = true,
+                    ["timeout_ms"] = (int)_timeout.TotalMilliseconds
+                }
+            });
+            return null;
         }
         catch (Exception ex)
         {

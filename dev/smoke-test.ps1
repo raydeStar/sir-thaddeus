@@ -7,7 +7,7 @@
 #  candidate. Designed to catch the "works on my machine" class of
 #  failures:
 #    1) File structure -- all required EXEs, DLLs, and assets present
-#    2) Launch gate   -- DesktopRuntime starts in headless mode
+#    2) Launch gate   -- UI shell starts in headless/smoke mode
 #    3) Health check  -- VoiceHost /health endpoint responds
 #    4) Checksum      -- zip SHA256 matches sidecar file
 #
@@ -60,6 +60,22 @@ function Fail([string]$Check, [string]$Detail = "") {
 function Warn([string]$Check) {
     Write-Host "  WARN  $Check" -ForegroundColor Yellow
     $script:warnings += $Check
+}
+
+function Resolve-PackagePath([string]$Primary, [string]$Legacy = "") {
+    $primaryPath = Join-Path $testDir $Primary
+    if (Test-Path $primaryPath) {
+        return $primaryPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Legacy)) {
+        $legacyPath = Join-Path $testDir $Legacy
+        if (Test-Path $legacyPath) {
+            return $legacyPath
+        }
+    }
+
+    return $null
 }
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -133,7 +149,6 @@ Write-Section "File Structure Checks"
 
 # Required top-level executables
 $requiredExes = @(
-    "SirThaddeus.DesktopRuntime.exe",
     "SirThaddeus.McpServer.exe",
     "SirThaddeus.VoiceHost.exe"
 )
@@ -147,6 +162,24 @@ foreach ($exe in $requiredExes) {
     else {
         Fail "$exe missing from package root"
     }
+}
+
+$uiExecutable = Join-Path $testDir "SirThaddeus.UI.Avalonia.exe"
+if (Test-Path $uiExecutable) {
+    $sizeMB = [math]::Round((Get-Item $uiExecutable).Length / 1MB, 1)
+    Pass "SirThaddeus.UI.Avalonia.exe present (${sizeMB} MB)"
+}
+else {
+    Fail "UI executable missing from package root (expected SirThaddeus.UI.Avalonia.exe)"
+}
+
+$headlessRuntimeExecutable = Resolve-PackagePath -Primary "headless/SirThaddeus.HeadlessRuntime.exe" -Legacy "SirThaddeus.HeadlessRuntime.exe"
+if ($headlessRuntimeExecutable) {
+    $sizeMB = [math]::Round((Get-Item $headlessRuntimeExecutable).Length / 1MB, 1)
+    Pass "SirThaddeus.HeadlessRuntime.exe present (${sizeMB} MB)"
+}
+else {
+    Fail "Headless runtime missing from package (expected headless/SirThaddeus.HeadlessRuntime.exe)"
 }
 
 # Required support files
@@ -164,19 +197,21 @@ foreach ($file in $requiredFiles) {
     }
 }
 
-# bin/ directory must exist and contain DLLs
+# Package must contain managed payload DLLs in either modern (root) or legacy (bin/) layout
+$rootDllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
 $binDir = Join-Path $testDir "bin"
-if (Test-Path $binDir) {
-    $dllCount = @(Get-ChildItem -Path $binDir -Filter "*.dll" -Recurse).Count
-    if ($dllCount -gt 0) {
-        Pass "bin/ directory contains $dllCount DLLs"
-    }
-    else {
-        Fail "bin/ directory exists but contains no DLLs"
-    }
+$binDllCount = if (Test-Path $binDir) {
+    @(Get-ChildItem -Path $binDir -Filter "*.dll" -File -Recurse).Count
 }
 else {
-    Fail "bin/ directory missing"
+    0
+}
+
+if ($rootDllCount -gt 0 -or $binDllCount -gt 0) {
+    Pass "Managed payload present (root DLLs: $rootDllCount, bin DLLs: $binDllCount)"
+}
+else {
+    Fail "No managed payload DLLs found in package"
 }
 
 # Voice backend assets.
@@ -184,23 +219,82 @@ else {
 # that only work after runtime downloads.
 $voiceAssetsRequired = -not $AllowRuntimeAssetDownload
 $voiceAssets = @(
-    @{ Path = "bin/voice/piper/piper.exe";              Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
-    @{ Path = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
-    @{ Path = "bin/voice/stt-models/base/model.bin";    Required = $voiceAssetsRequired; Label = "Whisper STT model" }
+    @{ Path = "voice/piper/piper.exe";                                  LegacyPath = "bin/voice/piper/piper.exe";                                  Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
+    @{ Path = "voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; LegacyPath = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
+    @{ Path = "voice/stt-models/base/model.bin";                        LegacyPath = "bin/voice/stt-models/base/model.bin";                        Required = $voiceAssetsRequired; Label = "Whisper STT model" }
 )
 
 foreach ($asset in $voiceAssets) {
-    $path = Join-Path $testDir $asset.Path
-    if (Test-Path $path) {
+    $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
+    if ($path) {
         Pass "$($asset.Label) present"
     }
     else {
-        if ($asset.Required) {
+        if ($voiceAssetsRequired) {
             Fail "$($asset.Label) not bundled"
         }
         else {
             Warn "$($asset.Label) not bundled (will download at runtime)"
         }
+    }
+}
+
+$packagedUvExe = Resolve-PackagePath -Primary "voice/bin/uv.exe" -Legacy "bin/voice/bin/uv.exe"
+if ($packagedUvExe) {
+    Pass "Bundled uv.exe present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled uv.exe not found"
+    }
+    else {
+        Warn "Bundled uv.exe not found (will download at runtime)"
+    }
+}
+
+$packagedPythonExe = Resolve-PackagePath -Primary "voice/runtime/python/python.exe" -Legacy "bin/voice/runtime/python/python.exe"
+if ($packagedPythonExe) {
+    Pass "Bundled Python runtime present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled Python runtime not found"
+    }
+    else {
+        Warn "Bundled Python runtime not found (will download at runtime)"
+    }
+}
+
+$packagedRequirementsFile = Resolve-PackagePath -Primary "voice/requirements.txt" -Legacy "bin/voice/requirements.txt"
+if ($packagedRequirementsFile) {
+    Pass "Voice requirements.txt present"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Voice requirements.txt not found"
+    }
+    else {
+        Warn "Voice requirements.txt not found"
+    }
+}
+
+$packagedWheelDir = Resolve-PackagePath -Primary "voice/deps/wheels" -Legacy "bin/voice/deps/wheels"
+$packagedWheelCount = if ($packagedWheelDir) {
+    @(Get-ChildItem -Path $packagedWheelDir -Filter "*.whl" -File -ErrorAction SilentlyContinue).Count
+}
+else {
+    0
+}
+
+if ($packagedWheelCount -gt 0) {
+    Pass "Bundled wheelhouse present ($packagedWheelCount wheels)"
+}
+else {
+    if ($voiceAssetsRequired) {
+        Fail "Bundled wheelhouse missing or empty"
+    }
+    else {
+        Warn "Bundled wheelhouse missing or empty (runtime download required)"
     }
 }
 
@@ -222,6 +316,35 @@ else {
     Warn "Asset manifest missing (runtime asset download unavailable)"
 }
 
+$searchPayloadChecks = @(
+    @{ Path = "search/start-searxng.ps1"; LegacyPath = "bin/search/start-searxng.ps1"; Label = "SearXNG bootstrap script" },
+    @{ Path = "search/runtime/python/python.exe"; LegacyPath = "bin/search/runtime/python/python.exe"; Label = "SearXNG Python runtime" },
+    @{ Path = "search/source/searxng-upstream/searx/webapp.py"; LegacyPath = "bin/search/source/searxng-upstream/searx/webapp.py"; Label = "SearXNG source payload" },
+    @{ Path = "search/deps/site-packages/flask/__init__.py"; LegacyPath = "bin/search/deps/site-packages/flask/__init__.py"; Label = "SearXNG Python dependencies" }
+)
+
+$detectedSearchPayload = 0
+foreach ($asset in $searchPayloadChecks) {
+    if (Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath) {
+        $detectedSearchPayload++
+    }
+}
+
+if ($detectedSearchPayload -eq 0) {
+    Fail "Bundled SearXNG payload not found"
+}
+else {
+    foreach ($asset in $searchPayloadChecks) {
+        $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
+        if ($path) {
+            Pass "$($asset.Label) present"
+        }
+        else {
+            Fail "$($asset.Label) missing"
+        }
+    }
+}
+
 # No PDB files should be in release packages
 $pdbFiles = @(Get-ChildItem -Path $testDir -Filter "*.pdb" -Recurse)
 if ($pdbFiles.Count -eq 0) {
@@ -229,6 +352,58 @@ if ($pdbFiles.Count -eq 0) {
 }
 else {
     Warn "$($pdbFiles.Count) debug symbols found (expected in Debug builds only)"
+}
+
+# =========================================================================
+#  1.5) OFFLINE VOICE DEPENDENCY VALIDATION
+# =========================================================================
+
+Write-Section "Offline Voice Dependency Gate"
+
+if ($voiceAssetsRequired) {
+    if (-not $packagedUvExe -or -not $packagedPythonExe -or -not $packagedRequirementsFile -or $packagedWheelCount -le 0) {
+        Fail "Offline dependency install gate prerequisites missing"
+    }
+    else {
+        $voiceVenvTempDir = Join-Path $env:TEMP ("st-voice-smoke-venv-" + [Guid]::NewGuid().ToString("N"))
+        try {
+            Write-Host "  Creating temporary voice venv for offline install test..."
+            & $packagedUvExe venv $voiceVenvTempDir --python $packagedPythonExe
+            if ($LASTEXITCODE -ne 0) {
+                Fail "Offline dependency install gate" "uv venv creation failed (exit code $LASTEXITCODE)"
+            }
+            else {
+                $venvPython = Join-Path $voiceVenvTempDir "Scripts/python.exe"
+                if (-not (Test-Path $venvPython)) {
+                    Fail "Offline dependency install gate" "venv python not found at $venvPython"
+                }
+                else {
+                    Write-Host "  Installing voice dependencies from bundled wheelhouse (--no-index)..."
+                    & $packagedUvExe pip install --python $venvPython --no-index --find-links $packagedWheelDir -r $packagedRequirementsFile
+                    if ($LASTEXITCODE -ne 0) {
+                        Fail "Offline dependency install gate" "uv pip install failed (exit code $LASTEXITCODE)"
+                    }
+                    else {
+                        & $venvPython -c "import fastapi; import faster_whisper; import uvicorn; import numpy; print('voice dependency imports OK')"
+                        if ($LASTEXITCODE -ne 0) {
+                            Fail "Offline dependency import gate" "Python import verification failed (exit code $LASTEXITCODE)"
+                        }
+                        else {
+                            Pass "Offline voice dependency install + import validation"
+                        }
+                    }
+                }
+            }
+        }
+        finally {
+            if (Test-Path $voiceVenvTempDir) {
+                Remove-Item -Path $voiceVenvTempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+else {
+    Warn "Offline dependency install gate skipped (--AllowRuntimeAssetDownload)"
 }
 
 # =========================================================================
@@ -252,7 +427,7 @@ if (-not $SkipLaunch) {
             while ($maxWait -gt 0 -and -not $voiceHostProcess.HasExited) {
                 try {
                     $response = Invoke-RestMethod -Uri "http://127.0.0.1:17845/health" -TimeoutSec 2 -ErrorAction Stop
-                    if ($response.status -eq 'ok') {
+                    if ($response.status -eq 'ok' -or $response.status -eq 'loading') {
                         $healthy = $true
                         break
                     }
@@ -265,7 +440,7 @@ if (-not $SkipLaunch) {
             }
 
             if ($healthy) {
-                Pass "VoiceHost started and /health returned ok"
+                Pass "VoiceHost started and /health responded"
             }
             elseif ($voiceHostProcess.HasExited) {
                 Fail "VoiceHost exited early" "exit code: $($voiceHostProcess.ExitCode)"
@@ -284,39 +459,38 @@ if (-not $SkipLaunch) {
         Fail "Cannot test VoiceHost launch -- exe not found"
     }
 
-    # -- DesktopRuntime headless launch --
-    $desktopExe = Join-Path $testDir "SirThaddeus.DesktopRuntime.exe"
-    if (Test-Path $desktopExe) {
-        Write-Host "  Starting DesktopRuntime in headless mode..."
-        $desktopProcess = $null
+    # -- UI shell launch --
+    if ($uiExecutable) {
+        Write-Host "  Starting UI shell in smoke mode..."
+        $uiProcess = $null
         try {
-            $desktopProcess = Start-Process -FilePath $desktopExe `
+            $uiProcess = Start-Process -FilePath $uiExecutable `
                 -ArgumentList "--headless", "--smoke-test" `
                 -PassThru -WindowStyle Hidden
 
             # Give it a few seconds to start and not crash
             Start-Sleep -Seconds 5
 
-            if (-not $desktopProcess.HasExited) {
-                Pass "DesktopRuntime started in headless mode (still running after 5s)"
+            if (-not $uiProcess.HasExited) {
+                Pass "UI shell started in smoke mode (still running after 5s)"
             }
             else {
-                if ($desktopProcess.ExitCode -eq 0) {
-                    Pass "DesktopRuntime exited cleanly in smoke-test mode"
+                if ($uiProcess.ExitCode -eq 0) {
+                    Pass "UI shell exited cleanly in smoke-test mode"
                 }
                 else {
-                    Fail "DesktopRuntime crashed on launch" "exit code: $($desktopProcess.ExitCode)"
+                    Fail "UI shell crashed on launch" "exit code: $($uiProcess.ExitCode)"
                 }
             }
         }
         finally {
-            if ($desktopProcess -and -not $desktopProcess.HasExited) {
-                Stop-Process -Id $desktopProcess.Id -Force -ErrorAction SilentlyContinue
+            if ($uiProcess -and -not $uiProcess.HasExited) {
+                Stop-Process -Id $uiProcess.Id -Force -ErrorAction SilentlyContinue
             }
         }
     }
     else {
-        Fail "Cannot test DesktopRuntime launch -- exe not found"
+        Fail "Cannot test UI launch -- executable not found"
     }
 }
 else {

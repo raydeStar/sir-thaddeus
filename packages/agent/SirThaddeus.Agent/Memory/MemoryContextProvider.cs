@@ -72,6 +72,8 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             {
                 ["query"] = request.UserMessage
             };
+            if (!string.IsNullOrWhiteSpace(request.ConversationId))
+                argsObj["conversationId"] = request.ConversationId;
             var retrievalMode = request.IsColdGreeting ? "greet" : "default";
             if (request.IsColdGreeting)
                 argsObj["mode"] = "greet";

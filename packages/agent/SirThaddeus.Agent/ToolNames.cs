@@ -11,6 +11,8 @@ public static class ToolNames
 {
     public const string WebSearch           = "web_search";
     public const string WebSearchAlt        = "WebSearch";
+    public const string PlacesDiscover      = "places_discover";
+    public const string PlacesDiscoverAlt   = "PlacesDiscover";
     public const string WeatherGeocode      = "weather_geocode";
     public const string WeatherGeocodeAlt   = "WeatherGeocode";
     public const string WeatherForecast     = "weather_forecast";

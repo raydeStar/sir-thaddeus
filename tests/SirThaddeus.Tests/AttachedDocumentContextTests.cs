@@ -1,4 +1,4 @@
-using SirThaddeus.DesktopRuntime.Services;
+using SirThaddeus.UI.Avalonia;
 using Xunit;
 
 namespace SirThaddeus.Tests;

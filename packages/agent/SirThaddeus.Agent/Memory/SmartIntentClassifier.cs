@@ -1,6 +1,8 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
 
 namespace SirThaddeus.Agent.Memory;
 
@@ -19,6 +21,10 @@ public interface ISmartIntentClassifier
 public sealed class SmartIntentClassifier : ISmartIntentClassifier
 {
     private readonly ILlmClient _llm;
+    private readonly IAuditLogger? _audit;
+    private readonly TimeSpan _timeout;
+    private const int MessagePreviewLength = 80;
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMilliseconds(750);
 
     private static readonly string SystemPrompt = """
         You are a memory gating classifier. Your job is to decide whether retrieving the user's personal memories and profile will improve the quality of the answer to their request.
@@ -35,9 +41,14 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
         }
         """;
 
-    public SmartIntentClassifier(ILlmClient llm)
+    public SmartIntentClassifier(
+        ILlmClient llm,
+        IAuditLogger? audit = null,
+        TimeSpan? timeout = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
+        _audit = audit;
+        _timeout = timeout ?? DefaultTimeout;
     }
 
     public async Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default)
@@ -45,8 +56,15 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
         if (string.IsNullOrWhiteSpace(userMessage))
             return MemoryIntentDecision.Unsure;
 
+        var lower = userMessage.Trim().ToLowerInvariant();
+        if (LooksLikeDeterministicSuppress(lower))
+            return MemoryIntentDecision.Suppress;
+
         try
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_timeout);
+
             var result = await _llm.ChatAsync(
                 new[]
                 {
@@ -55,18 +73,12 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
                 },
                 tools: null,
                 maxTokensOverride: 20,
-                cancellationToken: ct);
+                cancellationToken: cts.Token);
 
             if (string.IsNullOrWhiteSpace(result.Content))
                 return MemoryIntentDecision.Unsure;
 
-            var cleaned = result.Content.Trim();
-            if (cleaned.StartsWith("```json"))
-            {
-                cleaned = cleaned.Substring(7);
-                if (cleaned.EndsWith("```"))
-                    cleaned = cleaned.Substring(0, cleaned.Length - 3);
-            }
+            var cleaned = StripCodeFence(result.Content);
 
             var doc = JsonDocument.Parse(cleaned);
             if (doc.RootElement.TryGetProperty("decision", out var prop) && prop.ValueKind == JsonValueKind.String)
@@ -76,11 +88,89 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
                     return dec;
             }
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Fallback gracefully to unsure on any parsing/LLM errors
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            WriteAudit("MEMORY_CLASSIFIER_TIMEOUT", userMessage, error: null);
+        }
+        catch (JsonException ex)
+        {
+            WriteAudit("MEMORY_CLASSIFIER_FAIL", userMessage, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            WriteAudit("MEMORY_CLASSIFIER_FAIL", userMessage, ex.Message);
         }
 
         return MemoryIntentDecision.Unsure;
+    }
+
+    private static bool LooksLikeDeterministicSuppress(string lower)
+    {
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return true;
+
+        if (UtilityRouter.TryHandle(lower) is not null)
+            return true;
+
+        if (IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower) is not null)
+            return true;
+
+        return lower.Contains("thank you", StringComparison.Ordinal) ||
+               lower.Contains("thanks for helping", StringComparison.Ordinal) ||
+               lower.Contains("just wanted to say thanks", StringComparison.Ordinal) ||
+               lower.Contains("appreciate your help", StringComparison.Ordinal);
+    }
+
+    private void WriteAudit(string action, string userMessage, string? error)
+    {
+        if (_audit is null)
+            return;
+
+        var details = new Dictionary<string, object>
+        {
+            ["timeout_ms"] = (int)_timeout.TotalMilliseconds,
+            ["message_preview"] = Truncate(userMessage, MessagePreviewLength)
+        };
+
+        if (!string.IsNullOrWhiteSpace(error))
+            details["error"] = error;
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = action,
+            Result = "error",
+            Details = details
+        });
+    }
+
+    private static string StripCodeFence(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
+            return trimmed;
+
+        var firstBreak = trimmed.IndexOf('\n');
+        if (firstBreak < 0)
+            return trimmed.Trim('`', ' ');
+
+        var inner = trimmed[(firstBreak + 1)..];
+        var closing = inner.LastIndexOf("```", StringComparison.Ordinal);
+        if (closing >= 0)
+            inner = inner[..closing];
+
+        return inner.Trim();
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            return value;
+
+        return value[..maxLength] + "...";
     }
 }

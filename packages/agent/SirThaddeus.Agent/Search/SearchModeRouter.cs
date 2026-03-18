@@ -42,9 +42,24 @@ public static class SearchModeRouter
     [
         "tell me more", "more info", "more information",
         "more detail", "more details", "more about",
+        "more on ", "bring me up", "pull me up",
         "go deeper", "dig into", "elaborate",
         "expand on", "continue", "keep going",
         "what else", "anything else", "show me"
+    ];
+
+    // "show me" is ambiguous for local-business queries (can mean
+    // "show me nearby X" as a fresh lookup). These are strong follow-up
+    // markers that should still be treated as follow-ups even when the
+    // message names a local business/entity.
+    private static readonly string[] StrongFollowUpPhrases =
+    [
+        "tell me more", "more info", "more information",
+        "more detail", "more details", "more about",
+        "more on ", "bring me up", "pull me up",
+        "go deeper", "dig into", "elaborate",
+        "expand on", "continue", "keep going",
+        "what else", "anything else"
     ];
 
     // ── "More sources" phrases (triggers MoreSources branch) ─────────
@@ -74,8 +89,9 @@ public static class SearchModeRouter
         if (string.IsNullOrWhiteSpace(lower))
             return SearchMode.WebFactFind;
 
-        // ── 1. FOLLOW_UP: referential message + recent results ───────
-        if (session.HasRecentResults(now) && IsFollowUpMessage(lower))
+        // ── 1. FOLLOW_UP: explicit phrase OR referential cue + recent results
+        if (session.HasRecentResults(now) &&
+            (IsFollowUpMessage(lower) || IsReferential(lower)))
             return SearchMode.FollowUp;
 
         // ── 2. NEWS_AGGREGATE: news-intent triggers ──────────────────
@@ -109,6 +125,14 @@ public static class SearchModeRouter
     /// </summary>
     public static bool IsFollowUpMessage(string lowerMessage)
     {
+        // Strong explicit follow-up phrases should win, even if the
+        // message contains local-business tokens like "restaurant".
+        foreach (var phrase in StrongFollowUpPhrases)
+        {
+            if (lowerMessage.Contains(phrase, StringComparison.Ordinal))
+                return true;
+        }
+
         // A direct local business search ("show me a bakery nearby") is never a follow-up, 
         // even if it starts with "show me".
         if (Routing.IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerMessage))

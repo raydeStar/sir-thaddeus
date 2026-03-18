@@ -18,6 +18,19 @@ public interface IAgentOrchestrator
     Task<AgentResponse> ProcessAsync(string userMessage, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Processes a user message with optional conversation scoping
+    /// metadata for memory retrieval/persistence.
+    /// </summary>
+    /// <param name="userMessage">The user's input text.</param>
+    /// <param name="conversationId">Conversation identifier for memory scoping.</param>
+    /// <param name="cancellationToken">Cancellation for STOP ALL or timeout.</param>
+    /// <returns>The agent's final response with audit trail.</returns>
+    Task<AgentResponse> ProcessAsync(
+        string userMessage,
+        string? conversationId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Clears the conversation history, starting a fresh session.
     /// </summary>
     void ResetConversation();

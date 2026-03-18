@@ -27,6 +27,13 @@ public class AuditLogTests : IDisposable
         {
             File.Delete(_testFilePath);
         }
+
+        foreach (var rotated in Directory.EnumerateFiles(
+                     Path.GetDirectoryName(_testFilePath) ?? Path.GetTempPath(),
+                     Path.GetFileName(_testFilePath) + ".*"))
+        {
+            File.Delete(rotated);
+        }
     }
 
     [Fact]
@@ -63,6 +70,23 @@ public class AuditLogTests : IDisposable
             var doc = JsonDocument.Parse(line);
             Assert.NotNull(doc);
         }
+    }
+
+    [Fact]
+    public void Append_DoesNotThrow_WhenFileLocked()
+    {
+        _logger.Append(new AuditEvent { Actor = "test", Action = "PRE_LOCK" });
+
+        using var lockStream = new FileStream(
+            _testFilePath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+
+        var ex = Record.Exception(() =>
+            _logger.Append(new AuditEvent { Actor = "test", Action = "LOCKED_APPEND" }));
+
+        Assert.Null(ex);
     }
 
     [Fact]
@@ -280,5 +304,37 @@ public class AuditLogTests : IDisposable
 
         // Assert - should not contain permission_token_id at all
         Assert.DoesNotContain("permission_token_id", json);
+    }
+
+    [Fact]
+    public void Append_RotatesLog_WhenSizeLimitExceeded()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"audit_rotate_{Guid.NewGuid()}.jsonl");
+        using var logger = new JsonLineAuditLogger(path, maxFileBytes: 2_048, maxArchiveFiles: 3);
+
+        for (var i = 0; i < 120; i++)
+        {
+            logger.Append(new AuditEvent
+            {
+                Actor = "test",
+                Action = "ROTATE",
+                Details = new Dictionary<string, object>
+                {
+                    ["payload"] = new string('x', 140)
+                }
+            });
+        }
+
+        Assert.True(File.Exists(path));
+        Assert.True(File.Exists(path + ".1"));
+        Assert.True(new FileInfo(path).Length <= 2_100);
+
+        File.Delete(path);
+        foreach (var rotated in Directory.EnumerateFiles(
+                     Path.GetDirectoryName(path) ?? Path.GetTempPath(),
+                     Path.GetFileName(path) + ".*"))
+        {
+            File.Delete(rotated);
+        }
     }
 }

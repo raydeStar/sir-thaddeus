@@ -2,26 +2,22 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-
-// ─────────────────────────────────────────────────────────────────────
-// MCP Server Entry Point
-//
-// Launched as a child process by the desktop runtime (or any MCP client).
-// Communicates via stdin/stdout using JSON-RPC per the MCP specification.
-// stderr is used for logging so it doesn't pollute the protocol stream.
-// ─────────────────────────────────────────────────────────────────────
+using SirThaddeus.McpServer.Tools;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Logging.AddConsole(consoleLogOptions =>
 {
-    // Route ALL logs to stderr so stdout stays clean for JSON-RPC.
     consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-builder.Services
+var mcpBuilder = builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly(typeof(MetaTools).Assembly);
+
+#if WINDOWS || NET8_0_WINDOWS10_0_19041_0
+mcpBuilder.WithToolsFromAssembly(typeof(ScreenTools).Assembly);
+#endif
 
 await builder.Build().RunAsync();

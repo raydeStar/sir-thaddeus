@@ -141,8 +141,9 @@ public class IntentClassificationTests
     public async Task ClassificationFailure_FallsBackToCasual()
     {
         using var t = TestTimer.Start(_output, "ClassificationFailure");
-        // LLM throws on EVERY call — classification fails, falls back to casual.
-        // The casual path also fails, but the error is caught at the top level.
+        // Use a non-deterministic casual prompt so the first LLM call is the
+        // classifier. If classification fails, the router should still fall
+        // back to the casual response path on the second call.
         var callCount = 0;
         var llm = new FakeLlmClient(_ =>
         {
@@ -157,7 +158,7 @@ public class IntentClassificationTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
 
-        var result = await agent.ProcessAsync("hey there!");
+        var result = await agent.ProcessAsync("tell me a joke");
 
         // Should succeed — classification failure falls back to casual
         Assert.True(result.Success);
@@ -2667,6 +2668,8 @@ internal sealed class FakeMcpClient : IMcpToolClient
                  """{"type":"object","properties":{"memoryId":{"type":"string"}},"required":["memoryId"]}"""),
         MakeTool("web_search",         "Searches the web for information",
                  """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("places_discover",    "Discovers nearby places using open data",
+             """{"type":"object","properties":{"query":{"type":"string"},"userLocationHint":{"type":"string"},"maxResults":{"type":"integer"},"radiusMeters":{"type":"integer"},"locale":{"type":"string"}},"required":["query"]}"""),
         MakeTool("places_lookup",      "Looks up place details for deep-dive briefings",
                  """{"type":"object","properties":{"query":{"type":"string"},"timezone":{"type":"string"},"locale":{"type":"string"},"userLocationHint":{"type":"string"},"maxReviewSnippets":{"type":"integer"}},"required":["query"]}"""),
         MakeTool("weather_geocode",    "Geocodes a place for weather lookup",

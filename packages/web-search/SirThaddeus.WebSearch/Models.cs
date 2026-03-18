@@ -44,6 +44,33 @@ public sealed record SearchResults
 
     /// <summary>Non-fatal issues encountered during the search.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
+
+    /// <summary>
+    /// Provider routing diagnostics collected while resolving the request.
+    /// Used for runtime audit visibility when auto mode probes or falls back.
+    /// </summary>
+    public IReadOnlyList<SearchDiagnosticEntry> Diagnostics { get; init; } = [];
+}
+
+/// <summary>
+/// A single provider-level diagnostic emitted during provider probing or search.
+/// </summary>
+public sealed record SearchDiagnosticEntry
+{
+    /// <summary>Provider name involved in the step (for example, "SearxNG").</summary>
+    public string Provider { get; init; } = "";
+
+    /// <summary>Diagnostic phase such as "probe", "search", or "fallback".</summary>
+    public string Phase { get; init; } = "";
+
+    /// <summary>Step outcome such as "available", "unavailable", "results", "no_results", or "error".</summary>
+    public string Outcome { get; init; } = "";
+
+    /// <summary>Provider-supplied message or condensed error text.</summary>
+    public string Message { get; init; } = "";
+
+    /// <summary>Number of results returned by the provider for this step.</summary>
+    public int ResultCount { get; init; }
 }
 
 /// <summary>

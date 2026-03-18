@@ -124,6 +124,27 @@ public sealed class SearchSession
     /// </summary>
     public bool LastWasLocalBusinessDiscovery { get; set; }
 
+    // ── Local business discovery grounding ───────────────────────────
+    /// <summary>
+    /// Ordered candidate titles shown to the user during the most recent
+    /// local business discovery response. Used to resolve follow-up prompts
+    /// like "more info on this one" deterministically.
+    /// </summary>
+    public List<string> LastLocalBusinessCandidateTitles { get; set; } = [];
+
+    /// <summary>
+    /// Normalized business category label used in the last discovery
+    /// response (e.g. "florists", "bakeries").
+    /// </summary>
+    public string? LastLocalBusinessLabel { get; set; }
+
+    /// <summary>
+    /// SourceId anchor for the best currently selected local business
+    /// candidate. Defaults to the first candidate when the user has not
+    /// explicitly selected one.
+    /// </summary>
+    public string? LastLocalBusinessAnchorSourceId { get; set; }
+
     // ── Story clusters (news pipeline only) ──────────────────────────
     public List<StoryCluster> LastClusters { get; set; } = [];
 
@@ -159,6 +180,34 @@ public sealed class SearchSession
         // Don't clear SelectedSourceId — UI may have set it.
     }
 
+    /// <summary>
+    /// Captures the ordered local-business candidates presented to the user
+    /// for deterministic follow-up grounding.
+    /// </summary>
+    public void RecordLocalBusinessCandidates(
+        string businessLabel,
+        IReadOnlyList<SourceItem> orderedCandidates)
+    {
+        LastLocalBusinessLabel = businessLabel;
+        LastLocalBusinessCandidateTitles = orderedCandidates
+            .Where(c => !string.IsNullOrWhiteSpace(c.Title))
+            .Select(c => c.Title.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        LastLocalBusinessAnchorSourceId = orderedCandidates.FirstOrDefault()?.SourceId;
+    }
+
+    /// <summary>
+    /// Clears local-business discovery grounding state.
+    /// </summary>
+    public void ClearLocalBusinessCandidates()
+    {
+        LastLocalBusinessCandidateTitles.Clear();
+        LastLocalBusinessLabel = null;
+        LastLocalBusinessAnchorSourceId = null;
+    }
+
     /// <summary>Appends new results without replacing existing ones.</summary>
     public void AppendResults(IReadOnlyList<SourceItem> newResults, DateTimeOffset now)
     {
@@ -183,6 +232,7 @@ public sealed class SearchSession
         LastEntityType           = null;
         LastEntityDisambiguation = null;
         LastWasLocalBusinessDiscovery = false;
+        ClearLocalBusinessCandidates();
         LastResults.Clear();
         LastClusters.Clear();
         PrimarySourceId  = null;

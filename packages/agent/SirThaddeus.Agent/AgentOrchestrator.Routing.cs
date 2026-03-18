@@ -24,7 +24,10 @@ public sealed partial class AgentOrchestrator
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
     /// </summary>
-    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(string userMessage, CancellationToken cancellationToken)
+    private async Task<MemoryContextResult> GetMemoryContextSafeAsync(
+        string userMessage,
+        string? conversationId,
+        CancellationToken cancellationToken)
     {
         if (!MemoryEnabled)
             return new MemoryContextResult();
@@ -35,6 +38,7 @@ public sealed partial class AgentOrchestrator
                 new MemoryContextRequest
                 {
                     UserMessage = userMessage,
+                    ConversationId = conversationId,
                     MemoryEnabled = MemoryEnabled,
                     IsColdGreeting = IsColdGreeting(userMessage),
                     ActiveProfileId = ActiveProfileId,
@@ -84,16 +88,38 @@ public sealed partial class AgentOrchestrator
         intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
 
-    private static bool ShouldRunFootmanForRoute(
+    /// <summary>
+    /// Decides whether the Footman LLM router should run for this request.
+    /// Uses <see cref="ActionTier"/> to enforce the authority model:
+    /// <list type="bullet">
+    ///   <item>Tier 0 (RetrievalSafeLocal): Footman always bypassed.</item>
+    ///   <item>Tier 1 (RetrievalSafeExternal): Footman bypassed when the
+    ///         deterministic signal is strong (confirmed by intent-specific
+    ///         heuristics). Runs only when confidence is low and the
+    ///         deterministic match is weak — but even then, its output is
+    ///         subject to typed-block-reason enforcement.</item>
+    ///   <item>Tier 2 (PlanComplex): Footman always runs.</item>
+    /// </list>
+    /// </summary>
+    internal static bool ShouldRunFootmanForRoute(
         RouterOutput route,
         string lowerIncoming,
         IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
     {
-        if (route.Confidence < 0.95)
+        var tier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
+
+        // Tier 0 — deterministic direct execution, no Footman.
+        if (tier == ActionTier.RetrievalSafeLocal)
+            return false;
+
+        // Tier 2 — Footman retains full authority.
+        if (tier == ActionTier.PlanComplex)
             return true;
 
-        // Strong deterministic lookup intents should bypass Footman to
-        // avoid stochastic downgrades into chat-only paths.
+        // Tier 1 — retrieval-safe-external.
+        // Bypass Footman for strong deterministic signals to prevent
+        // stochastic downgrades into chat-only paths.
+
         if (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
             IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
         {
@@ -106,6 +132,14 @@ public sealed partial class AgentOrchestrator
             return false;
         }
 
+        // Local business discovery has a strong deterministic signal:
+        // "business term + proximity cue" is unambiguous.
+        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+        {
+            return false;
+        }
+
         if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
             webEvidence.ShouldLookup &&
             webEvidence.Score >= 2.8)
@@ -113,24 +147,76 @@ public sealed partial class AgentOrchestrator
             return false;
         }
 
+        // LookupSearch follow-ups are validated by Tier-1 via
+        // IsFollowUpMessage + HasRecentSearchResults. The deterministic
+        // session context is authoritative — skip the Footman to prevent
+        // stochastic downgrades from losing web_search on follow-ups.
+        if (route.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) &&
+            Search.SearchModeRouter.IsFollowUpMessage(lowerIncoming))
+        {
+            return false;
+        }
+
+        // ScreenObserve with a confirmed screen-request signal.
+        if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming))
+        {
+            return false;
+        }
+
+        // Low-confidence Tier 1 — let Footman refine (but its downgrade
+        // authority is still limited by typed block reasons).
+        if (route.Confidence < 0.95)
+            return true;
+
+        // High-confidence Tier 1 without a matching heuristic bypass:
+        // still allow Footman to refine arguments when the route already
+        // carries web/search needs.
         if (IsLookupIntent(route.Intent))
             return true;
 
         return route.NeedsWeb || route.NeedsSearch || route.NeedsBrowserAutomation;
     }
 
-    private static bool ShouldBlockFootmanLookupDowngrade(
+    /// <summary>
+    /// Determines whether a Footman downgrade from a lookup intent to a
+    /// non-lookup intent should be blocked.
+    ///
+    /// Uses the <see cref="ActionTier"/> model:
+    /// <list type="bullet">
+    ///   <item>Tier 0/1: downgrade blocked unless the Footman provides a
+    ///         typed <see cref="FootmanBlockReason"/> that is valid for
+    ///         the tier.</item>
+    ///   <item>Tier 2: existing behavior (Footman authoritative).</item>
+    /// </list>
+    /// </summary>
+    internal static bool ShouldBlockFootmanLookupDowngrade(
         string lowerIncoming,
         RouterOutput baseRoute,
         RouterOutput footmanRoute,
-        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence)
+        IntentFeatureExtractor.WebLookupHeuristicEvidence webEvidence,
+        FootmanBlockReason blockReason = FootmanBlockReason.None)
     {
         if (!IsLookupIntent(baseRoute.Intent))
             return false;
 
+        // Footman kept it as a lookup — no downgrade, nothing to block.
         if (IsLookupIntent(footmanRoute.Intent))
             return false;
 
+        // Classify the base route to determine authority boundaries.
+        var tier = ActionTierClassifier.Classify(baseRoute, lowerIncoming, webEvidence);
+
+        // For Tier 0 and Tier 1, block the downgrade unless the Footman
+        // supplied a valid typed block reason for this tier.
+        if (tier == ActionTier.RetrievalSafeLocal ||
+            tier == ActionTier.RetrievalSafeExternal)
+        {
+            return !FootmanBlockReasonPolicy.IsValidBlockForTier(blockReason, tier);
+        }
+
+        // Tier 2 — preserve legacy heuristic blocks for important intent
+        // families (deep-dive, news, strong fact, search follow-up).
         if (baseRoute.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
             IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
         {
@@ -147,6 +233,11 @@ public sealed partial class AgentOrchestrator
             IsLookupFloorEligiblePrompt(lowerIncoming) &&
             webEvidence.ShouldLookup &&
             webEvidence.Score >= 2.8)
+        {
+            return true;
+        }
+
+        if (baseRoute.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -170,6 +261,10 @@ public sealed partial class AgentOrchestrator
 
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
             return Intents.LookupNews;
+
+        // Local business discovery is a strong deterministic signal.
+        if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+            return Intents.LookupFact;
 
         if (webEvidence.ShouldLookup && webEvidence.Score >= 2.8)
             return Intents.LookupFact;
@@ -343,6 +438,47 @@ public sealed partial class AgentOrchestrator
     // logic now lives in IntentFeatureExtractor.
     private static bool LooksLikeGreeting(string lower)
         => IntentFeatureExtractor.LooksLikeGreeting(lower);
+
+    /// <summary>
+    /// Emits a structured <c>ROUTER_DISAGREEMENT</c> audit event whenever
+    /// the deterministic router and the Footman produced different intents.
+    /// This is the primary diagnostic for investigating Footman overrides
+    /// and blocked downgrades.
+    /// </summary>
+    private void LogRouterDisagreement(
+        string userMessage,
+        RouterOutput routeBeforeFootman,
+        string footmanIntent,
+        RoutingDecision footmanDecision,
+        ActionTier actionTier,
+        string arbitrationResult)
+    {
+        try
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "ROUTER_DISAGREEMENT",
+                Result = arbitrationResult,
+                Details = new Dictionary<string, object>
+                {
+                    ["userMessage"] = Truncate(userMessage ?? "", 120),
+                    ["deterministicIntent"] = routeBeforeFootman.Intent,
+                    ["deterministicConfidence"] = routeBeforeFootman.Confidence,
+                    ["footmanIntent"] = footmanIntent,
+                    ["footmanConfidence"] = footmanDecision.Confidence,
+                    ["footmanReasonCode"] = footmanDecision.ReasonCode,
+                    ["footmanBlockReason"] = footmanDecision.BlockReason.ToString(),
+                    ["actionTier"] = actionTier.ToString(),
+                    ["arbitrationResult"] = arbitrationResult
+                }
+            });
+        }
+        catch
+        {
+            // Audit logging is best-effort; agent logic must proceed.
+        }
+    }
 
     /// <summary>
     /// Detects a "cold greeting" — the very first user message after a

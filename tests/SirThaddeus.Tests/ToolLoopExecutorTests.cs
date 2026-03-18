@@ -199,6 +199,256 @@ public class ToolLoopExecutorTests
 
     // ExistenceGuard test removed — feature was intentionally removed for latency reasons.
 
+    [Fact]
+    public async Task ExecuteAsync_WhenWeatherToolDenied_ReturnsDeterministicWeatherPermissionMessage()
+    {
+        var llm = new FakeLlmClient((_, _) => new LlmResponse
+        {
+            IsComplete = false,
+            FinishReason = "tool_calls",
+            ToolCalls =
+            [
+                new ToolCallRequest
+                {
+                    Id = "call_weather",
+                    Function = new FunctionCallDetails
+                    {
+                        Name = "weather_forecast",
+                        Arguments = """{"latitude":47.6,"longitude":-122.3}"""
+                    }
+                }
+            ]
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => """{"error":"tool call blocked: denied by user"}""",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("what's the weather")
+            ],
+            Tools = [MakeToolDefinition("weather_forecast")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal("I don't have permission to look up the weather right now.", response.Text);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenWebToolDenied_RunsBestEffortFallbackWithoutTools()
+    {
+        var llmCallCount = 0;
+        IReadOnlyList<ToolDefinition>? fallbackTools = null;
+        IReadOnlyList<ChatMessage>? fallbackMessages = null;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"nvidia latest","recency":"day"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            fallbackTools = tools;
+            fallbackMessages = messages;
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Nvidia designs GPUs and AI hardware.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => """{"error":"tool call blocked: denied by user"}""",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("what's new with nvidia?")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal("Nvidia designs GPUs and AI hardware.", response.Text);
+        Assert.Null(fallbackTools);
+        Assert.NotNull(fallbackMessages);
+        Assert.Contains(
+            fallbackMessages!,
+            m => m.Role.Equals("system", StringComparison.OrdinalIgnoreCase) &&
+                 m.Content?.Contains("Do not mention permissions", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenWebToolDeniedAndFallbackFails_ReturnsRealTimeFallbackMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((_, _) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"current stock market","recency":"day"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            throw new HttpRequestException("fallback failed");
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => """{"error":"tool call blocked: denied by user"}""",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("what happened in markets today")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal("I do not know about real-time events right now.", response.Text);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenWebToolTransportDrops_UsesBestEffortOfflineFallback()
+    {
+        var llmCallCount = 0;
+        IReadOnlyList<ToolDefinition>? fallbackTools = null;
+        IReadOnlyList<ChatMessage>? fallbackMessages = null;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"latest weather","recency":"day"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            fallbackTools = tools;
+            fallbackMessages = messages;
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Based on built-in knowledge, weather patterns vary by region.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "Error: Tool execution failed — The pipe is being closed.",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("what is the weather right now?")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal("Based on built-in knowledge, weather patterns vary by region.", response.Text);
+        Assert.Null(fallbackTools);
+        Assert.NotNull(fallbackMessages);
+        Assert.Contains(
+            fallbackMessages!,
+            m => m.Role.Equals("system", StringComparison.OrdinalIgnoreCase) &&
+                 m.Content?.Contains("tool-backed lookup is offline", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

@@ -260,10 +260,23 @@ public sealed partial class AgentOrchestrator
         try
         {
             using var doc = JsonDocument.Parse(jsonPart);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            JsonElement itemsElement;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = doc.RootElement;
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                     doc.RootElement.TryGetProperty("sources", out var sourcesElement) &&
+                     sourcesElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = sourcesElement;
+            }
+            else
+            {
                 return sources;
+            }
 
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var item in itemsElement.EnumerateArray())
             {
                 var url   = item.TryGetProperty("url", out var u) ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t) ? t.GetString() : "";
@@ -509,7 +522,7 @@ public sealed partial class AgentOrchestrator
             : WebFollowUpInstruction;
 
         var messagesForSummary = InjectModeIntoSystemPrompt(
-            _history, memoryPackText + instruction);
+            _history, SearchOrchestrator.CombineMemoryAndInstruction(memoryPackText, instruction));
         messagesForSummary.Add(ChatMessage.User(summaryInput));
 
         var response = await CallLlmWithRetrySafe(
@@ -529,7 +542,7 @@ public sealed partial class AgentOrchestrator
         {
             LogEvent("AGENT_SUMMARY_FOLLOWUP_FALLBACK",
                 "LLM summary failed — building extractive fallback");
-            text = BuildExtractiveSummaryFromContent(fullText);
+            text = BuildExtractiveSummaryFromContent(fullText, userMessage);
         }
         else
         {
@@ -577,7 +590,7 @@ public sealed partial class AgentOrchestrator
             text = "I wasn't able to generate a clean answer for that. " +
                    "Could you try asking a different way?";
 
-        _history.Add(ChatMessage.Assistant(text));
+        AppendAssistantMessage(text);
         LogEvent("AGENT_RESPONSE", text);
 
         return new AgentResponse
@@ -750,7 +763,7 @@ public sealed partial class AgentOrchestrator
         return null;
     }
 
-    private static string BuildExtractiveSummaryFromContent(string content)
+    private static string BuildExtractiveSummaryFromContent(string content, string? userMessage = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return "I fetched the source, but couldn't extract usable content.";
@@ -767,8 +780,20 @@ public sealed partial class AgentOrchestrator
         var bottomLine = lines[0];
         var details = string.Join('\n', lines.Skip(1).Take(4));
 
-        return string.IsNullOrWhiteSpace(details)
+        var body = string.IsNullOrWhiteSpace(details)
             ? $"Bottom line:\n{bottomLine}"
             : $"Bottom line:\n{bottomLine}\n\nDetails:\n{details}";
+
+        // Echo the user's question so key topic words appear in the
+        // response even when the LLM is unavailable for synthesis.
+        if (!string.IsNullOrWhiteSpace(userMessage))
+        {
+            var q = userMessage.Length > 200
+                ? userMessage[..200] + "\u2026"
+                : userMessage;
+            return $"Regarding \"{q}\":\n\n{body}";
+        }
+
+        return body;
     }
 }

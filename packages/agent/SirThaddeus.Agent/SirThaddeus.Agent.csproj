@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -16,6 +16,7 @@
     <ProjectReference Include="..\..\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
     <ProjectReference Include="..\..\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
     <ProjectReference Include="..\..\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
+    <ProjectReference Include="..\..\web-search\SirThaddeus.WebSearch\SirThaddeus.WebSearch.csproj" />
   </ItemGroup>
 
   <ItemGroup>

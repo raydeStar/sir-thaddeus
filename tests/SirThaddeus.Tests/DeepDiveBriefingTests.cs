@@ -71,13 +71,7 @@ public class DeepDiveBriefingContractTests
     public void ContractCompliance_FixtureJson_DeserializeValidateAndMapProjection()
     {
         var repoRoot = FindRepoRoot();
-        var fixturePath = Path.Combine(
-            repoRoot,
-            "apps",
-            "desktop-runtime",
-            "SirThaddeus.DesktopRuntime",
-            "Fixtures",
-            "deep_dive_place.sample.json");
+        var fixturePath = ResolveFixturePath(repoRoot, "deep_dive_place.sample.json");
 
         var json = File.ReadAllText(fixturePath);
         Assert.True(
@@ -348,5 +342,27 @@ Phone: (503) 555-9580
         }
 
         return Directory.GetCurrentDirectory();
+    }
+
+    private static string ResolveFixturePath(string repoRoot, string fileName)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(repoRoot, "tests", "SirThaddeus.Tests", "Fixtures", fileName),
+            Path.Combine(repoRoot, "LEGACY", "SirThaddeus.DesktopRuntime", "Fixtures", fileName),
+            Path.Combine(repoRoot, "apps", "desktop-runtime", "SirThaddeus.DesktopRuntime", "Fixtures", fileName)
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"Could not locate fixture '{fileName}' in expected paths.",
+            candidates[0]);
     }
 }

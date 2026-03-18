@@ -6,14 +6,17 @@ public static class CommandLineParser
 {
     public static string HelpText => """
 Usage:
-  harness run --suite <name> --mode live|replay|stub --max-iters N --min-score S [options]
-  harness record --suite <name> [options]
-  harness replay --suite <name> [options]
-  harness smoke --mode live|replay|stub [options]
+    harness run --all [options]
+    harness run --suite <name> [options]
+    harness run --category <name> [options]
+    harness run --test <id> [options]
+    harness run --suite <name> --test <id> [options]
 
 Options:
-  --suite <name>                 Suite name (directory under tools/SirThaddeus.Harness/Suites)
-  --mode <live|replay|stub>      Execution mode (command defaults may override)
+    --all                          Run every headless suite
+    --suite <name>                 Run a suite by directory name under tools/SirThaddeus.Harness/Suites
+    --category <name>              Alias for --suite
+    --test <id>                    Run a single test id; requires uniqueness unless paired with --suite
   --max-iters <N>                Max iteration count for score-gated runs (default: 1)
   --min-score <S>                Override minimum score threshold for all tests
   --allow-workspace-edits        Allow auto-iteration patch application
@@ -23,7 +26,6 @@ Options:
   --judge-timeout-ms <N>         Cursor judge wait timeout in milliseconds (default: 60000)
   --judge-required <true|false>  Hard-fail if judge output missing/invalid (default: true)
   --suites-root <path>           Override suites root directory
-  --fixtures-root <path>         Override fixtures root directory
   --artifacts-root <path>        Override artifacts root directory
   --help                         Show this help
 """;
@@ -50,19 +52,8 @@ Options:
         HarnessCommandKind command,
         IReadOnlyDictionary<string, string?> values)
     {
-        var modeRaw = GetValue(values, "mode");
-        var modeExplicitlySet = !string.IsNullOrWhiteSpace(modeRaw);
-        var requestedMode = ParseMode(modeRaw) ?? HarnessExecutionMode.Live;
-        var mode = command switch
-        {
-            HarnessCommandKind.Record => HarnessExecutionMode.Live,
-            HarnessCommandKind.Replay => HarnessExecutionMode.Replay,
-            _ => requestedMode
-        };
-
-        var suite = command == HarnessCommandKind.Smoke
-            ? "smoke"
-            : (GetValue(values, "suite") ?? "");
+        var suite = GetValue(values, "suite") ?? GetValue(values, "category") ?? "";
+        var testId = GetValue(values, "test") ?? "";
 
         var judgeMode = ParseJudgeMode(GetValue(values, "judge")) ?? HarnessJudgeMode.None;
         var maxIters = ParseInt(GetValue(values, "max-iters"), defaultValue: 1, minValue: 1, key: "max-iters");
@@ -75,10 +66,11 @@ Options:
         return new HarnessCommandOptions
         {
             Command = command,
-            Mode = mode,
-            ModeExplicitlySet = modeExplicitlySet,
+            Mode = HarnessExecutionMode.Headless,
             JudgeMode = judgeMode,
+            RunAllSuites = HasFlag(values, "all"),
             SuiteName = suite,
+            TestId = testId,
             ShowHelp = HasFlag(values, "help"),
             MaxIterations = maxIters,
             MinScoreOverride = minScore,
@@ -89,8 +81,6 @@ Options:
             JudgeRequired = judgeRequired,
             SuitesRoot = GetValue(values, "suites-root")
                          ?? Path.Combine("tools", "SirThaddeus.Harness", "Suites"),
-            FixturesRoot = GetValue(values, "fixtures-root")
-                           ?? Path.Combine("tools", "SirThaddeus.Harness", "fixtures"),
             ArtifactsRoot = GetValue(values, "artifacts-root")
                             ?? Path.Combine("artifacts", "harness")
         };
@@ -101,13 +91,17 @@ Options:
         if (options.ShowHelp)
             return;
 
-        if (string.IsNullOrWhiteSpace(options.SuiteName))
-            throw new CommandLineException("Missing required option --suite <name>.");
+        if (options.Command != HarnessCommandKind.Run)
+            throw new CommandLineException("Only the run command is supported.");
 
-        if (options.Mode == HarnessExecutionMode.Replay &&
-            options.Command == HarnessCommandKind.Record)
+        if (options.RunAllSuites && !string.IsNullOrWhiteSpace(options.SuiteName))
+            throw new CommandLineException("Use either --all or --suite/--category, not both.");
+
+        if (!options.RunAllSuites &&
+            string.IsNullOrWhiteSpace(options.SuiteName) &&
+            string.IsNullOrWhiteSpace(options.TestId))
         {
-            throw new CommandLineException("Record command cannot run in replay mode.");
+            throw new CommandLineException("Select what to run with --all, --suite/--category, or --test.");
         }
     }
 
@@ -145,27 +139,10 @@ Options:
         command = raw switch
         {
             "run" => HarnessCommandKind.Run,
-            "record" => HarnessCommandKind.Record,
-            "replay" => HarnessCommandKind.Replay,
-            "smoke" => HarnessCommandKind.Smoke,
             _ => default
         };
 
-        return raw is "run" or "record" or "replay" or "smoke";
-    }
-
-    private static HarnessExecutionMode? ParseMode(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        return raw.Trim().ToLowerInvariant() switch
-        {
-            "live" => HarnessExecutionMode.Live,
-            "replay" => HarnessExecutionMode.Replay,
-            "stub" => HarnessExecutionMode.Stub,
-            _ => throw new CommandLineException($"Invalid --mode value '{raw}'.")
-        };
+        return raw is "run";
     }
 
     private static HarnessJudgeMode? ParseJudgeMode(string? raw)

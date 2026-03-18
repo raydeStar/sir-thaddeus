@@ -14,7 +14,7 @@ namespace SirThaddeus.McpShared;
 //   - Documentation generation
 //   - Tests (verify manifest completeness and consistency)
 //
-// This is a cross-platform (net8.0) package so tests can reference it
+// This is a cross-platform (net10.0) package so tests can reference it
 // without depending on the Windows-only MCP server project.
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -234,6 +234,16 @@ public static class ToolManifest
             Permission  = "required",
             Description = "Fetches and extracts content from a specific URL.",
             Limits      = "20s timeout. Single page. Content <= 4000 chars."
+        },
+        new()
+        {
+            Name        = "places_discover",
+            Aliases     = ["PlacesDiscover"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Discovers nearby businesses and places using open OSM geocoding and Overpass data.",
+            Limits      = "Max 20 results. Radius clamped 500-20000m. Open-data provider with endpoint failover."
         },
         new()
         {

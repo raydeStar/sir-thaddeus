@@ -42,7 +42,7 @@ flowchart LR
 
 **Nuts & bolts**
 - **Projects**
-  - **Desktop runtime**: `apps/desktop-runtime/SirThaddeus.DesktopRuntime`
+  - **Desktop runtime**: `apps/ui-avalonia/SirThaddeus.UI.Avalonia`
   - **Agent**: `packages/agent/SirThaddeus.Agent`
   - **LLM client**: `packages/llm-client/SirThaddeus.LlmClient`
   - **MCP server**: `apps/mcp-server/SirThaddeus.McpServer`
@@ -56,7 +56,7 @@ flowchart LR
 
 ---
 
-## Desktop runtime (UI + wiring)
+## Avalonia runtime (UI + wiring)
 
 ```mermaid
 flowchart TD

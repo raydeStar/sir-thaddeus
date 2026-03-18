@@ -18,6 +18,16 @@ public interface IAutoMemoryExtractor
         string userMessage,
         string? activeProfileId,
         string turnId);
+
+    /// <summary>
+    /// Stores a raw conversation chunk (user or assistant text) for
+    /// future conversational recall. Non-blocking and best effort.
+    /// </summary>
+    void FireAndForgetConversationChunk(
+        string text,
+        string? conversationId,
+        string turnId,
+        string role);
 }
 
 public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
@@ -61,6 +71,42 @@ public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
             {
                 _telemetry?.RecordExtractionFailure();
                 _log?.Invoke("AUTO_MEMORY_EXTRACT_ERROR", ex.Message);
+            }
+        });
+    }
+
+    public void FireAndForgetConversationChunk(
+        string text,
+        string? conversationId,
+        string turnId,
+        string role)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var trimmedText = text.Trim();
+                if (trimmedText.Length > 4000)
+                    trimmedText = trimmedText[..4000];
+
+                var chunk = new MemoryChunk
+                {
+                    ChunkId = Guid.NewGuid().ToString("N"),
+                    SourceType = "conversation",
+                    SourceRef = BuildConversationSourceRef(conversationId),
+                    Text = $"{role}: {trimmedText}",
+                    WhenIso = DateTimeOffset.UtcNow,
+                    Sensitivity = Sensitivity.Public
+                };
+
+                await _memoryStore.StoreChunkAsync(chunk);
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke("AUTO_MEMORY_CHUNK_STORE_ERROR", ex.Message);
             }
         });
     }
@@ -204,6 +250,17 @@ public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
         var bytes = System.Text.Encoding.UTF8.GetBytes(input);
         var hashBytes = sha256.ComputeHash(bytes);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    private static string? BuildConversationSourceRef(string? conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+            return null;
+
+        var trimmed = conversationId.Trim();
+        return trimmed.StartsWith("conv:", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"conv:{trimmed}";
     }
 
     private string BuildExtractionPrompt(string userMessage)

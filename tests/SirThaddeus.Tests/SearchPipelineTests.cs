@@ -4,6 +4,7 @@ using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Tests;
 
@@ -77,6 +78,54 @@ public class SearchModeRouterTests
         var mode = SearchModeRouter.Classify(message, EmptySession(), DateTimeOffset.UtcNow);
         // No session results → can't follow up → falls through to fact find
         Assert.Equal(SearchMode.WebFactFind, mode);
+    }
+
+    [Fact]
+    public void FollowUpWithLocalBusinessEntity_StillClassifiesAsFollowUp_WhenExplicitPhrasePresent()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "bring me up more info on the godairyfree restaurant",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void LocalBusinessShowMeQuery_IsNotForcedIntoFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "show me bakeries near me",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.NotEqual(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void FollowUp_MoreOnPhrase_ClassifiesAsFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "can you bring me up more on The West Olympia Woman",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
+    }
+
+    [Fact]
+    public void FollowUp_BringMeUp_ClassifiesAsFollowUp()
+    {
+        var session = SessionWithResults();
+        var mode = SearchModeRouter.Classify(
+            "bring me up more on the moonrise bakery",
+            session,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(SearchMode.FollowUp, mode);
     }
 
     [Fact]
@@ -884,6 +933,62 @@ public class SearchOrchestratorModeHintTests
         Assert.False(result.SuppressSourceCardsUi);
         Assert.False(result.SuppressToolActivityUi);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_FactHint_DoesNotOverrideFollowUpWithRecentLocalDiscovery()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/olympia-flower-farms\",\"title\":\"These Olympia Flower Farms\",\"domain\":\"example.com\",\"snippet\":\"Directory of Olympia flower farms and florists.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            "places_lookup" => "{\"name\":\"These Olympia Flower Farms\",\"address\":\"Olympia, WA\"}",
+            "PlacesLookup" => "{\"name\":\"These Olympia Flower Farms\",\"address\":\"Olympia, WA\"}",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var discovery = await orchestrator.ExecuteAsync(
+            "show me local florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(discovery.Success);
+        Assert.True(orchestrator.Session.LastWasLocalBusinessDiscovery);
+
+        var followUp = await orchestrator.ExecuteAsync(
+            "can you pull more info up on these olympia flower farms?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(followUp.Success);
+        Assert.NotNull(followUp.DeepDiveBriefing);
+    }
 }
 
 #endregion
@@ -1278,8 +1383,8 @@ public class SearchPipelineGoldenTests
         Assert.Contains("wind", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Avg temp", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\n1.", result.Text, StringComparison.Ordinal);
-        Assert.Equal(0, result.LlmRoundTrips); // weather brief has a system pass
-        Assert.Equal(1, llmCalls);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Equal(0, llmCalls);
 
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
@@ -1586,6 +1691,362 @@ public class SearchPipelineGoldenTests
             c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("boise", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rexburg", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_NoResults_RetriesBroaderLocationQuery()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "Here are local headlines.");
+
+        var searchResult =
+            "1. Rexburg, ID budget update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/local\",\"title\":\"Rexburg, ID budget update\",\"excerpt\":\"City officials in Rexburg, ID approved the latest budget after public comment.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase))
+                return searchResult;
+
+            if (args.Contains("rexburg, id news today", StringComparison.OrdinalIgnoreCase))
+                return "No results found for Rexburg, ID news today";
+
+            return searchResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are local headlines.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_NoResults_ReturnsDeterministicNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"No results found for {args}";
+            }
+
+            return "";
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I cannot access real-time data", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("built-in reasoning", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task News_SummaryCapabilityClaim_IsRewrittenFromLiveSources()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText:
+                "I cant access your local news feed or browse the web for real-time events. " +
+                "I only have access to the documents and snippets provided in our conversation history, " +
+                "and I can use my internal knowledge base instead.");
+
+        var payload =
+            "1. Olympia school board approves budget after heated meeting\n" +
+            "2. Port of Olympia cleanup project enters next phase\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/olympia-budget\",\"title\":\"Olympia school board approves budget after heated meeting\",\"domain\":\"example.com\",\"excerpt\":\"Officials approved the next district budget after a lengthy public comment period.\"}," +
+            "{\"url\":\"https://example.com/port-cleanup\",\"title\":\"Port of Olympia cleanup project enters next phase\",\"domain\":\"example.com\",\"excerpt\":\"Crews are moving into the next stage of the waterfront cleanup effort this week.\"}]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("browse the web", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("internal knowledge base", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Olympia school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("SEARCH_RESPONSE_SANITIZED"), evt =>
+            evt.Result == "unsupported_capability_claim");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_FiltersOutNonLocalHeadlines_WhenLocalMatchesExist()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify"))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"name":"","type":"none","hint":""}""", FinishReason = "stop" };
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local news in Olympia, WA","recency":"day"}""", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = messages.Last().Content,
+                FinishReason = "stop"
+            };
+        });
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "2. Iran says Strait of Hormuz will remain closed\n" +
+            "3. Olympia school board approves budget after heated meeting\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/detroit\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"example.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}," +
+            "{\"url\":\"https://example.com/hormuz\",\"title\":\"Iran says Strait of Hormuz will remain closed\",\"domain\":\"example.com\",\"excerpt\":\"CNN reports the new Iranian leader said the strait would stay closed.\"}," +
+            "{\"url\":\"https://example.com/olympia-budget\",\"title\":\"Olympia school board approves budget after heated meeting\",\"domain\":\"example.com\",\"excerpt\":\"Officials approved the next district budget after a lengthy public comment period in Olympia.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Olympia school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Hormuz", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "city");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_NonLocalHeadlinesOnly_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "2. Iran says Strait of Hormuz will remain closed\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/detroit\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"example.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}," +
+            "{\"url\":\"https://example.com/hormuz\",\"title\":\"Iran says Strait of Hormuz will remain closed\",\"domain\":\"example.com\",\"excerpt\":\"CNN reports the new Iranian leader said the strait would stay closed.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results for Olympia, WA", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "none");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_RemoteHeadlineFromLocalOutlet_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Olympia, WA","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var payload =
+            "1. Suspect killed after synagogue attack in Detroit\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.theolympian.com/news/nation-world/article123.html\",\"title\":\"Suspect killed after synagogue attack in Detroit\",\"domain\":\"theolympian.com\",\"excerpt\":\"CBS reports a suspect was killed after a Detroit-area synagogue attack.\"}" +
+            "]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you get the local news for me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results for Olympia, WA", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detroit", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_LOCALITY_FILTER"), evt =>
+            evt.Result == "none");
+    }
+
+    [Fact]
+    public async Task News_LocalQuery_RetryBudgetExceeded_ReturnsNoResultsMessage()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "This should not be used.");
+
+        var audit = new TestAuditLogger();
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (args.Contains("rexburg, id news today", StringComparison.OrdinalIgnoreCase))
+                return "No results found for Rexburg, ID news today";
+
+            if (args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase))
+                return """{"error":"tool_budget_exceeded","budget":"max_web_pulls_per_turn","limit":3,"tool":"web_search"}""";
+
+            return "";
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("I couldn't find usable live local news results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Web search failed before returning results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("LOCAL_NEWS_QUERY_RETRY_ABORTED"), evt =>
+            evt.Result == "tool_budget_exceeded");
+    }
+
+    [Fact]
+    public async Task News_WebSearchProviderTrace_RecordsSearxngFallbackDetails()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"recent local news","recency":"day"}""",
+            summaryText: "Here are local headlines.");
+
+        var payload =
+            "1. Local update\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            """{"sources":[{"url":"https://example.com/local","title":"Local update","domain":"example.com"}],"searchDiagnostics":{"query":"Rexburg, ID news today","recency":"day","provider":"GoogleNews","bundles":[{"query":"Rexburg, ID news today","provider":"GoogleNews","resultCount":1,"errors":[],"diagnostics":[{"provider":"SearxNG","phase":"probe","outcome":"unavailable","message":"probe returned unavailable","resultCount":0},{"provider":"SearchApi","phase":"probe","outcome":"unavailable","message":"probe returned unavailable","resultCount":0},{"provider":"GoogleNews","phase":"fallback","outcome":"results","message":"returned 1 result(s)","resultCount":1}]}]}}""";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Rexburg, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the recent local news?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        var trace = Assert.Single(audit.GetByAction("WEB_SEARCH_PROVIDER_TRACE"));
+        var pathSummary = Assert.IsType<string>(trace.Details!["path_summary"]);
+        Assert.Contains("SearxNG:probe=unavailable", pathSummary, StringComparison.Ordinal);
+        Assert.Equal("GoogleNews", Assert.IsType<string>(trace.Details["provider"]));
     }
 
     [Theory]
@@ -1986,9 +2447,38 @@ public class LocalBusinessDetectionTests
                            "[{\"url\":\"https://example.com/bakeries\",\"title\":\"Best Bakeries in Olympia\",\"domain\":\"example.com\"}]";
                 }
             }
+                        if (tool.Contains("browser_navigate") || tool.Contains("BrowserNavigate"))
+                        {
+                                return "1. Left Bank Pastry\n2. Wagner's European Bakery and Cafe";
+                        }
             if (tool.Contains("places_lookup") || tool.Contains("PlacesLookup"))
             {
-                return "{\"name\":\"Left Bank Pastry\",\"address\":\"1008 4th Ave E, Olympia, WA\"}";
+                                if (args.Contains("Wagner", StringComparison.OrdinalIgnoreCase))
+                                {
+                                        return """
+                                                {
+                                                    "place": {
+                                                        "name": "Wagner's European Bakery and Cafe",
+                                                        "address": "1013 Capitol Way S, Olympia, WA",
+                                                        "rating": 4.5,
+                                                        "userRatingsTotal": 850,
+                                                        "openNow": true
+                                                    }
+                                                }
+                                                """;
+                                }
+
+                                return """
+                                        {
+                                            "place": {
+                                                "name": "Left Bank Pastry",
+                                                "address": "1008 4th Ave E, Olympia, WA",
+                                                "rating": 4.7,
+                                                "userRatingsTotal": 640,
+                                                "openNow": true
+                                            }
+                                        }
+                                        """;
             }
             return "dummy content";
         });
@@ -2010,7 +2500,8 @@ public class LocalBusinessDetectionTests
         var result2 = await agent.ProcessAsync("Show me a bakery nearby");
         Assert.True(result2.Success);
         Assert.Contains(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("bakeries nearby", result2.Text);
+        Assert.Contains("bakeries", result2.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nearby", result2.Text, StringComparison.OrdinalIgnoreCase);
 
         // Ensure the session recorded that this was a local business discovery
         var sessionFlagFound = false;
@@ -2040,6 +2531,7 @@ public class LocalBusinessDetectionTests
     [InlineData("pharmacy in my area", true)]
     [InlineData("bakery around here", true)]
     [InlineData("bakeries nearby", true)]             // -ies plural
+    [InlineData("some local delis please", true)]     // deli keyword + local cue
     [InlineData("pharmacies near me", true)]          // -ies plural
     [InlineData("groceries near me", true)]           // -ies plural
     [InlineData("find me some bakeries nearby", true)]
@@ -2051,6 +2543,697 @@ public class LocalBusinessDetectionTests
     {
         var result = IntentFeatureExtractor.HasLocalBusinessProximitySignals(input.ToLowerInvariant());
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public async Task LocalBakeryDiscovery_FiltersIrrelevantGuideResults()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.theolympian.com/west-olympia-woman\",\"title\":\"The West Olympia Woman (Community-Supported Bread)\",\"domain\":\"theolympian.com\",\"snippet\":\"She has been baking out of her home for years and sells community-supported bread.\"}," +
+            "{\"url\":\"https://example.com/dairy-free-guide\",\"title\":\"Washington Dairy-Free Restaurant Guide\",\"domain\":\"example.com\",\"snippet\":\"A statewide guide to dairy-free restaurants and dessert options.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring up some local bakeries, please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("bakery nearby", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("West Olympia Woman", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dairy-Free Restaurant Guide", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBakeryDiscovery_E2E_DropsGenericGuideHeading_AndReturnsRealBakeries()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"bakeries near me olympia wa","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/olympia-gluten-free-desserts\",\"title\":\"Where to Get Gluten-Free Desserts in Olympia\",\"domain\":\"example.com\",\"snippet\":\"A curated local dessert guide.\"}" +
+            "]";
+
+        var articleResult = """
+            Where to Get Gluten-Free Desserts in Olympia
+            1. Left Bank Pastry
+            2. Wagner's European Bakery and Cafe
+            """;
+
+        string PlaceJson(string name, string address) =>
+            $$"""
+            {
+              "place": {
+                "name": "{{name}}",
+                "address": "{{address}}",
+                "rating": 4.6,
+                "userRatingsTotal": 120,
+                "openNow": true
+              }
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => searchResult,
+            "browser_navigate" or "BrowserNavigate" => articleResult,
+            "places_lookup" or "PlacesLookup" when args.Contains("Wagner", StringComparison.OrdinalIgnoreCase)
+                => PlaceJson("Wagner's European Bakery and Cafe", "1013 Capitol Way S, Olympia, WA"),
+            "places_lookup" or "PlacesLookup"
+                => PlaceJson("Left Bank Pastry", "108 5th Ave SW, Olympia, WA"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some bakeries near me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Wagner's European Bakery", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Where to Get Gluten-Free Desserts in Olympia", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_TargetsTenResults_WithStrictThenBackfill()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var sourcesJson =
+            "[" +
+            "{\"url\":\"https://example.com/florist-1\",\"title\":\"Olympia Florist One\",\"domain\":\"example.com\",\"snippet\":\"Local florist and flower delivery\"}," +
+            "{\"url\":\"https://example.com/florist-2\",\"title\":\"Flower House Olympia\",\"domain\":\"example.com\",\"snippet\":\"Family flower shop\"}," +
+            "{\"url\":\"https://example.com/place-3\",\"title\":\"Olympia Directory 3\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-4\",\"title\":\"Olympia Directory 4\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-5\",\"title\":\"Olympia Directory 5\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-6\",\"title\":\"Olympia Directory 6\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-7\",\"title\":\"Olympia Directory 7\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-8\",\"title\":\"Olympia Directory 8\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-9\",\"title\":\"Olympia Directory 9\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-10\",\"title\":\"Olympia Directory 10\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-11\",\"title\":\"Olympia Directory 11\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-12\",\"title\":\"Olympia Directory 12\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-13\",\"title\":\"Olympia Directory 13\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-14\",\"title\":\"Olympia Directory 14\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-15\",\"title\":\"Olympia Directory 15\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-16\",\"title\":\"Olympia Directory 16\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-17\",\"title\":\"Olympia Directory 17\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-18\",\"title\":\"Olympia Directory 18\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-19\",\"title\":\"Olympia Directory 19\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-20\",\"title\":\"Olympia Directory 20\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-21\",\"title\":\"Olympia Directory 21\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}," +
+            "{\"url\":\"https://example.com/place-22\",\"title\":\"Olympia Directory 22\",\"domain\":\"example.com\",\"snippet\":\"Regional listings\"}" +
+            "]";
+
+        var searchResult = "Top local results\n<!-- SOURCES_JSON -->\n" + sourcesJson;
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("florists nearby", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        var bulletCount = Regex.Matches(result.Text, "^- \\*\\*", RegexOptions.Multiline).Count;
+        Assert.Equal(10, bulletCount);
+
+        var webCall = mcp.Calls.FirstOrDefault(c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("\"maxResults\":20", webCall.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_PrefersOpenPlacesDiscovery_OverWebSearch()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var discoverResult =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"show me florists nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[" +
+            "{\"id\":\"node:1\",\"name\":\"Fleurae\",\"address\":\"101 Capitol Way S, Olympia, WA\",\"category\":\"florist\",\"latitude\":47.0420,\"longitude\":-122.9000,\"distanceMeters\":420,\"osmUrl\":\"https://www.openstreetmap.org/node/1\",\"tags\":{\"shop\":\"florist\"}}," +
+            "{\"id\":\"node:2\",\"name\":\"Buds and Blooms\",\"address\":\"517 Washington St SE, Olympia, WA\",\"category\":\"florist\",\"latitude\":47.0411,\"longitude\":-122.8912,\"distanceMeters\":180,\"osmUrl\":\"https://www.openstreetmap.org/node/2\",\"tags\":{\"shop\":\"florist\"}}" +
+            "]," +
+            "\"errors\":[]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => discoverResult,
+            "web_search" or "WebSearch" => throw new InvalidOperationException("web_search should not run when open places discovery succeeds"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Fleurae", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Buds and Blooms", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_OpenPlacesNoResults_FallsBackToPlacesLookup()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia bakeries","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var noResultsDiscover =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"bakeries nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[]," +
+            "\"errors\":[]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => noResultsDiscover,
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            "web_search" or "WebSearch" => throw new InvalidOperationException("web_search should not run after an open places no-results response"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me bakeries nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_OpenPlacesNoResults_FallsBackToWebSearch_WhenDirectLookupIsEmpty()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var noResultsDiscover =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"bakeries nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[]," +
+            "\"errors\":[\"unsupported category mapping\"]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var webSearchResult =
+            "Downtown bakery picks\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://leftbankpastry.com\",\"title\":\"Left Bank Pastry - Bakery in Olympia, WA\",\"domain\":\"leftbankpastry.com\",\"snippet\":\"Neighborhood bakery in downtown Olympia.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => noResultsDiscover,
+            "places_lookup" or "PlacesLookup" when args.Contains("Left Bank Pastry Olympia, WA", StringComparison.OrdinalIgnoreCase) =>
+                """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            "places_lookup" or "PlacesLookup" => "{\"place\":null,\"sources\":[]}",
+            "web_search" or "WebSearch" => webSearchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_WebSearchNoResults_ReturnsNoResultsMessage()
+    {
+        // Regression: when web_search returns no results for a local
+        // business query, the pipeline used to fall through to a
+        // browser_navigate Google SERP fallback that produced a single
+        // fake source titled "Google Search". The fix skips the browser
+        // fallback entirely and returns an honest no-results message.
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local florists olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        // web_search returns the canonical no-results payload
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => "No results found for local florists olympia",
+            "WebSearch"  => "No results found for local florists olympia",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "hey thadds -- can you bring me up local florists?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Google Search", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        // browser_navigate should never have been called
+        Assert.DoesNotContain(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_WebSearchNoResults_FallsBackToPlacesLookup()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => "No results found for local bakeries olympia",
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_MissingPlacesKey_ReturnsActionableConfigurationMessage()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" or "WebSearch" => "No results found for local bakeries olympia",
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "provider": "google_places",
+                  "query": "bakeries near Olympia, WA",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Google Places provider is missing an API key", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ST_DEEPDIVE_PLACES_API_KEY", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_JunkSourcesFiltered_ReturnsNoResultsMessage()
+    {
+        // Even if sources somehow include synthetic entries like
+        // "Google Search", the junk filter in
+        // SelectLocalBusinessDiscoverySources should strip them,
+        // leaving zero real sources and triggering the no-results path.
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local florists olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        // Only junk sources in the payload
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.google.com/search?q=florists\",\"title\":\"Google Search\",\"domain\":\"google.com\",\"snippet\":\"\"}," +
+            "{\"url\":\"https://www.bing.com/search?q=florists\",\"title\":\"Bing\",\"domain\":\"bing.com\",\"snippet\":\"\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch"  => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up local florists?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Google Search", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bing", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalDeliDiscovery_UsesInlineLocationContext_WhenNoManualLocationHint()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis in Essex County, New Jersey","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/nj-deli\",\"title\":\"Town Hall Deli - South Orange, NJ\",\"domain\":\"example.com\",\"snippet\":\"Popular Essex County deli with sandwiches and breakfast.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some local delis in Essex County, New Jersey please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("deli nearby in Essex County, New Jersey", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I need a location", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FiltersOutOutOfAreaResults_WhenLocationIsKnown()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/nj-deli\",\"title\":\"Millburn Deli - Millburn, NJ\",\"domain\":\"example.com\",\"snippet\":\"Beloved Essex County deli known for giant sandwiches.\"}," +
+            "{\"url\":\"https://example.com/dc-deli\",\"title\":\"Best Delis in Washington, D.C.\",\"domain\":\"example.com\",\"snippet\":\"A roundup of delis in the nation's capital.\"}," +
+            "{\"url\":\"https://example.com/va-deli\",\"title\":\"Sterling Deli Update - Sterling, Virginia\",\"domain\":\"example.com\",\"snippet\":\"Regional deli news in Northern Virginia.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Essex County, New Jersey"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some local delis please?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Millburn Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Washington, D.C.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Sterling, Virginia", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_KeepsAmbiguousRelevantResults_WhenLocationIsKnown()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local delis near Olympia, WA","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/main-street-deli\",\"title\":\"Main Street Deli\",\"domain\":\"example.com\",\"snippet\":\"Classic sandwiches, soups, and lunch specials.\"}," +
+            "{\"url\":\"https://example.com/capitol-lunch\",\"title\":\"Capitol Lunch Counter\",\"domain\":\"example.com\",\"snippet\":\"Fresh bagels, hot pastrami, and daily deli specials.\"}," +
+            "{\"url\":\"https://example.com/market-deli\",\"title\":\"Farmhouse Market Deli\",\"domain\":\"example.com\",\"snippet\":\"Local deli counter with grab-and-go sandwiches.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up local delis?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Main Street Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Farmhouse Market Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -2083,6 +3266,7 @@ public class LocalBusinessDetectionTests
     [InlineData("brief me on the new bakery downtown")]
     [InlineData("briefing on walmart hours")]
     [InlineData("briefing for trader joe's")]
+    [InlineData("can you pull me up more info on new olympia flower shop")]
     public void LooksLikeDeepDiveLookup_MatchesBriefingSignals(string input)
     {
         var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
@@ -2097,6 +3281,71 @@ public class LocalBusinessDetectionTests
     {
         var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
         Assert.False(result, $"Expected no deep dive match for: {input}");
+    }
+
+    // ── ExtractFollowUpSubject tests ─────────────────────────────────
+
+    [Theory]
+    [InlineData("tell me more about Left Bank Pastry", "Left Bank Pastry")]
+    [InlineData("can you tell me more about New Olympia Flower Shop?", "New Olympia Flower Shop")]
+    [InlineData("can you pull me up more info on new olympia flower shop?", "new olympia flower shop")]
+    [InlineData("more info on Target", "Target")]
+    [InlineData("show me Trader Joe's", "Trader Joe's")]
+    [InlineData("brief me on the new bakery downtown", "the new bakery downtown")]
+    [InlineData("give me a brief on french market", "french market")]
+    [InlineData("create a brief about Target", "Target")]
+    public void ExtractFollowUpSubject_PrefixStripping_Works(string input, string expected)
+    {
+        var result = SearchOrchestrator.ExtractFollowUpSubject(input);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("New Olympia Flower Shop -- can you tell me more about this one?", "New Olympia Flower Shop")]
+    [InlineData("Left Bank Pastry -- tell me more", "Left Bank Pastry")]
+    [InlineData("Target — more info please?", "Target")]
+    [InlineData("Trader Joe's -- what can you tell me about this?", "Trader Joe's")]
+    [InlineData("The West Olympia Woman -- give me a brief", "The West Olympia Woman")]
+    public void ExtractFollowUpSubject_SeparatorPattern_ExtractsEntityName(string input, string expected)
+    {
+        var result = SearchOrchestrator.ExtractFollowUpSubject(input);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("this one", true)]
+    [InlineData("that one", true)]
+    [InlineData("this place", true)]
+    [InlineData("that restaurant", true)]
+    [InlineData("the first one", true)]
+    [InlineData("Left Bank Pastry", false)]
+    [InlineData("Target in Olympia", false)]
+    public void IsPronounSubjectReference_ClassifiesCorrectly(string subject, bool expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.IsPronounSubjectReference(subject));
+    }
+
+    [Theory]
+    [InlineData("New Olympia Flower Shop | Yelp", "New Olympia Flower Shop")]
+    [InlineData("Target — Google Maps", "Target")]
+    [InlineData("Left Bank Pastry - TripAdvisor", "Left Bank Pastry")]
+    [InlineData("Plain Title", "Plain Title")]
+    public void StripTitleSuffix_StripsCommonSiteSuffixes(string title, string expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.StripTitleSuffix(title));
+    }
+
+    [Theory]
+    [InlineData("can you tell me more about this one?", true)]
+    [InlineData("tell me more", true)]
+    [InlineData("more info please", true)]
+    [InlineData("give me a brief on it", true)]
+    [InlineData("elaborate on that", true)]
+    [InlineData("some random search query", false)]
+    [InlineData("new olympia flower shop", false)]
+    public void IsFollowUpFiller_ClassifiesCorrectly(string text, bool expected)
+    {
+        Assert.Equal(expected, SearchOrchestrator.IsFollowUpFiller(text.ToLowerInvariant()));
     }
 }
 
@@ -2156,3 +3405,176 @@ public class AuditedMcpToolClientBudgetTests
 }
 
 #endregion
+
+// ── Local Business Name Extraction Tests ────────────────────────────
+public class LocalBusinessNameExtractionTests
+{
+    [Fact]
+    public void ExtractBusinessNames_NumberedList_ReturnsNames()
+    {
+        var article = """
+            Best Bakeries in Olympia, WA
+            1. Left Bank Pastry
+            Incredible croissants and fresh bread daily.
+            2. The Bread Peddler
+            Known for artisan sourdough loaves.
+            3. Olympia Coffee Roasters
+            Also serves amazing pastries.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Left Bank Pastry", names);
+        Assert.Contains("The Bread Peddler", names);
+        Assert.Contains("Olympia Coffee Roasters", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_HeadingFollowedByDetails_ReturnsNames()
+    {
+        var article = """
+            Top local bakeries
+
+            Wagner's European Bakery
+            123 Main St, Olympia, WA 98501
+            Authentic German breads and pastries.
+
+            San Francisco Street Bakery
+            4.5 stars - Open now
+            Fresh sourdough and artisan bread daily.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Wagner's European Bakery", names);
+        Assert.Contains("San Francisco Street Bakery", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_SkipsGenericPhrases()
+    {
+        var article = """
+            Best Bakeries
+            1. Read More
+            2. Left Bank Pastry
+            Great bread.
+            3. Advertisement
+            4. Show More
+            5. Sweet Flour Baking Co
+            Artisan cakes.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.DoesNotContain("Read More", names);
+        Assert.DoesNotContain("Advertisement", names);
+        Assert.DoesNotContain("Show More", names);
+        Assert.Contains("Left Bank Pastry", names);
+        Assert.Contains("Sweet Flour Baking Co", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_DeduplicatesAcrossArticles()
+    {
+        var article1 = """
+            1. Left Bank Pastry
+            Great croissants.
+            2. Some Other Bakery
+            Fine bread.
+            """;
+        var article2 = """
+            1. Left Bank Pastry
+            Best pastries in town.
+            2. Third Place Bakery
+            Wonderful pies.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article1, article2], "bakeries nearby");
+
+        Assert.Single(names, n => n.Equals("Left Bank Pastry", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Some Other Bakery", names);
+        Assert.Contains("Third Place Bakery", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_CleansTrailingJunk()
+    {
+        var article = """
+            1. Wagner's Bakery - Best in Town
+            Amazing bread.
+            2. The Flour Shop (Olympia)
+            Fresh daily.
+            3. Bread & Butter Co. 4.5 stars
+            Artisan loaves.
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("Wagner's Bakery", names);
+        Assert.Contains("The Flour Shop", names);
+        Assert.Contains("Bread & Butter Co.", names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_EmptyArticles_ReturnsEmpty()
+    {
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [], "bakeries nearby");
+        Assert.Empty(names);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_NoMatchableContent_ReturnsEmpty()
+    {
+        var article = "This is just a paragraph about the history of bread baking in the Pacific Northwest.";
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+        Assert.Empty(names);
+    }
+
+    /// <summary>
+    /// Regression: "Bakeries in Olympia, WA - The Real Yellow Pages" must be
+    /// caught as an aggregator and must not survive title extraction.
+    /// </summary>
+    [Fact]
+    public void YellowPagesAggregator_DetectedAndRejected()
+    {
+        var source = new SourceItem
+        {
+            Url   = "https://www.realyellowpages.com/olympia-wa/bakeries",
+            Title = "Bakeries in Olympia, WA - The Real Yellow Pages"
+        };
+
+        // Should be recognized as an aggregator directory source.
+        Assert.True(SearchOrchestrator.IsDirectoryAggregatorSource(source));
+
+        // Even if extraction were attempted, the title must be rejected
+        // (the name after stripping is "Bakeries in Olympia, WA" which
+        // starts with the category label).
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            source.Title, "can you bring me up some local bakeries please?");
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_FiltersGenericListingHeadings()
+    {
+        var article = """
+            - San Francisco Street Bakery
+            - Local Bakery Locations in Olympia, Washington
+            - Grocery Hours
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("San Francisco Street Bakery", names);
+        Assert.DoesNotContain("Local Bakery Locations in Olympia, Washington", names);
+        Assert.DoesNotContain("Grocery Hours", names);
+    }
+}

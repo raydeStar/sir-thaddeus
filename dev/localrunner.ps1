@@ -11,6 +11,100 @@ Write-Host "  Sir Thaddeus Local Runner"
 Write-Host "══════════════════════════════════════════════════════════════"
 
 $DebugMode = $args -contains "--debug"
+$TerminalMode = $args -contains "--terminal"
+$ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" })
+$ToolsRequested = $ForwardArgs -contains "--tools"
+
+function Test-ProjectAssetsPresent {
+    param([string]$ProjectPath)
+
+    $projectDir = Split-Path -Parent $ProjectPath
+    $assetsPath = Join-Path $projectDir "obj\project.assets.json"
+    return Test-Path $assetsPath
+}
+
+function Invoke-ProjectBuild {
+    param(
+        [string]$ProjectPath,
+        [string]$Label
+    )
+
+    $buildArgs = @("build", $ProjectPath, "-m:1", "-v", "q")
+    if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+        $buildArgs += "--no-restore"
+    }
+
+    & dotnet @buildArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      Retrying $Label build with verbose output..." -ForegroundColor DarkYellow
+
+        $retryArgs = @("build", $ProjectPath, "-m:1", "-v", "m")
+        if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+            $retryArgs += "--no-restore"
+        }
+
+        & dotnet @retryArgs
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nERROR: $Label build failed." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+
+function Stop-RepoOwnedPortListeners {
+    param(
+        [string]$RepoRootPath,
+        [int[]]$Ports
+    )
+
+    foreach ($port in $Ports) {
+        $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+
+            foreach ($listenerPid in $listeners) {
+                $proc = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+            if (-not $proc) {
+                continue
+            }
+
+                $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
+            $details = @(
+                $proc.ProcessName,
+                $processInfo.ExecutablePath,
+                $processInfo.CommandLine
+            ) -join " "
+
+            if ($details -like "*$RepoRootPath*" -or $details -like "*SirThaddeus*" -or $details -like "*voice-backend*") {
+                    Write-Host "      Releasing port $port from PID $listenerPid ($($proc.ProcessName))..." -ForegroundColor DarkGray
+                    Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                    Write-Host "      Leaving unrelated listener on port ${port}: PID $listenerPid ($($proc.ProcessName))." -ForegroundColor DarkYellow
+            }
+        }
+    }
+}
+
+function Stop-ExistingInstances {
+    param([string]$RepoRootPath)
+
+    Write-Host "`n[0/5] Stopping any existing instances of Sir Thaddeus..." -ForegroundColor Yellow
+    $processesToKill = @("SirThaddeus.McpServer", "SirThaddeus.VoiceHost", "SirThaddeus.HeadlessRuntime", "SirThaddeus.UI.Avalonia")
+    foreach ($procName in $processesToKill) {
+        $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
+        if ($procs) {
+            Write-Host "      Killing $procName..." -ForegroundColor DarkGray
+            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Release orphaned listeners, but only when they belong to this repo/toolchain.
+    # Include runtime API ports so stale external dotnet hosts are not reused.
+    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRootPath -Ports @(5378, 5391, 8001, 17845)
+}
+
+Stop-ExistingInstances -RepoRootPath $RepoRoot
 
 function Ensure-LocalVoiceAssets {
     param([string]$RepoRootPath)
@@ -69,17 +163,17 @@ function Repair-StaleVoiceSessionState {
 
     try {
         $json = Get-Content $sessionPath -Raw | ConvertFrom-Json
-        $pid = $json.pid
-        if ($null -eq $pid -or $pid -le 0) {
+        $sessionPid = $json.pid
+        if ($null -eq $sessionPid -or $sessionPid -le 0) {
             Remove-Item -Force $sessionPath -ErrorAction SilentlyContinue
             Write-Host "      Cleared stale voicehost-session.json (null pid)." -ForegroundColor DarkGray
             return
         }
 
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $proc = Get-Process -Id $sessionPid -ErrorAction SilentlyContinue
         if (-not $proc) {
             Remove-Item -Force $sessionPath -ErrorAction SilentlyContinue
-            Write-Host "      Cleared stale voicehost-session.json (dead pid $pid)." -ForegroundColor DarkGray
+            Write-Host "      Cleared stale voicehost-session.json (dead pid $sessionPid)." -ForegroundColor DarkGray
         }
     }
     catch {
@@ -87,9 +181,178 @@ function Repair-StaleVoiceSessionState {
     }
 }
 
+function Get-LocalSearxngSidecarStatus {
+    param([string]$RepoRootPath)
+
+    $packageRoots = @(
+        (Join-Path $RepoRootPath "apps/searxng/package"),
+        (Join-Path $RepoRootPath "artifacts/searxng/win-x64/package")
+    )
+
+    foreach ($packageRoot in $packageRoots) {
+        $startScript = Join-Path $packageRoot "start-searxng.ps1"
+        $pythonExe = Join-Path $packageRoot "runtime/python/python.exe"
+        $depsRoot = Join-Path $packageRoot "deps/site-packages"
+        $sourceRoot = Join-Path $packageRoot "source/searxng-upstream/searx/webapp.py"
+
+        if ((Test-Path $startScript) -and (Test-Path $pythonExe) -and (Test-Path $depsRoot) -and (Test-Path $sourceRoot)) {
+            return [pscustomobject]@{
+                Ready = $true
+                PackageRoot = $packageRoot
+                StartScript = $startScript
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Ready = $false
+        PackageRoot = ""
+        StartScript = ""
+    }
+}
+
+function Ensure-LocalSearxngSidecar {
+    param([string]$RepoRootPath)
+
+    $buildScript = Join-Path $RepoRootPath "dev/build-searxng-package.ps1"
+    $status = Get-LocalSearxngSidecarStatus -RepoRootPath $RepoRootPath
+    if ($status.Ready) {
+        return $status
+    }
+
+    if (-not (Test-Path $buildScript)) {
+        Write-Host "      WARN: missing $buildScript; cannot build bundled SearXNG sidecar." -ForegroundColor Yellow
+        return $status
+    }
+
+    Write-Host "      Missing SearXNG sidecar payload. Building..." -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      WARN: failed to build bundled SearXNG sidecar (exit $LASTEXITCODE)." -ForegroundColor Yellow
+    }
+
+    return (Get-LocalSearxngSidecarStatus -RepoRootPath $RepoRootPath)
+}
+
+function Get-WebSearchRuntimeInfo {
+    $settingsPath = Join-Path $env:LOCALAPPDATA "SirThaddeus\settings.json"
+    $mode = "auto"
+    $autoStart = $true
+    $baseUrl = "http://localhost:8080"
+
+    if (Test-Path $settingsPath) {
+        try {
+            $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            $webSearchProperty = $settings.PSObject.Properties['webSearch']
+            if ($null -ne $webSearchProperty -and $null -ne $webSearchProperty.Value) {
+                $webSearch = $webSearchProperty.Value
+
+                $modeProperty = $webSearch.PSObject.Properties['mode']
+                if ($null -ne $modeProperty -and
+                    -not [string]::IsNullOrWhiteSpace([string]$modeProperty.Value)) {
+                    $mode = [string]$modeProperty.Value
+                }
+
+                $baseUrlProperty = $webSearch.PSObject.Properties['searxngBaseUrl']
+                if ($null -ne $baseUrlProperty -and
+                    -not [string]::IsNullOrWhiteSpace([string]$baseUrlProperty.Value)) {
+                    $baseUrl = [string]$baseUrlProperty.Value
+                }
+
+                $autoStartProperty = $webSearch.PSObject.Properties['searxngAutoStart']
+                if ($null -ne $autoStartProperty -and $null -ne $autoStartProperty.Value) {
+                    $autoStart = [bool]$autoStartProperty.Value
+                }
+            }
+        }
+        catch {
+            Write-Host "      WARN: failed to read web search settings from $settingsPath." -ForegroundColor Yellow
+        }
+    }
+
+    return [pscustomobject]@{
+        SettingsPath = $settingsPath
+        Mode = $mode
+        AutoStart = $autoStart
+        BaseUrl = $baseUrl
+    }
+}
+
+function Test-HttpUrlReachable {
+    param([string]$Url)
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return $false
+    }
+
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 2 -ErrorAction Stop
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Write-SearxngStartupExpectation {
+    param(
+        [bool]$IsTerminalMode,
+        [bool]$IsToolsRequested,
+        $RuntimeInfo,
+        $SidecarStatus
+    )
+
+    $healthUrl = ($RuntimeInfo.BaseUrl.TrimEnd('/') + "/search?q=thaddeus&format=json")
+    $healthText = if (Test-HttpUrlReachable -Url $healthUrl) { "reachable" } else { "not reachable yet" }
+    $sidecarText = if ($SidecarStatus.Ready) {
+        "ready ($($SidecarStatus.StartScript))"
+    }
+    else {
+        "missing"
+    }
+
+    Write-Host "      Web search mode: $($RuntimeInfo.Mode)" -ForegroundColor DarkGray
+    Write-Host "      SearXNG auto-start: $(if ($RuntimeInfo.AutoStart) { 'enabled' } else { 'disabled' })" -ForegroundColor DarkGray
+    Write-Host "      SearXNG base URL: $($RuntimeInfo.BaseUrl) ($healthText)" -ForegroundColor DarkGray
+    Write-Host "      SearXNG sidecar: $sidecarText" -ForegroundColor DarkGray
+
+    if ($IsTerminalMode) {
+        Write-Host "      Tools flag: $(if ($IsToolsRequested) { 'enabled (--tools)' } else { 'disabled' })" -ForegroundColor DarkGray
+        if (-not $IsToolsRequested) {
+            Write-Host "      SearXNG startup: not expected in terminal mode without --tools." -ForegroundColor Yellow
+            return
+        }
+    }
+    else {
+        Write-Host "      Runtime launch: UI-managed background runtime" -ForegroundColor DarkGray
+    }
+
+    $mode = [string]$RuntimeInfo.Mode
+    if ([string]::IsNullOrWhiteSpace($mode)) {
+        $mode = "auto"
+    }
+    $mode = $mode.ToLowerInvariant()
+    if ($mode -notin @("auto", "searxng")) {
+        Write-Host "      SearXNG startup: skipped because webSearch.mode='$($RuntimeInfo.Mode)' does not use SearXNG." -ForegroundColor Yellow
+        return
+    }
+
+    if (-not $RuntimeInfo.AutoStart) {
+        Write-Host "      SearXNG startup: skipped because webSearch.searxngAutoStart is disabled." -ForegroundColor Yellow
+        return
+    }
+
+    if (-not $SidecarStatus.Ready) {
+        Write-Host "      SearXNG startup: expected by runtime, but the sidecar payload is still missing." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "      SearXNG startup: expected in the background; it will not open a separate window." -ForegroundColor Cyan
+}
+
 # 1. Bootstrap (Restores dependencies, validates SDK)
 Write-Host "`n[1/5] Bootstrapping environment..." -ForegroundColor Yellow
-& "$PSScriptRoot\bootstrap.ps1"
+& "$PSScriptRoot\bootstrap.ps1" -SkipRestore
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nERROR: Bootstrap failed. Cannot start application." -ForegroundColor Red
     exit $LASTEXITCODE
@@ -99,33 +362,23 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "`n[2/5] Checking local voice assets/session state..." -ForegroundColor Yellow
 Ensure-LocalVoiceAssets -RepoRootPath $RepoRoot
 Repair-StaleVoiceSessionState
+$SearxngSidecarStatus = Ensure-LocalSearxngSidecar -RepoRootPath $RepoRoot
+$SearxngRuntimeInfo = Get-WebSearchRuntimeInfo
 
-# 3. Build VoiceHost & MCP Server (DesktopRuntime doesn't reference them directly)
+# 3. Build VoiceHost & MCP Server (UI/terminal hosts don't directly reference them)
 Write-Host "`n[3/5] Building VoiceHost..." -ForegroundColor Yellow
 $VoiceHostPath = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
-& dotnet build $VoiceHostPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: VoiceHost build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+Invoke-ProjectBuild -ProjectPath $VoiceHostPath -Label "VoiceHost"
 
 Write-Host "`n[4/5] Building MCP Server..." -ForegroundColor Yellow
 $McpServerPath = Join-Path $RepoRoot "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"
-& dotnet build $McpServerPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: MCP Server build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+Invoke-ProjectBuild -ProjectPath $McpServerPath -Label "MCP Server"
 
 # 5. Preparation & Execution
 if ($DebugMode) {
     Write-Host "`n[5/5] DEBUG MODE: Cleaning up existing background processes..." -ForegroundColor Cyan
     Stop-Process -Name "SirThaddeus.VoiceHost" -Force -ErrorAction SilentlyContinue
-    
-    foreach ($p in @(8001, 17845)) {
-        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
-        if ($conn) { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }
-    }
+    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRoot -Ports @(8001, 17845)
 
     Write-Host "      Launching backend services in separate windows..." -ForegroundColor Cyan
     
@@ -152,24 +405,34 @@ if ($DebugMode) {
     }
 
     Write-Host "      Backend logs are now visible in dedicated windows." -ForegroundColor DarkGray
-    Write-Host "      Starting Desktop Runtime..." -ForegroundColor Yellow
+    Write-Host "      Starting runtime host..." -ForegroundColor Yellow
 }
 else {
-    Write-Host "`n[5/5] Starting Sir Thaddeus (Desktop Runtime)..." -ForegroundColor Yellow
+    Write-Host "`n[5/5] Starting Sir Thaddeus..." -ForegroundColor Yellow
     Write-Host "      VoiceHost and Backend services will auto-start as needed." -ForegroundColor DarkGray
     Write-Host "      (Use --debug to see background service logs in separate windows)" -ForegroundColor DarkGray
 }
 
-$ProjectPath = Join-Path $RepoRoot "apps/desktop-runtime/SirThaddeus.DesktopRuntime/SirThaddeus.DesktopRuntime.csproj"
-# Keep startup snappy: rely on normal incremental build.
-& dotnet build $ProjectPath -v q
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`nERROR: DesktopRuntime build failed." -ForegroundColor Red
-    exit $LASTEXITCODE
+$ProjectPath = if ($TerminalMode) {
+    Join-Path $RepoRoot "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj"
+}
+else {
+    Join-Path $RepoRoot "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
 }
 
+if ($TerminalMode) {
+    Write-Host "      Mode: terminal (headless runtime)" -ForegroundColor Cyan
+}
+else {
+    Write-Host "      Mode: Avalonia UI" -ForegroundColor Cyan
+}
+Write-SearxngStartupExpectation -IsTerminalMode:$TerminalMode -IsToolsRequested:$ToolsRequested -RuntimeInfo $SearxngRuntimeInfo -SidecarStatus $SearxngSidecarStatus
+
+# Keep startup snappy: rely on normal incremental build.
+Invoke-ProjectBuild -ProjectPath $ProjectPath -Label "startup project"
+
 try {
-    & dotnet run --project $ProjectPath --no-build -- $args
+    & dotnet run --project $ProjectPath --no-build -- $ForwardArgs
 }
 finally {
     if ($DebugMode) {

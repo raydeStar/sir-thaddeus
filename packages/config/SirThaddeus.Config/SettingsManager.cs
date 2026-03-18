@@ -134,6 +134,21 @@ public static class SettingsManager
             var normalized = Normalize(loaded);
             if (requiresMigration)
             {
+                // v2 → v3: Raise web-pull budget from old default (3) to new (8)
+                // so the local-business enrichment pipeline has room for
+                // places_lookup calls after web_search + article fetches.
+                if (loaded.SchemaVersion <= 2 &&
+                    normalized.ToolBudgets.MaxWebPullsPerTurn == 3)
+                {
+                    normalized = normalized with
+                    {
+                        ToolBudgets = normalized.ToolBudgets with
+                        {
+                            MaxWebPullsPerTurn = 8
+                        }
+                    };
+                }
+
                 normalized = normalized with
                 {
                     SchemaVersion = AppSettings.CurrentSchemaVersion
@@ -221,6 +236,7 @@ public static class SettingsManager
         var dialogue = settings.Dialogue is null ? defaults.Dialogue : settings.Dialogue;
         var runtimeSafety = settings.RuntimeSafety is null ? defaults.RuntimeSafety : settings.RuntimeSafety;
         var toolBudgets = settings.ToolBudgets is null ? defaults.ToolBudgets : settings.ToolBudgets;
+        var workflowFeatures = settings.WorkflowFeatures is null ? defaults.WorkflowFeatures : settings.WorkflowFeatures;
         var userProfile = settings.UserProfile is null ? defaults.UserProfile : settings.UserProfile;
 
         var normalizedBudgets = toolBudgets.Normalize();
@@ -239,6 +255,7 @@ public static class SettingsManager
         var normalizedLocationsByProfile = NormalizeLocationsByProfile(
             userProfile.LocationsByProfile,
             normalizedRootLocation);
+        var normalizedAliasesByProfile = NormalizeAliasesByProfile(userProfile.AliasesByProfile);
 
         var normalizedActiveProfileId = string.IsNullOrWhiteSpace(settings.ActiveProfileId)
             ? null
@@ -314,6 +331,17 @@ public static class SettingsManager
             {
                 Mode = NormalizeWebSearchMode(webSearch.Mode, defaults.WebSearch.Mode),
                 SearxngBaseUrl = StringOrFallback(webSearch.SearxngBaseUrl, defaults.WebSearch.SearxngBaseUrl),
+                SearxngLaunchCommand = StringOrFallback(webSearch.SearxngLaunchCommand, defaults.WebSearch.SearxngLaunchCommand),
+                SearxngLaunchArguments = StringOrFallback(webSearch.SearxngLaunchArguments, defaults.WebSearch.SearxngLaunchArguments),
+                SearxngStartupTimeoutMs = IntOrFallback(
+                    webSearch.SearxngStartupTimeoutMs,
+                    defaults.WebSearch.SearxngStartupTimeoutMs,
+                    min: 2_000,
+                    max: 180_000),
+                SearchApiProvider = NormalizeSearchApiProvider(webSearch.SearchApiProvider, defaults.WebSearch.SearchApiProvider),
+                SearchApiKey = OptionalString(webSearch.SearchApiKey),
+                SearchApiBaseUrl = StringOrFallback(webSearch.SearchApiBaseUrl, defaults.WebSearch.SearchApiBaseUrl),
+                SearchApiEngine = NormalizeSearchApiEngine(webSearch.SearchApiEngine, defaults.WebSearch.SearchApiEngine),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
                 MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
             },
@@ -357,7 +385,8 @@ public static class SettingsManager
             UserProfile = userProfile with
             {
                 Location = normalizedUserLocation,
-                LocationsByProfile = normalizedLocationsByProfile
+                LocationsByProfile = normalizedLocationsByProfile,
+                AliasesByProfile = normalizedAliasesByProfile
             },
             ActiveProfileId = normalizedActiveProfileId,
             ActivePersonalityId = StringOrFallback(settings.ActivePersonalityId, defaults.ActivePersonalityId),
@@ -373,7 +402,8 @@ public static class SettingsManager
                     ? "1.0"
                     : runtimeSafety.RequiredServerContractVersion.Trim()
             },
-            ToolBudgets = normalizedBudgets
+            ToolBudgets = normalizedBudgets,
+            WorkflowFeatures = workflowFeatures
         };
     }
 
@@ -420,6 +450,26 @@ public static class SettingsManager
             Latitude = null,
             Longitude = null
         };
+    }
+
+    private static Dictionary<string, string> NormalizeAliasesByProfile(
+        Dictionary<string, string>? raw)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (raw is null)
+            return map;
+
+        foreach (var (key, value) in raw)
+        {
+            var normalizedKey = AppSettings.NormalizeLocationProfileKey(key);
+            var normalizedValue = (value ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(normalizedValue))
+                continue;
+
+            map[normalizedKey] = normalizedValue;
+        }
+
+        return map;
     }
 
     private static string StringOrFallback(string? value, string fallback)
@@ -483,11 +533,30 @@ public static class SettingsManager
         {
             "auto" => "auto",
             "searxng" => "searxng",
+            "search_api" => "search_api",
+            "api" => "search_api",
             "ddg_html" => "ddg_html",
             "google_news" => "google_news",
             "manual" => "manual",
             _ => fallback
         };
+    }
+
+    private static string NormalizeSearchApiProvider(string? value, string fallback)
+    {
+        return (value ?? "").Trim().ToLowerInvariant() switch
+        {
+            "" => fallback,
+            "searchapi" => "searchapi",
+            _ => fallback
+        };
+    }
+
+    private static string NormalizeSearchApiEngine(string? value, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? fallback
+            : value.Trim().ToLowerInvariant();
     }
 
     private static string NormalizeWeatherProviderMode(string? value, string fallback)

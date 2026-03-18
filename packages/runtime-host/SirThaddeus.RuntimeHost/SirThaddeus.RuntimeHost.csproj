@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
+    <ProjectReference Include="..\..\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
+    <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -19,6 +19,26 @@ public sealed class SuiteLoader
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .Build();
 
+    public IReadOnlyList<string> ListSuiteNames(string suitesRoot)
+    {
+        if (string.IsNullOrWhiteSpace(suitesRoot))
+            throw new InvalidOperationException("Suites root is required.");
+
+        var rooted = Path.IsPathRooted(suitesRoot)
+            ? suitesRoot
+            : Path.GetFullPath(suitesRoot, Directory.GetCurrentDirectory());
+
+        if (!Directory.Exists(rooted))
+            throw new DirectoryNotFoundException($"Suites root not found: {rooted}");
+
+        return Directory
+            .EnumerateDirectories(rooted)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
     public HarnessSuite LoadSuite(string suitesRoot, string suiteName)
     {
         if (string.IsNullOrWhiteSpace(suitesRoot))

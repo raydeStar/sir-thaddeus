@@ -1,9 +1,74 @@
 using SirThaddeus.WebSearch;
+using SirThaddeus.Agent.Search;
 
 namespace SirThaddeus.Tests;
 
 public class ExistenceGateTests
 {
+    [Fact]
+    public void ReleasedProductExistenceAnswer_ConfirmedModel_UsesCautiousPositiveWording()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://support.apple.com/en-us/111831",
+                Title = "iPhone 15 - Tech Specs - Apple Support",
+                Domain = "support.apple.com",
+                Snippet = "Year introduced: 2023. iPhone 15 - Tech Specs.",
+                SourceId = SourceItem.ComputeSourceId("https://support.apple.com/en-us/111831")
+            },
+            new()
+            {
+                Url = "https://www.apple.com/iphone/compare/?modelList=iphone-15",
+                Title = "iPhone 15 vs iPhone 15 Pro vs iPhone 15 Plus - Apple",
+                Domain = "apple.com",
+                Snippet = "Compare iPhone models including iPhone 15.",
+                SourceId = SourceItem.ComputeSourceId("https://www.apple.com/iphone/compare/?modelList=iphone-15")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does iPhone 15 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.Contains("could not verify definitive proof", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("iPhone 15 exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_MissingModel_UsesLikelyDoesNotExistWording()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://en.wikipedia.org/wiki/List_of_iPhone_models",
+                Title = "List of iPhone models - Wikipedia",
+                Domain = "en.wikipedia.org",
+                Snippet = "The iPhone is a line of smartphones developed by Apple.",
+                SourceId = SourceItem.ComputeSourceId("https://en.wikipedia.org/wiki/List_of_iPhone_models")
+            },
+            new()
+            {
+                Url = "https://www.digitaltrends.com/phones/every-iphone-release-in-chronological-order/",
+                Title = "Every iPhone release in chronological order: 2007-2025",
+                Domain = "digitaltrends.com",
+                Snippet = "Every iPhone release in chronological order.",
+                SourceId = SourceItem.ComputeSourceId("https://www.digitaltrends.com/phones/every-iphone-release-in-chronological-order/")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does iPhone 99 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.Contains("likely does not exist", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void QueryBundleBuilder_BuildsSeasonEpisodeBundle()
     {

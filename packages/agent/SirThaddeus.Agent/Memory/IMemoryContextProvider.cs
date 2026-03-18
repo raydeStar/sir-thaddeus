@@ -6,6 +6,7 @@ namespace SirThaddeus.Agent.Memory;
 public sealed record MemoryContextRequest
 {
     public required string UserMessage { get; init; }
+    public string? ConversationId { get; init; }
     public bool MemoryEnabled { get; init; } = true;
     public bool IsColdGreeting { get; init; }
     public string? ActiveProfileId { get; init; }

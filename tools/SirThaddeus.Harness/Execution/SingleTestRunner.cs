@@ -1,34 +1,28 @@
 using SirThaddeus.Agent;
-using SirThaddeus.Agent.Routing;
-using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Artifacts;
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Scoring;
 using SirThaddeus.Harness.Tracing;
-using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Harness.Execution;
 
-public sealed class SingleTestRunner
+internal sealed class SingleTestRunner
 {
     private readonly SuiteRunContext _context;
     private readonly HarnessArtifactWriter _artifactWriter;
-    private readonly FixtureStore _fixtureStore;
     private readonly ScoringEngine _scoringEngine;
     private readonly CursorJudgeClient _judgeClient;
 
     public SingleTestRunner(
         SuiteRunContext context,
         HarnessArtifactWriter artifactWriter,
-        FixtureStore fixtureStore,
         ScoringEngine scoringEngine,
         CursorJudgeClient judgeClient)
     {
         _context = context;
         _artifactWriter = artifactWriter;
-        _fixtureStore = fixtureStore;
         _scoringEngine = scoringEngine;
         _judgeClient = judgeClient;
     }
@@ -41,73 +35,15 @@ public sealed class SingleTestRunner
         CancellationToken cancellationToken)
     {
         var settings = SettingsManager.Load();
-        var traceRecorder = new TraceRecorder();
-        var mode = ResolveMode(_context.Options, test);
         var artifacts = _artifactWriter.CreatePaths(
             _context.Options.ArtifactsRoot,
             _context.RunId,
             _context.SuiteName,
             test.Id,
             iteration);
-
-        HarnessFixture? loadedFixture = null;
-        RecordingLlmClient? recordingLlmClient = null;
-        ILlmClient llmClient;
-
-        IToolExecutor baseExecutor;
-        if (mode is HarnessExecutionMode.Replay or HarnessExecutionMode.Stub)
-        {
-            try
-            {
-                loadedFixture = await _fixtureStore.LoadAsync(
-                    _context.Options.FixturesRoot,
-                    _context.SuiteName,
-                    test.Id,
-                    cancellationToken);
-            }
-            catch (FileNotFoundException) when (mode == HarnessExecutionMode.Stub)
-            {
-                loadedFixture = null;
-            }
-        }
-
-        switch (mode)
-        {
-            case HarnessExecutionMode.Live:
-                {
-                    llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                    baseExecutor = new LiveToolExecutor(settings);
-                    break;
-                }
-            case HarnessExecutionMode.Replay:
-                {
-                    llmClient = new ReplayLlmClient(loadedFixture!, traceRecorder);
-                    baseExecutor = new ReplayToolExecutor(loadedFixture!);
-                    break;
-                }
-            case HarnessExecutionMode.Stub:
-                {
-                    if (loadedFixture is not null)
-                    {
-                        llmClient = new ReplayLlmClient(loadedFixture, traceRecorder);
-                        var replayExecutor = new ReplayToolExecutor(loadedFixture);
-                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, replayExecutor);
-                    }
-                    else
-                    {
-                        llmClient = BuildLiveLlmClient(settings, traceRecorder, out recordingLlmClient);
-                        var liveExecutor = new LiveToolExecutor(settings);
-                        baseExecutor = new StubToolExecutor(test.Stub, test.AllowedTools, liveExecutor);
-                    }
-                    break;
-                }
-            default:
-                throw new InvalidOperationException($"Unsupported mode: {mode}");
-        }
-
-        await using var recordingExecutor = new RecordingToolExecutor(baseExecutor);
-        var mcpClient = new ExecutorBackedMcpClient(recordingExecutor, traceRecorder, test.AllowedTools);
-        var modelName = await llmClient.GetModelNameAsync(cancellationToken);
+        await _context.HeadlessClient.InitializeAsync(cancellationToken);
+        var headlessResult = await _context.HeadlessClient.ExecuteAsync(test, cancellationToken);
+        var modelName = settings.Llm.Model;
 
         await _artifactWriter.WriteInputAsync(
             artifacts,
@@ -117,30 +53,12 @@ public sealed class SingleTestRunner
             modelName,
             cancellationToken);
 
-        var effectivePersonalityId = !string.IsNullOrWhiteSpace(test.PersonalityId)
-            ? test.PersonalityId
-            : settings.ActivePersonalityId;
-
-        var gatekeeperClient = BuildGatekeeperClient(settings);
-        var footmanRouter = gatekeeperClient is not null ? new FastLlmFootmanRouter(gatekeeperClient, logEvent: (_, _) => { }) : null;
-
-        var orchestrator = new AgentOrchestrator(
-            llmClient,
-            mcpClient,
-            new TestAuditLogger(),
-            settings.Llm.SystemPrompt,
-            activePersonalityId: effectivePersonalityId,
-            personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(settings),
-            footmanRouter: footmanRouter,
-            gatekeeperLlm: gatekeeperClient);
-        orchestrator.MemoryEnabled = ShouldEnableMemoryForTest(test, settings);
-
-        var response = await orchestrator.ProcessAsync(test.UserMessage, cancellationToken);
-        traceRecorder.RecordFinal(response.Text);
-        var steps = traceRecorder.Snapshot();
+        var response = headlessResult.Response;
+        var steps = headlessResult.Steps;
+        var judgeToolTurns = headlessResult.ToolTurns;
 
         var preliminary = _scoringEngine.Score(test, response, steps, judgeResult: null);
-        var judgePacket = BuildJudgePacket(test, response, recordingExecutor.RecordedTurns, preliminary);
+        var judgePacket = BuildJudgePacket(test, response, judgeToolTurns, preliminary);
         var judgeResult = await _judgeClient.ExecuteAsync(
             _context.Options.JudgeMode,
             judgePacket,
@@ -163,13 +81,6 @@ public sealed class SingleTestRunner
             response.Text,
             cancellationToken);
 
-        HarnessFixture? capturedFixture = null;
-        if (_context.ShouldRecordFixtures && mode == HarnessExecutionMode.Live)
-        {
-            capturedFixture = BuildFixture(test, settings, modelName, recordingLlmClient, recordingExecutor);
-            await _fixtureStore.SaveAsync(_context.Options.FixturesRoot, _context.SuiteName, capturedFixture, cancellationToken);
-        }
-
         return new SingleRunResult
         {
             Response = response,
@@ -177,83 +88,8 @@ public sealed class SingleTestRunner
             JudgeResult = judgeResult,
             ArtifactPaths = artifacts,
             Steps = steps,
-            Fixture = capturedFixture,
             ModelName = modelName
         };
-    }
-
-    private static ILlmClient BuildLiveLlmClient(
-        AppSettings settings,
-        TraceRecorder traceRecorder,
-        out RecordingLlmClient recordingClient)
-    {
-        var options = new LlmClientOptions
-        {
-            BaseUrl = settings.Llm.BaseUrl,
-            Model = settings.Llm.Model,
-            MaxTokens = settings.Llm.MaxTokens,
-            ContextWindowTokens = settings.Llm.ContextWindowTokens,
-            Temperature = settings.Llm.Temperature
-        };
-
-        var inner = new LmStudioClient(options);
-        recordingClient = new RecordingLlmClient(inner, traceRecorder);
-        return recordingClient;
-    }
-
-    private static ILlmClient? BuildGatekeeperClient(AppSettings settings)
-    {
-        var gatekeeperBaseUrl = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperBaseUrl)
-            ? settings.Llm.BaseUrl
-            : settings.Llm.GatekeeperBaseUrl;
-        var gatekeeperModel = string.IsNullOrWhiteSpace(settings.Llm.GatekeeperModelId)
-            ? null
-            : settings.Llm.GatekeeperModelId;
-
-        if (string.IsNullOrWhiteSpace(gatekeeperModel))
-            return null;
-
-        return new LmStudioClient(new LlmClientOptions
-        {
-            BaseUrl = gatekeeperBaseUrl,
-            Model = gatekeeperModel,
-            MaxTokens = 120,
-            Temperature = 0.0
-        });
-    }
-
-    private static HarnessExecutionMode ResolveMode(HarnessCommandOptions options, HarnessTestCase test)
-    {
-        if (options.Command is HarnessCommandKind.Record or HarnessCommandKind.Replay or HarnessCommandKind.Smoke)
-            return options.Mode;
-
-        if (options.ModeExplicitlySet)
-            return options.Mode;
-
-        return test.Mode.Trim().ToLowerInvariant() switch
-        {
-            "live" => HarnessExecutionMode.Live,
-            "replay" => HarnessExecutionMode.Replay,
-            "stub" => HarnessExecutionMode.Stub,
-            _ => options.Mode
-        };
-    }
-
-    private static bool ShouldEnableMemoryForTest(HarnessTestCase test, AppSettings settings)
-    {
-        if (!settings.Memory.Enabled)
-            return false;
-
-        // If the test explicitly forbids memory tools, disable pre-fetch.
-        if (test.Assertions.ForbiddenTools.Any(tool =>
-                tool.StartsWith("memory_", StringComparison.OrdinalIgnoreCase)))
-            return false;
-
-        if (test.AllowedTools.Count == 0)
-            return settings.Memory.Enabled;
-
-        return test.AllowedTools.Any(tool =>
-            tool.StartsWith("memory_", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CursorJudgePacket BuildJudgePacket(
@@ -284,35 +120,19 @@ public sealed class SingleTestRunner
         };
     }
 
-    private static HarnessFixture BuildFixture(
-        HarnessTestCase test,
-        AppSettings settings,
-        string? modelName,
-        RecordingLlmClient? recordingLlm,
-        RecordingToolExecutor recordingExecutor)
-    {
-        return new HarnessFixture
-        {
-            TestId = test.Id,
-            RecordedAtUtc = DateTimeOffset.UtcNow,
-            AvailableTools = recordingExecutor.AvailableTools,
-            LlmTurns = recordingLlm?.RecordedTurns ?? [],
-            ToolTurns = recordingExecutor.RecordedTurns,
-            Metadata = new HarnessFixtureMetadata
-            {
-                Model = modelName ?? settings.Llm.Model,
-                BaseUrl = settings.Llm.BaseUrl,
-                Temperature = settings.Llm.Temperature,
-                MaxTokens = settings.Llm.MaxTokens
-            }
-        };
-    }
 }
 
-public sealed record SuiteRunContext
+internal sealed record HeadlessExecutionResult
+{
+    public required AgentResponse Response { get; init; }
+    public required IReadOnlyList<TraceStep> Steps { get; init; }
+    public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
+}
+
+internal sealed record SuiteRunContext
 {
     public required HarnessCommandOptions Options { get; init; }
     public required string SuiteName { get; init; }
     public required string RunId { get; init; }
-    public bool ShouldRecordFixtures { get; init; }
+    public required HeadlessRuntimeHarnessClient HeadlessClient { get; init; }
 }
