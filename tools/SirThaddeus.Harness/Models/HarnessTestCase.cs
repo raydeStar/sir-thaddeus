@@ -29,7 +29,7 @@ public sealed record HarnessTestCase
 
     [JsonPropertyName("mode")]
     [YamlMember(Alias = "mode")]
-    public string Mode { get; init; } = "live";
+    public string Mode { get; init; } = "headless";
 
     /// <summary>
     /// Optional per-test personality override. When set, the runner uses this

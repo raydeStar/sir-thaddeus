@@ -47,39 +47,49 @@ Runs bootstrap + full Release test suite as a single gate before packaging.
 - TRX results are written to `./artifacts/test-results/`
 - Each run produces a timestamped `.trx` file (e.g. `test-20260208-151200.trx`)
 
-## Fast E2E Strategy (Lower Time + Tokens)
+## Run headless integration tests
 
-Use the harness in tiers so PR checks stay fast and cheap:
+Use the harness as the single conversation-level integration test path. It always
+drives the real headless runtime.
 
-1. Tier 1 (every PR, fastest live check):
+Run everything:
 
 ```powershell
-dotnet tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll smoke --mode live --max-iters 1 --judge none
+./dev/harness.ps1 --all --judge none
 ```
 
-or use the wrapper that downgrades known external provider outages to `INCONCLUSIVE`:
+Run one category/suite:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ./dev/harness-pr-fast.ps1
+./dev/harness.ps1 --suite web-search --judge none
 ```
 
-2. Tier 2 (targeted feature checks):
+`--category` is an alias for `--suite`:
 
 ```powershell
-dotnet tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll run --suite stargate --mode live --max-iters 1 --judge none
+./dev/harness.ps1 --category reasoning --judge none
 ```
 
-3. Tier 3 (nightly / pre-release, expensive):
+Run one specific test id:
 
 ```powershell
-./dev/harness_e2e.ps1
+./dev/harness.ps1 --test smoke_casual_no_tools --judge none
+```
+
+If a test id exists in more than one suite, pair it with `--suite`.
+
+Examples:
+
+```powershell
+./dev/harness.ps1 --suite smoke --test smoke_casual_no_tools --judge none
+./dev/harness.ps1 run --suite personality --max-iters 1 --judge none
 ```
 
 Recommended policy:
 
 - Keep `--max-iters 1` for PR runs.
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
-- Treat external-provider failures (geocode/search endpoint outages) as environment issues unless deterministic/local suites regress.
+- Use `--all` before merges when you want one full headless pass.
 
 ## Optional pre-push hook
 

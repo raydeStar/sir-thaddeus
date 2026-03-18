@@ -12,6 +12,14 @@ public sealed record SingleRunResult
     public required CursorJudgeResult? JudgeResult { get; init; }
     public required ArtifactPaths ArtifactPaths { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
-    public required HarnessFixture? Fixture { get; init; }
     public required string? ModelName { get; init; }
+}
+
+public sealed record RecordedToolTurn
+{
+    public int Index { get; init; }
+    public string ToolName { get; init; } = string.Empty;
+    public string ArgumentsJson { get; init; } = string.Empty;
+    public string ResultText { get; init; } = string.Empty;
+    public bool Success { get; init; }
 }

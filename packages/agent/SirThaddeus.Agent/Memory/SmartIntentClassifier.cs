@@ -2,6 +2,7 @@ using System.Text.Json;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
 
 namespace SirThaddeus.Agent.Memory;
 
@@ -110,6 +111,12 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
     private static bool LooksLikeDeterministicSuppress(string lower)
     {
         if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return true;
+
+        if (UtilityRouter.TryHandle(lower) is not null)
+            return true;
+
+        if (IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower) is not null)
             return true;
 
         return lower.Contains("thank you", StringComparison.Ordinal) ||

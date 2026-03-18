@@ -42,7 +42,23 @@ public sealed class WorkflowTaskClassifierTests
     {
         var envelope = await _classifier.ClassifyAsync("What day is it today?", CancellationToken.None);
 
-        Assert.True(envelope.NeedsTools);
+        Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
+        Assert.Equal("direct_answer", envelope.Intent);
+        Assert.False(envelope.NeedsTools);
+        Assert.False(envelope.ShowChecklist);
+    }
+
+    [Fact]
+    public async Task CasualCheckInWithToday_StaysDirectAnswer()
+    {
+        var envelope = await _classifier.ClassifyAsync(
+            "Hey, how are you doing today? Just wanted to say thanks for helping me out.",
+            CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
+        Assert.Equal("direct_answer", envelope.Intent);
+        Assert.False(envelope.NeedsTools);
+        Assert.False(envelope.ShowChecklist);
     }
 
     // ── MultiStepResearch prompts ────────────────────────────────────────────

@@ -1,6 +1,7 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
+using SirThaddeus.LlmClient;
 using System.Text.Json;
 
 namespace SirThaddeus.Tests;
@@ -125,6 +126,28 @@ public class MemoryContextProviderTests
         Assert.Empty(mcp.Calls);
     }
 
+    [Fact]
+    public async Task GetContextAsync_SkipsUtilityTimePrompt_WithoutCallingMemoryTool()
+    {
+        var mcp = new FakeMcpClient("should-not-run");
+        var audit = new TestAuditLogger();
+        var classifier = new SmartIntentClassifier(new ThrowingLlmClient());
+        var provider = new MemoryContextProvider(mcp, audit, classifier, TimeProvider.System);
+
+        var result = await provider.GetContextAsync(new MemoryContextRequest
+        {
+            UserMessage = "What time is it right now? Tell me in one sentence.",
+            MemoryEnabled = true,
+            IsColdGreeting = false,
+            Timeout = TimeSpan.FromMilliseconds(500)
+        });
+
+        Assert.True(result.Provenance.Skipped);
+        Assert.False(result.Provenance.Success);
+        Assert.Equal("Memory retrieve explicitly suppressed by intent classifier.", result.Provenance.Summary);
+        Assert.Empty(mcp.Calls);
+    }
+
     private sealed class SlowMcpClient : IMcpToolClient
     {
         private readonly int _delayMs;
@@ -152,6 +175,25 @@ public class MemoryContextProviderTests
         private readonly MemoryIntentDecision _decision;
         public FakeSmartIntentClassifier(MemoryIntentDecision decision = MemoryIntentDecision.Unsure) => _decision = decision;
         public Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default) => Task.FromResult(_decision);
+    }
+
+    private sealed class ThrowingLlmClient : ILlmClient
+    {
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools = null,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("LLM should not be called for deterministic suppression.");
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("LLM should not be called for deterministic suppression.");
+
+        public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>("throwing-test-client");
     }
 }
 

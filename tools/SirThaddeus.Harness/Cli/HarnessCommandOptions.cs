@@ -2,18 +2,12 @@ namespace SirThaddeus.Harness.Cli;
 
 public enum HarnessCommandKind
 {
-    Run,
-    Record,
-    Replay,
-    Smoke
+    Run
 }
 
 public enum HarnessExecutionMode
 {
-    Live,
-    Headless,
-    Replay,
-    Stub
+    Headless
 }
 
 public enum HarnessJudgeMode
@@ -26,11 +20,12 @@ public enum HarnessJudgeMode
 public sealed record HarnessCommandOptions
 {
     public HarnessCommandKind Command { get; init; } = HarnessCommandKind.Run;
-    public HarnessExecutionMode Mode { get; init; } = HarnessExecutionMode.Live;
-    public bool ModeExplicitlySet { get; init; }
+    public HarnessExecutionMode Mode { get; init; } = HarnessExecutionMode.Headless;
     public HarnessJudgeMode JudgeMode { get; init; } = HarnessJudgeMode.None;
 
+    public bool RunAllSuites { get; init; }
     public string SuiteName { get; init; } = "";
+    public string TestId { get; init; } = "";
     public bool ShowHelp { get; init; }
 
     public int MaxIterations { get; init; } = 1;
@@ -45,9 +40,6 @@ public sealed record HarnessCommandOptions
 
     public string SuitesRoot { get; init; } =
         Path.Combine("tools", "SirThaddeus.Harness", "Suites");
-
-    public string FixturesRoot { get; init; } =
-        Path.Combine("tools", "SirThaddeus.Harness", "fixtures");
 
     public string ArtifactsRoot { get; init; } =
         Path.Combine("artifacts", "harness");

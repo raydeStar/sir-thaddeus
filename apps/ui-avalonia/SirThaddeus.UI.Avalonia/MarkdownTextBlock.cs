@@ -41,8 +41,10 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
 
     private void RebuildInlines()
     {
-        Inlines?.Clear();
         var text = Markdown;
+        Text = StripMarkdown(text);
+
+        Inlines?.Clear();
         if (string.IsNullOrEmpty(text))
             return;
 
@@ -89,7 +91,7 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
         {
             // Fall back to plain text on pathological input.
             Inlines.Clear();
-            Inlines.Add(new Run(text.Replace("**", "", StringComparison.Ordinal)));
+            Inlines.Add(new Run(Text ?? string.Empty));
             return;
         }
 
@@ -97,4 +99,19 @@ public sealed class MarkdownTextBlock : SelectableTextBlock
         if (pos < text.Length)
             Inlines.Add(new Run(text[pos..]));
     }
+
+    private static string StripMarkdown(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        var plainText = MarkdownBoldRegex().Replace(text, "$1");
+        plainText = MarkdownItalicAsteriskRegex().Replace(plainText, "$1");
+        plainText = MarkdownItalicUnderscoreRegex().Replace(plainText, "$1");
+        return plainText;
+    }
+
+    private static Regex MarkdownBoldRegex() => new(@"\*\*(.+?)\*\*", RegexOptions.Compiled, RegexTimeout);
+    private static Regex MarkdownItalicAsteriskRegex() => new(@"(?<!\w)\*([^*\r\n]+?)\*(?!\w)", RegexOptions.Compiled, RegexTimeout);
+    private static Regex MarkdownItalicUnderscoreRegex() => new(@"(?<!\w)_([^_\r\n]+?)_(?!\w)", RegexOptions.Compiled, RegexTimeout);
 }

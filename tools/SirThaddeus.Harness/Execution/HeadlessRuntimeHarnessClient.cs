@@ -51,11 +51,13 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         if (_process is not null)
             return;
 
-        var runtimeDll = ResolveHeadlessRuntimeDll();
+        StopOrphanedRuntimeProcesses();
+
+        var runtimeProject = ResolveHeadlessRuntimeProject();
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"\"{runtimeDll}\" --server --tools --port {_port}",
+            Arguments = $"run --project \"{runtimeProject}\" -- --server --tools --port {_port}",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -102,12 +104,13 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             await SetActivePersonalityAsync(test.PersonalityId!, cancellationToken);
         }
 
-        await GetAuditEntriesAsync(cancellationToken);
+        var auditBaseline = await GetAuditEntriesAsync(cancellationToken);
         var auditCaptureStart = DateTimeOffset.UtcNow;
         var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
         var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
         var auditEntries = FilterNewAuditEntries(
             auditCaptureStart,
+            auditBaseline,
             await GetAuditEntriesAsync(cancellationToken));
 
         var (toolCalls, toolTurns, steps) = BuildToolTraceFromAudit(auditEntries);
@@ -140,13 +143,19 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     private static IReadOnlyList<AuditEntryDto> FilterNewAuditEntries(
         DateTimeOffset captureStart,
+        IReadOnlyList<AuditEntryDto> baselineEntries,
         IReadOnlyList<AuditEntryDto> currentEntries)
     {
         if (currentEntries.Count == 0)
             return currentEntries;
 
+        var knownEntries = baselineEntries
+            .Select(GetAuditSignature)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         return currentEntries
-            .Where(entry => entry.TimestampUtc >= captureStart.AddSeconds(-1))
+            .Where(entry => entry.TimestampUtc >= captureStart)
+            .Where(entry => !knownEntries.Contains(GetAuditSignature(entry)))
             .ToArray();
     }
 
@@ -348,7 +357,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         var start = DateTime.UtcNow;
         Exception? lastError = null;
 
-        while (DateTime.UtcNow - start < TimeSpan.FromSeconds(30))
+        while (DateTime.UtcNow - start < TimeSpan.FromSeconds(90))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -431,23 +440,20 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             "Tests will proceed but searches may fall back to GoogleNews.");
     }
 
-    private static string ResolveHeadlessRuntimeDll()
+    private static string ResolveHeadlessRuntimeProject()
     {
         var repoRoot = Directory.GetCurrentDirectory();
-        var searchRoot = Path.Combine(repoRoot, "apps", "headless-runtime", "SirThaddeus.HeadlessRuntime", "bin");
-        if (!Directory.Exists(searchRoot))
-            throw new FileNotFoundException("Headless runtime build output directory not found.", searchRoot);
+        var projectPath = Path.Combine(
+            repoRoot,
+            "apps",
+            "headless-runtime",
+            "SirThaddeus.HeadlessRuntime",
+            "SirThaddeus.HeadlessRuntime.csproj");
 
-        var candidates = Directory
-            .EnumerateFiles(searchRoot, "SirThaddeus.HeadlessRuntime.dll", SearchOption.AllDirectories)
-            .Where(path => !path.Contains(Path.DirectorySeparatorChar + "ref" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
-            .ToList();
+        if (!File.Exists(projectPath))
+            throw new FileNotFoundException("Headless runtime project not found.", projectPath);
 
-        if (candidates.Count == 0)
-            throw new FileNotFoundException("Unable to locate SirThaddeus.HeadlessRuntime.dll in build outputs. Build headless-runtime first.");
-
-        return candidates[0];
+        return projectPath;
     }
 
     private static int GetFreeTcpPort()
@@ -461,6 +467,26 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         finally
         {
             listener.Stop();
+        }
+    }
+
+    private static void StopOrphanedRuntimeProcesses()
+    {
+        foreach (var process in Process.GetProcessesByName("SirThaddeus.HeadlessRuntime"))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(2_000);
+            }
+            catch
+            {
+                // Best-effort cleanup. A still-running process will surface during build/start.
+            }
+            finally
+            {
+                process.Dispose();
+            }
         }
     }
 
@@ -497,6 +523,15 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             _ => prop.GetRawText()
         };
     }
+
+    private static string GetAuditSignature(AuditEntryDto entry)
+        => string.Join(
+            "|",
+            entry.TimestampUtc.ToUnixTimeMilliseconds().ToString(),
+            entry.Category,
+            entry.Message,
+            entry.CorrelationId ?? string.Empty,
+            entry.MetadataJson ?? string.Empty);
 
     public ValueTask DisposeAsync()
     {

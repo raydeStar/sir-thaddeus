@@ -1,3 +1,6 @@
+using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
+
 namespace SirThaddeus.Agent.Workflow;
 
 public sealed class TaskClassifier : ITaskClassifier
@@ -6,6 +9,21 @@ public sealed class TaskClassifier : ITaskClassifier
     {
         var text = (userRequest ?? string.Empty).Trim();
         var lower = text.ToLowerInvariant();
+
+        if (IsWorkflowDirectAnswerPrompt(lower))
+        {
+            return Task.FromResult(new TaskEnvelope
+            {
+                UserRequest = text,
+                Intent = "direct_answer",
+                Complexity = TaskComplexity.Trivial,
+                NeedsTools = false,
+                ShowChecklist = false,
+                TimeBudget = TimeSpan.FromSeconds(30),
+                MaxRetries = 1,
+                MaxToolCalls = 8
+            });
+        }
 
         var complexity = TaskComplexity.SimpleLookup;
         if (text.Length <= 24 &&
@@ -53,5 +71,16 @@ public sealed class TaskClassifier : ITaskClassifier
         };
 
         return Task.FromResult(envelope);
+    }
+
+    public static bool IsWorkflowDirectAnswerPrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return true;
+
+        return IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower) ||
+               IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower) ||
+               IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower) ||
+               UtilityRouter.TryHandle(lower) is not null;
     }
 }

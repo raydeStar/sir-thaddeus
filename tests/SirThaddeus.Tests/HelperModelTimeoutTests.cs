@@ -41,6 +41,19 @@ public sealed class HelperModelTimeoutTests
     }
 
     [Fact]
+    public async Task SmartIntentClassifier_TimeUtility_ReturnsSuppress_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "What time is it right now? Tell me in one sentence.");
+
+        Assert.Equal(MemoryIntentDecision.Suppress, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
     public async Task SlotExtract_Timeout_FallsBackToHeuristic_AndAudits()
     {
         var audit = new TestAuditLogger();

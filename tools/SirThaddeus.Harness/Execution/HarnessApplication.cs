@@ -1,4 +1,5 @@
 using System.Text;
+using SirThaddeus.Config;
 using SirThaddeus.Harness.Artifacts;
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Iteration;
@@ -12,18 +13,18 @@ public sealed class HarnessApplication
 {
     private readonly SuiteLoader _suiteLoader = new();
     private readonly HarnessArtifactWriter _artifactWriter = new();
-    private readonly FixtureStore _fixtureStore = new();
     private readonly ScoringEngine _scoringEngine = new();
     private readonly CursorJudgeClient _judgeClient = new();
     private readonly AutoIterationEngine _autoIterationEngine = new(new WorkspacePatchApplier());
 
     public async Task<int> RunAsync(HarnessCommandOptions options, CancellationToken cancellationToken)
     {
-        var suite = _suiteLoader.LoadSuite(options.SuitesRoot, options.SuiteName);
+        var selectedSuites = ResolveSelectedSuites(options);
         var runId = DateTimeOffset.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var settings = SettingsManager.Load();
 
         Console.WriteLine($"Harness command: {options.Command}");
-        Console.WriteLine($"Suite: {suite.Name}");
+        Console.WriteLine($"Selection: {DescribeSelection(options, selectedSuites)}");
         Console.WriteLine($"Mode: {options.Mode}");
         Console.WriteLine($"RunId: {runId}");
         Console.WriteLine();
@@ -32,76 +33,82 @@ public sealed class HarnessApplication
         var failCount = 0;
         var summaries = new List<string>();
 
-        foreach (var test in suite.Tests)
+        await using var headlessClient = new HeadlessRuntimeHarnessClient(settings);
+
+        foreach (var suite in selectedSuites)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            Console.WriteLine($"== Test: {test.Id} - {test.Name}");
+            Console.WriteLine($"== Suite: {suite.Name} ({suite.Tests.Count} test(s))");
 
             var context = new SuiteRunContext
             {
                 Options = options,
                 SuiteName = suite.Name,
                 RunId = runId,
-                ShouldRecordFixtures = options.Command == HarnessCommandKind.Record
+                HeadlessClient = headlessClient
             };
 
             var runner = new SingleTestRunner(
                 context,
                 _artifactWriter,
-                _fixtureStore,
                 _scoringEngine,
                 _judgeClient);
 
-            var previousBestScore = (double?)null;
-            var previousBestFinal = (string?)null;
-
-            async Task<TestAttemptResult> RunIterationAsync(int iteration)
+            foreach (var test in suite.Tests)
             {
-                var single = await runner.RunAsync(
-                    test,
-                    iteration,
-                    previousBestScore,
-                    previousBestFinal,
-                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                Console.WriteLine($"== Test: {test.Id} - {test.Name}");
 
-                if (previousBestScore is null || single.Score.FinalScore > previousBestScore.Value)
+                var previousBestScore = (double?)null;
+                var previousBestFinal = (string?)null;
+
+                async Task<TestAttemptResult> RunIterationAsync(int iteration)
                 {
-                    previousBestScore = single.Score.FinalScore;
-                    previousBestFinal = single.Response.Text;
+                    var single = await runner.RunAsync(
+                        test,
+                        iteration,
+                        previousBestScore,
+                        previousBestFinal,
+                        cancellationToken);
+
+                    if (previousBestScore is null || single.Score.FinalScore > previousBestScore.Value)
+                    {
+                        previousBestScore = single.Score.FinalScore;
+                        previousBestFinal = single.Response.Text;
+                    }
+
+                    return new TestAttemptResult
+                    {
+                        Iteration = iteration,
+                        Score = single.Score,
+                        FinalResponse = single.Response.Text,
+                        ArtifactDirectory = single.ArtifactPaths.RootDirectory,
+                        JudgeResult = single.JudgeResult
+                    };
                 }
 
-                return new TestAttemptResult
-                {
-                    Iteration = iteration,
-                    Score = single.Score,
-                    FinalResponse = single.Response.Text,
-                    ArtifactDirectory = single.ArtifactPaths.RootDirectory,
-                    JudgeResult = single.JudgeResult
-                };
+                var attempts = await _autoIterationEngine.ExecuteAsync(
+                    options,
+                    test,
+                    RunIterationAsync,
+                    cancellationToken);
+
+                var best = attempts.OrderByDescending(a => a.Score.FinalScore).First();
+                var minScore = options.MinScoreOverride ?? test.MinScore;
+                var passed = best.Score.HardPass && best.Score.FinalScore >= minScore;
+
+                if (passed)
+                    passCount++;
+                else
+                    failCount++;
+
+                var resultLabel = passed ? "PASS" : "FAIL";
+                Console.WriteLine($"Result: {resultLabel} | score={best.Score.FinalScore:0.00} | min={minScore:0.00}");
+                Console.WriteLine($"Attempts: {attempts.Count}");
+                Console.WriteLine($"Artifacts: {best.ArtifactDirectory}");
+                Console.WriteLine();
+
+                summaries.Add(BuildSummaryLine(suite.Name, test, best, passed, minScore));
             }
-
-            var attempts = await _autoIterationEngine.ExecuteAsync(
-                options,
-                test,
-                RunIterationAsync,
-                cancellationToken);
-
-            var best = attempts.OrderByDescending(a => a.Score.FinalScore).First();
-            var minScore = options.MinScoreOverride ?? test.MinScore;
-            var passed = best.Score.HardPass && best.Score.FinalScore >= minScore;
-
-            if (passed)
-                passCount++;
-            else
-                failCount++;
-
-            var resultLabel = passed ? "PASS" : "FAIL";
-            Console.WriteLine($"Result: {resultLabel} | score={best.Score.FinalScore:0.00} | min={minScore:0.00}");
-            Console.WriteLine($"Attempts: {attempts.Count}");
-            Console.WriteLine($"Artifacts: {best.ArtifactDirectory}");
-            Console.WriteLine();
-
-            summaries.Add(BuildSummaryLine(test, best, passed, minScore));
         }
 
         Console.WriteLine("== Run Summary");
@@ -115,6 +122,7 @@ public sealed class HarnessApplication
     }
 
     private static string BuildSummaryLine(
+        string suiteName,
         HarnessTestCase test,
         TestAttemptResult best,
         bool passed,
@@ -123,6 +131,8 @@ public sealed class HarnessApplication
         var status = passed ? "[PASS]" : "[FAIL]";
         var builder = new StringBuilder();
         builder.Append(status).Append(' ')
+            .Append(suiteName)
+            .Append('/')
             .Append(test.Id)
             .Append(" score=").Append(best.Score.FinalScore.ToString("0.00"))
             .Append(" min=").Append(minScore.ToString("0.00"));
@@ -135,5 +145,62 @@ public sealed class HarnessApplication
         }
 
         return builder.ToString();
+    }
+
+    private IReadOnlyList<HarnessSuite> ResolveSelectedSuites(HarnessCommandOptions options)
+    {
+        var suiteNames = options.RunAllSuites ||
+                         (!string.IsNullOrWhiteSpace(options.TestId) && string.IsNullOrWhiteSpace(options.SuiteName))
+            ? _suiteLoader.ListSuiteNames(options.SuitesRoot)
+            : [options.SuiteName];
+
+        var loadedSuites = suiteNames
+            .Select(name => _suiteLoader.LoadSuite(options.SuitesRoot, name))
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(options.TestId))
+            return loadedSuites;
+
+        var matchedSuites = loadedSuites
+            .Select(suite => new HarnessSuite
+            {
+                Name = suite.Name,
+                Tests = suite.Tests
+                    .Where(test => string.Equals(test.Id, options.TestId, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+            })
+            .Where(suite => suite.Tests.Count > 0)
+            .ToList();
+
+        if (matchedSuites.Count == 0)
+        {
+            var scope = string.IsNullOrWhiteSpace(options.SuiteName)
+                ? "any suite"
+                : $"suite '{options.SuiteName}'";
+            throw new InvalidOperationException($"Test '{options.TestId}' was not found in {scope}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.SuiteName) && matchedSuites.Count > 1)
+        {
+            var suites = string.Join(", ", matchedSuites.Select(suite => suite.Name));
+            throw new InvalidOperationException(
+                $"Test id '{options.TestId}' matched multiple suites ({suites}). Re-run with --suite.");
+        }
+
+        return matchedSuites;
+    }
+
+    private static string DescribeSelection(HarnessCommandOptions options, IReadOnlyList<HarnessSuite> suites)
+    {
+        if (options.RunAllSuites && string.IsNullOrWhiteSpace(options.TestId))
+            return $"all suites ({suites.Count})";
+
+        if (!string.IsNullOrWhiteSpace(options.TestId) && string.IsNullOrWhiteSpace(options.SuiteName))
+            return $"test {options.TestId}";
+
+        if (!string.IsNullOrWhiteSpace(options.TestId))
+            return $"suite {options.SuiteName}, test {options.TestId}";
+
+        return $"suite {options.SuiteName}";
     }
 }

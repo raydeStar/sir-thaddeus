@@ -528,6 +528,10 @@ internal static partial class RuntimeApiServer
 
     private static bool ShouldForceToolBackedLookup(TaskEnvelope envelope, string prompt)
     {
+        var lower = (prompt ?? string.Empty).Trim().ToLowerInvariant();
+        if (TaskClassifier.IsWorkflowDirectAnswerPrompt(lower))
+            return false;
+
         if (!envelope.NeedsTools)
             return false;
 
@@ -537,7 +541,6 @@ internal static partial class RuntimeApiServer
         if (!string.Equals(envelope.Intent, "lookup", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var lower = (prompt ?? string.Empty).ToLowerInvariant();
          return lower.Contains("hours") ||
                lower.Contains("price") ||
              lower.Contains("cheapest") ||
