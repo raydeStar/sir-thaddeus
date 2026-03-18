@@ -33,6 +33,8 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 ## Documentation
 
+- [Architecture Overview](docs/ARCHITECTURE.md)
+- [Settings Reference](docs/SETTINGS.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 
@@ -102,7 +104,8 @@ That same interaction model applies throughout the runtime:
 - **Local LLM integration** through LM Studio and OpenAI-compatible endpoints
 - **Reasoning pipeline** for breaking down logic questions step by step
 - **Small-model support** with routing assistance for better tool use
-- **Lightweight document reading** for text-based context
+- **Supported document formats**: PDF, DOCX, XLSX, CSV, RTF, Markdown, and plain text
+- **In-memory result caching** with configurable TTLs for web search, weather, and location data
 - **Conversation-scoped memory retrieval** for better continuity across multi-turn chats
 - **Automatic history persistence** for chat and briefing context in memory-backed flows
 
@@ -111,6 +114,7 @@ That same interaction model applies throughout the runtime:
 - **Web search and browser actions**
 - **Screen reading** and active-window context
 - **Read-only file listing and reading** with limits
+- **Clipboard read/write** for seamless copy/paste integration
 - **Allowlisted system actions**
 - **Built-in utilities** for math, conversions, and structured lookups
 
@@ -309,7 +313,42 @@ sir-thaddeus/
 |-- packages/
 |-- tests/
 |-- tools/
+|-- Microsoft/
 `-- project-notes/
+```
+
+---
+
+## Development
+
+### Prerequisites
+
+- .NET 10.0 SDK
+- (Optional) LM Studio or any OpenAI-compatible local model server
+- (Optional) SearXNG for local web search (bundled setup available)
+
+### Build
+
+```bash
+dotnet build SirThaddeus.sln
+```
+
+### Test
+
+```bash
+dotnet test SirThaddeus.sln
+```
+
+### Run (headless)
+
+```bash
+dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
+```
+
+### Run (Avalonia UI)
+
+```bash
+dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
 ```
 
 ---
