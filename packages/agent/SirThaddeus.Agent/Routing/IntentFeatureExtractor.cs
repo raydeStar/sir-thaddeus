@@ -130,7 +130,7 @@ public static class IntentFeatureExtractor
     }
 
     /// <summary>
-    /// Maps explicit "use/call/run <tool>" prompts to the safest
+    /// Maps explicit "use/call/run (tool)" prompts to the safest
     /// deterministic route for that tool family.
     /// </summary>
     public static string? TryGetExplicitToolInvocationIntent(string lower)

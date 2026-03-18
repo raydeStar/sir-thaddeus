@@ -29,6 +29,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - Read-only (no side effects, safe to retry)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that searches the web, auto-reads the top results, and returns
+/// rich summaries with structured source metadata for UI rendering.
+/// </summary>
 [McpServerToolType]
 public static class WebSearchTools
 {

@@ -17,6 +17,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - optional regionCode supports county/state filtering (e.g. US-ID)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that provides public holiday lookups by country and year
+/// using the Nager.Date API (keyless).
+/// </summary>
 [McpServerToolType]
 public static class HolidayTools
 {

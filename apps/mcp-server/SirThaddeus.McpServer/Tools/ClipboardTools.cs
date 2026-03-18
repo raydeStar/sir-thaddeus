@@ -4,6 +4,10 @@ using ModelContextProtocol.Server;
 
 namespace SirThaddeus.McpServer.Tools;
 
+/// <summary>
+/// MCP tools for reading from and writing to the Windows system clipboard.
+/// Runs clipboard access on an STA thread as required by WinForms.
+/// </summary>
 [McpServerToolType]
 public static class ClipboardTools
 {

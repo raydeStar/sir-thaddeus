@@ -55,6 +55,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
     /// <param name="audit">Audit logger for event recording.</param>
     /// <param name="gate">Permission gate callback (runtime-provided).</param>
     /// <param name="sessionId">Current session/run ID for correlation.</param>
+    /// <param name="runtimeControls">Optional factory for runtime control state (STOP switch, budget overrides).</param>
     public AuditedMcpToolClient(
         IMcpToolClient     inner,
         IAuditLogger       audit,

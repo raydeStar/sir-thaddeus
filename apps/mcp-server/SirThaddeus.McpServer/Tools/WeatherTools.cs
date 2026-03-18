@@ -23,6 +23,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - cache TTL configurable (forecast 10..30 min, geocode default 24h)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tools for geocoding and weather forecasts using a coordinate-first
+/// NWS-primary, Open-Meteo-fallback weather stack.
+/// </summary>
 [McpServerToolType]
 public static class WeatherTools
 {

@@ -17,6 +17,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   offset   — UTC offset (e.g. "-05:00")
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that returns the current local time in a structured format
+/// for agent temporal reasoning.
+/// </summary>
 [McpServerToolType]
 public static class TimeTools
 {

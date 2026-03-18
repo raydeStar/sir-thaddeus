@@ -362,7 +362,7 @@ public static class DeepDiveHoursParser
 
     /// <summary>
     /// Strips HTML tags but preserves whitespace/newlines at tag boundaries
-    /// so "Monday</td><td>9 AM" becomes "Monday  9 AM".
+    /// so "Monday 9 AM" cell pairs become "Monday  9 AM".
     /// </summary>
     private static string StripHtmlTags(string input)
     {

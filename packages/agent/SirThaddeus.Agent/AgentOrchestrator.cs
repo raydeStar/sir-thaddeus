@@ -242,7 +242,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     /// <summary>
     /// Seeds the conversation history with prior user/assistant turns
     /// so multi-turn follow-ups work across stateless HTTP requests.
-    /// Call this <b>before</b> <see cref="ProcessAsync"/> to replay
+    /// Call this <b>before</b> <see cref="ProcessAsync(string, CancellationToken)"/> to replay
     /// the conversation context.  Only user and assistant messages
     /// are accepted — system messages are silently skipped because
     /// the constructor already seeds the system prompt.

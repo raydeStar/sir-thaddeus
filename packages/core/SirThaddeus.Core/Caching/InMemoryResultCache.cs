@@ -1,5 +1,9 @@
 namespace SirThaddeus.Core.Caching;
 
+/// <summary>
+/// Thread-safe, in-memory implementation of <see cref="IResultCache"/> backed by
+/// a dictionary with TTL expiry and LRU eviction.
+/// </summary>
 public sealed class InMemoryResultCache : IResultCache
 {
     private sealed record CacheEntry(object Value, DateTimeOffset ExpiresAtUtc);
@@ -11,12 +15,18 @@ public sealed class InMemoryResultCache : IResultCache
     private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    /// Creates a new cache with the given maximum entry count.
+    /// </summary>
+    /// <param name="maxEntries">Maximum entries before LRU eviction (minimum 1).</param>
+    /// <param name="timeProvider">Optional time provider for testability.</param>
     public InMemoryResultCache(int maxEntries = 500, TimeProvider? timeProvider = null)
     {
         _maxEntries = Math.Max(1, maxEntries);
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <inheritdoc />
     public Task<T?> GetAsync<T>(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -43,6 +53,7 @@ public sealed class InMemoryResultCache : IResultCache
         }
     }
 
+    /// <inheritdoc />
     public Task SetAsync<T>(string key, T value, TimeSpan ttl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);

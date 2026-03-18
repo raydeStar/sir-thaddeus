@@ -4,6 +4,10 @@ using System.Text.Json;
 
 namespace SirThaddeus.Core.Caching;
 
+/// <summary>
+/// Builds deterministic cache keys from a tool name and its arguments
+/// by normalizing and JSON-serializing the arguments.
+/// </summary>
 public static class CacheKeyBuilder
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -11,6 +15,10 @@ public static class CacheKeyBuilder
         WriteIndented = false
     };
 
+    /// <summary>
+    /// Creates a composite key in the form <c>toolname:{json-args}</c>.
+    /// Arguments are deeply sorted and normalized for consistency.
+    /// </summary>
     public static string Build(string toolName, object? args)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);

@@ -17,6 +17,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - Read-only, safe to retry
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that resolves timezone from geographic coordinates
+/// using NWS for US locations and Open-Meteo fallback globally.
+/// </summary>
 [McpServerToolType]
 public static class TimezoneTools
 {

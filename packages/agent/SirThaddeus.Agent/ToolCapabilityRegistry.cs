@@ -64,6 +64,14 @@ public static class ToolCapabilityRegistry
             ["FileListPreview"] = ToolCapability.FileRead,
             ["file_list_apply"] = ToolCapability.FileRead,
             ["FileListApply"] = ToolCapability.FileRead,
+            ["document_read"] = ToolCapability.FileRead,
+            ["DocumentRead"] = ToolCapability.FileRead,
+
+            // Clipboard
+            ["clipboard_read"] = ToolCapability.FileRead,
+            ["ClipboardRead"] = ToolCapability.FileRead,
+            ["clipboard_write"] = ToolCapability.FileWrite,
+            ["ClipboardWrite"] = ToolCapability.FileWrite,
 
             // System
             ["system_execute"] = ToolCapability.SystemExecute,

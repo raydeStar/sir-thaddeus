@@ -2,6 +2,10 @@ using SirThaddeus.DocumentReader.Readers;
 
 namespace SirThaddeus.DocumentReader;
 
+/// <summary>
+/// Resolves and delegates to format-specific <see cref="IDocumentReader"/> implementations
+/// based on the file extension.
+/// </summary>
 public sealed class DocumentReaderFactory : IDocumentReader
 {
     private static readonly Dictionary<string, Func<IDocumentReader>> ReaderByExtension =
@@ -16,6 +20,10 @@ public sealed class DocumentReaderFactory : IDocumentReader
             [".txt"] = () => new PlainTextReader(DocumentFormat.PlainText)
         };
 
+    /// <summary>
+    /// Returns the appropriate reader for the given file path based on extension.
+    /// Falls back to <see cref="PlainTextReader"/> for unrecognized extensions.
+    /// </summary>
     public IDocumentReader Resolve(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -31,6 +39,7 @@ public sealed class DocumentReaderFactory : IDocumentReader
             : new PlainTextReader(DocumentFormat.Unknown);
     }
 
+    /// <inheritdoc />
     public Task<DocumentContent> ReadAsync(string path, CancellationToken cancellationToken = default)
         => Resolve(path).ReadAsync(path, cancellationToken);
 }

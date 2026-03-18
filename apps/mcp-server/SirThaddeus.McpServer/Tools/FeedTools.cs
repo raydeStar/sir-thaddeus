@@ -11,6 +11,10 @@ namespace SirThaddeus.McpServer.Tools;
 // Bounded by strict timeout, payload size limit, and max returned items.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that fetches and parses RSS/Atom feeds, returning feed metadata
+/// and items with strict payload size and timeout limits.
+/// </summary>
 [McpServerToolType]
 public static class FeedTools
 {

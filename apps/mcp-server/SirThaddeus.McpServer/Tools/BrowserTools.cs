@@ -19,6 +19,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - Single page per call, no crawling
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that fetches and reads a single web page, extracting readable
+/// content (title, author, date, clean text) with HTTP timeout and size bounds.
+/// </summary>
 [McpServerToolType]
 public static class BrowserTools
 {

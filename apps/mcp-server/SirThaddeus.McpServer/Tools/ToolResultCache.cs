@@ -2,6 +2,10 @@ using SirThaddeus.Core.Caching;
 
 namespace SirThaddeus.McpServer.Tools;
 
+/// <summary>
+/// Internal caching wrapper that checks <see cref="SirThaddeus.Core.Caching.IResultCache"/>
+/// before executing tool calls, with environment-based enable/disable.
+/// </summary>
 internal static class ToolResultCache
 {
     private static readonly Lazy<IResultCache> Cache = new(CreateCache);
