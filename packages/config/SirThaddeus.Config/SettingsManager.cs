@@ -230,6 +230,7 @@ public static class SettingsManager
         var mcp = settings.Mcp is null ? defaults.Mcp : settings.Mcp;
         var mcpPerms = mcp.Permissions is null ? defaults.Mcp.Permissions : mcp.Permissions;
         var webSearch = settings.WebSearch is null ? defaults.WebSearch : settings.WebSearch;
+        var cache = settings.Cache is null ? defaults.Cache : settings.Cache;
         var weather = settings.Weather is null ? defaults.Weather : settings.Weather;
         var deepDive = settings.DeepDive is null ? defaults.DeepDive : settings.DeepDive;
         var memory = settings.Memory is null ? defaults.Memory : settings.Memory;
@@ -343,6 +344,29 @@ public static class SettingsManager
                 SearchApiEngine = NormalizeSearchApiEngine(webSearch.SearchApiEngine, defaults.WebSearch.SearchApiEngine),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
                 MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
+            },
+            Cache = cache with
+            {
+                WebSearchTtlMinutes = IntOrFallback(
+                    cache.WebSearchTtlMinutes,
+                    defaults.Cache.WebSearchTtlMinutes,
+                    min: 1,
+                    max: 120),
+                WeatherTtlMinutes = IntOrFallback(
+                    cache.WeatherTtlMinutes,
+                    defaults.Cache.WeatherTtlMinutes,
+                    min: 1,
+                    max: 720),
+                PlacesAndHolidaysTtlHours = IntOrFallback(
+                    cache.PlacesAndHolidaysTtlHours,
+                    defaults.Cache.PlacesAndHolidaysTtlHours,
+                    min: 1,
+                    max: 720),
+                MaxEntries = IntOrFallback(
+                    cache.MaxEntries,
+                    defaults.Cache.MaxEntries,
+                    min: 50,
+                    max: 5_000)
             },
             Weather = weather with
             {

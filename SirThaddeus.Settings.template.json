@@ -30,5 +30,12 @@
     "timeoutMs": 8000,
     "maxResults": 5
   },
+  "cache": {
+    "enabled": true,
+    "webSearchTtlMinutes": 15,
+    "weatherTtlMinutes": 60,
+    "placesAndHolidaysTtlHours": 24,
+    "maxEntries": 500
+  },
   "activePersonalityId": "helpful_default"
 }

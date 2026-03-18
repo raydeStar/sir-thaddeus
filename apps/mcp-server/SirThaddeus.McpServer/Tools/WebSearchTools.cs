@@ -86,9 +86,18 @@ public static class WebSearchTools
         if (string.IsNullOrWhiteSpace(query))
             return "Error: Search query is required.";
 
+        recency ??= "any";
+
         try
         {
-            return await ExecuteSearchAsync(query, maxResults, recency, cancellationToken);
+            var args = new { query, maxResults, recency };
+            var cached = await ToolResultCache.GetAsync<string>("web_search", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
+            var result = await ExecuteSearchAsync(query, maxResults, recency, cancellationToken);
+            await ToolResultCache.SetAsync("web_search", args, result, ToolResultCache.ResolveWebSearchTtl());
+            return result;
         }
         catch (OperationCanceledException)
         {

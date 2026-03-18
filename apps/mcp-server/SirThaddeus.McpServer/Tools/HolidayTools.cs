@@ -45,6 +45,11 @@ public static class HolidayTools
 
         try
         {
+            var args = new { countryCode, year, regionCode = regionCode ?? string.Empty, maxItems };
+            var cached = await ToolResultCache.GetAsync<string>("holidays_get", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
             var result = await PublicApiToolContext.HolidaysProvider.Value.GetHolidaysAsync(
                 countryCode,
                 year,
@@ -52,7 +57,7 @@ public static class HolidayTools
                 maxItems,
                 cancellationToken);
 
-            return Json(new
+            var response = Json(new
             {
                 countryCode = result.CountryCode,
                 regionCode = result.RegionCode,
@@ -75,6 +80,9 @@ public static class HolidayTools
                     types = h.Types
                 }).ToArray()
             });
+
+            await ToolResultCache.SetAsync("holidays_get", args, response, ToolResultCache.ResolvePlacesAndHolidaysTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {
@@ -114,13 +122,18 @@ public static class HolidayTools
 
         try
         {
+            var args = new { countryCode, regionCode = regionCode ?? string.Empty, maxItems };
+            var cached = await ToolResultCache.GetAsync<string>("holidays_next", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
             var result = await PublicApiToolContext.HolidaysProvider.Value.GetNextPublicHolidaysAsync(
                 countryCode,
                 regionCode,
                 maxItems,
                 cancellationToken);
 
-            return Json(new
+            var response = Json(new
             {
                 countryCode = result.CountryCode,
                 regionCode = result.RegionCode,
@@ -142,6 +155,9 @@ public static class HolidayTools
                     types = h.Types
                 }).ToArray()
             });
+
+            await ToolResultCache.SetAsync("holidays_next", args, response, ToolResultCache.ResolvePlacesAndHolidaysTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {
@@ -176,12 +192,17 @@ public static class HolidayTools
 
         try
         {
+            var args = new { countryCode, regionCode = regionCode ?? string.Empty };
+            var cached = await ToolResultCache.GetAsync<string>("holidays_is_today", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
             var result = await PublicApiToolContext.HolidaysProvider.Value.IsTodayPublicHolidayAsync(
                 countryCode,
                 regionCode,
                 cancellationToken);
 
-            return Json(new
+            var response = Json(new
             {
                 countryCode = result.CountryCode,
                 regionCode = result.RegionCode,
@@ -218,6 +239,9 @@ public static class HolidayTools
                         types = result.NextHoliday.Types
                     }
             });
+
+            await ToolResultCache.SetAsync("holidays_is_today", args, response, ToolResultCache.ResolvePlacesAndHolidaysTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {

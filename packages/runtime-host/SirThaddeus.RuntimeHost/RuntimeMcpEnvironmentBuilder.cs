@@ -72,6 +72,16 @@ public static class RuntimeMcpEnvironmentBuilder
         env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
         env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
 
+        env["ST_CACHE_ENABLED"] = settings.Cache.Enabled ? "true" : "false";
+        env["ST_CACHE_WEBSEARCH_TTL_MINUTES"] =
+            Math.Clamp(settings.Cache.WebSearchTtlMinutes, 1, 120).ToString();
+        env["ST_CACHE_WEATHER_TTL_MINUTES"] =
+            Math.Clamp(settings.Cache.WeatherTtlMinutes, 1, 720).ToString();
+        env["ST_CACHE_PLACES_HOLIDAYS_TTL_HOURS"] =
+            Math.Clamp(settings.Cache.PlacesAndHolidaysTtlHours, 1, 720).ToString();
+        env["ST_CACHE_MAX_ENTRIES"] =
+            Math.Clamp(settings.Cache.MaxEntries, 50, 5_000).ToString();
+
         if (!string.IsNullOrWhiteSpace(settings.DeepDive.PlacesApiKey))
             env["ST_DEEPDIVE_PLACES_API_KEY"] = settings.DeepDive.PlacesApiKey.Trim();
         env["ST_DEEPDIVE_PLACES_TIMEOUT_MS"] = Math.Clamp(settings.DeepDive.PlacesTimeoutMs, 2_000, 20_000).ToString();
