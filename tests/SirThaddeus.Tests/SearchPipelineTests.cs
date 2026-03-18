@@ -1383,8 +1383,8 @@ public class SearchPipelineGoldenTests
         Assert.Contains("wind", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Avg temp", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\n1.", result.Text, StringComparison.Ordinal);
-        Assert.Equal(0, result.LlmRoundTrips); // weather brief has a system pass
-        Assert.Equal(1, llmCalls);
+        Assert.Equal(0, result.LlmRoundTrips);
+        Assert.Equal(0, llmCalls);
 
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));

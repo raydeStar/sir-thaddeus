@@ -1,5 +1,7 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Guardrails;
+using SirThaddeus.Agent.Memory;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine.Profiles;
@@ -141,21 +143,29 @@ public class IntentClassificationTests
     public async Task ClassificationFailure_FallsBackToCasual()
     {
         using var t = TestTimer.Start(_output, "ClassificationFailure");
-        // LLM throws on EVERY call — classification fails, falls back to casual.
-        // The casual path also fails, but the error is caught at the top level.
-        var callCount = 0;
-        var llm = new FakeLlmClient(_ =>
+        var llm = new FakeLlmClient(messages =>
         {
-            callCount++;
-            // Fail classification (call 1), succeed on casual response (call 2+)
-            if (callCount == 1)
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify the user message", StringComparison.OrdinalIgnoreCase))
                 throw new HttpRequestException("Connection refused");
+
             return "Hello! I'm doing well.";
         });
 
         var mcp = new FakeMcpClient(returnValue: "");
         var audit = new TestAuditLogger();
-        var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
+        var slotExtract = new SlotExtract(
+            new FakeLlmClient(
+                """{"intent":"chat","topic":null,"locationText":null,"timeScope":null,"explicitLocationChange":false,"refersToPriorLocation":false}"""),
+            audit);
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "You are a test assistant.",
+            slotExtract: slotExtract,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
 
         var result = await agent.ProcessAsync("hey there!");
 
@@ -2599,6 +2609,27 @@ internal sealed class FakeLlmClient : ILlmClient
 
     public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
         => Task.FromResult<string?>("fake-test-model");
+}
+
+internal sealed class StubMemoryContextProvider : IMemoryContextProvider
+{
+    public Task<MemoryContextResult> GetContextAsync(
+        MemoryContextRequest request,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new MemoryContextResult());
+}
+
+internal sealed class StubGuardrailsCoordinator : IGuardrailsCoordinator
+{
+    public GuardrailsCoordinatorResult? TryRunDeterministicSpecialCase(string message, string mode) => null;
+
+    public Task<GuardrailsCoordinatorResult?> TryRunAsync(
+        RouterOutput route,
+        string message,
+        string mode,
+        string? extraContext = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<GuardrailsCoordinatorResult?>(null);
 }
 
 /// <summary>
