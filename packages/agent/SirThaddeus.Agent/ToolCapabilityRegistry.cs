@@ -30,6 +30,8 @@ public static class ToolCapabilityRegistry
             ["WebSearch"] = ToolCapability.WebSearch,
             ["browser_navigate"] = ToolCapability.BrowserNavigate,
             ["BrowserNavigate"] = ToolCapability.BrowserNavigate,
+            ["places_discover"] = ToolCapability.WebSearch,
+            ["PlacesDiscover"] = ToolCapability.WebSearch,
             ["places_lookup"] = ToolCapability.WebSearch,
             ["PlacesLookup"] = ToolCapability.WebSearch,
             ["weather_geocode"] = ToolCapability.WebSearch,

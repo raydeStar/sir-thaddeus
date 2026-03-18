@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Memory;
 
@@ -54,6 +55,10 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
         if (string.IsNullOrWhiteSpace(userMessage))
             return MemoryIntentDecision.Unsure;
 
+        var lower = userMessage.Trim().ToLowerInvariant();
+        if (LooksLikeDeterministicSuppress(lower))
+            return MemoryIntentDecision.Suppress;
+
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -100,6 +105,17 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
         }
 
         return MemoryIntentDecision.Unsure;
+    }
+
+    private static bool LooksLikeDeterministicSuppress(string lower)
+    {
+        if (IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower))
+            return true;
+
+        return lower.Contains("thank you", StringComparison.Ordinal) ||
+               lower.Contains("thanks for helping", StringComparison.Ordinal) ||
+               lower.Contains("just wanted to say thanks", StringComparison.Ordinal) ||
+               lower.Contains("appreciate your help", StringComparison.Ordinal);
     }
 
     private void WriteAudit(string action, string userMessage, string? error)

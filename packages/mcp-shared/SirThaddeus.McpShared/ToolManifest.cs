@@ -237,6 +237,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "places_discover",
+            Aliases     = ["PlacesDiscover"],
+            Category    = "web",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Discovers nearby businesses and places using open OSM geocoding and Overpass data.",
+            Limits      = "Max 20 results. Radius clamped 500-20000m. Open-data provider with endpoint failover."
+        },
+        new()
+        {
             Name        = "places_lookup",
             Aliases     = ["PlacesLookup"],
             Category    = "web",

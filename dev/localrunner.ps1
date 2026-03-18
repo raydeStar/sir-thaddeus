@@ -100,7 +100,8 @@ function Stop-ExistingInstances {
     }
 
     # Release orphaned listeners, but only when they belong to this repo/toolchain.
-    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRootPath -Ports @(8001, 17845)
+    # Include runtime API ports so stale external dotnet hosts are not reused.
+    Stop-RepoOwnedPortListeners -RepoRootPath $RepoRootPath -Ports @(5378, 5391, 8001, 17845)
 }
 
 Stop-ExistingInstances -RepoRootPath $RepoRoot

@@ -2447,9 +2447,38 @@ public class LocalBusinessDetectionTests
                            "[{\"url\":\"https://example.com/bakeries\",\"title\":\"Best Bakeries in Olympia\",\"domain\":\"example.com\"}]";
                 }
             }
+                        if (tool.Contains("browser_navigate") || tool.Contains("BrowserNavigate"))
+                        {
+                                return "1. Left Bank Pastry\n2. Wagner's European Bakery and Cafe";
+                        }
             if (tool.Contains("places_lookup") || tool.Contains("PlacesLookup"))
             {
-                return "{\"name\":\"Left Bank Pastry\",\"address\":\"1008 4th Ave E, Olympia, WA\"}";
+                                if (args.Contains("Wagner", StringComparison.OrdinalIgnoreCase))
+                                {
+                                        return """
+                                                {
+                                                    "place": {
+                                                        "name": "Wagner's European Bakery and Cafe",
+                                                        "address": "1013 Capitol Way S, Olympia, WA",
+                                                        "rating": 4.5,
+                                                        "userRatingsTotal": 850,
+                                                        "openNow": true
+                                                    }
+                                                }
+                                                """;
+                                }
+
+                                return """
+                                        {
+                                            "place": {
+                                                "name": "Left Bank Pastry",
+                                                "address": "1008 4th Ave E, Olympia, WA",
+                                                "rating": 4.7,
+                                                "userRatingsTotal": 640,
+                                                "openNow": true
+                                            }
+                                        }
+                                        """;
             }
             return "dummy content";
         });
@@ -2471,7 +2500,8 @@ public class LocalBusinessDetectionTests
         var result2 = await agent.ProcessAsync("Show me a bakery nearby");
         Assert.True(result2.Success);
         Assert.Contains(mcp.Calls, c => c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("bakeries nearby", result2.Text);
+        Assert.Contains("bakeries", result2.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nearby", result2.Text, StringComparison.OrdinalIgnoreCase);
 
         // Ensure the session recorded that this was a local business discovery
         var sessionFlagFound = false;
@@ -2561,6 +2591,76 @@ public class LocalBusinessDetectionTests
     }
 
     [Fact]
+    public async Task LocalBakeryDiscovery_E2E_DropsGenericGuideHeading_AndReturnsRealBakeries()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"bakeries near me olympia wa","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "Top local results\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/olympia-gluten-free-desserts\",\"title\":\"Where to Get Gluten-Free Desserts in Olympia\",\"domain\":\"example.com\",\"snippet\":\"A curated local dessert guide.\"}" +
+            "]";
+
+        var articleResult = """
+            Where to Get Gluten-Free Desserts in Olympia
+            1. Left Bank Pastry
+            2. Wagner's European Bakery and Cafe
+            """;
+
+        string PlaceJson(string name, string address) =>
+            $$"""
+            {
+              "place": {
+                "name": "{{name}}",
+                "address": "{{address}}",
+                "rating": 4.6,
+                "userRatingsTotal": 120,
+                "openNow": true
+              }
+            }
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => searchResult,
+            "browser_navigate" or "BrowserNavigate" => articleResult,
+            "places_lookup" or "PlacesLookup" when args.Contains("Wagner", StringComparison.OrdinalIgnoreCase)
+                => PlaceJson("Wagner's European Bakery and Cafe", "1013 Capitol Way S, Olympia, WA"),
+            "places_lookup" or "PlacesLookup"
+                => PlaceJson("Left Bank Pastry", "108 5th Ave SW, Olympia, WA"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you pull up some bakeries near me?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Wagner's European Bakery", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Where to Get Gluten-Free Desserts in Olympia", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task LocalBusinessDiscovery_TargetsTenResults_WithStrictThenBackfill()
     {
         var llm = new FakeLlmClient((messages, _) =>
@@ -2630,6 +2730,192 @@ public class LocalBusinessDetectionTests
     }
 
     [Fact]
+    public async Task LocalBusinessDiscovery_PrefersOpenPlacesDiscovery_OverWebSearch()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia florists","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var discoverResult =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"show me florists nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[" +
+            "{\"id\":\"node:1\",\"name\":\"Fleurae\",\"address\":\"101 Capitol Way S, Olympia, WA\",\"category\":\"florist\",\"latitude\":47.0420,\"longitude\":-122.9000,\"distanceMeters\":420,\"osmUrl\":\"https://www.openstreetmap.org/node/1\",\"tags\":{\"shop\":\"florist\"}}," +
+            "{\"id\":\"node:2\",\"name\":\"Buds and Blooms\",\"address\":\"517 Washington St SE, Olympia, WA\",\"category\":\"florist\",\"latitude\":47.0411,\"longitude\":-122.8912,\"distanceMeters\":180,\"osmUrl\":\"https://www.openstreetmap.org/node/2\",\"tags\":{\"shop\":\"florist\"}}" +
+            "]," +
+            "\"errors\":[]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => discoverResult,
+            "web_search" or "WebSearch" => throw new InvalidOperationException("web_search should not run when open places discovery succeeds"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me florists nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Fleurae", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Buds and Blooms", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_OpenPlacesNoResults_FallsBackToPlacesLookup()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"olympia bakeries","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var noResultsDiscover =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"bakeries nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[]," +
+            "\"errors\":[]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => noResultsDiscover,
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            "web_search" or "WebSearch" => throw new InvalidOperationException("web_search should not run after an open places no-results response"),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "show me bakeries nearby",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_OpenPlacesNoResults_FallsBackToWebSearch_WhenDirectLookupIsEmpty()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var noResultsDiscover =
+            "{" +
+            "\"provider\":\"osm_overpass\"," +
+            "\"query\":\"bakeries nearby\"," +
+            "\"userLocationHint\":\"Olympia, WA\"," +
+            "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+            "\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931}," +
+            "\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"}," +
+            "\"results\":[]," +
+            "\"errors\":[\"unsupported category mapping\"]," +
+            "\"cache\":{\"hit\":false,\"ageSeconds\":0}" +
+            "}";
+
+        var webSearchResult =
+            "Downtown bakery picks\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://leftbankpastry.com\",\"title\":\"Left Bank Pastry - Bakery in Olympia, WA\",\"domain\":\"leftbankpastry.com\",\"snippet\":\"Neighborhood bakery in downtown Olympia.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "places_discover" or "PlacesDiscover" => noResultsDiscover,
+            "places_lookup" or "PlacesLookup" when args.Contains("Left Bank Pastry Olympia, WA", StringComparison.OrdinalIgnoreCase) =>
+                """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            "places_lookup" or "PlacesLookup" => "{\"place\":null,\"sources\":[]}",
+            "web_search" or "WebSearch" => webSearchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_discover", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task LocalBusinessDiscovery_WebSearchNoResults_ReturnsNoResultsMessage()
     {
         // Regression: when web_search returns no results for a local
@@ -2674,6 +2960,99 @@ public class LocalBusinessDetectionTests
         Assert.DoesNotContain(
             mcp.Calls.Select(c => c.Tool),
             t => t.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_WebSearchNoResults_FallsBackToPlacesLookup()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => "No results found for local bakeries olympia",
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "place": {
+                    "name": "Left Bank Pastry",
+                    "address": "108 5th Ave SW, Olympia, WA",
+                    "rating": 4.7,
+                    "userRatingsTotal": 640,
+                    "openNow": true
+                  }
+                }
+                """,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Left Bank Pastry", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            mcp.Calls.Select(c => c.Tool),
+            t => t.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_MissingPlacesKey_ReturnsActionableConfigurationMessage()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"local bakeries olympia","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" or "WebSearch" => "No results found for local bakeries olympia",
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "provider": "google_places",
+                  "query": "bakeries near Olympia, WA",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "can you bring me up some local bakeries?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Google Places provider is missing an API key", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ST_DEEPDIVE_PLACES_API_KEY", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -3156,5 +3535,46 @@ public class LocalBusinessNameExtractionTests
         var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
             [article], "bakeries nearby");
         Assert.Empty(names);
+    }
+
+    /// <summary>
+    /// Regression: "Bakeries in Olympia, WA - The Real Yellow Pages" must be
+    /// caught as an aggregator and must not survive title extraction.
+    /// </summary>
+    [Fact]
+    public void YellowPagesAggregator_DetectedAndRejected()
+    {
+        var source = new SourceItem
+        {
+            Url   = "https://www.realyellowpages.com/olympia-wa/bakeries",
+            Title = "Bakeries in Olympia, WA - The Real Yellow Pages"
+        };
+
+        // Should be recognized as an aggregator directory source.
+        Assert.True(SearchOrchestrator.IsDirectoryAggregatorSource(source));
+
+        // Even if extraction were attempted, the title must be rejected
+        // (the name after stripping is "Bakeries in Olympia, WA" which
+        // starts with the category label).
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            source.Title, "can you bring me up some local bakeries please?");
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_FiltersGenericListingHeadings()
+    {
+        var article = """
+            - San Francisco Street Bakery
+            - Local Bakery Locations in Olympia, Washington
+            - Grocery Hours
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "bakeries nearby");
+
+        Assert.Contains("San Francisco Street Bakery", names);
+        Assert.DoesNotContain("Local Bakery Locations in Olympia, Washington", names);
+        Assert.DoesNotContain("Grocery Hours", names);
     }
 }

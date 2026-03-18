@@ -100,10 +100,10 @@ public sealed partial class SearchOrchestrator
         }
 
         var instruction = isMarketQuoteRequest
-            ? memoryPackText + FinanceQuoteSummaryInstruction
+            ? CombineMemoryAndInstruction(memoryPackText, FinanceQuoteSummaryInstruction)
             : isLocalNews
-                ? memoryPackText + LocalNewsSummaryInstruction
-                : memoryPackText + NewsSummaryInstruction;
+                ? CombineMemoryAndInstruction(memoryPackText, LocalNewsSummaryInstruction)
+                : CombineMemoryAndInstruction(memoryPackText, NewsSummaryInstruction);
 
         return await SummarizeAndRespond(
             summaryInput, instruction,
@@ -179,6 +179,17 @@ public sealed partial class SearchOrchestrator
 
         var query = await _queryBuilder.BuildAsync(
             SearchMode.WebFactFind, userMessage ?? "", entity, Session, history, ct);
+
+        if (isLocalBusinessQuery)
+        {
+            var openPlaces = await TryHandleLocalBusinessWithOpenPlacesAsync(
+                userMessage ?? string.Empty,
+                localBusinessLocation,
+                toolCallsMade,
+                ct);
+            if (openPlaces.Attempted && openPlaces.Response is not null)
+                return openPlaces.Response;
+        }
 
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
@@ -263,6 +274,13 @@ public sealed partial class SearchOrchestrator
                 }
             });
         }
+
+        var releasedProductExistence = TryBuildReleasedProductExistenceResponse(
+            userMessage ?? "",
+            sources,
+            toolCallsMade);
+        if (releasedProductExistence is not null)
+            return releasedProductExistence;
 
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
@@ -382,10 +400,10 @@ public sealed partial class SearchOrchestrator
         }
 
         var instruction = isMarketQuoteRequest
-            ? memoryPackText + FinanceQuoteSummaryInstruction
+            ? CombineMemoryAndInstruction(memoryPackText, FinanceQuoteSummaryInstruction)
             : hasArticleContent
-                ? memoryPackText + FactFindSummaryInstruction
-                : memoryPackText + FactFindSnippetOnlyInstruction;
+                ? CombineMemoryAndInstruction(memoryPackText, FactFindSummaryInstruction)
+                : CombineMemoryAndInstruction(memoryPackText, FactFindSnippetOnlyInstruction);
 
         if (isLocalBizDiscovery)
         {

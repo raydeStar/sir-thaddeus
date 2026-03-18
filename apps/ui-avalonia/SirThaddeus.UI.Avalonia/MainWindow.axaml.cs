@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private string? _lastWorkflowChecklistStamp;
     private string? _workflowConfidenceBand;
     private int _workflowRetryCount;
+    private CancellationTokenSource? _progressDrawerAutoCollapseCancellation;
     private bool _voiceInitiatedRun;
     private static readonly TimeSpan MarkdownRegexTimeout = TimeSpan.FromMilliseconds(75);
     private static readonly Regex MarkdownBoldRegex = new(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
@@ -87,8 +88,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        _viewTabs = [ChatTabButton, BriefingTabButton, ProgressTabButton, SettingsTabButton];
-        _viewPanels = [ChatView, BriefingView, ProgressView, SettingsView];
+        _viewTabs = [ChatTabButton, BriefingTabButton, SettingsTabButton];
+        _viewPanels = [ChatView, BriefingView, SettingsView];
 
         _uiSettings = _uiSettingsStore.Load();
         ApplyUiSettingsToControls();
@@ -235,6 +236,8 @@ public partial class MainWindow : Window
         _eventStreamCancellation?.Cancel();
         _eventStreamCancellation?.Dispose();
         _eventStreamCancellation = null;
+
+        CancelProgressDrawerAutoCollapse();
 
         _runtimeHttpClient?.Dispose();
         _runtimeHttpClient = null;
@@ -440,7 +443,7 @@ public partial class MainWindow : Window
             _viewPanels[i].IsVisible = _viewTabs[i].IsChecked == true;
         }
 
-        InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true || ProgressTabButton.IsChecked == true;
+        InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true;
     }
 
     private void SettingsTabControl_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -597,6 +600,7 @@ public partial class MainWindow : Window
         if (show)
         {
             ActionDrawer.IsVisible = false;
+            ProgressDrawer.IsVisible = false;
         }
     }
 
@@ -606,6 +610,7 @@ public partial class MainWindow : Window
         if (show)
         {
             ConversationDrawer.IsVisible = false;
+            ProgressDrawer.IsVisible = false;
         }
     }
 
@@ -1769,12 +1774,11 @@ public partial class MainWindow : Window
                         if (!string.IsNullOrWhiteSpace(parts.ThinkingText))
                         {
                             lastMsg.ThoughtContent = parts.ThinkingText;
-                            lastMsg.Content = StripMarkdownFormatting(parts.DisplayText);
+                            lastMsg.Content = parts.DisplayText;
                         }
                         else
                         {
-                            // Always strip markdown bold/italic and clean LLM output markers.
-                            lastMsg.Content = StripMarkdownFormatting(parts.DisplayText);
+                            lastMsg.Content = parts.DisplayText;
                         }
 
                         // Stash the user prompt so the context menu "Retry" can resubmit it.
@@ -1814,6 +1818,11 @@ public partial class MainWindow : Window
                 _activeRunId = null;
                 UpdateComposerState();
 
+                if (_workflowChecklistItems.Count == 0)
+                {
+                    _ = AutoCollapseProgressDrawerAsync();
+                }
+
                 if (shouldAutoSpeak && !string.IsNullOrWhiteSpace(_lastAssistantMessage))
                 {
                     _ = AutoSpeakResponseAsync(_lastAssistantMessage);
@@ -1833,7 +1842,7 @@ public partial class MainWindow : Window
                 var failure = ReadPayload<RunFailedPayload>(envelope.Payload);
                 AppendTranscript($"[system] Run failed: {failure?.Error ?? "unknown"}");
                 _activeRunId = null;
-                HideProgressTab();
+                HideProgressDrawer();
                 UpdateComposerState();
                 break;
             case RuntimeEventTypes.ToolRequested:
@@ -1868,7 +1877,7 @@ public partial class MainWindow : Window
                 {
                     _lastWorkflowNarration = narration.Message;
                     WorkflowNarrationText.Text = narration.Message;
-                    ShowProgressTab();
+                    ShowProgressDrawer();
                 }
                 break;
             case RuntimeEventTypes.ChecklistUpdated:
@@ -1909,7 +1918,14 @@ public partial class MainWindow : Window
                         }
 
                         if (_workflowChecklistItems.Count > 0)
-                            ShowProgressTab();
+                        {
+                            ShowProgressDrawer();
+
+                            if (string.Equals(checklist.CurrentPhase, "Done", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _ = AutoCollapseProgressDrawerAsync();
+                            }
+                        }
                     }
                 }
                 break;
@@ -1922,7 +1938,7 @@ public partial class MainWindow : Window
                     {
                         _workflowRetryCount++;
                         WorkflowNarrationText.Text = "Retrying with alternate verification strategy\u2026";
-                        ShowProgressTab();
+                        ShowProgressDrawer();
                         UpdateWorkflowToolStrip();
                     }
                     else if (string.Equals(progressEvent.EventType, "retry.skipped", StringComparison.OrdinalIgnoreCase))
@@ -1945,7 +1961,7 @@ public partial class MainWindow : Window
                         };
 
                         WorkflowNarrationText.Text = skipLabel;
-                        ShowProgressTab();
+                        ShowProgressDrawer();
                         UpdateWorkflowToolStrip();
                     }
                     else if (string.Equals(progressEvent.EventType, "task.started", StringComparison.OrdinalIgnoreCase))
@@ -1961,7 +1977,7 @@ public partial class MainWindow : Window
                                 _ => "Processing request…"
                             };
                             WorkflowNarrationText.Text = label;
-                            ShowProgressTab();
+                            ShowProgressDrawer();
                         }
                     }
                 }
@@ -1975,6 +1991,7 @@ public partial class MainWindow : Window
 
     private void ResetWorkflowProgressUi()
     {
+        CancelProgressDrawerAutoCollapse();
         _workflowChecklistItems.Clear();
         _lastWorkflowNarration = null;
         _lastWorkflowChecklistStamp = null;
@@ -1982,26 +1999,71 @@ public partial class MainWindow : Window
         _workflowRetryCount = 0;
         WorkflowNarrationText.Text = string.Empty;
         WorkflowToolStripText.Text = string.Empty;
-        HideProgressTab();
+        HideProgressDrawer();
     }
 
-    private void ShowProgressTab()
+    private void ShowProgressDrawer()
     {
-        if (ProgressTabButton.IsVisible)
-            return; // Already showing.
-        ProgressTabButton.IsVisible = true;
+        CancelProgressDrawerAutoCollapse();
+        ProgressDrawer.IsVisible = true;
+        // Close competing drawers.
+        ActionDrawer.IsVisible = false;
+        ConversationDrawer.IsVisible = false;
     }
 
-    private void HideProgressTab()
+    private void HideProgressDrawer()
     {
-        if (!ProgressTabButton.IsVisible)
+        CancelProgressDrawerAutoCollapse();
+        ProgressDrawer.IsVisible = false;
+    }
+
+    private async Task AutoCollapseProgressDrawerAsync()
+    {
+        if (!ProgressDrawer.IsVisible)
             return;
-        ProgressTabButton.IsVisible = false;
-        ProgressTabButton.IsChecked = false;
-        ProgressView.IsVisible = false;
-        // If we were on the Progress tab, switch back to Chat.
-        if (_viewTabs.All(t => t.IsChecked != true))
-            SetActiveView(ChatTabButton);
+
+        CancelProgressDrawerAutoCollapse();
+        var cancellation = new CancellationTokenSource();
+        _progressDrawerAutoCollapseCancellation = cancellation;
+
+        try
+        {
+            await Task.Delay(2500, cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(_progressDrawerAutoCollapseCancellation, cancellation) && ProgressDrawer.IsVisible)
+            {
+                ProgressDrawer.IsVisible = false;
+            }
+        });
+
+        if (ReferenceEquals(_progressDrawerAutoCollapseCancellation, cancellation))
+        {
+            _progressDrawerAutoCollapseCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelProgressDrawerAutoCollapse()
+    {
+        var cancellation = _progressDrawerAutoCollapseCancellation;
+        _progressDrawerAutoCollapseCancellation = null;
+        if (cancellation is null)
+            return;
+
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private void CloseProgressDrawerButton_Click(object? sender, RoutedEventArgs e)
+    {
+        HideProgressDrawer();
     }
 
     private void UpdateWorkflowToolStrip()

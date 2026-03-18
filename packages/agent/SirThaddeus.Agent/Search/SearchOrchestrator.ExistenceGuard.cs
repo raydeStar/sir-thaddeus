@@ -1,10 +1,66 @@
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Search;
 
 public sealed partial class SearchOrchestrator
 {
+    private AgentResponse? TryBuildReleasedProductExistenceResponse(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        List<ToolCallRecord> toolCallsMade)
+    {
+        var text = BuildReleasedProductExistenceAnswer(userMessage, sources);
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = 0
+        };
+    }
+
+    internal static string? BuildReleasedProductExistenceAnswer(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources)
+    {
+        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        if (!IntentFeatureExtractor.LooksLikeReleasedProductExistenceLookup(lower))
+            return null;
+
+        if (sources.Count == 0)
+            return null;
+
+        var subject = ExtractReleasedProductExistenceSubject(userMessage ?? string.Empty);
+        var subjectMatches = sources
+            .Where(source =>
+                ($"{source.Title} {source.Snippet}")
+                .Contains(subject, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var positiveEvidence = subjectMatches
+            .Where(source => HasReleasedProductPositiveSignal(source))
+            .ToList();
+
+        if (positiveEvidence.Count > 0)
+        {
+            var year = TryExtractReleaseYear(positiveEvidence);
+            var yearClause = year is null ? string.Empty : $" with a {year} introduction/release year";
+
+            return
+                $"I could not verify definitive proof from the provided search results alone, but the available evidence strongly indicates {subject} exists as a released product. " +
+                $"The returned sources include official or catalog-style references to {subject}{yearClause} and place it in Apple's released iPhone lineup.";
+        }
+
+        return
+            $"Based on the available release lists, {subject} likely does not exist as a released product. " +
+            $"The returned sources enumerate Apple's iPhone lineup and release timelines, but none identify {subject} as an official released model.";
+    }
+
     private AgentResponse? TryBuildExistenceGuardedResponse(
         string userMessage,
         IReadOnlyList<SourceItem> initialSources,
@@ -188,5 +244,52 @@ public sealed partial class SearchOrchestrator
             : question[..Math.Min(seasonMatch.Index, question.Length)].Trim(' ', '?', '.', '"', '\'');
 
         return (entity, season, episode);
+    }
+
+    private static string ExtractReleasedProductExistenceSubject(string userMessage)
+    {
+        var normalized = (userMessage ?? string.Empty).Trim().TrimEnd('?', '.', '!');
+        var match = Regex.Match(
+            normalized,
+            @"^(?:does|did|is)\s+(.+?)\s+exist(?:\s+as\s+a[n]?\s+.+)?$",
+            RegexOptions.IgnoreCase);
+
+        return match.Success
+            ? match.Groups[1].Value.Trim()
+            : normalized;
+    }
+
+    private static bool HasReleasedProductPositiveSignal(SourceItem source)
+    {
+        var text = $"{source.Title} {source.Snippet}";
+        return text.Contains("year introduced", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("released", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("available now", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("in production", StringComparison.OrdinalIgnoreCase) ||
+               source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
+               source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryExtractReleaseYear(IReadOnlyList<SourceItem> sources)
+    {
+        foreach (var source in sources)
+        {
+            var text = $"{source.Title} {source.Snippet}";
+            var yearIntroducedMatch = Regex.Match(
+                text,
+                @"year introduced:\s*(\d{4})",
+                RegexOptions.IgnoreCase);
+            if (yearIntroducedMatch.Success)
+                return yearIntroducedMatch.Groups[1].Value;
+
+            var releasedMatch = Regex.Match(
+                text,
+                @"released\s+(\d{4})",
+                RegexOptions.IgnoreCase);
+            if (releasedMatch.Success)
+                return releasedMatch.Groups[1].Value;
+        }
+
+        return null;
     }
 }

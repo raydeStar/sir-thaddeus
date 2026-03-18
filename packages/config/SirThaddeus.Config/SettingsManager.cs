@@ -134,6 +134,21 @@ public static class SettingsManager
             var normalized = Normalize(loaded);
             if (requiresMigration)
             {
+                // v2 → v3: Raise web-pull budget from old default (3) to new (8)
+                // so the local-business enrichment pipeline has room for
+                // places_lookup calls after web_search + article fetches.
+                if (loaded.SchemaVersion <= 2 &&
+                    normalized.ToolBudgets.MaxWebPullsPerTurn == 3)
+                {
+                    normalized = normalized with
+                    {
+                        ToolBudgets = normalized.ToolBudgets with
+                        {
+                            MaxWebPullsPerTurn = 8
+                        }
+                    };
+                }
+
                 normalized = normalized with
                 {
                     SchemaVersion = AppSettings.CurrentSchemaVersion

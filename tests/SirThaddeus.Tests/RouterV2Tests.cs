@@ -44,6 +44,8 @@ public class RouterV2Tests
     [InlineData("any bakeries around here")]
     [InlineData("best coffee shop in seattle")]
     [InlineData("good grocery stores in my area")]
+    [InlineData("Does iPhone 15 exist as a released product?")]
+    [InlineData("Does iPhone 99 exist as a released product?")]
     public async Task RouteAsync_LocalBusinessHeuristics_RouteWithoutLlm(string message)
     {
         var (router, getLlmCalls) = CreateRouterWithCallCounter();

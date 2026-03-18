@@ -78,9 +78,9 @@ internal static partial class OfflineWebReasoningResponder
         {
             ChatMessage.System(
                 systemPrompt +
-                memoryPackText +
-                OfflineReasoningInstruction +
-                $"\n\nWeb lookup status: {failureReason}")
+                SearchOrchestrator.CombineMemoryAndInstruction(memoryPackText,
+                    OfflineReasoningInstruction +
+                    $"\n\nWeb lookup status: {failureReason}"))
         };
 
         // Keep only a short tail so local models do not run out of room.

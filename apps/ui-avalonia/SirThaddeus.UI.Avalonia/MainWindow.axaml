@@ -43,7 +43,6 @@
                     Spacing="0">
           <ToggleButton x:Name="ChatTabButton" Content="Chat" IsChecked="True" Classes="viewTab" Click="ViewTab_Click"/>
           <ToggleButton x:Name="BriefingTabButton" Content="Briefing" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
-          <ToggleButton x:Name="ProgressTabButton" Content="Progress" IsChecked="False" IsVisible="False" Classes="viewTab" Click="ViewTab_Click"/>
           <ToggleButton x:Name="SettingsTabButton" Content="Settings" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
         </StackPanel>
 
@@ -236,11 +235,11 @@
                             </Border>
 
                             <!-- Message content -->
-                            <SelectableTextBlock Text="{Binding Content}"
-                                                 FontSize="14"
-                                                 LineHeight="22"
-                                                 Foreground="{StaticResource TextBrush}"
-                                                 TextWrapping="Wrap"/>
+                            <local:MarkdownTextBlock Markdown="{Binding Content}"
+                                                     FontSize="14"
+                                                     LineHeight="22"
+                                                     Foreground="{StaticResource TextBrush}"
+                                                     TextWrapping="Wrap"/>
 
                             <!-- Inline tool activity footer (compact, dim) -->
                             <TextBlock IsVisible="{Binding HasToolSummary}"
@@ -520,49 +519,6 @@
               </ScrollViewer>
             </Border>
           </Grid>
-        </Grid>
-
-        <!-- ── Progress View (workflow checklist / narration) ── -->
-        <Grid x:Name="ProgressView" IsVisible="False" Background="{StaticResource BaseBrush}">
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="40,32,40,32" MaxWidth="640" Spacing="16">
-              <TextBlock x:Name="WorkflowNarrationText"
-                         Text=""
-                         FontSize="16"
-                         FontWeight="SemiBold"
-                         Foreground="{StaticResource Subtext1Brush}"
-                         TextWrapping="Wrap"/>
-
-              <ItemsControl x:Name="WorkflowChecklistList">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
-                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,3">
-                      <TextBlock Text="{Binding StateIcon}"
-                                 FontSize="13"
-                                 VerticalAlignment="Center"
-                                 Width="16"
-                                 Foreground="{StaticResource GreenBrush}"/>
-                      <TextBlock FontSize="13"
-                                 Foreground="{StaticResource Overlay0Brush}"
-                                 VerticalAlignment="Center"
-                                 TextWrapping="Wrap">
-                        <Run Text="{Binding Title}"/>
-                        <Run Text=" — " Foreground="{StaticResource Overlay0Brush}"/>
-                        <Run Text="{Binding StatusNote}" FontStyle="Italic"/>
-                      </TextBlock>
-                    </StackPanel>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-
-              <TextBlock x:Name="WorkflowToolStripText"
-                         Text=""
-                         FontSize="11"
-                         Foreground="{StaticResource Overlay0Brush}"
-                         Opacity="0.7"
-                         Margin="0,8,0,0"/>
-            </StackPanel>
-          </ScrollViewer>
         </Grid>
 
         <Grid x:Name="SettingsView" IsVisible="False" Background="{StaticResource BaseBrush}">
@@ -1497,6 +1453,63 @@
           </Grid>
         </Grid>
       </Grid>
+
+      <!-- ── Progress Drawer (workflow checklist / narration) ── -->
+      <Border x:Name="ProgressDrawer"
+              Grid.Column="2"
+              Width="320"
+              IsVisible="False"
+              Background="{StaticResource CrustBrush}"
+              BorderBrush="{StaticResource Surface0Brush}"
+              BorderThickness="1,0,0,0">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
+            <TextBlock Text="Progress" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseProgressDrawerButton_Click"/>
+          </Grid>
+
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="12,0,12,12" Spacing="12">
+              <TextBlock x:Name="WorkflowNarrationText"
+                         Text=""
+                         FontSize="13"
+                         FontWeight="SemiBold"
+                         Foreground="{StaticResource Subtext1Brush}"
+                         TextWrapping="Wrap"/>
+
+              <ItemsControl x:Name="WorkflowChecklistList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,3">
+                      <TextBlock Text="{Binding StateIcon}"
+                                 FontSize="13"
+                                 VerticalAlignment="Center"
+                                 Width="16"
+                                 Foreground="{StaticResource GreenBrush}"/>
+                      <TextBlock FontSize="13"
+                                 Foreground="{StaticResource Overlay0Brush}"
+                                 VerticalAlignment="Center"
+                                 TextWrapping="Wrap">
+                        <Run Text="{Binding Title}"/>
+                        <Run Text=" — " Foreground="{StaticResource Overlay0Brush}"/>
+                        <Run Text="{Binding StatusNote}" FontStyle="Italic"/>
+                      </TextBlock>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+
+          <TextBlock x:Name="WorkflowToolStripText"
+                     Grid.Row="2"
+                     Text=""
+                     FontSize="11"
+                     Foreground="{StaticResource Overlay0Brush}"
+                     Opacity="0.7"
+                     Margin="12,4,12,12"/>
+        </Grid>
+      </Border>
 
       <Border x:Name="ActionDrawer"
               Grid.Column="2"

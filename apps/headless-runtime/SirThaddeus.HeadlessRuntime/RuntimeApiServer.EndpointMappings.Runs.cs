@@ -155,11 +155,6 @@ internal static partial class RuntimeApiServer
         IAuditLogger audit)
     {
         var settings = getSettings();
-        var features = settings.WorkflowFeatures;
-        var workflowEnabled = features.ChecklistProgressUiEnabled ||
-                              features.ConfidenceScoringEnabled ||
-                              features.ConstrainedRetryEnabled ||
-                              features.TaskRunAuditSnapshotsEnabled;
 
         var orchestrator = buildOrchestrator(settings);
         if (request.Messages is { Count: > 0 })
@@ -171,45 +166,35 @@ internal static partial class RuntimeApiServer
             ? request.SessionId
             : request.ConversationId;
 
-        TaskRunState? workflowState = null;
-        if (workflowEnabled)
-        {
-            workflowState = await InitializeWorkflowStateAsync(request.Prompt, settings, runState.CancellationToken);
-            PublishProgressEvent(
-                runState,
-                "task.started",
-                "Workflow run started.",
-                true,
-                null,
-                new Dictionary<string, string>
-                {
-                    ["complexity"] = workflowState.Envelope.Complexity.ToString(),
-                    ["showChecklist"] = workflowState.Envelope.ShowChecklist.ToString()
-                });
-            if (features.ChecklistProgressUiEnabled &&
-                workflowState.Envelope.ShowChecklist)
+        var workflowState = await InitializeWorkflowStateAsync(request.Prompt, settings, runState.CancellationToken);
+        PublishProgressEvent(
+            runState,
+            "task.started",
+            "Workflow run started.",
+            true,
+            null,
+            new Dictionary<string, string>
             {
-                UpdateChecklistStep(workflowState, 1, ChecklistItemState.InProgress, "Understanding request");
-                PublishChecklist(runState, workflowState);
-            }
-
-            await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.TaskStarted, runState.CancellationToken);
-        }
-
-        // Wrap with time-budget-enforcing decorator when workflow is active.
-        IAgentOrchestrator effectiveOrchestrator = orchestrator;
-        ChecklistAwareAgentOrchestrator? workflowDecorator = null;
-        if (workflowState is not null)
+                ["complexity"] = workflowState.Envelope.Complexity.ToString(),
+                ["showChecklist"] = workflowState.Envelope.ShowChecklist.ToString()
+            });
+        if (workflowState.Envelope.ShowChecklist)
         {
-            workflowDecorator = new ChecklistAwareAgentOrchestrator(orchestrator);
-            effectiveOrchestrator = workflowDecorator;
+            UpdateChecklistStep(workflowState, 1, ChecklistItemState.InProgress, "Understanding request");
+            PublishChecklist(runState, workflowState);
         }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.TaskStarted, runState.CancellationToken);
+
+        // Wrap with time-budget-enforcing decorator.
+        var workflowDecorator = new ChecklistAwareAgentOrchestrator(orchestrator);
+        IAgentOrchestrator effectiveOrchestrator = workflowDecorator;
 
         var stopwatch = Stopwatch.StartNew();
-        workflowDecorator?.SetRunBudget(workflowState!.Envelope.TimeBudget, stopwatch);
+        workflowDecorator.SetRunBudget(workflowState.Envelope.TimeBudget, stopwatch);
 
         var firstPassPrompt = request.Prompt;
-        if (workflowState is not null && ShouldForceToolBackedLookup(workflowState.Envelope, request.Prompt))
+        if (ShouldForceToolBackedLookup(workflowState.Envelope, request.Prompt))
         {
             firstPassPrompt = BuildToolBackedLookupPrompt(request.Prompt);
         }
@@ -221,148 +206,140 @@ internal static partial class RuntimeApiServer
 
         var selectedResponse = firstResponse;
         var totalRoundTrips = firstResponse.LlmRoundTrips;
+        var totalToolCallsUsed = firstResponse.ToolCallsMade.Count;
         ConfidenceSnapshot? firstConfidence = null;
         ConfidenceSnapshot? selectedConfidence = null;
         CompletionReason? completionReason = null;
 
-        if (workflowState is not null)
+        CaptureEvidence(workflowState, firstResponse, "primary");
+        workflowState.DraftAnswer = firstResponse.Text;
+        workflowState.ToolCallsUsed = totalToolCallsUsed;
+
+        if (workflowState.Envelope.ShowChecklist)
         {
-            CaptureEvidence(workflowState, firstResponse, "primary");
-            workflowState.DraftAnswer = firstResponse.Text;
-            workflowState.ToolCallsUsed = firstResponse.ToolCallsMade.Count;
+            UpdateChecklistStep(workflowState, 1, ChecklistItemState.Completed, "Request understood");
+            UpdateChecklistStep(workflowState, 2, ChecklistItemState.InProgress, "Gathering evidence");
+            workflowState.Checklist.CurrentPhase = "Gathering evidence";
+            PublishChecklist(runState, workflowState);
+        }
 
-            if (features.ChecklistProgressUiEnabled && workflowState.Envelope.ShowChecklist)
-            {
-                UpdateChecklistStep(workflowState, 1, ChecklistItemState.Completed, "Request understood");
-                UpdateChecklistStep(workflowState, 2, ChecklistItemState.InProgress, "Gathering evidence");
-                workflowState.Checklist.CurrentPhase = "Gathering evidence";
-                PublishChecklist(runState, workflowState);
-            }
+        firstConfidence = WorkflowConfidenceEvaluator.Evaluate(workflowState);
 
-            firstConfidence = features.ConfidenceScoringEnabled
-                ? WorkflowConfidenceEvaluator.Evaluate(workflowState)
-                : new ConfidenceSnapshot { Score = 0.7, Band = "Medium", Summary = "Confidence scoring disabled.", ShouldRetry = false };
+        workflowState.LatestConfidence = firstConfidence;
+        selectedConfidence = firstConfidence;
 
-            workflowState.LatestConfidence = firstConfidence;
-            selectedConfidence = firstConfidence;
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 2, ChecklistItemState.Completed, "Evidence captured");
+            UpdateChecklistStep(workflowState, 3, ChecklistItemState.InProgress, "Comparing findings");
+            workflowState.Checklist.CurrentPhase = "Comparing evidence";
+            PublishChecklist(runState, workflowState);
+        }
 
-            if (features.ChecklistProgressUiEnabled && workflowState.Envelope.ShowChecklist)
-            {
-                UpdateChecklistStep(workflowState, 2, ChecklistItemState.Completed, "Evidence captured");
-                UpdateChecklistStep(workflowState, 3, ChecklistItemState.InProgress, "Comparing findings");
-                workflowState.Checklist.CurrentPhase = "Comparing evidence";
-                PublishChecklist(runState, workflowState);
-            }
+        var retryGate = WorkflowRetryGateEvaluator.Evaluate(workflowState, firstConfidence, stopwatch.Elapsed);
+        workflowState.LastRetryGateDecision = retryGate;
 
-            var retryGate = WorkflowRetryGateEvaluator.Evaluate(workflowState, firstConfidence, stopwatch.Elapsed);
-            workflowState.LastRetryGateDecision = retryGate;
+        if (retryGate.IsAllowed)
+        {
+            var retryPlan = await WorkflowRetryPlanner.BuildRetryPlanAsync(workflowState, runState.CancellationToken);
+            var retryAction = retryPlan.FirstOrDefault();
+            var retryStrategy = retryAction?.RetryStrategy ?? "fallback_retry";
 
-            if (features.ConstrainedRetryEnabled && retryGate.IsAllowed)
-            {
-                var retryPlan = await WorkflowRetryPlanner.BuildRetryPlanAsync(workflowState, runState.CancellationToken);
-                var retryAction = retryPlan.FirstOrDefault();
-                var retryStrategy = retryAction?.RetryStrategy ?? "fallback_retry";
-
-                workflowState.RetriesUsed += 1;
-                workflowState.RuntimeState = TaskLifecycleState.Retrying;
-                PublishProgressEvent(
-                    runState,
-                    "retry.started",
-                    "Confidence below threshold, starting alternate verification strategy.",
-                    true,
-                    workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
-                    new Dictionary<string, string>
-                    {
-                        ["retry"] = workflowState.RetriesUsed.ToString(),
-                        ["reason"] = "confidence_below_threshold",
-                        ["strategy"] = retryStrategy
-                    });
-                await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.RetryStarted, runState.CancellationToken);
-
-                var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text, retryAction);
-                var retryResponse = await effectiveOrchestrator.ProcessAsync(
-                    retryPrompt,
-                    conversationId,
-                    runState.CancellationToken);
-
-                totalRoundTrips += retryResponse.LlmRoundTrips;
-
-                var retryState = new TaskRunState
+            workflowState.RetriesUsed += 1;
+            workflowState.RuntimeState = TaskLifecycleState.Retrying;
+            PublishProgressEvent(
+                runState,
+                "retry.started",
+                "Confidence below threshold, starting alternate verification strategy.",
+                true,
+                workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
+                new Dictionary<string, string>
                 {
-                    Envelope = workflowState.Envelope,
-                    Checklist = workflowState.Checklist,
-                    ToolCallsUsed = workflowState.ToolCallsUsed + retryResponse.ToolCallsMade.Count,
-                    RetriesUsed = workflowState.RetriesUsed,
-                    DraftAnswer = retryResponse.Text,
-                    RuntimeState = TaskLifecycleState.Retrying
-                };
-                retryState.Evidence.AddRange(workflowState.Evidence);
-                CaptureEvidence(retryState, retryResponse, "retry");
+                    ["retry"] = workflowState.RetriesUsed.ToString(),
+                    ["reason"] = "confidence_below_threshold",
+                    ["strategy"] = retryStrategy
+                });
+            await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.RetryStarted, runState.CancellationToken);
 
-                var retryConfidence = features.ConfidenceScoringEnabled
-                    ? WorkflowConfidenceEvaluator.Evaluate(retryState)
-                    : firstConfidence;
+            var retryPrompt = BuildRetryPrompt(request.Prompt, firstResponse.Text, retryAction);
+            var retryResponse = await effectiveOrchestrator.ProcessAsync(
+                retryPrompt,
+                conversationId,
+                runState.CancellationToken);
 
-                if (retryConfidence.Score >= firstConfidence.Score)
-                {
-                    selectedResponse = retryResponse;
-                    selectedConfidence = retryConfidence;
-                    workflowState.DraftAnswer = retryResponse.Text;
-                    workflowState.ToolCallsUsed = retryState.ToolCallsUsed;
-                }
+            totalRoundTrips += retryResponse.LlmRoundTrips;
+            totalToolCallsUsed += retryResponse.ToolCallsMade.Count;
+            workflowState.ToolCallsUsed = totalToolCallsUsed;
 
-                workflowState.LatestConfidence = selectedConfidence;
-                workflowState.Evidence.Clear();
-                workflowState.Evidence.AddRange(retryState.Evidence);
-            }
-            else if (features.ConstrainedRetryEnabled)
+            var retryState = new TaskRunState
             {
-                PublishProgressEvent(
-                    runState,
-                    "retry.skipped",
-                    retryGate.ReasonMessage,
-                    true,
-                    workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
-                    new Dictionary<string, string>
-                    {
-                        ["reason"] = retryGate.ReasonCode,
-                        ["remainingRetries"] = retryGate.RemainingRetries.ToString(),
-                        ["remainingToolCalls"] = retryGate.RemainingToolCalls.ToString(),
-                        ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString(),
-                        ["confidenceBand"] = firstConfidence.Band,
-                        ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
-                    });
-            }
+                Envelope = workflowState.Envelope,
+                Checklist = workflowState.Checklist,
+                ToolCallsUsed = totalToolCallsUsed,
+                RetriesUsed = workflowState.RetriesUsed,
+                DraftAnswer = retryResponse.Text,
+                RuntimeState = TaskLifecycleState.Retrying
+            };
+            retryState.Evidence.AddRange(workflowState.Evidence);
+            CaptureEvidence(retryState, retryResponse, "retry");
 
-            completionReason = ResolveCompletionReason(
-                selectedResponse,
-                workflowState,
-                selectedConfidence,
-                stopwatch.Elapsed);
+            var retryConfidence = WorkflowConfidenceEvaluator.Evaluate(retryState);
 
-            workflowState.CompletionReason = completionReason;
-            workflowState.RuntimeState = TaskLifecycleState.Finalizing;
-            await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Finalizing, runState.CancellationToken);
-
-            if (features.ChecklistProgressUiEnabled && workflowState.Envelope.ShowChecklist)
+            if (retryConfidence.Score >= firstConfidence.Score)
             {
-                UpdateChecklistStep(workflowState, 3, ChecklistItemState.Completed, "Comparison complete");
-                UpdateChecklistStep(workflowState, 4, ChecklistItemState.Completed, "Answer prepared");
-                UpdateChecklistStep(workflowState, 5, ChecklistItemState.Completed, "Finalized");
-                workflowState.Checklist.CurrentPhase = "Done";
-                PublishChecklist(runState, workflowState);
+                selectedResponse = retryResponse;
+                selectedConfidence = retryConfidence;
+                workflowState.DraftAnswer = retryResponse.Text;
             }
 
-            await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Completed, runState.CancellationToken);
-
-            if (features.TaskRunAuditSnapshotsEnabled)
-            {
-                WriteWorkflowAuditSnapshot(audit, runState.RunId, workflowState, selectedConfidence, selectedResponse);
-            }
+            workflowState.LatestConfidence = selectedConfidence;
+            workflowState.Evidence.Clear();
+            workflowState.Evidence.AddRange(retryState.Evidence);
         }
         else
         {
-            completionReason = selectedResponse.Success ? CompletionReason.SuccessMediumConfidence : CompletionReason.Failed;
+            PublishProgressEvent(
+                runState,
+                "retry.skipped",
+                retryGate.ReasonMessage,
+                true,
+                workflowState.Checklist.Items.FirstOrDefault(i => i.Order == 3)?.Id,
+                new Dictionary<string, string>
+                {
+                    ["reason"] = retryGate.ReasonCode,
+                    ["remainingRetries"] = retryGate.RemainingRetries.ToString(),
+                    ["remainingToolCalls"] = retryGate.RemainingToolCalls.ToString(),
+                    ["remainingTimeMs"] = retryGate.RemainingTimeMs.ToString(),
+                    ["confidenceBand"] = firstConfidence.Band,
+                    ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
+                });
+        }
+
+        completionReason = ResolveCompletionReason(
+            selectedResponse,
+            workflowState,
+            selectedConfidence,
+            stopwatch.Elapsed);
+
+        workflowState.CompletionReason = completionReason;
+        workflowState.RuntimeState = TaskLifecycleState.Finalizing;
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 3, ChecklistItemState.Completed, "Comparison complete");
+            UpdateChecklistStep(workflowState, 4, ChecklistItemState.InProgress, "Preparing answer");
+            workflowState.Checklist.CurrentPhase = "Preparing answer";
+            PublishChecklist(runState, workflowState);
+        }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Finalizing, runState.CancellationToken);
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 4, ChecklistItemState.Completed, "Answer prepared");
+            UpdateChecklistStep(workflowState, 5, ChecklistItemState.InProgress, "Delivering response");
+            workflowState.Checklist.CurrentPhase = "Delivering response";
+            PublishChecklist(runState, workflowState);
         }
 
         runState.Append(RuntimeEventTypes.TokenDelta, new TokenDeltaPayload(selectedResponse.Text, 0));
@@ -371,12 +348,23 @@ internal static partial class RuntimeApiServer
             new RunCompletedPayload(
                 selectedResponse.Text,
                 totalRoundTrips,
-                selectedResponse.ToolCallsMade.Count,
+                totalToolCallsUsed,
                 ToBriefingDto(selectedResponse.DeepDiveBriefing),
                 completionReason?.ToString(),
                 selectedConfidence?.Band,
-                workflowState?.LastRetryGateDecision?.IsAllowed,
-                workflowState?.LastRetryGateDecision?.ReasonCode));
+                workflowState.LastRetryGateDecision?.IsAllowed,
+                workflowState.LastRetryGateDecision?.ReasonCode));
+
+        if (workflowState.Envelope.ShowChecklist)
+        {
+            UpdateChecklistStep(workflowState, 5, ChecklistItemState.Completed, "Finalized");
+            workflowState.Checklist.CurrentPhase = "Done";
+            PublishChecklist(runState, workflowState);
+        }
+
+        await PublishNarrationIfAnyAsync(runState, workflowState, ProgressTrigger.Completed, runState.CancellationToken);
+
+        WriteWorkflowAuditSnapshot(audit, runState.RunId, workflowState, selectedConfidence, selectedResponse);
     }
 
     private static void WriteWorkflowAuditSnapshot(
@@ -400,7 +388,7 @@ internal static partial class RuntimeApiServer
                 ["completion_reason"] = workflowState.CompletionReason?.ToString() ?? "unknown",
                 ["confidence_band"] = confidence?.Band ?? "n/a",
                 ["confidence_score"] = confidence?.Score ?? 0.0,
-                ["retry_gate_allowed"] = workflowState.LastRetryGateDecision?.IsAllowed,
+                ["retry_gate_allowed"] = workflowState.LastRetryGateDecision?.IsAllowed is bool allowed ? allowed : "n/a",
                 ["retry_gate_reason"] = workflowState.LastRetryGateDecision?.ReasonCode ?? "n/a",
                 ["retries_used"] = workflowState.RetriesUsed,
                 ["tool_calls_used"] = workflowState.ToolCallsUsed,

@@ -26,6 +26,30 @@ public class IntentFeatureExtractorTests
         Assert.False(result);
     }
 
+    [Fact]
+    public void LooksLikeFactLookup_ReleasedProductExistencePrompt_ReturnsTrue()
+    {
+        var lower = "Does iPhone 15 exist as a released product?"
+            .ToLowerInvariant();
+
+        var result = IntentFeatureExtractor.LooksLikeFactLookup(lower);
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void WebLookupHeuristicEvidence_ReleasedProductExistencePrompt_RequestsLookup()
+    {
+        var lower = "Does iPhone 99 exist as a released product?"
+            .ToLowerInvariant();
+
+        var evidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+
+        Assert.True(evidence.ShouldLookup);
+        Assert.True(evidence.Score >= 2.8);
+        Assert.Equal("released_product_existence", evidence.ReasonCode);
+    }
+
     // ── HasLocalBusinessProximitySignals — proximity detection ────────
 
     [Theory]

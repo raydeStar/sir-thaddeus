@@ -100,6 +100,31 @@ public class MemoryContextProviderTests
         Assert.Empty(mcp.Calls);
     }
 
+    [Fact]
+    public async Task GetContextAsync_SkipsWhenClassifierSuppressesNonGreeting()
+    {
+        var mcp = new FakeMcpClient("should-not-run");
+        var audit = new TestAuditLogger();
+        var provider = new MemoryContextProvider(
+            mcp,
+            audit,
+            new FakeSmartIntentClassifier(MemoryIntentDecision.Suppress),
+            TimeProvider.System);
+
+        var result = await provider.GetContextAsync(new MemoryContextRequest
+        {
+            UserMessage = "Hey, how are you doing today? Just wanted to say thanks for helping me out.",
+            MemoryEnabled = true,
+            IsColdGreeting = false,
+            Timeout = TimeSpan.FromMilliseconds(500)
+        });
+
+        Assert.True(result.Provenance.Skipped);
+        Assert.False(result.Provenance.Success);
+        Assert.Equal("Memory retrieve explicitly suppressed by intent classifier.", result.Provenance.Summary);
+        Assert.Empty(mcp.Calls);
+    }
+
     private sealed class SlowMcpClient : IMcpToolClient
     {
         private readonly int _delayMs;

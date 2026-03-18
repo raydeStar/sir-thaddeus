@@ -522,7 +522,7 @@ public sealed partial class AgentOrchestrator
             : WebFollowUpInstruction;
 
         var messagesForSummary = InjectModeIntoSystemPrompt(
-            _history, memoryPackText + instruction);
+            _history, SearchOrchestrator.CombineMemoryAndInstruction(memoryPackText, instruction));
         messagesForSummary.Add(ChatMessage.User(summaryInput));
 
         var response = await CallLlmWithRetrySafe(

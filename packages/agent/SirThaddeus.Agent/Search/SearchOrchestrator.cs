@@ -74,6 +74,8 @@ public sealed partial class SearchOrchestrator
     private const string WebSearchToolNameAlt = "WebSearch";
     private const string BrowseToolName       = "browser_navigate";
     private const string BrowseToolNameAlt    = "BrowserNavigate";
+    private const string PlacesDiscoverToolName    = "places_discover";
+    private const string PlacesDiscoverToolNameAlt = "PlacesDiscover";
     private const string PlacesLookupToolName    = "places_lookup";
     private const string PlacesLookupToolNameAlt = "PlacesLookup";
 
@@ -81,7 +83,7 @@ public sealed partial class SearchOrchestrator
     private const int DefaultMaxResults    = 5;
     private const int LocalBusinessTargetResults = 10;
     private const int LocalBusinessFetchMaxResults = 20;
-    private const int LocalBusinessMaxArticleFetches = 2;
+    private const int LocalBusinessMaxArticleFetches = 1;
     private const int LocalBusinessMaxPlaceLookups = 5;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
@@ -173,6 +175,24 @@ public sealed partial class SearchOrchestrator
     // ── Source metadata delimiter (matches WebSearchTools output) ─────
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
 
+    // ── Memory / Instruction boundary ────────────────────────────────
+
+    /// <summary>
+    /// Combines memory pack text with synthesis instructions, inserting a
+    /// clear boundary so the LLM does not follow response patterns found
+    /// in memory context chunks (e.g. prior deflections).
+    /// </summary>
+    internal static string CombineMemoryAndInstruction(string memoryPackText, string instruction)
+    {
+        if (string.IsNullOrWhiteSpace(memoryPackText))
+            return instruction;
+
+        return memoryPackText +
+            "\n\n[END OF MEMORY CONTEXT — the task instructions below take absolute precedence " +
+            "over any response patterns shown in memory]\n" +
+            instruction;
+    }
+
     // ── LLM Instructions ─────────────────────────────────────────────
     private const string NewsSummaryInstruction =
         "\n\nSearch results are in the next message. " +
@@ -182,6 +202,8 @@ public sealed partial class SearchOrchestrator
         "Note where sources agree or differ. " +
         "No URLs. ONLY use facts from the provided sources. " +
         "Do NOT apologize or claim you lack internet, real-time data, or web access. " +
+        "Do NOT deflect, claim role limitations, or ask clarifying questions — " +
+        "answer directly from the search results provided. " +
         "The provided results already contain the current information you need. " +
         "Do NOT invent or guess details not in the results. " +
         "IMPORTANT: If the user's message specifies a response format " +
@@ -210,6 +232,8 @@ public sealed partial class SearchOrchestrator
         "Include key facts. No URLs. " +
         "ONLY use facts from the provided sources. " +
         "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
+        "Do NOT deflect, claim role limitations, or ask clarifying questions — " +
+        "answer directly from the search results provided. " +
         "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. specific line prefixes, headings, structure), follow it exactly.\n" +
@@ -224,6 +248,8 @@ public sealed partial class SearchOrchestrator
         "summarize down to generalities. No URLs. " +
         "ONLY use facts from the provided sources. " +
         "Do NOT apologize or claim you lack internet, real-time data, or location access. " +
+        "Do NOT deflect, claim role limitations, or ask clarifying questions — " +
+        "answer directly from the search results provided. " +
         "The provided results already contain the current, localized data you need. " +
         "IMPORTANT: If the user's message specifies a response format " +
         "(e.g. specific line prefixes, headings, structure), follow it exactly.\n" +
@@ -837,7 +863,7 @@ public sealed partial class SearchOrchestrator
                            content;
 
         return await SummarizeAndRespond(
-            summaryInput, memoryPackText + DeepDiveInstruction,
+            summaryInput, CombineMemoryAndInstruction(memoryPackText, DeepDiveInstruction),
             history, toolCallsMade, SummaryFallbackKind.Generic, null, ct);
     }
 
@@ -922,7 +948,7 @@ public sealed partial class SearchOrchestrator
             : NewsSummaryInstruction;
 
         return await SummarizeAndRespond(
-            sb.ToString(), memoryPackText + instruction,
+            sb.ToString(), CombineMemoryAndInstruction(memoryPackText, instruction),
             history, toolCallsMade, SummaryFallbackKind.News, relatedSources, ct);
     }
 
@@ -1018,7 +1044,7 @@ public sealed partial class SearchOrchestrator
             ct);
     }
 
-    private Task<AgentResponse> BuildNoResultsFallbackAsync(
+    private async Task<AgentResponse> BuildNoResultsFallbackAsync(
         string userMessage,
         string memoryPackText,
         IReadOnlyList<ChatMessage> history,
@@ -1026,9 +1052,18 @@ public sealed partial class SearchOrchestrator
         CancellationToken ct)
     {
         if (IsLocalBusinessNoResultsRequest(userMessage))
-            return Task.FromResult(BuildNoResultsResponse(userMessage, toolCallsMade));
+        {
+            var directFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
+                userMessage,
+                toolCallsMade,
+                ct);
+            if (directFallback is not null)
+                return directFallback;
 
-        return BuildNoResultsReasoningResponseAsync(
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        }
+
+        return await BuildNoResultsReasoningResponseAsync(
             userMessage,
             memoryPackText,
             history,
@@ -2949,9 +2984,16 @@ public sealed partial class SearchOrchestrator
                 ? $"{label} in {locationSnippet}"
                 : label;
 
-            text = $"I could not retrieve live local business results for {context} right now. " +
-                   "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
-                   "and I can check its current hours.";
+                        var placesConfigMissing = toolCallsMade.Any(call =>
+                                call.ToolName.Contains("places_lookup", StringComparison.OrdinalIgnoreCase) &&
+                                call.Result.Contains("Google Places API key is not configured", StringComparison.OrdinalIgnoreCase));
+
+                        text = placesConfigMissing
+                                ? $"Local business lookup is not fully configured right now, so I could not retrieve live results for {context}. " +
+                                    "The Google Places provider is missing an API key. Set ST_DEEPDIVE_PLACES_API_KEY or GOOGLE_MAPS_API_KEY, then try again."
+                                : $"I could not retrieve live local business results for {context} right now. " +
+                                    "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
+                                    "and I can check its current hours.";
         }
         else
         {

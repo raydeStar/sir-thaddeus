@@ -3,6 +3,7 @@ name: Location - Is there a deli nearby?
 user_message: "Is there a deli nearby?"
 allowed_tools:
   - memory_retrieve
+  - places_discover
   - places_lookup
   - web_search
   - browser_navigate

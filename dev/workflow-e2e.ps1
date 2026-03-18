@@ -57,10 +57,6 @@ try {
         $settings | Add-Member -MemberType NoteProperty -Name workflowFeatures -Value ([pscustomobject]@{})
     }
 
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "checklistProgressUiEnabled" -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "confidenceScoringEnabled" -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "constrainedRetryEnabled" -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "taskRunAuditSnapshotsEnabled" -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "retryGateTestOverrideReason" -Value $RetryGateOverrideReason
 
     if ($ForceToolBudgetZero) {

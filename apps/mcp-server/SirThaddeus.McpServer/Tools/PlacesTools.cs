@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using SirThaddeus.WebSearch;
+using SirThaddeus.WebSearch.Providers;
 
 namespace SirThaddeus.McpServer.Tools;
 
@@ -13,6 +14,44 @@ namespace SirThaddeus.McpServer.Tools;
 public static class PlacesTools
 {
     private static readonly Lazy<HttpClient> SharedHttp = new(CreateHttpClient);
+    private static readonly Lazy<IPlacesDiscoveryProvider> OpenDiscoveryProvider =
+        new(() => new OsmPlacesDiscoveryProvider(httpClient: SharedHttp.Value));
+
+    [McpServerTool, Description(
+        "Discovers nearby businesses and places using open OSM geocoding + Overpass data. " +
+        "Works without paid API keys and returns structured nearby place candidates.")]
+    public static async Task<string> PlacesDiscover(
+        [Description("Nearby place query, such as 'bakeries nearby' or 'parks in Olympia'.")] string query,
+        [Description("Optional user location hint (city/region).")]
+        string? userLocationHint = null,
+        [Description("Maximum number of place candidates to return (1-20).")]
+        int maxResults = 10,
+        [Description("Search radius in meters around the resolved location (500-20000).")]
+        int radiusMeters = 4_000,
+        [Description("Locale hint for future formatting support.")]
+        string locale = "en-US",
+        CancellationToken cancellationToken = default)
+    {
+        var options = new PlaceDiscoveryOptions
+        {
+            MaxResults = Math.Clamp(maxResults, 1, 20),
+            RadiusMeters = Math.Clamp(radiusMeters, 500, 20_000),
+            Locale = string.IsNullOrWhiteSpace(locale) ? "en-US" : locale.Trim()
+        };
+
+        var result = await OpenDiscoveryProvider.Value.DiscoverAsync(
+            query,
+            userLocationHint,
+            options,
+            cancellationToken);
+
+        var serializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = false
+        };
+
+        return JsonSerializer.Serialize(result, serializerOptions);
+    }
 
     [McpServerTool, Description(
         "Looks up a place via Google Places API and returns structured details " +

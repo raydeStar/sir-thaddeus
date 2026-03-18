@@ -2667,6 +2667,8 @@ internal sealed class FakeMcpClient : IMcpToolClient
                  """{"type":"object","properties":{"memoryId":{"type":"string"}},"required":["memoryId"]}"""),
         MakeTool("web_search",         "Searches the web for information",
                  """{"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"integer"},"recency":{"type":"string"}},"required":["query"]}"""),
+        MakeTool("places_discover",    "Discovers nearby places using open data",
+             """{"type":"object","properties":{"query":{"type":"string"},"userLocationHint":{"type":"string"},"maxResults":{"type":"integer"},"radiusMeters":{"type":"integer"},"locale":{"type":"string"}},"required":["query"]}"""),
         MakeTool("places_lookup",      "Looks up place details for deep-dive briefings",
                  """{"type":"object","properties":{"query":{"type":"string"},"timezone":{"type":"string"},"locale":{"type":"string"},"userLocationHint":{"type":"string"},"maxReviewSnippets":{"type":"integer"}},"required":["query"]}"""),
         MakeTool("weather_geocode",    "Geocodes a place for weather lookup",

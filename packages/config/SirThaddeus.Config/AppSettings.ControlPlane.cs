@@ -9,7 +9,7 @@ namespace SirThaddeus.Config;
 /// </summary>
 public sealed partial record AppSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -66,7 +66,7 @@ public sealed record ToolBudgetSettings
     public int MaxToolCallsPerSession { get; init; } = 200;
 
     [JsonPropertyName("maxWebPullsPerTurn")]
-    public int MaxWebPullsPerTurn { get; init; } = 3;
+    public int MaxWebPullsPerTurn { get; init; } = 8;
 
     [JsonPropertyName("maxFileOpsPerMinute")]
     public int MaxFileOpsPerMinute { get; init; } = 30;
@@ -81,23 +81,11 @@ public sealed record ToolBudgetSettings
 }
 
 /// <summary>
-/// Feature flags for checklist/progress/confidence workflow rollout.
-/// Defaults are OFF for safe incremental adoption.
+/// Workflow settings kept for the retry-gate test-override hook.
+/// All workflow features are always enabled.
 /// </summary>
 public sealed record WorkflowFeatureSettings
 {
-    [JsonPropertyName("checklistProgressUiEnabled")]
-    public bool ChecklistProgressUiEnabled { get; init; } = true;
-
-    [JsonPropertyName("confidenceScoringEnabled")]
-    public bool ConfidenceScoringEnabled { get; init; } = true;
-
-    [JsonPropertyName("constrainedRetryEnabled")]
-    public bool ConstrainedRetryEnabled { get; init; } = true;
-
-    [JsonPropertyName("taskRunAuditSnapshotsEnabled")]
-    public bool TaskRunAuditSnapshotsEnabled { get; init; } = true;
-
     [JsonPropertyName("retryGateTestOverrideReason")]
     public string RetryGateTestOverrideReason { get; init; } = "";
 }

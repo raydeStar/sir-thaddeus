@@ -548,6 +548,9 @@ public static class IntentFeatureExtractor
         if (LooksLikeSeasonEpisodePlotLookup(lower))
             return new WebLookupHeuristicEvidence(3.0, "season_episode_lookup", true, 0.96);
 
+        if (LooksLikeReleasedProductExistenceLookup(lower))
+            return new WebLookupHeuristicEvidence(3.0, "released_product_existence", true, 0.95);
+
         if (lower.Contains("web_search", StringComparison.Ordinal) ||
             lower.Contains("web search", StringComparison.Ordinal))
         {
@@ -851,6 +854,8 @@ public static class IntentFeatureExtractor
                 "florist", "florists", "bakery", "bakeries",
                 "bar", "pub", "store", "shop",
                 "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+                "bank", "banks", "credit union",
+                "park", "parks", "playground",
                 "hotel", "motel",
                 "gas station", "car wash", "laundromat", "salon", "barber",
                 "gym", "dentist", "clinic", "doctor", "urgent care"
@@ -967,6 +972,8 @@ public static class IntentFeatureExtractor
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "bank", "banks", "credit union",
+            "park", "parks", "playground",
             "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
             "gym", "dentist", "clinic", "doctor", "urgent care"
@@ -1038,6 +1045,8 @@ public static class IntentFeatureExtractor
             "florist", "florists", "bakery", "bakeries",
             "bar", "pub", "store", "shop",
             "grocery", "groceries", "supermarket", "pharmacy", "pharmacies",
+            "bank", "banks", "credit union",
+            "park", "parks", "playground",
             "hotel", "motel",
             "gas station", "car wash", "laundromat", "salon", "barber",
             "gym", "dentist", "clinic", "doctor", "urgent care",
@@ -1080,6 +1089,9 @@ public static class IntentFeatureExtractor
         if (LooksLikeExplicitNewsLookup(lower))
             return false;
 
+        if (LooksLikeReleasedProductExistenceLookup(lower))
+            return true;
+
         if (LooksLikeIdentityLookup(lower))
             return true;
 
@@ -1119,6 +1131,51 @@ public static class IntentFeatureExtractor
             return true;
 
         return false;
+    }
+
+    public static bool LooksLikeReleasedProductExistenceLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasExistenceCue =
+            lower.StartsWith("does ", StringComparison.Ordinal) ||
+            lower.StartsWith("did ", StringComparison.Ordinal) ||
+            lower.Contains(" exist ", StringComparison.Ordinal) ||
+            lower.EndsWith(" exist?", StringComparison.Ordinal) ||
+            lower.Contains(" real ", StringComparison.Ordinal);
+
+        if (!hasExistenceCue)
+            return false;
+
+        ReadOnlySpan<string> releaseSignals =
+        [
+            "released product",
+            "released device",
+            "released model",
+            "officially released",
+            "ever released",
+            "shipping product",
+            "real product",
+            "real device"
+        ];
+
+        if (ContainsAny(lower, releaseSignals))
+            return true;
+
+        var hasReleaseVerb =
+            lower.Contains("released", StringComparison.Ordinal) ||
+            lower.Contains("launch", StringComparison.Ordinal) ||
+            lower.Contains("shipped", StringComparison.Ordinal) ||
+            lower.Contains("available", StringComparison.Ordinal);
+
+        var hasArtifactNoun =
+            lower.Contains("product", StringComparison.Ordinal) ||
+            lower.Contains("device", StringComparison.Ordinal) ||
+            lower.Contains("model", StringComparison.Ordinal) ||
+            lower.Contains("phone", StringComparison.Ordinal);
+
+        return hasReleaseVerb && hasArtifactNoun;
     }
 
     public static bool LooksLikeLogicPuzzlePrompt(string lower)

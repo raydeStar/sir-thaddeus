@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.WebSearch;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -45,7 +46,19 @@ public sealed partial class SearchOrchestrator
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
         var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
         var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" nearby in {location}";
-        var topSources = sources.Take(LocalBusinessTargetResults).ToList();
+        var topSources = sources
+            .Where(source => !IsDirectoryAggregatorSource(source))
+            .Select(source => new
+            {
+                Source = source,
+                Name = ExtractBusinessNameFromSourceTitle(source.Title, userMessage)
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .Take(LocalBusinessTargetResults)
+            .ToList();
+
+        if (topSources.Count == 0)
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
 
         var sb = new StringBuilder();
         sb.AppendLine(topSources.Count == 1
@@ -53,9 +66,10 @@ public sealed partial class SearchOrchestrator
             : $"Here are the top {topSources.Count} {businessLabel}{locText}:");
         sb.AppendLine();
 
-        foreach (var source in topSources)
+        foreach (var item in topSources)
         {
-            var displayTitle = StripTitleSuffix(source.Title);
+            var source = item.Source;
+            var displayTitle = item.Name!;
             sb.Append("- **");
             sb.Append(displayTitle);
             sb.Append("**");
@@ -219,6 +233,18 @@ public sealed partial class SearchOrchestrator
         if (Regex.IsMatch(title, @"\bTop\s+\w+\s+(?:in|near)\b", RegexOptions.IgnoreCase))
             return true;
 
+        if (Regex.IsMatch(title, @"^(?:where|how)\s+to\s+(?:get|find)\b", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(title, @"\b(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?|desserts?)\b", RegexOptions.IgnoreCase))
+            return true;
+
+        if (Regex.IsMatch(title, @"\b(?:guide|roundup|directory|best\s+of)\b", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(title, @"\b(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?|desserts?)\b", RegexOptions.IgnoreCase))
+            return true;
+
+        // "{Category} in {Location}" pattern — e.g. "Bakeries in Olympia, WA"
+        if (Regex.IsMatch(title, @"^(?:bakeries|bakery|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?)\b.*\bin\b", RegexOptions.IgnoreCase))
+            return true;
+
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             var host = uri.Host.ToLowerInvariant();
@@ -237,7 +263,13 @@ public sealed partial class SearchOrchestrator
                 path.Contains("top-picks", StringComparison.Ordinal))
                 return true;
 
-            if (host.Contains("experienceolympia", StringComparison.Ordinal) ||
+            if (host.Contains("yellowpages.com", StringComparison.Ordinal) ||
+                host.Contains("realyellowpages.com", StringComparison.Ordinal) ||
+                host.Contains("superpages.com", StringComparison.Ordinal) ||
+                host.Contains("citysearch.com", StringComparison.Ordinal) ||
+                host.Contains("manta.com", StringComparison.Ordinal) ||
+                host.Contains("mapquest.com", StringComparison.Ordinal) ||
+                host.Contains("experienceolympia", StringComparison.Ordinal) ||
                 host.Contains("visitseattle", StringComparison.Ordinal) ||
                 host.Contains("timeout.com", StringComparison.Ordinal) ||
                 host.Contains("eater.com", StringComparison.Ordinal) ||
@@ -294,6 +326,12 @@ public sealed partial class SearchOrchestrator
         if (lower.Contains("grocery", StringComparison.Ordinal))
             return ["grocery", "market", "supermarket"];
 
+        if (lower.Contains("bank", StringComparison.Ordinal) || lower.Contains("banks", StringComparison.Ordinal))
+            return ["bank", "banks", "credit union", "financial"];
+
+        if (lower.Contains("park", StringComparison.Ordinal) || lower.Contains("parks", StringComparison.Ordinal))
+            return ["park", "parks", "playground", "nature", "trail"];
+
         // Chain / brand name detection — match by the brand name itself.
         var brandKeyword = ExtractBrandKeyword(lower);
         if (brandKeyword is not null)
@@ -344,6 +382,12 @@ public sealed partial class SearchOrchestrator
             return "coffee shops";
         if (lower.Contains("salon", StringComparison.Ordinal))
             return "salons";
+        if (lower.Contains("bank", StringComparison.Ordinal))
+            return "banks";
+        if (lower.Contains("park", StringComparison.Ordinal))
+            return "parks";
+        if (lower.Contains("grocery", StringComparison.Ordinal) || lower.Contains("supermarket", StringComparison.Ordinal))
+            return "grocery stores";
 
         // Brand name as label (e.g. "Starbucks locations").
         var brand = ExtractBrandKeyword(lower);
@@ -363,6 +407,9 @@ public sealed partial class SearchOrchestrator
             "florists" => "florist",
             "coffee shops" => "coffee shop",
             "salons" => "salon",
+            "banks" => "bank",
+            "parks" => "park",
+            "grocery stores" => "grocery store",
             _ => label.TrimEnd('s')
         };
     }
@@ -512,6 +559,10 @@ public sealed partial class SearchOrchestrator
             lower.Contains("car wash", StringComparison.Ordinal) ||
             lower.Contains("laundromat", StringComparison.Ordinal) ||
             lower.Contains("grocery", StringComparison.Ordinal) ||
+            lower.Contains("bank", StringComparison.Ordinal) ||
+            lower.Contains("banks", StringComparison.Ordinal) ||
+            lower.Contains("park", StringComparison.Ordinal) ||
+            lower.Contains("parks", StringComparison.Ordinal) ||
             lower.Contains("dentist", StringComparison.Ordinal) ||
             lower.Contains("clinic", StringComparison.Ordinal) ||
             lower.Contains("open", StringComparison.Ordinal) ||
@@ -637,6 +688,72 @@ public sealed partial class SearchOrchestrator
         return BuildEnrichedLocalBusinessResponse(userMessage, enriched, locationContext, toolCallsMade);
     }
 
+    private async Task<(bool Attempted, AgentResponse? Response)> TryHandleLocalBusinessWithOpenPlacesAsync(
+        string userMessage,
+        string? locationContext,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var discovery = await DiscoverOpenPlacesAsync(userMessage, locationContext, toolCallsMade, ct);
+        if (discovery is null)
+            return (false, null);
+
+        if (discovery.Results.Count == 0)
+        {
+            var fallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(userMessage, toolCallsMade, ct);
+            if (fallback is not null)
+                return (true, fallback);
+
+            // Preserve the older web-search path when open-data discovery did
+            // not actually yield usable business results.
+            return (false, null);
+        }
+
+        var sources = BuildSourceItemsFromPlacesDiscovery(discovery);
+        var responseLocation = string.IsNullOrWhiteSpace(locationContext)
+            ? discovery.ResolvedLocation
+            : locationContext;
+        var businesses = discovery.Results
+            .Take(LocalBusinessTargetResults)
+            .Select(candidate =>
+            {
+                // Combine address and distance into one detail line so the
+                // formatter renders a single clean line per business instead
+                // of duplicating the address in an italic snippet below.
+                var detailParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(candidate.Address))
+                    detailParts.Add(candidate.Address);
+                if (candidate.DistanceMeters.HasValue)
+                    detailParts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value));
+
+                return new EnrichedBusiness(
+                    candidate.Name,
+                    detailParts.Count > 0 ? string.Join(" · ", detailParts) : null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+            })
+            .ToList();
+
+        Session.RecordSearchResults(
+            SearchMode.WebFactFind,
+            userMessage,
+            "any",
+            sources,
+            DateTimeOffset.UtcNow);
+        Session.LastWasLocalBusinessDiscovery = true;
+        Session.RecordLocalBusinessCandidates(GetRequestedLocalBusinessLabel(userMessage), sources);
+
+        return (true, BuildEnrichedLocalBusinessResponse(userMessage, businesses, responseLocation, toolCallsMade));
+    }
+
+    /// <summary>Test-only forwarder for <see cref="ExtractBusinessNameFromSourceTitle"/>.</summary>
+    internal static string? TestHook_ExtractBusinessNameFromSourceTitle(string? title, string userMessage)
+        => ExtractBusinessNameFromSourceTitle(title, userMessage);
+
     /// <summary>
     /// Extracts a business name from a source title by stripping common
     /// suffixes like site taglines, location qualifiers, and separators.
@@ -657,8 +774,9 @@ public sealed partial class SearchOrchestrator
         // Strip "(City, ST)" or location parenthetical.
         name = Regex.Replace(name, @"\s*\(.*\)\s*$", "").Trim();
 
-        // Strip trailing "- City" or "- Yelp" etc.
-        name = Regex.Replace(name, @"\s+-\s+(?:Yelp|Google|TripAdvisor|Facebook|Foursquare|Reddit).*$", "", RegexOptions.IgnoreCase).Trim();
+        // Strip trailing "- <anything>" — covers site names, city names,
+        // directory brands ("- The Real Yellow Pages", "- MapQuest", etc.).
+        name = Regex.Replace(name, @"\s+-\s+.+$", "").Trim();
 
         // If what's left is too short or is a generic directory phrase, skip.
         if (name.Length < 3 || name.Length > 60)
@@ -674,9 +792,14 @@ public sealed partial class SearchOrchestrator
         if (Regex.IsMatch(name, @"^(?:Best|Top)\s+\d*\s*", RegexOptions.IgnoreCase))
             return null;
 
-        // Skip if the name matches the generic business label ("Bakeries", "Restaurants").
+        // Skip if the name matches or starts with the business category label
+        // (e.g. "Bakeries", "Bakeries in Olympia").
         var label = GetRequestedLocalBusinessLabel(userMessage);
         if (string.Equals(name, label, StringComparison.OrdinalIgnoreCase))
+            return null;
+        var singular = SingularizeBusinessLabel(label);
+        if (Regex.IsMatch(name, $@"^{Regex.Escape(label)}\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(name, $@"^{Regex.Escape(singular)}\b", RegexOptions.IgnoreCase))
             return null;
 
         return name;
@@ -727,6 +850,59 @@ public sealed partial class SearchOrchestrator
             content = content[..MaxArticleChars];
 
         return content;
+    }
+
+    private async Task<PlacesDiscoveryResult?> DiscoverOpenPlacesAsync(
+        string userMessage,
+        string? locationContext,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var args = JsonSerializer.Serialize(new
+        {
+            query = userMessage,
+            userLocationHint = locationContext ?? UserLocationHint,
+            maxResults = LocalBusinessTargetResults,
+            radiusMeters = 4_000,
+            locale = "en-US"
+        });
+
+        string? result = null;
+        var resolvedToolName = PlacesDiscoverToolName;
+
+        try
+        {
+            result = await _mcp.CallToolAsync(PlacesDiscoverToolName, args, ct);
+        }
+        catch
+        {
+            try
+            {
+                resolvedToolName = PlacesDiscoverToolNameAlt;
+                result = await _mcp.CallToolAsync(PlacesDiscoverToolNameAlt, args, ct);
+            }
+            catch (Exception ex)
+            {
+                toolCallsMade.Add(new ToolCallRecord
+                {
+                    ToolName = resolvedToolName,
+                    Arguments = args,
+                    Result = $"Error: {ex.Message}",
+                    Success = false
+                });
+                return null;
+            }
+        }
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = resolvedToolName,
+            Arguments = args,
+            Result = result!.Length > 200 ? result[..200] + "…" : result,
+            Success = true
+        });
+
+        return ParsePlacesDiscoveryResult(result!);
     }
 
     private static readonly Regex NumberedListRegex = new(
@@ -862,6 +1038,19 @@ public sealed partial class SearchOrchestrator
     private static bool IsGenericNonBusinessName(string name)
     {
         var lower = name.ToLowerInvariant();
+        if (Regex.IsMatch(lower, @"^(?:where|how)\s+to\s+(?:get|find)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\blocations?\s+in\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\bhours?\b", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(lower, @"\b(?:grocery|store|shop|bakery|bakeries|restaurant|cafe|coffee|deli|florist|salon|pharmacy|dentist|dessert)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"^(?:local\s+)?(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?)\s+(?:locations?|hours?)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\b(?:guide|roundup|directory)\b", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(lower, @"\b(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?|desserts?)\b", RegexOptions.IgnoreCase))
+            return true;
+
         ReadOnlySpan<string> skip =
         [
             "best", "top", "the best", "our picks", "see also",
@@ -936,6 +1125,52 @@ public sealed partial class SearchOrchestrator
         return ParsePlaceLookupResult(result!);
     }
 
+    private async Task<AgentResponse?> TryBuildLocalBusinessDirectPlaceFallbackAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var location = ResolveLocalBusinessLocationContext(userMessage);
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        var singular = SingularizeBusinessLabel(label);
+
+        var queries = new List<string>();
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            queries.Add($"{label} near {location}");
+            queries.Add($"{singular} near {location}");
+            queries.Add($"{label} {location}");
+        }
+        else
+        {
+            queries.Add($"{label} near me");
+            queries.Add($"{singular} near me");
+            queries.Add(label);
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var enriched = new List<EnrichedBusiness>();
+        foreach (var query in queries)
+        {
+            var business = await LookupPlaceAsync(query, location, toolCallsMade, ct);
+            if (business is null)
+                continue;
+            if (IsGenericNonBusinessName(business.Name))
+                continue;
+            if (!seen.Add(business.Name))
+                continue;
+
+            enriched.Add(business);
+            if (enriched.Count >= 3)
+                break;
+        }
+
+        if (enriched.Count == 0)
+            return null;
+
+        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade);
+    }
+
     private static EnrichedBusiness? ParsePlaceLookupResult(string json)
     {
         if (string.IsNullOrWhiteSpace(json) ||
@@ -993,6 +1228,162 @@ public sealed partial class SearchOrchestrator
         {
             return null;
         }
+    }
+
+    private static PlacesDiscoveryResult? ParsePlacesDiscoveryResult(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) ||
+            json.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+            json.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("provider", out var providerElement) ||
+                !root.TryGetProperty("results", out var resultsElement) ||
+                resultsElement.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var results = new List<PlaceDiscoveryCandidate>();
+            foreach (var item in resultsElement.EnumerateArray())
+            {
+                var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (item.TryGetProperty("tags", out var tagsElement) && tagsElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var property in tagsElement.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind == JsonValueKind.String &&
+                            !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                        {
+                            tags[property.Name] = property.Value.GetString()!;
+                        }
+                    }
+                }
+
+                results.Add(new PlaceDiscoveryCandidate
+                {
+                    Id = item.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? string.Empty : string.Empty,
+                    Name = item.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? string.Empty : string.Empty,
+                    Address = item.TryGetProperty("address", out var addressElement) ? addressElement.GetString() ?? string.Empty : string.Empty,
+                    Category = item.TryGetProperty("category", out var categoryElement) ? categoryElement.GetString() ?? string.Empty : string.Empty,
+                    Latitude = item.TryGetProperty("latitude", out var latElement) && latElement.TryGetDouble(out var lat) ? lat : 0,
+                    Longitude = item.TryGetProperty("longitude", out var lonElement) && lonElement.TryGetDouble(out var lon) ? lon : 0,
+                    DistanceMeters = item.TryGetProperty("distanceMeters", out var distanceElement) && distanceElement.TryGetInt32(out var distance) ? distance : null,
+                    OsmUrl = item.TryGetProperty("osmUrl", out var osmUrlElement) ? osmUrlElement.GetString() ?? string.Empty : string.Empty,
+                    Tags = tags
+                });
+            }
+
+            var errors = new List<string>();
+            if (root.TryGetProperty("errors", out var errorsElement) && errorsElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var errorElement in errorsElement.EnumerateArray())
+                {
+                    if (errorElement.ValueKind == JsonValueKind.String &&
+                        !string.IsNullOrWhiteSpace(errorElement.GetString()))
+                    {
+                        errors.Add(errorElement.GetString()!);
+                    }
+                }
+            }
+
+            PlacesDiscoveryCenter? center = null;
+            if (root.TryGetProperty("center", out var centerElement) && centerElement.ValueKind == JsonValueKind.Object)
+            {
+                center = new PlacesDiscoveryCenter
+                {
+                    Label = centerElement.TryGetProperty("label", out var labelElement) ? labelElement.GetString() ?? string.Empty : string.Empty,
+                    Latitude = centerElement.TryGetProperty("latitude", out var centerLatElement) && centerLatElement.TryGetDouble(out var centerLat) ? centerLat : 0,
+                    Longitude = centerElement.TryGetProperty("longitude", out var centerLonElement) && centerLonElement.TryGetDouble(out var centerLon) ? centerLon : 0
+                };
+            }
+
+            var options = new PlaceDiscoveryOptions();
+            if (root.TryGetProperty("options", out var optionsElement) && optionsElement.ValueKind == JsonValueKind.Object)
+            {
+                options = new PlaceDiscoveryOptions
+                {
+                    MaxResults = optionsElement.TryGetProperty("maxResults", out var maxResultsElement) && maxResultsElement.TryGetInt32(out var maxResults) ? maxResults : 10,
+                    RadiusMeters = optionsElement.TryGetProperty("radiusMeters", out var radiusElement) && radiusElement.TryGetInt32(out var radiusMeters) ? radiusMeters : 4_000,
+                    Locale = optionsElement.TryGetProperty("locale", out var localeElement) ? localeElement.GetString() ?? "en-US" : "en-US"
+                };
+            }
+
+            var cache = new PlacesCacheMetadata();
+            if (root.TryGetProperty("cache", out var cacheElement) && cacheElement.ValueKind == JsonValueKind.Object)
+            {
+                cache = new PlacesCacheMetadata
+                {
+                    Hit = cacheElement.TryGetProperty("hit", out var hitElement) && hitElement.ValueKind == JsonValueKind.True,
+                    AgeSeconds = cacheElement.TryGetProperty("ageSeconds", out var ageElement) && ageElement.TryGetInt32(out var ageSeconds) ? ageSeconds : 0
+                };
+            }
+
+            return new PlacesDiscoveryResult
+            {
+                Provider = providerElement.GetString() ?? string.Empty,
+                Query = root.TryGetProperty("query", out var queryElement) ? queryElement.GetString() ?? string.Empty : string.Empty,
+                UserLocationHint = root.TryGetProperty("userLocationHint", out var userLocationElement) ? userLocationElement.GetString() ?? string.Empty : string.Empty,
+                ResolvedLocation = root.TryGetProperty("resolvedLocation", out var resolvedElement) ? resolvedElement.GetString() ?? string.Empty : string.Empty,
+                Center = center,
+                Options = options,
+                Results = results,
+                Errors = errors,
+                Cache = cache
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<SourceItem> BuildSourceItemsFromPlacesDiscovery(PlacesDiscoveryResult discovery)
+    {
+        return discovery.Results
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Name))
+            .Select(candidate =>
+            {
+                var url = string.IsNullOrWhiteSpace(candidate.OsmUrl)
+                    ? $"https://www.openstreetmap.org/?mlat={candidate.Latitude.ToString("F6", CultureInfo.InvariantCulture)}&mlon={candidate.Longitude.ToString("F6", CultureInfo.InvariantCulture)}"
+                    : candidate.OsmUrl;
+                return new SourceItem
+                {
+                    SourceId = SourceItem.ComputeSourceId(url),
+                    Url = url,
+                    Title = candidate.Name,
+                    Domain = "openstreetmap.org",
+                    Snippet = BuildOpenPlaceSnippet(candidate)
+                };
+            })
+            .ToList();
+    }
+
+    private static string BuildOpenPlaceSnippet(PlaceDiscoveryCandidate candidate)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(candidate.Address))
+            parts.Add(candidate.Address);
+        if (!string.IsNullOrWhiteSpace(candidate.Category))
+            parts.Add(candidate.Category);
+        if (candidate.DistanceMeters.HasValue)
+            parts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value));
+        return string.Join(" · ", parts);
+    }
+
+    private static string FormatPlaceDistance(int distanceMeters)
+    {
+        if (distanceMeters < 1_000)
+            return $"{distanceMeters} m away";
+
+        var miles = distanceMeters / 1609.344;
+        return miles >= 10
+            ? $"{Math.Round(miles):0} mi away"
+            : $"{miles:F1} mi away";
     }
 
     private AgentResponse BuildEnrichedLocalBusinessResponse(

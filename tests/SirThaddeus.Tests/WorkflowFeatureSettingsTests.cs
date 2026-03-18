@@ -6,51 +6,22 @@ namespace SirThaddeus.Tests;
 public sealed class WorkflowFeatureSettingsTests
 {
     [Fact]
-    public void AppSettings_Defaults_WorkflowFeaturesAreEnabled()
+    public void AppSettings_Defaults_WorkflowFeatures_HasEmptyOverrideReason()
     {
         var settings = new AppSettings();
 
-        Assert.True(settings.WorkflowFeatures.ChecklistProgressUiEnabled);
-        Assert.True(settings.WorkflowFeatures.ConfidenceScoringEnabled);
-        Assert.True(settings.WorkflowFeatures.ConstrainedRetryEnabled);
-        Assert.True(settings.WorkflowFeatures.TaskRunAuditSnapshotsEnabled);
+        Assert.Equal("", settings.WorkflowFeatures.RetryGateTestOverrideReason);
     }
 
     [Fact]
-    public void RuntimeControlState_FromSettings_CarriesWorkflowFeatureFlags()
+    public void RuntimeControlState_FromSettings_MapsToolBudgets()
     {
-        var settings = new AppSettings
-        {
-            WorkflowFeatures = new WorkflowFeatureSettings
-            {
-                ChecklistProgressUiEnabled = false,
-                ConfidenceScoringEnabled = true,
-                ConstrainedRetryEnabled = false,
-                TaskRunAuditSnapshotsEnabled = false
-            }
-        };
+        var settings = new AppSettings();
 
         var runtime = RuntimeControlState.FromSettings(settings);
 
-        Assert.True(runtime.WorkflowFeatures.ConfidenceScoringEnabled);
-        Assert.False(runtime.WorkflowFeatures.ChecklistProgressUiEnabled);
-        Assert.False(runtime.WorkflowFeatures.ConstrainedRetryEnabled);
-        Assert.False(runtime.WorkflowFeatures.TaskRunAuditSnapshotsEnabled);
-    }
-
-    [Fact]
-    public void RuntimeControlState_IsChecklistWorkflowEnabled_TrueWhenAnyFlagEnabled()
-    {
-        var settings = new AppSettings
-        {
-            WorkflowFeatures = new WorkflowFeatureSettings
-            {
-                TaskRunAuditSnapshotsEnabled = true
-            }
-        };
-
-        var runtime = RuntimeControlState.FromSettings(settings);
-
-        Assert.True(runtime.IsChecklistWorkflowEnabled);
+        Assert.False(runtime.PanicModeEnabled);
+        Assert.False(runtime.SafeModeEnabled);
+        Assert.NotNull(runtime.ToolBudgets);
     }
 }

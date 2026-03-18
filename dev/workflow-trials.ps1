@@ -336,10 +336,6 @@ try {
     if ($null -eq $wfProp -or $null -eq $wfProp.Value) {
         $settings | Add-Member -MemberType NoteProperty -Name workflowFeatures -Value ([pscustomobject]@{})
     }
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "checklistProgressUiEnabled"    -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "confidenceScoringEnabled"      -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "constrainedRetryEnabled"       -Value $true
-    Set-OrAddProperty -Object $settings.workflowFeatures -Name "taskRunAuditSnapshotsEnabled"  -Value $true
     Set-OrAddProperty -Object $settings.workflowFeatures -Name "retryGateTestOverrideReason"   -Value ""
     $settings | ConvertTo-Json -Depth 30 | Set-Content -Path $settingsPath -Encoding UTF8
 

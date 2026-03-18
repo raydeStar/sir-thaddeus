@@ -61,6 +61,7 @@ public static class ToolGroupPolicy
         // Web
         ["web_search"]           = "web",
         ["browser_navigate"]     = "web",
+        ["places_discover"]      = "web",
         ["places_lookup"]        = "web",
         ["weather_geocode"]      = "web",
         ["weather_forecast"]     = "web",
