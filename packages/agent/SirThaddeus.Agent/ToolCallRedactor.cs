@@ -45,6 +45,8 @@ public static class ToolCallRedactor
             // File read: log the path only, not any content
             "fileread" or "file_read"
                 => Truncate(argumentsJson, 200),
+            "documentread" or "document_read"
+                => Truncate(argumentsJson, 220),
 
             // File list: log the path
             "filelist" or "file_list"
@@ -82,6 +84,10 @@ public static class ToolCallRedactor
                 => Truncate(argumentsJson, 260),
             "statuscheckurl" or "status_check_url"
                 => Truncate(argumentsJson, 220),
+            "clipboardread" or "clipboard_read"
+                => "[Clipboard read request]",
+            "clipboardwrite" or "clipboard_write"
+                => SummarizeClipboardWriteInput(argumentsJson),
 
             // Memory tools: safe to log (subject/predicate only)
             _ when lower.StartsWith("memory")
@@ -114,6 +120,8 @@ public static class ToolCallRedactor
             // File read: NEVER log file content; just size + hash
             "fileread" or "file_read"
                 => $"[File content: {output.Length} chars, sha256={ShortHash(output)}]",
+            "documentread" or "document_read"
+                => $"[Document content: {output.Length} chars, sha256={ShortHash(output)}]",
 
             // Browser navigate: log title + content length, not full body
             "browsernavigate" or "browser_navigate"
@@ -144,6 +152,10 @@ public static class ToolCallRedactor
                 => SummarizeFeedOutput(output),
             "statuscheckurl" or "status_check_url"
                 => SummarizeStatusOutput(output),
+            "clipboardread" or "clipboard_read"
+                => $"[Clipboard content: {output.Length} chars, sha256={ShortHash(output)}]",
+            "clipboardwrite" or "clipboard_write"
+                => SummarizeClipboardWriteOutput(output),
 
             // Memory tools: safe to log (structured JSON, no secrets)
             _ when lower.StartsWith("memory")
@@ -169,6 +181,34 @@ public static class ToolCallRedactor
             : "(no title)";
 
         return $"[Browser: {Truncate(title, 100)}, {output.Length} chars total]";
+    }
+
+    private static string SummarizeClipboardWriteInput(string argumentsJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("text", out var textEl) &&
+                textEl.ValueKind == JsonValueKind.String)
+            {
+                var text = textEl.GetString() ?? "";
+                return $"[Clipboard write request: {text.Length} chars, sha256={ShortHash(text)}]";
+            }
+        }
+        catch
+        {
+        }
+
+        return "[Clipboard write request]";
+    }
+
+    private static string SummarizeClipboardWriteOutput(string output)
+    {
+        if (output.Contains("Error", StringComparison.OrdinalIgnoreCase))
+            return Truncate(output, 160);
+
+        return "[Clipboard write: completed]";
     }
 
     private static string SummarizeSearchOutput(string output)

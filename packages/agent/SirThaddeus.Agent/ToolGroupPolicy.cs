@@ -58,7 +58,7 @@ public static class ToolGroupPolicy
         ["system_execute"]       = "system",
         ["system_execute_preview"] = "system",
         ["system_execute_apply"] = "system",
-        ["clipboard_read"]       = "files",
+        ["clipboard_read"]       = "sensitiveRead",
         ["clipboard_write"]      = "system",
 
         // Web
@@ -111,11 +111,19 @@ public static class ToolGroupPolicy
         { "screen", "files", "system", "web", "memoryRead", "memoryWrite" };
 
     /// <summary>
+    /// Groups that always require per-call approval and cannot be persisted
+    /// as session/always grants.
+    /// </summary>
+    public static readonly HashSet<string> PerCallOnlyGroups =
+        new(StringComparer.OrdinalIgnoreCase)
+        { "sensitiveRead" };
+
+    /// <summary>
     /// Groups that should be blocked in panic mode.
     /// </summary>
     public static readonly HashSet<string> SideEffectGroups =
         new(StringComparer.OrdinalIgnoreCase)
-        { "system", "web", "memoryWrite" };
+        { "system", "web", "memoryWrite", "sensitiveRead" };
 
     // ─────────────────────────────────────────────────────────────────
     // Group Resolution
@@ -155,6 +163,10 @@ public static class ToolGroupPolicy
         // Meta / Time → always allowed
         if (group == "meta")
             return "always";
+
+        // Sensitive read tools (e.g., clipboard_read) always prompt.
+        if (PerCallOnlyGroups.Contains(group))
+            return "ask";
 
         // Memory master off → treat memory groups as off
         if (!snapshot.MemoryEnabled &&
