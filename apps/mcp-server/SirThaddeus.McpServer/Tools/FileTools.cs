@@ -34,6 +34,9 @@ public static class FileTools
         try
         {
             var fullPath = Path.GetFullPath(path);
+            var accessError = ValidatePathAccess(fullPath);
+            if (accessError is not null)
+                return accessError;
 
             if (!File.Exists(fullPath))
                 return $"Error: File not found at '{fullPath}'.";
@@ -66,6 +69,9 @@ public static class FileTools
         try
         {
             var fullPath = Path.GetFullPath(path);
+            var accessError = ValidatePathAccess(fullPath);
+            if (accessError is not null)
+                return accessError;
 
             if (!File.Exists(fullPath))
                 return $"Error: File not found at '{fullPath}'.";
@@ -118,6 +124,10 @@ public static class FileTools
         try
         {
             var fullPath = Path.GetFullPath(path);
+            var accessError = ValidatePathAccess(fullPath);
+            if (accessError is not null)
+                return BuildError("access_denied", fullPath);
+
             if (!File.Exists(fullPath))
                 return BuildError("file_not_found", fullPath);
 
@@ -176,6 +186,9 @@ public static class FileTools
         try
         {
             var fullPath = Path.GetFullPath(path);
+            var accessError = ValidatePathAccess(fullPath);
+            if (accessError is not null)
+                return accessError;
 
             if (!Directory.Exists(fullPath))
                 return $"Error: Directory not found at '{fullPath}'.";
@@ -213,6 +226,10 @@ public static class FileTools
         try
         {
             var fullPath = Path.GetFullPath(path);
+            var accessError = ValidatePathAccess(fullPath);
+            if (accessError is not null)
+                return BuildError("access_denied", fullPath);
+
             if (!Directory.Exists(fullPath))
                 return BuildError("directory_not_found", fullPath);
 
@@ -316,6 +333,90 @@ public static class FileTools
             return fallback;
 
         return Math.Clamp(parsed, min, max);
+    }
+
+    private static string? ValidatePathAccess(string fullPath)
+    {
+        if (ParseBooleanEnv("ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"))
+            return "Error: File access is disabled in settings.";
+
+        var allowedRoots = ParseAllowedRootsEnv("ST_DOCUMENT_READER_ALLOWED_ROOTS");
+        if (allowedRoots.Count == 0)
+            return "Error: No allowed folders are configured. Add a folder in Settings > Search before using file tools.";
+
+        return IsPathUnderAnyRoot(fullPath, allowedRoots)
+            ? null
+            : $"Error: Access denied. '{fullPath}' is outside the configured allowed folders.";
+    }
+
+    private static bool ParseBooleanEnv(string key)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" => true,
+            "true" => true,
+            "yes" => true,
+            "on" => true,
+            _ => false
+        };
+    }
+
+    private static IReadOnlyList<string> ParseAllowedRootsEnv(string key)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        var roots = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in raw.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                var normalized = NormalizePath(candidate);
+                if (seen.Add(normalized))
+                    roots.Add(normalized);
+            }
+            catch
+            {
+                // Ignore invalid configured roots.
+            }
+        }
+
+        return roots;
+    }
+
+    private static bool IsPathUnderAnyRoot(string fullPath, IReadOnlyList<string> allowedRoots)
+    {
+        var normalizedPath = NormalizePath(fullPath);
+        foreach (var root in allowedRoots)
+        {
+            var relative = Path.GetRelativePath(root, normalizedPath);
+            if (string.Equals(relative, ".", StringComparison.Ordinal) ||
+                (!string.Equals(relative, "..", StringComparison.Ordinal) &&
+                 !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                 !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal) &&
+                 !Path.IsPathRooted(relative)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        if (!string.IsNullOrEmpty(root) && string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+            return fullPath;
+
+        return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     private static HashSet<string> ParseAllowedExtensionsEnv(string key, IReadOnlyList<string> fallback)

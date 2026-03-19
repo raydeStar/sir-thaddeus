@@ -372,11 +372,13 @@ public static class SettingsManager
             },
             DocumentReader = documentReader with
             {
+                DisableAllFileAccess = documentReader.DisableAllFileAccess,
                 MaxDefaultChars = IntOrFallback(
                     documentReader.MaxDefaultChars,
                     defaults.DocumentReader.MaxDefaultChars,
                     min: 100,
                     max: 100_000),
+                AllowedRoots = NormalizeAllowedRoots(documentReader.AllowedRoots),
                 AllowedExtensions = NormalizeAllowedExtensions(
                     documentReader.AllowedExtensions,
                     defaults.DocumentReader.AllowedExtensions)
@@ -670,5 +672,43 @@ public static class SettingsManager
             .ToArray();
 
         return normalized.Length > 0 ? normalized : fallback;
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedRoots(IReadOnlyList<string>? configured)
+    {
+        if (configured is not { Count: > 0 })
+            return [];
+
+        var normalized = new List<string>(configured.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var candidate in configured)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            try
+            {
+                var fullPath = Path.GetFullPath(candidate.Trim());
+                fullPath = TrimTrailingDirectorySeparators(fullPath);
+                if (seen.Add(fullPath))
+                    normalized.Add(fullPath);
+            }
+            catch
+            {
+                // Ignore invalid configured roots during normalization.
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string TrimTrailingDirectorySeparators(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (!string.IsNullOrEmpty(root) && string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+            return path;
+
+        return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 }

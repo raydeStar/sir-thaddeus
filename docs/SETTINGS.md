@@ -50,7 +50,9 @@ This document describes fields in `SirThaddeus.Settings.template.json`.
 
 ## `documentReader`
 
+- `documentReader.disableAllFileAccess` (bool, default `false`): hard-blocks all MCP file and document reads, even if folders are listed below.
 - `documentReader.maxDefaultChars` (int, default `4000`): default response text cap for `document_read`.
+- `documentReader.allowedRoots` (string[], default `[]`): absolute folder allowlist for `file_read`, `file_list`, and `document_read`. If empty, file access is denied until the user picks a folder.
 - `documentReader.allowedExtensions` (string[], default `['.pdf','.docx','.xlsx','.csv','.rtf','.md','.txt']`): extension allowlist.
 
 ## `clipboard`
@@ -95,7 +97,9 @@ This document describes fields in `SirThaddeus.Settings.template.json`.
 ```json
 {
   "documentReader": {
+    "disableAllFileAccess": true,
     "maxDefaultChars": 2500,
+    "allowedRoots": ["C:\\Users\\you\\Documents"],
     "allowedExtensions": [".pdf", ".docx", ".txt"]
   },
   "clipboard": {

@@ -38,7 +38,9 @@
     "maxEntries": 500
   },
   "documentReader": {
+    "disableAllFileAccess": false,
     "maxDefaultChars": 4000,
+    "allowedRoots": [],
     "allowedExtensions": [
       ".pdf",
       ".docx",

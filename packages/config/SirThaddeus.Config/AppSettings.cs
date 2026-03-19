@@ -803,8 +803,14 @@ public sealed record CacheSettings
 
 public sealed record DocumentReaderSettings
 {
+    [JsonPropertyName("disableAllFileAccess")]
+    public bool DisableAllFileAccess { get; init; }
+
     [JsonPropertyName("maxDefaultChars")]
     public int MaxDefaultChars { get; init; } = 4_000;
+
+    [JsonPropertyName("allowedRoots")]
+    public IReadOnlyList<string> AllowedRoots { get; init; } = [];
 
     [JsonPropertyName("allowedExtensions")]
     public IReadOnlyList<string> AllowedExtensions { get; init; } =

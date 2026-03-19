@@ -1055,6 +1055,46 @@
                     </Border>
                   </StackPanel>
 
+                  <!-- File Access -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="FILE ACCESS" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <CheckBox Content="Do not allow any access to my files"
+                                  IsChecked="{Binding DisableAllFileAccess}"
+                                  Classes="settingsCheck"/>
+                        <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. If no folder is listed, file access stays blocked."
+                                   Classes="hint"
+                                   TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button x:Name="AddAllowedFileRootButton"
+                                  Content="Add Folder"
+                                  Classes="actionBtn"
+                                  Click="AddAllowedFileRootButton_Click"/>
+                          <Button x:Name="RemoveAllowedFileRootButton"
+                                  Content="Remove Selected"
+                                  Classes="actionBtn"
+                                  Click="RemoveAllowedFileRootButton_Click"/>
+                        </StackPanel>
+                        <Border BorderBrush="{StaticResource Surface0Brush}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource RadiusSm}"
+                                Padding="8">
+                          <ListBox x:Name="AllowedFileRootsList"
+                                   ItemsSource="{Binding AllowedFileRoots}"
+                                   MinHeight="96"
+                                   Background="Transparent">
+                            <ListBox.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding .}" FontSize="12" TextWrapping="Wrap"/>
+                              </DataTemplate>
+                            </ListBox.ItemTemplate>
+                          </ListBox>
+                        </Border>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
                 </StackPanel>
               </ScrollViewer>
             </TabItem>

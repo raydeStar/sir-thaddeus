@@ -54,7 +54,9 @@ Sir Thaddeus is local-first and permissioned. Priority security areas:
 File operations are allowlist-bound and normalized before execution.
 
 - `file_read`, `file_list`, and `document_read` resolve paths to canonical full paths.
+- A dedicated settings switch can hard-disable all file access regardless of MCP permission posture.
 - Requests outside configured allowlisted roots are denied.
+- If no allowed roots are configured, file access fails closed.
 - Path traversal patterns (for example `..\..\`) are blocked by canonical-path containment checks.
 - Tool-level previews/applies and runtime policy gates enforce the same bounds.
 

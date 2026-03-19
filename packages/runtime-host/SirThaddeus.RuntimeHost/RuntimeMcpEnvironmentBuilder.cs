@@ -84,6 +84,9 @@ public static class RuntimeMcpEnvironmentBuilder
 
         env["ST_DOCUMENT_READER_MAX_DEFAULT_CHARS"] =
             Math.Clamp(settings.DocumentReader.MaxDefaultChars, 100, 100_000).ToString();
+        env["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = settings.DocumentReader.DisableAllFileAccess ? "true" : "false";
+        env["ST_DOCUMENT_READER_ALLOWED_ROOTS"] =
+            string.Join(Path.PathSeparator, settings.DocumentReader.AllowedRoots);
         env["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] =
             string.Join(",", settings.DocumentReader.AllowedExtensions);
         env["ST_CLIPBOARD_ENABLED"] = settings.Clipboard.Enabled ? "true" : "false";
