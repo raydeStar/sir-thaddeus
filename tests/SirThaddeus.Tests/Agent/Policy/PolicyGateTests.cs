@@ -38,6 +38,9 @@ public class PolicyGateTests
         MakeTool("file_read_apply"),
         MakeTool("file_list_preview"),
         MakeTool("file_list_apply"),
+        MakeTool("document_read"),
+        MakeTool("clipboard_read"),
+        MakeTool("clipboard_write"),
         MakeTool("system_execute"),
         MakeTool("memory_retrieve"),
         MakeTool("memory_list_facts"),
@@ -179,10 +182,13 @@ public class PolicyGateTests
 
         Assert.Contains("file_read", names);
         Assert.Contains("file_list", names);
+        Assert.Contains("document_read", names);
         Assert.DoesNotContain("file_read_preview", names);
         Assert.DoesNotContain("file_read_apply", names);
         Assert.DoesNotContain("file_list_preview", names);
         Assert.DoesNotContain("file_list_apply", names);
+        Assert.DoesNotContain("clipboard_read", names);
+        Assert.DoesNotContain("clipboard_write", names);
         Assert.DoesNotContain("screen_capture", names);
         Assert.DoesNotContain("system_execute", names);
         Assert.DoesNotContain("web_search", names);
@@ -193,14 +199,16 @@ public class PolicyGateTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void SystemTask_OnlyExposesSystemExecute()
+    public void SystemTask_ExposesSystemAndClipboardTools()
     {
         var policy = PolicyGate.Evaluate(Route(Intents.SystemTask));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
         var names = filtered.Select(t => t.Function.Name).ToHashSet();
 
-        Assert.Single(filtered);
         Assert.Contains("system_execute", names);
+        Assert.Contains("clipboard_read", names);
+        Assert.Contains("clipboard_write", names);
+        Assert.DoesNotContain("file_read", names);
     }
 
     // ─────────────────────────────────────────────────────────────────

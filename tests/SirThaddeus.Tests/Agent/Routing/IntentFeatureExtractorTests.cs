@@ -1,3 +1,4 @@
+using SirThaddeus.Agent;
 using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Tests;
@@ -97,5 +98,19 @@ public class IntentFeatureExtractorTests
     public void HasLocalBusinessProximitySignals_BrandWithoutProximity_ReturnsFalse(string input)
     {
         Assert.False(IntentFeatureExtractor.HasLocalBusinessProximitySignals(input.ToLowerInvariant()));
+    }
+
+    [Theory]
+    [InlineData("use document_read on C:/docs/sample.pdf", Intents.FileTask)]
+    [InlineData("call document read for my report", Intents.FileTask)]
+    [InlineData("use clipboard_read", Intents.SystemTask)]
+    [InlineData("run clipboard write with this text", Intents.SystemTask)]
+    public void TryGetExplicitToolInvocationIntent_NewDocumentAndClipboardTools_RoutesToExpectedIntent(
+        string input,
+        string expectedIntent)
+    {
+        var result = IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(input.ToLowerInvariant());
+
+        Assert.Equal(expectedIntent, result);
     }
 }

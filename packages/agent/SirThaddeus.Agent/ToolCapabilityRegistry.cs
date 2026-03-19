@@ -67,13 +67,13 @@ public static class ToolCapabilityRegistry
             ["document_read"] = ToolCapability.FileRead,
             ["DocumentRead"] = ToolCapability.FileRead,
 
-            // Clipboard
-            ["clipboard_read"] = ToolCapability.FileRead,
-            ["ClipboardRead"] = ToolCapability.FileRead,
-            ["clipboard_write"] = ToolCapability.FileWrite,
-            ["ClipboardWrite"] = ToolCapability.FileWrite,
-
             // System
+            // Clipboard is treated as a system capability for routing.
+            // Per-call approval still comes from ToolGroupPolicy.
+            ["clipboard_read"] = ToolCapability.SystemExecute,
+            ["ClipboardRead"] = ToolCapability.SystemExecute,
+            ["clipboard_write"] = ToolCapability.SystemExecute,
+            ["ClipboardWrite"] = ToolCapability.SystemExecute,
             ["system_execute"] = ToolCapability.SystemExecute,
             ["SystemExecute"] = ToolCapability.SystemExecute,
             ["system_execute_preview"] = ToolCapability.SystemExecute,

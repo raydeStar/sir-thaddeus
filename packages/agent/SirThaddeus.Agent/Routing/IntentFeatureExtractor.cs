@@ -157,7 +157,7 @@ public static class IntentFeatureExtractor
             return null;
 
         if (ContainsAny(lower,
-            ["file_read", "file read", "file_list", "file list", "file_write", "file write"]))
+            ["file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read"]))
         {
             return Intents.FileTask;
         }
@@ -169,7 +169,7 @@ public static class IntentFeatureExtractor
         }
 
         if (ContainsAny(lower,
-            ["system_execute", "system execute", "shell command", "terminal command"]))
+            ["system_execute", "system execute", "shell command", "terminal command", "clipboard_read", "clipboard read", "clipboard_write", "clipboard write"]))
         {
             return Intents.SystemTask;
         }
