@@ -65,6 +65,43 @@ public sealed class FileToolsAccessPolicyTests
         Assert.Contains("alpha beta gamma", result, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FileList_ResolvesMyPersonalFolderAlias_WhenExactlyOneAllowedRootExists()
+    {
+        var allowedRoot = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(allowedRoot, "note.txt"), "hello");
+
+        using var env = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = "false",
+            ["ST_DOCUMENT_READER_ALLOWED_ROOTS"] = allowedRoot,
+            ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
+        });
+
+        var result = FileTools.FileList("my personal folder");
+
+        Assert.Contains("[FILE] note.txt", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FileRead_ResolvesSingleRootRelativePath()
+    {
+        var allowedRoot = CreateTempDirectory();
+        var filePath = Path.Combine(allowedRoot, "note.txt");
+        await File.WriteAllTextAsync(filePath, "hello from allowed root");
+
+        using var env = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = "false",
+            ["ST_DOCUMENT_READER_ALLOWED_ROOTS"] = allowedRoot,
+            ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
+        });
+
+        var result = await FileTools.FileRead("note.txt", CancellationToken.None);
+
+        Assert.Equal("hello from allowed root", result);
+    }
+
     private static string CreateTempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "sir-thaddeus-tests", Guid.NewGuid().ToString("N"));

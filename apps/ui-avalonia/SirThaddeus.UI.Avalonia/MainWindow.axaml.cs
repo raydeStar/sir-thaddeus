@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _initialConnectAttempted;
     private bool _trayAvailable;
     private bool _stopAllInProgress;
+    private bool _submitInProgress;
     private AttachedDocumentContext? _attachedDocument;
     private string? _lastUserPrompt;
     private string? _pendingUserPrompt;
@@ -826,6 +827,11 @@ public partial class MainWindow : Window
 
     private async void SendButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_submitInProgress)
+        {
+            return;
+        }
+
         var prompt = PromptBox.Text?.Trim();
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -833,9 +839,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Don't clear PromptBox yet – SubmitPromptAsync will clear it on
-        // success, or leave the text visible as a pending prompt when offline.
-        await SubmitPromptAsync(prompt, voiceInitiated: false);
+        _submitInProgress = true;
+        UpdateComposerState();
+        try
+        {
+            // Don't clear PromptBox yet – SubmitPromptAsync will clear it on
+            // success, or leave the text visible as a pending prompt when offline.
+            await SubmitPromptAsync(prompt, voiceInitiated: false);
+        }
+        finally
+        {
+            _submitInProgress = false;
+            UpdateComposerState();
+        }
     }
 
     /// <summary>
@@ -3096,7 +3112,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     {
         var hasPrompt = !string.IsNullOrWhiteSpace(PromptBox.Text);
         var runActive = !string.IsNullOrWhiteSpace(_activeRunId);
-        SendButton.IsEnabled = hasPrompt && !runActive;
+        SendButton.IsEnabled = hasPrompt && !runActive && !_submitInProgress;
         SendButton.IsVisible = !runActive;
         StopButton.IsEnabled = runActive;
         StopButton.IsVisible = runActive;

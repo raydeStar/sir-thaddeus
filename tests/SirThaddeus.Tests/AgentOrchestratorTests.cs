@@ -1681,7 +1681,7 @@ public class ToolLoopTests
         var result = await agent.ProcessAsync("What can you see on the screen right now?");
 
         Assert.True(result.Success);
-        Assert.Contains("desktop", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("captured your current screen", result.Text, StringComparison.OrdinalIgnoreCase);
 
         // Verify screen_capture was actually called
         var toolCalls = result.ToolCallsMade
@@ -2228,6 +2228,140 @@ public class PolicyFilteringTests
             .FirstOrDefault(t => t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(failedCall);
         Assert.False(failedCall!.Success);
+    }
+
+    [Fact]
+    public async Task DeterministicScreenCapture_ReplacesGenericNoAccessDisclaimerWithCaptureSummary()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I can't read your screen directly because that would require a specific tool integration.",
+                FinishReason = "stop"
+            };
+        });
+
+        var screenReport = """
+[Screen Read]
+Window: Code — "Visual Studio Code"
+Content Type: Code
+
+Content:
+README.md open with a checklist and the words screen capture enabled.
+""";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => screenReport,
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Can you read my screen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains("code editor", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Visual Studio Code", result.Text);
+        Assert.Contains("screen capture enabled", result.Text);
+        Assert.DoesNotContain("can't read your screen", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ScreenRequest_WithSplitWordStillUsesDeterministicCapture()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I cannot access your screen directly.",
+                FinishReason = "stop"
+            };
+        });
+
+        var screenReport = """
+[Screen Read]
+Window: Browser — Example
+Content Type: WebPage
+
+Content:
+Example page content from the browser.
+""";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" or "ScreenCapture" => screenReport,
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("ok i want to run a few tests -- can you tell me what is on mys creen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains("Example", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cannot access your screen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task FileRequest_ReadMyPersonalFolder_ListsContentsAndReadsSingleTextFile()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I cannot view your files directly.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "file_list" or "FileList" => "[FILE] note.txt",
+                "file_read" or "FileRead" => "hello from the only text file",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("can you read my personal folder and tell me whats in there?");
+
+        Assert.True(result.Success);
+        Assert.Contains("I listed `my personal folder`.", result.Text, StringComparison.Ordinal);
+        Assert.Contains("[FILE] note.txt", result.Text, StringComparison.Ordinal);
+        Assert.Contains("hello from the only text file", result.Text, StringComparison.Ordinal);
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("file_list", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("file_read", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("cannot view your files", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

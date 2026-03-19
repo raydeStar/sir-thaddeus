@@ -11,6 +11,12 @@ public sealed class RouterV2 : IRouter
 {
     private readonly DefaultRouter _fallbackRouter;
 
+    /// <summary>
+    /// Creates a new <see cref="RouterV2"/> backed by the given LLM client and
+    /// deterministic utility engine.
+    /// </summary>
+    /// <param name="llm">LLM client used by the fallback router for classification.</param>
+    /// <param name="deterministicUtilityEngine">Engine for math/conversion shortcuts.</param>
     public RouterV2(
         ILlmClient llm,
         IDeterministicUtilityEngine deterministicUtilityEngine)
@@ -18,6 +24,7 @@ public sealed class RouterV2 : IRouter
         _fallbackRouter = new DefaultRouter(llm, deterministicUtilityEngine);
     }
 
+    /// <inheritdoc />
     public Task<RouterOutput> RouteAsync(RouterRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -65,6 +72,9 @@ public sealed class RouterV2 : IRouter
 
         if (IntentFeatureExtractor.LooksLikeScreenRequest(lower))
             return DefaultRouter.MakeRoute(Intents.ScreenObserve, confidence: 0.95, needsScreen: true);
+
+        if (IntentFeatureExtractor.LooksLikeFileRequest(lower))
+            return DefaultRouter.MakeRoute(Intents.FileTask, confidence: 0.95, needsFile: true);
 
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return DefaultRouter.MakeRoute(Intents.LookupNews, confidence: 0.93, needsWeb: true, needsSearch: true);

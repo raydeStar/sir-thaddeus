@@ -8,6 +8,7 @@ namespace SirThaddeus.McpServer.Tools;
 public static class UiaScreenReader
 {
     private const int MaxElements = 200;
+    private const int MaxStructuredElements = 300;
     private const int MaxTextLength = 6_000;
     private const int MaxDocumentTextLength = 1_500;
     private const int MaxBrowserEditCandidates = 40;
@@ -87,6 +88,171 @@ public static class UiaScreenReader
             return UiaReadResult.Empty("Accessibility tree unavailable", windowTitle, processName);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Structured read — returns nodes with bounding rectangles
+    // for reading-order sorting and chrome/content classification.
+    // ═══════════════════════════════════════════════════════════════
+
+    public static Task<UiaStructuredResult> ReadForegroundWindowStructuredAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tcs = new TaskCompletionSource<UiaStructuredResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var thread = new Thread(() =>
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                tcs.TrySetCanceled(cancellationToken);
+                return;
+            }
+
+            try
+            {
+                tcs.TrySetResult(ReadForegroundWindowStructured());
+            }
+            catch
+            {
+                tcs.TrySetResult(UiaStructuredResult.Empty("Accessibility tree unavailable"));
+            }
+        });
+
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        if (cancellationToken.CanBeCanceled)
+            cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+
+        return tcs.Task;
+    }
+
+    public static UiaStructuredResult ReadForegroundWindowStructured()
+    {
+        var hwnd = GetForegroundWindow();
+        if (hwnd == IntPtr.Zero)
+            return UiaStructuredResult.Empty("No foreground window");
+
+        var windowTitle = GetWindowTitle(hwnd);
+        var processName = GetProcessName(hwnd);
+        var processId = GetProcessId(hwnd);
+
+        try
+        {
+            IUIAutomation automation = new CUIAutomation8Class();
+            var root = automation.ElementFromHandle(hwnd);
+            if (root is null)
+                return UiaStructuredResult.Empty("Accessibility tree unavailable",
+                    windowTitle, processName, processId);
+
+            var nodes = new List<UiaNode>();
+            var trueCondition = automation.CreateTrueCondition();
+            WalkElementStructured(root, trueCondition, nodes, depth: 0);
+
+            var browserUrl = TryGetBrowserUrl(automation, root);
+
+            return new UiaStructuredResult
+            {
+                WindowTitle = windowTitle,
+                ProcessName = processName,
+                ProcessId = processId,
+                BrowserUrl = browserUrl,
+                Source = nodes.Count == 0 ? "context-only" : "uia",
+                Nodes = nodes,
+                FailureReason = nodes.Count == 0
+                    ? "Accessibility tree returned no readable content"
+                    : null
+            };
+        }
+        catch
+        {
+            return UiaStructuredResult.Empty("Accessibility tree unavailable",
+                windowTitle, processName, processId);
+        }
+    }
+
+    private static void WalkElementStructured(
+        IUIAutomationElement element,
+        IUIAutomationCondition trueCondition,
+        List<UiaNode> nodes,
+        int depth)
+    {
+        if (nodes.Count >= MaxStructuredElements)
+            return;
+
+        try
+        {
+            var role = SafeGet(() => element.CurrentControlType);
+            var name = NormalizeWhitespace(SafeGet(() => element.CurrentName));
+            var value = NormalizeWhitespace(TryGetValue(element));
+            var className = SafeGet(() => element.CurrentClassName);
+            var automationId = SafeGet(() => element.CurrentAutomationId);
+            var bounds = SafeGetBounds(element);
+
+            // Emit any element with a recognized role and meaningful content
+            if (role != 0)
+            {
+                nodes.Add(new UiaNode
+                {
+                    ControlType = role,
+                    RoleLabel = RoleLabel(role),
+                    Name = name,
+                    Value = value,
+                    ClassName = className,
+                    AutomationId = automationId,
+                    BoundsLeft = bounds.Left,
+                    BoundsTop = bounds.Top,
+                    BoundsRight = bounds.Right,
+                    BoundsBottom = bounds.Bottom,
+                    Depth = depth,
+                });
+            }
+
+            if (nodes.Count >= MaxStructuredElements)
+                return;
+
+            var children = element.FindAll(TreeScope.TreeScope_Children, trueCondition);
+            for (var i = 0; i < children.Length; i++)
+            {
+                var child = children.GetElement(i);
+                WalkElementStructured(child, trueCondition, nodes, depth + 1);
+                if (nodes.Count >= MaxStructuredElements)
+                    break;
+            }
+        }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+    }
+
+    private static (int Left, int Top, int Right, int Bottom) SafeGetBounds(IUIAutomationElement element)
+    {
+        try
+        {
+            var rect = element.CurrentBoundingRectangle;
+            return (rect.left, rect.top, rect.right, rect.bottom);
+        }
+        catch
+        {
+            return (0, 0, 0, 0);
+        }
+    }
+
+    private static int GetProcessId(IntPtr hwnd)
+    {
+        try
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            return (int)pid;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Legacy flat-text walk (kept for backward compatibility)
+    // ═══════════════════════════════════════════════════════════════
 
     private static void WalkElement(
         IUIAutomationElement element,
@@ -439,6 +605,50 @@ public sealed record UiaReadResult
     {
         WindowTitle = windowTitle,
         ProcessName = processName,
+        Source = "empty",
+        FailureReason = reason
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Structured result types for the new screen read pipeline
+// ─────────────────────────────────────────────────────────────────────
+
+public sealed record UiaNode
+{
+    public int ControlType { get; init; }
+    public string RoleLabel { get; init; } = "";
+    public string? Name { get; init; }
+    public string? Value { get; init; }
+    public string? ClassName { get; init; }
+    public string? AutomationId { get; init; }
+    public int BoundsLeft { get; init; }
+    public int BoundsTop { get; init; }
+    public int BoundsRight { get; init; }
+    public int BoundsBottom { get; init; }
+    public int Depth { get; init; }
+}
+
+public sealed record UiaStructuredResult
+{
+    public string WindowTitle { get; init; } = "";
+    public string ProcessName { get; init; } = "";
+    public int ProcessId { get; init; }
+    public string? BrowserUrl { get; init; }
+    public string Source { get; init; } = "";
+    public string? FailureReason { get; init; }
+    public List<UiaNode> Nodes { get; init; } = new();
+    public bool IsEmpty => Nodes.Count == 0;
+
+    public static UiaStructuredResult Empty(
+        string reason,
+        string windowTitle = "",
+        string processName = "",
+        int processId = 0) => new()
+    {
+        WindowTitle = windowTitle,
+        ProcessName = processName,
+        ProcessId = processId,
         Source = "empty",
         FailureReason = reason
     };

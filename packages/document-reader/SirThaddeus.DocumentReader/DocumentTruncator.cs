@@ -10,6 +10,9 @@ public static class DocumentTruncator
     /// Returns <paramref name="textContent"/> as-is if within budget,
     /// otherwise truncates and appends a "[...truncated]" notice.
     /// </summary>
+    /// <param name="textContent">The full extracted text to truncate.</param>
+    /// <param name="maxChars">Maximum characters to keep before truncation.</param>
+    /// <returns>The original or truncated text with a notice appended when clipped.</returns>
     public static string TruncateWithNotice(string textContent, int maxChars)
     {
         if (maxChars <= 0)

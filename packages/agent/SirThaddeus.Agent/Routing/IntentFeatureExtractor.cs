@@ -17,6 +17,12 @@ public static class IntentFeatureExtractor
         [
             "what's on my screen",   "whats on my screen",
             "what is on my screen",
+            "what's on my screen right now",
+            "whats on my screen right now",
+            "what is on my screen right now",
+            "tell me what's on my screen",
+            "tell me whats on my screen",
+            "tell me what is on my screen",
             "what can you see",      "what do you see",
             "look at my screen",     "look at the screen",
             "take a screenshot",     "screenshot",
@@ -64,13 +70,7 @@ public static class IntentFeatureExtractor
             "summarize what im looking at"
         ];
 
-        foreach (var p in patterns)
-        {
-            if (lower.Contains(p, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
+        return ContainsLoosePhrase(lower, patterns);
     }
 
     public static bool LooksLikeFileRequest(string lower)
@@ -84,16 +84,29 @@ public static class IntentFeatureExtractor
             "what's in the file", "whats in the file",
             "file contents",   "show me the file",
             "directory listing", "folder contents",
-            "list directory",  "ls "
+            "list directory",  "ls ",
+            "what's in my folder", "whats in my folder",
+            "what is in my folder",
+            "what's in this folder", "whats in this folder",
+            "what is in this folder",
+            "what's in that folder", "whats in that folder",
+            "what is in that folder",
+            "what's in my personal folder", "whats in my personal folder",
+            "what is in my personal folder",
+            "read my personal folder",
+            "read my folder",
+            "read this folder",
+            "tell me whats in there",
+            "tell me what's in there",
+            "can you see what is in my folder",
+            "can you see what is in this folder",
+            "can you see what is in my personal folder",
+            "show me my files", "show me what's in my folder",
+            "show me whats in my folder",
+            "what files are in"
         ];
 
-        foreach (var p in patterns)
-        {
-            if (lower.Contains(p, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
+        return ContainsLoosePhrase(lower, patterns);
     }
 
     public static bool LooksLikeSystemCommand(string lower)
@@ -1331,6 +1344,30 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    private static bool ContainsLoosePhrase(string lower, ReadOnlySpan<string> phrases)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        var compact = NormalizeCompactPhraseInput(lower);
+
+        foreach (var phrase in phrases)
+        {
+            if (lower.Contains(phrase, StringComparison.Ordinal) ||
+                normalized.Contains(phrase, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var compactPhrase = NormalizeCompactPhraseInput(phrase);
+            if (compactPhrase.Length > 0 && compact.Contains(compactPhrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     private static string NormalizeLoosePhraseInput(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1355,5 +1392,20 @@ public static class IntentFeatureExtractor
         }
 
         return buffer.ToString().Trim();
+    }
+
+    private static string NormalizeCompactPhraseInput(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var buffer = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c))
+                buffer.Append(c);
+        }
+
+        return buffer.ToString();
     }
 }

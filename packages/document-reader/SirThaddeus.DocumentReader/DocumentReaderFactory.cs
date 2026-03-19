@@ -24,6 +24,8 @@ public sealed class DocumentReaderFactory : IDocumentReader
     /// Returns the appropriate reader for the given file path based on extension.
     /// Falls back to <see cref="PlainTextReader"/> for unrecognized extensions.
     /// </summary>
+    /// <param name="path">Absolute path to the file; the extension determines the reader.</param>
+    /// <returns>A format-specific <see cref="IDocumentReader"/> instance.</returns>
     public IDocumentReader Resolve(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

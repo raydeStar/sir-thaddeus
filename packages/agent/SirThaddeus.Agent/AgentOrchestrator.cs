@@ -854,6 +854,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
             }
 
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileListArgs(contextualUserMessage, out var explicitFileListArgs, out var explicitFolderPath))
+            {
+                var explicitFileListResponse = await ExecuteExplicitFileListAsync(
+                    explicitFileListArgs,
+                    explicitFolderPath,
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
+            }
+
             // ── Chat-only: skip tool loop entirely ───────────────────
             // No tools, no function-calling grammar. The LLM just
             // responds with text. Fastest path for casual conversation.
@@ -953,6 +967,86 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                             LogEvent = LogEvent
                         },
                         cancellationToken), usageBaseline);
+                }
+
+                var screenFallbackEligible =
+                    hasRefusalOrUncertaintySignals &&
+                    route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) &&
+                    !deterministicRouteMatched;
+
+                if (screenFallbackEligible)
+                {
+                    LogEvent("CHAT_FALLBACK_TO_SCREEN",
+                        "Chat-only refusal/uncertainty detected — falling back to deterministic screen capture.");
+
+                    return AttachContextSnapshot(await ExecuteDeterministicScreenCaptureAsync(
+                        contextualUserMessage,
+                        memoryPackText,
+                        personalityAnchor,
+                        personalityTurnTag,
+                        toolCallsMade,
+                        roundTrips,
+                        usageBaseline,
+                        cancellationToken), usageBaseline);
+                }
+
+                var fileFallbackEligible =
+                    hasRefusalOrUncertaintySignals &&
+                    route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) &&
+                    !deterministicRouteMatched;
+
+                if (fileFallbackEligible)
+                {
+                    LogEvent("CHAT_FALLBACK_TO_FILE",
+                        "Chat-only refusal/uncertainty detected — falling back to file tools.");
+
+                    if (TryBuildExplicitFileReadArgs(contextualUserMessage, out var fallbackFileReadArgs, out var fallbackFilePath))
+                    {
+                        return AttachContextSnapshot(
+                            await ExecuteExplicitFileReadAsync(
+                                fallbackFileReadArgs,
+                                fallbackFilePath,
+                                toolCallsMade,
+                                roundTrips,
+                                cancellationToken),
+                            usageBaseline);
+                    }
+
+                    if (TryBuildExplicitFileListArgs(contextualUserMessage, out var fallbackFileListArgs, out var fallbackFolderPath))
+                    {
+                        return AttachContextSnapshot(
+                            await ExecuteExplicitFileListAsync(
+                                fallbackFileListArgs,
+                                fallbackFolderPath,
+                                contextualUserMessage,
+                                toolCallsMade,
+                                roundTrips,
+                                cancellationToken),
+                            usageBaseline);
+                    }
+
+                    var fallbackToolsCatalog = await toolDefsTask;
+                    var filePolicy = PolicyGate.Evaluate(new RouterOutput
+                    {
+                        Intent = Intents.FileTask,
+                        NeedsFileAccess = true,
+                        RequiredCapabilities = [ToolCapability.FileRead],
+                        Confidence = 1.0
+                    });
+                    var fileTools = PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy);
+
+                    LogEvent("AGENT_TOOLS_POLICY_FILTERED",
+                        $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
+
+                    var fileToolLoopResponse = await RunToolLoopAsync(
+                        fileTools,
+                        toolCallsMade,
+                        roundTrips,
+                        cancellationToken);
+
+                    return AttachContextSnapshot(fileToolLoopResponse, usageBaseline);
                 }
 
                 if (string.IsNullOrWhiteSpace(text))
