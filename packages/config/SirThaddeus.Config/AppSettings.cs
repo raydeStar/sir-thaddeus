@@ -26,6 +26,15 @@ public sealed partial record AppSettings
     [JsonPropertyName("webSearch")]
     public WebSearchSettings WebSearch { get; init; } = new();
 
+    [JsonPropertyName("cache")]
+    public CacheSettings Cache { get; init; } = new();
+
+    [JsonPropertyName("documentReader")]
+    public DocumentReaderSettings DocumentReader { get; init; } = new();
+
+    [JsonPropertyName("clipboard")]
+    public ClipboardSettings Clipboard { get; init; } = new();
+
     [JsonPropertyName("weather")]
     public WeatherSettings Weather { get; init; } = new();
 
@@ -769,6 +778,57 @@ public sealed record WebSearchSettings
     /// </summary>
     [JsonPropertyName("maxResults")]
     public int MaxResults { get; init; } = 5;
+}
+
+/// <summary>
+/// Shared in-memory cache configuration for MCP tool responses.
+/// </summary>
+public sealed record CacheSettings
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; } = true;
+
+    [JsonPropertyName("webSearchTtlMinutes")]
+    public int WebSearchTtlMinutes { get; init; } = 15;
+
+    [JsonPropertyName("weatherTtlMinutes")]
+    public int WeatherTtlMinutes { get; init; } = 60;
+
+    [JsonPropertyName("placesAndHolidaysTtlHours")]
+    public int PlacesAndHolidaysTtlHours { get; init; } = 24;
+
+    [JsonPropertyName("maxEntries")]
+    public int MaxEntries { get; init; } = 500;
+}
+
+public sealed record DocumentReaderSettings
+{
+    [JsonPropertyName("disableAllFileAccess")]
+    public bool DisableAllFileAccess { get; init; }
+
+    [JsonPropertyName("maxDefaultChars")]
+    public int MaxDefaultChars { get; init; } = 4_000;
+
+    [JsonPropertyName("allowedRoots")]
+    public IReadOnlyList<string> AllowedRoots { get; init; } = [];
+
+    [JsonPropertyName("allowedExtensions")]
+    public IReadOnlyList<string> AllowedExtensions { get; init; } =
+    [
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".csv",
+        ".rtf",
+        ".md",
+        ".txt"
+    ];
+}
+
+public sealed record ClipboardSettings
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; } = true;
 }
 
 /// <summary>

@@ -109,6 +109,16 @@ public class ToolGroupResolutionTests
         Assert.Equal("system", group);
     }
 
+    [Theory]
+    [InlineData("ClipboardRead", "sensitiveRead")]
+    [InlineData("clipboard_read", "sensitiveRead")]
+    public void ClipboardRead_MapsToSensitiveReadGroup(string toolName, string expected)
+    {
+        var canonical = AuditedMcpToolClient.Canonicalize(toolName);
+        var group = ToolGroupPolicy.ResolveGroup(canonical);
+        Assert.Equal(expected, group);
+    }
+
     [Fact]
     public void UnknownTool_MapsToUnknownGroup()
     {
@@ -314,6 +324,14 @@ public class EffectivePolicyResolutionTests
         var snapshot = MakeSnapshot(isDebug: false);
         Assert.Equal("off",
             ToolGroupPolicy.ResolveEffectivePolicy("unknown", snapshot));
+    }
+
+    [Fact]
+    public void SensitiveReadGroup_AlwaysRequiresAsk()
+    {
+        var snapshot = MakeSnapshot(devOverride: "always", isDebug: false);
+        Assert.Equal("ask",
+            ToolGroupPolicy.ResolveEffectivePolicy("sensitiveRead", snapshot));
     }
 }
 

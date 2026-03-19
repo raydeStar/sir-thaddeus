@@ -32,6 +32,18 @@ public static class PlacesTools
         string locale = "en-US",
         CancellationToken cancellationToken = default)
     {
+        var cacheArgs = new
+        {
+            query,
+            userLocationHint = userLocationHint ?? string.Empty,
+            maxResults,
+            radiusMeters,
+            locale = locale ?? "en-US"
+        };
+        var cached = await ToolResultCache.GetAsync<string>("places_discover", cacheArgs);
+        if (!string.IsNullOrWhiteSpace(cached))
+            return cached;
+
         var options = new PlaceDiscoveryOptions
         {
             MaxResults = Math.Clamp(maxResults, 1, 20),
@@ -50,7 +62,9 @@ public static class PlacesTools
             WriteIndented = false
         };
 
-        return JsonSerializer.Serialize(result, serializerOptions);
+        var response = JsonSerializer.Serialize(result, serializerOptions);
+        await ToolResultCache.SetAsync("places_discover", cacheArgs, response, ToolResultCache.ResolvePlacesAndHolidaysTtl());
+        return response;
     }
 
     [McpServerTool, Description(
@@ -75,6 +89,18 @@ public static class PlacesTools
         var reviewLimit = Math.Clamp(maxReviewSnippets, 1, 5);
         var language = NormalizeLanguage(locale);
         var nowIso = DateTimeOffset.UtcNow.ToString("O");
+
+        var cacheArgs = new
+        {
+            query,
+            timezone = timezone ?? "unknown",
+            locale = locale ?? "en-US",
+            userLocationHint = userLocationHint ?? string.Empty,
+            maxReviewSnippets = reviewLimit
+        };
+        var cached = await ToolResultCache.GetAsync<string>("places_lookup", cacheArgs);
+        if (!string.IsNullOrWhiteSpace(cached))
+            return cached;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
@@ -114,7 +140,9 @@ public static class PlacesTools
             {
                 WriteIndented = false
             };
-            return JsonSerializer.Serialize(payload, options);
+            var response = JsonSerializer.Serialize(payload, options);
+            await ToolResultCache.SetAsync("places_lookup", cacheArgs, response, ToolResultCache.ResolvePlacesAndHolidaysTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {

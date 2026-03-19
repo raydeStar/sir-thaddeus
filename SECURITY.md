@@ -49,6 +49,26 @@ Sir Thaddeus is local-first and permissioned. Priority security areas:
 - Audit trail: append-only logging, redaction, and operator-visible actions
 - Local data: memory/database paths, file access scope, and profile isolation
 
+## File Access Policy
+
+File operations are allowlist-bound and normalized before execution.
+
+- `file_read`, `file_list`, and `document_read` resolve paths to canonical full paths.
+- A dedicated settings switch can hard-disable all file access regardless of MCP permission posture.
+- Requests outside configured allowlisted roots are denied.
+- If no allowed roots are configured, file access fails closed.
+- Path traversal patterns (for example `..\..\`) are blocked by canonical-path containment checks.
+- Tool-level previews/applies and runtime policy gates enforce the same bounds.
+
+## Clipboard Policy
+
+Clipboard access is treated as sensitive.
+
+- `clipboard_read` is a per-call sensitive-read operation and always requires explicit approval.
+- `clipboard_read` approvals are not persisted as session/always grants.
+- `clipboard_write` is treated as a modify/system action and remains permission-gated.
+- Audit summaries redact clipboard payloads (size/hash metadata only) to avoid leaking copied secrets.
+
 ## Out Of Scope
 
 The following are generally out of scope unless they create a clear security bypass:

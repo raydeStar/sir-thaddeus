@@ -19,6 +19,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   tool_list_capabilities — full manifest of all tools
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// Read-only diagnostic tools for the MCP server: health check,
+/// capability listing, version, and uptime tracking.
+/// </summary>
 [McpServerToolType]
 public static class MetaTools
 {

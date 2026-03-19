@@ -21,6 +21,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   I3 — Explicit permission required (enforced by runtime gate)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool for executing allow-listed system commands with strict safety
+/// constraints (no metacharacters, restricted subcommands, explicit permission).
+/// </summary>
 [McpServerToolType]
 public static class SystemTools
 {

@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
     <ProjectReference Include="..\..\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
     <ProjectReference Include="..\..\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
     <ProjectReference Include="..\..\local-tools\SirThaddeus.LocalTools.Playwright\SirThaddeus.LocalTools.Playwright.csproj" />
@@ -22,11 +23,12 @@
     <ProjectReference Include="..\..\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
     <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
+    <ProjectReference Include="..\..\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\*.cs"
-             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs"
+             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs;..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ClipboardTools.cs"
              Link="Tools\%(Filename)%(Extension)" />
   </ItemGroup>
 

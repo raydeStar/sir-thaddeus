@@ -20,6 +20,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   4. Favicon extraction from <link rel="icon"> (bounded: 64KB / 3s)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// Shared utility for web content extraction. Handles HTTP fetching,
+/// SmartReader text extraction, and favicon discovery.
+/// </summary>
 public static class ContentExtractor
 {
     private const int DefaultTimeoutSecs = 15;

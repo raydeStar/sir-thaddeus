@@ -16,6 +16,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - Bounded timeout + short cache TTL
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tool that probes website reachability with HEAD/GET requests
+/// and SSRF guards against localhost and private network targets.
+/// </summary>
 [McpServerToolType]
 public static class StatusTools
 {

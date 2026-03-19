@@ -23,6 +23,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - cache TTL configurable (forecast 10..30 min, geocode default 24h)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP tools for geocoding and weather forecasts using a coordinate-first
+/// NWS-primary, Open-Meteo-fallback weather stack.
+/// </summary>
 [McpServerToolType]
 public static class WeatherTools
 {
@@ -49,9 +53,14 @@ public static class WeatherTools
 
         try
         {
+            var args = new { place, maxResults };
+            var cached = await ToolResultCache.GetAsync<string>("weather_geocode", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
             var lookup = await Service.Value.GeocodeAsync(place, maxResults, cancellationToken);
 
-            return Json(new
+            var response = Json(new
             {
                 query = lookup.Query,
                 source = lookup.Source,
@@ -71,6 +80,9 @@ public static class WeatherTools
                     confidence = r.Confidence
                 }).ToArray()
             });
+
+            await ToolResultCache.SetAsync("weather_geocode", args, response, ToolResultCache.ResolveWeatherTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {
@@ -113,10 +125,22 @@ public static class WeatherTools
 
         try
         {
+            var args = new
+            {
+                latitude,
+                longitude,
+                placeHint = placeHint ?? string.Empty,
+                countryCode = countryCode ?? string.Empty,
+                days
+            };
+            var cached = await ToolResultCache.GetAsync<string>("weather_forecast", args);
+            if (!string.IsNullOrWhiteSpace(cached))
+                return cached;
+
             var forecast = await Service.Value.ForecastAsync(
                 latitude, longitude, placeHint, countryCode, days, cancellationToken);
 
-            return Json(new
+            var response = Json(new
             {
                 provider = forecast.Provider,
                 providerReason = forecast.ProviderReason,
@@ -166,6 +190,9 @@ public static class WeatherTools
                     })
                     .ToArray()
             });
+
+            await ToolResultCache.SetAsync("weather_forecast", args, response, ToolResultCache.ResolveWeatherTtl());
+            return response;
         }
         catch (OperationCanceledException)
         {

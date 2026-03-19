@@ -30,5 +30,29 @@
     "timeoutMs": 8000,
     "maxResults": 5
   },
+  "cache": {
+    "enabled": true,
+    "webSearchTtlMinutes": 15,
+    "weatherTtlMinutes": 60,
+    "placesAndHolidaysTtlHours": 24,
+    "maxEntries": 500
+  },
+  "documentReader": {
+    "disableAllFileAccess": false,
+    "maxDefaultChars": 4000,
+    "allowedRoots": [],
+    "allowedExtensions": [
+      ".pdf",
+      ".docx",
+      ".xlsx",
+      ".csv",
+      ".rtf",
+      ".md",
+      ".txt"
+    ]
+  },
+  "clipboard": {
+    "enabled": true
+  },
   "activePersonalityId": "helpful_default"
 }

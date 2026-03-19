@@ -2154,7 +2154,8 @@ file sealed class ConsolePermissionGate : IToolPermissionGate
             return Task.FromResult(ToolPermissionResult.NotRequired());
 
         var epoch = _conversationEpoch;
-        if (_sessionGrants.ContainsKey((group, epoch)))
+        var perCallOnly = ToolGroupPolicy.PerCallOnlyGroups.Contains(group);
+        if (!perCallOnly && _sessionGrants.ContainsKey((group, epoch)))
             return Task.FromResult(ToolPermissionResult.NotRequired());
 
         lock (_consoleGate)
@@ -2199,7 +2200,15 @@ file sealed class ConsolePermissionGate : IToolPermissionGate
             Console.WriteLine($"  Why  : {purpose}");
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  Allow Once [Enter/A] | Allow Session [Tab/S] | Allow Always [Shift+Tab/P] | Deny [Esc/D]");
+            if (perCallOnly)
+            {
+                Console.WriteLine("  Allow Once [Enter/A] | Deny [Esc/D]");
+                Console.WriteLine("  Note : This tool always requires explicit per-call approval.");
+            }
+            else
+            {
+                Console.WriteLine("  Allow Once [Enter/A] | Allow Session [Tab/S] | Allow Always [Shift+Tab/P] | Deny [Esc/D]");
+            }
             Console.ResetColor();
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine(borderBottom);
@@ -2214,14 +2223,14 @@ file sealed class ConsolePermissionGate : IToolPermissionGate
                 if (key.Key == ConsoleKey.Enter || key.Key == ConsoleKey.A)
                     return Task.FromResult(ToolPermissionResult.Grant());
 
-                if ((key.Key == ConsoleKey.Tab && key.Modifiers == 0) || key.Key == ConsoleKey.S)
+                if (!perCallOnly && ((key.Key == ConsoleKey.Tab && key.Modifiers == 0) || key.Key == ConsoleKey.S))
                 {
                     _sessionGrants[(group, epoch)] = true;
                     return Task.FromResult(ToolPermissionResult.Grant());
                 }
 
-                if ((key.Key == ConsoleKey.Tab && key.Modifiers.HasFlag(ConsoleModifiers.Shift)) ||
-                    key.Key == ConsoleKey.P)
+                if (!perCallOnly && ((key.Key == ConsoleKey.Tab && key.Modifiers.HasFlag(ConsoleModifiers.Shift)) ||
+                    key.Key == ConsoleKey.P))
                 {
                     _persistGroupAsAlways(group);
                     return Task.FromResult(ToolPermissionResult.NotRequired());

@@ -4,8 +4,10 @@
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +26,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs" Link="Tools\ScreenTools.cs" />
+    <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ClipboardTools.cs" Link="Tools\ClipboardTools.cs" />
   </ItemGroup>
 
 </Project>

@@ -50,7 +50,8 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
             return Task.FromResult(ToolPermissionResult.NotRequired());
         }
 
-        if (_sessionGrants.TryGetValue(group, out var granted) && granted)
+        if (!ToolGroupPolicy.PerCallOnlyGroups.Contains(group) &&
+            _sessionGrants.TryGetValue(group, out var granted) && granted)
         {
             return Task.FromResult(ToolPermissionResult.NotRequired());
         }
@@ -66,7 +67,10 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
             {
                 if (_requestGroupMap.TryGetValue(requestId, out var group))
                 {
-                    _sessionGrants[group] = true;
+                    if (!ToolGroupPolicy.PerCallOnlyGroups.Contains(group))
+                    {
+                        _sessionGrants[group] = true;
+                    }
                 }
             }
 

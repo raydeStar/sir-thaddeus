@@ -230,6 +230,9 @@ public static class SettingsManager
         var mcp = settings.Mcp is null ? defaults.Mcp : settings.Mcp;
         var mcpPerms = mcp.Permissions is null ? defaults.Mcp.Permissions : mcp.Permissions;
         var webSearch = settings.WebSearch is null ? defaults.WebSearch : settings.WebSearch;
+        var cache = settings.Cache is null ? defaults.Cache : settings.Cache;
+        var documentReader = settings.DocumentReader is null ? defaults.DocumentReader : settings.DocumentReader;
+        var clipboard = settings.Clipboard is null ? defaults.Clipboard : settings.Clipboard;
         var weather = settings.Weather is null ? defaults.Weather : settings.Weather;
         var deepDive = settings.DeepDive is null ? defaults.DeepDive : settings.DeepDive;
         var memory = settings.Memory is null ? defaults.Memory : settings.Memory;
@@ -342,8 +345,45 @@ public static class SettingsManager
                 SearchApiBaseUrl = StringOrFallback(webSearch.SearchApiBaseUrl, defaults.WebSearch.SearchApiBaseUrl),
                 SearchApiEngine = NormalizeSearchApiEngine(webSearch.SearchApiEngine, defaults.WebSearch.SearchApiEngine),
                 TimeoutMs = IntOrFallback(webSearch.TimeoutMs, defaults.WebSearch.TimeoutMs, min: 2_000, max: 30_000),
-                MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 10)
+                MaxResults = IntOrFallback(webSearch.MaxResults, defaults.WebSearch.MaxResults, min: 1, max: 20)
             },
+            Cache = cache with
+            {
+                WebSearchTtlMinutes = IntOrFallback(
+                    cache.WebSearchTtlMinutes,
+                    defaults.Cache.WebSearchTtlMinutes,
+                    min: 1,
+                    max: 120),
+                WeatherTtlMinutes = IntOrFallback(
+                    cache.WeatherTtlMinutes,
+                    defaults.Cache.WeatherTtlMinutes,
+                    min: 1,
+                    max: 720),
+                PlacesAndHolidaysTtlHours = IntOrFallback(
+                    cache.PlacesAndHolidaysTtlHours,
+                    defaults.Cache.PlacesAndHolidaysTtlHours,
+                    min: 1,
+                    max: 720),
+                MaxEntries = IntOrFallback(
+                    cache.MaxEntries,
+                    defaults.Cache.MaxEntries,
+                    min: 50,
+                    max: 5_000)
+            },
+            DocumentReader = documentReader with
+            {
+                DisableAllFileAccess = documentReader.DisableAllFileAccess,
+                MaxDefaultChars = IntOrFallback(
+                    documentReader.MaxDefaultChars,
+                    defaults.DocumentReader.MaxDefaultChars,
+                    min: 100,
+                    max: 100_000),
+                AllowedRoots = NormalizeAllowedRoots(documentReader.AllowedRoots),
+                AllowedExtensions = NormalizeAllowedExtensions(
+                    documentReader.AllowedExtensions,
+                    defaults.DocumentReader.AllowedExtensions)
+            },
+            Clipboard = clipboard,
             Weather = weather with
             {
                 ProviderMode = NormalizeWeatherProviderMode(weather.ProviderMode, defaults.Weather.ProviderMode),
@@ -616,5 +656,59 @@ public static class SettingsManager
         if (string.IsNullOrWhiteSpace(trimmed))
             return "/";
         return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedExtensions(
+        IReadOnlyList<string>? configured,
+        IReadOnlyList<string> fallback)
+    {
+        var source = configured is { Count: > 0 } ? configured : fallback;
+
+        var normalized = source
+            .Select(value => (value ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.StartsWith('.') ? value : "." + value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length > 0 ? normalized : fallback;
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedRoots(IReadOnlyList<string>? configured)
+    {
+        if (configured is not { Count: > 0 })
+            return [];
+
+        var normalized = new List<string>(configured.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var candidate in configured)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            try
+            {
+                var fullPath = Path.GetFullPath(candidate.Trim());
+                fullPath = TrimTrailingDirectorySeparators(fullPath);
+                if (seen.Add(fullPath))
+                    normalized.Add(fullPath);
+            }
+            catch
+            {
+                // Ignore invalid configured roots during normalization.
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string TrimTrailingDirectorySeparators(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (!string.IsNullOrEmpty(root) && string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+            return path;
+
+        return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 }

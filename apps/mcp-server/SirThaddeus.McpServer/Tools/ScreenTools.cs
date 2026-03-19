@@ -32,6 +32,10 @@ namespace SirThaddeus.McpServer.Tools;
 //   - Single capture per call, no video/streaming.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// MCP screen observation tools using a layered strategy: UI Automation tree,
+/// window metadata, browser URL extraction, HTTP content, and OCR fallback.
+/// </summary>
 [McpServerToolType]
 public static class ScreenTools
 {

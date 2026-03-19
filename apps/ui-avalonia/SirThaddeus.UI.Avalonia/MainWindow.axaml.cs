@@ -367,6 +367,35 @@ public partial class MainWindow : Window
         _backendSettings.RefreshVoiceCatalogs("TTS voices refreshed.");
     }
 
+    private async void AddAllowedFileRootButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            _backendSettings.SetStatus("Folder picker is unavailable on this platform.");
+            AppendTranscript("[error] Folder picker is unavailable on this platform.");
+            return;
+        }
+
+        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose an allowed folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder?.TryGetLocalPath() is not { Length: > 0 } path)
+            return;
+
+        _backendSettings.AddAllowedFileRoot(path);
+    }
+
+    private void RemoveAllowedFileRootButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (AllowedFileRootsList.SelectedItem is string path)
+            _backendSettings.RemoveAllowedFileRoot(path);
+    }
+
     private void BeginVoiceHostLifecycleTransition(bool enabled, bool restartManagedProcess = false)
     {
         _voiceHostLifecycleCancellation?.Cancel();

@@ -168,6 +168,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public ObservableCollection<string> AvailablePrimaryModels { get; } = [];
     public ObservableCollection<string> AvailableGatekeeperModels { get; } = [];
+    public ObservableCollection<string> AllowedFileRoots { get; } = [];
 
     public bool IsRefreshingModels
     {
@@ -618,6 +619,55 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 MarkDirty();
             }
         }
+    }
+
+    public bool DisableAllFileAccess
+    {
+        get => _appSettings.DocumentReader.DisableAllFileAccess;
+        set
+        {
+            if (_appSettings.DocumentReader.DisableAllFileAccess == value)
+                return;
+
+            _appSettings = _appSettings with
+            {
+                DocumentReader = _appSettings.DocumentReader with { DisableAllFileAccess = value }
+            };
+            OnPropertyChanged();
+            MarkDirty();
+        }
+    }
+
+    public void AddAllowedFileRoot(string path)
+    {
+        var normalized = NormalizePathRoot(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        if (AllowedFileRoots.Any(existing => string.Equals(existing, normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            SetStatus("That folder is already allowed.");
+            return;
+        }
+
+        AllowedFileRoots.Add(normalized);
+        UpdateAllowedFileRootsInSettings();
+        MarkDirty();
+    }
+
+    public void RemoveAllowedFileRoot(string? path)
+    {
+        var normalized = NormalizePathRoot(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        var existing = AllowedFileRoots.FirstOrDefault(item => string.Equals(item, normalized, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+            return;
+
+        AllowedFileRoots.Remove(existing);
+        UpdateAllowedFileRootsInSettings();
+        MarkDirty();
     }
 
     public int WebSearchTimeoutMs
@@ -1700,6 +1750,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 TimeoutMs = Math.Clamp(WebSearchTimeoutMs, 1_000, 120_000),
                 MaxResults = Math.Clamp(WebSearchMaxResults, 1, 20)
             },
+            DocumentReader = latest.DocumentReader with
+            {
+                DisableAllFileAccess = DisableAllFileAccess,
+                AllowedRoots = AllowedFileRoots
+                    .Select(NormalizePathRoot)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            },
             ToolBudgets = new ToolBudgetSettings
             {
                 Enabled = latest.ToolBudgets.Enabled,
@@ -2139,6 +2198,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         var priorSettings = _appSettings;
         _appSettings = settings;
+        ReplaceCollection(AllowedFileRoots, settings.DocumentReader.AllowedRoots);
         ChatMessageItem.Use24HourTime = settings.Ui.Use24HourTime;
         IsDirty = false;
         StatusText = statusText;
@@ -2245,6 +2305,37 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         var normalized = NormalizeString(value);
         return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
+    private void UpdateAllowedFileRootsInSettings()
+    {
+        _appSettings = _appSettings with
+        {
+            DocumentReader = _appSettings.DocumentReader with
+            {
+                AllowedRoots = AllowedFileRoots.ToArray()
+            }
+        };
+    }
+
+    private static string NormalizePathRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return string.Empty;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path.Trim());
+            var root = Path.GetPathRoot(fullPath);
+            if (!string.IsNullOrEmpty(root) && string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+                return fullPath;
+
+            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static string NormalizeHotkeyChord(string? value, string fallback)
