@@ -167,14 +167,26 @@ public static class PolicyGate
         // ── File task: read/list files ───────────────────────────────
         [Intents.FileTask] = new PolicyDecision
         {
-            AllowedCapabilities = [ToolCapability.FileRead],
+            AllowedCapabilities = [ToolCapability.FileRead, ToolCapability.FileWrite, ToolCapability.Meta],
             ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.WebSearch],
             AllowedTools =
             [
                 "file_read",
                 "file_list",
                 "FileRead",
-                "FileList"
+                "FileList",
+                "knowledge_store_list_roots",
+                "knowledge_store_read_file",
+                "knowledge_store_list_files",
+                "knowledge_store_create_file",
+                "knowledge_store_append_to_file",
+                "knowledge_store_journal_log_entry",
+                "KnowledgeStoreListRoots",
+                "KnowledgeStoreReadFile",
+                "KnowledgeStoreListFiles",
+                "KnowledgeStoreCreateFile",
+                "KnowledgeStoreAppendToFile",
+                "KnowledgeStoreJournalLogEntry"
             ],
             ForbiddenTools =
             [
@@ -185,7 +197,10 @@ public static class PolicyGate
                 "FileReadPreview",
                 "FileReadApply",
                 "FileListPreview",
-                "FileListApply"
+                "FileListApply",
+                "audit.export_bundle",
+                "audit_export_bundle",
+                "AuditExportBundle"
             ],
             RequiredPermissions = ["FileAccess"]
         },

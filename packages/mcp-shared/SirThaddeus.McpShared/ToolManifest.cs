@@ -407,6 +407,66 @@ public static class ToolManifest
             Description = "Executes file_list for a previously created preview_id.",
             Limits      = "Preview must be unexpired and valid."
         },
+        new()
+        {
+            Name        = "knowledge_store_list_roots",
+            Aliases     = ["KnowledgeStoreListRoots"],
+            Category    = "meta",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Lists configured knowledge-store roots with ids, display names, and access levels.",
+            Limits      = "Bounded to configured roots only."
+        },
+        new()
+        {
+            Name        = "knowledge_store_read_file",
+            Aliases     = ["KnowledgeStoreReadFile"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Reads a markdown file from a configured knowledge-store root.",
+            Limits      = "Configured roots only. Markdown/native read constraints apply."
+        },
+        new()
+        {
+            Name        = "knowledge_store_list_files",
+            Aliases     = ["KnowledgeStoreListFiles"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Lists files and folders inside a configured knowledge-store root.",
+            Limits      = "Configured roots only. Relative folder path only."
+        },
+        new()
+        {
+            Name        = "knowledge_store_create_file",
+            Aliases     = ["KnowledgeStoreCreateFile"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a markdown file inside a configured knowledge-store root.",
+            Limits      = "Configured roots only. Guarded by root policy, size limits, and duplicate checks."
+        },
+        new()
+        {
+            Name        = "knowledge_store_append_to_file",
+            Aliases     = ["KnowledgeStoreAppendToFile"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Appends markdown content to an existing file inside a configured knowledge-store root.",
+            Limits      = "Configured roots only. Guarded by root policy and duplicate checks."
+        },
+        new()
+        {
+            Name        = "knowledge_store_journal_log_entry",
+            Aliases     = ["KnowledgeStoreJournalLogEntry"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Appends an entry to today's journal markdown file in a configured knowledge-store root.",
+            Limits      = "Configured roots only. Writes to journal/yyyy-MM-dd.md."
+        },
 
         // ── System Tools ─────────────────────────────────────────────
         new()

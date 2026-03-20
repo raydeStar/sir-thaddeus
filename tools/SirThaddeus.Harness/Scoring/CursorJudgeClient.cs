@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Models;
+using SirThaddeus.Harness.Tracing;
 
 namespace SirThaddeus.Harness.Scoring;
 
@@ -12,6 +13,8 @@ public sealed class CursorJudgeClient
         WriteIndented = true
     };
 
+    private readonly LocalModelJudgeClient _localModelJudge = new();
+
     public async Task<CursorJudgeResult?> ExecuteAsync(
         HarnessJudgeMode judgeMode,
         CursorJudgePacket packet,
@@ -19,13 +22,20 @@ public sealed class CursorJudgeClient
         string resultPath,
         int timeoutMs,
         bool required,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<TraceStep>? steps = null)
     {
         if (judgeMode == HarnessJudgeMode.None)
             return null;
 
         if (judgeMode == HarnessJudgeMode.Model)
-            return null; // v1: reserved command surface, no model judge integration yet.
+        {
+            return await _localModelJudge.EvaluateAsync(
+                packet.UserMessage,
+                steps ?? [],
+                packet.FinalResponse,
+                cancellationToken);
+        }
 
         await File.WriteAllTextAsync(packetPath, JsonSerializer.Serialize(packet, JsonOptions), cancellationToken);
 

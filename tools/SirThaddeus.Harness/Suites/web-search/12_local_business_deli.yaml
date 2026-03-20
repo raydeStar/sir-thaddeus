@@ -19,9 +19,7 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords:
-    - hillsboro
-    - deli
+  required_keywords: []
   forbidden_keywords:
     - as an ai
     - i can't

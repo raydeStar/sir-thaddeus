@@ -157,6 +157,35 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             return null;
         }
 
+        if (string.Equals(utilityResult.Category, "meta_health", StringComparison.OrdinalIgnoreCase))
+        {
+            if (utilityResult.McpToolName is not null &&
+                utilityResult.McpToolArgs is not null &&
+                request.ExecuteGenericToolCallAsync is not null)
+            {
+                await request.ExecuteGenericToolCallAsync(
+                    utilityResult,
+                    request.ToolCallsMade,
+                    cancellationToken);
+            }
+
+            var summary = BuildMetaToolPingSummary(request.ToolCallsMade);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                return new AgentResponse
+                {
+                    Text = summary,
+                    Success = true,
+                    ToolCallsMade = request.ToolCallsMade.ToList(),
+                    LlmRoundTrips = request.RoundTrips,
+                    SuppressSourceCardsUi = true,
+                    SuppressToolActivityUi = true
+                };
+            }
+
+            return null;
+        }
+
         if (string.Equals(utilityResult.Category, "time_local", StringComparison.OrdinalIgnoreCase))
         {
             if (utilityResult.McpToolName is not null &&
@@ -404,6 +433,47 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             var listText = string.Join(", ", ordered);
             return $"Available capability groups: {listText}.\n\n" +
                    "Use `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? BuildMetaToolPingSummary(IList<ToolCallRecord> calls)
+    {
+        var pingCall = calls
+            .LastOrDefault(call => string.Equals(
+                call.ToolName,
+                "tool_ping",
+                StringComparison.OrdinalIgnoreCase));
+        if (pingCall is null || string.IsNullOrWhiteSpace(pingCall.Result))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(pingCall.Result);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var status = root.TryGetProperty("status", out var statusEl) && statusEl.ValueKind == JsonValueKind.String
+                ? statusEl.GetString()
+                : null;
+            var toolCount = root.TryGetProperty("tool_count", out var toolCountEl) && toolCountEl.ValueKind == JsonValueKind.Number
+                ? toolCountEl.GetInt32()
+                : (int?)null;
+
+            if (string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                return toolCount is > 0
+                    ? $"MCP server is responding and tool execution is healthy with {toolCount.Value} tools available."
+                    : "MCP server is responding and tool execution is healthy.";
+            }
+
+            return string.IsNullOrWhiteSpace(status)
+                ? "MCP server is responding, but the health status was not clearly reported."
+                : $"MCP server is responding, but reported status '{status}'.";
         }
         catch
         {

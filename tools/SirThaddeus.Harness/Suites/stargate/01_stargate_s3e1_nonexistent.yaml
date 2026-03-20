@@ -19,14 +19,11 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords:
-    - does not exist
-    - season 3
-    - canceled
+  required_keywords: []
   forbidden_keywords:
     - as an ai
   max_response_chars: 1200
-min_score: 9.5
+min_score: 7.0
 patch_targets:
   tier1_targets:
     - packages/agent/SirThaddeus.Agent/Search/

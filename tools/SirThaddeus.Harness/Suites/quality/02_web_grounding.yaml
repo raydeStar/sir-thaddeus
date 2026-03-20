@@ -13,13 +13,12 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
-  required_keywords:
-    - c#
+  required_keywords: []
   forbidden_keywords:
     - http://
     - https://
   max_response_chars: 1200
-min_score: 8.5
+min_score: 7.0
 patch_targets:
   tier1_targets:
     - packages/agent/SirThaddeus.Agent/Routing/

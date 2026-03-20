@@ -55,4 +55,36 @@ public sealed class UtilityIntentHandlerTests
         Assert.NotNull(response);
         Assert.Equal("inferred", response!.Text);
     }
+
+    [Fact]
+    public async Task TryHandleAsync_MetaHealth_ReturnsDeterministicToolPingSummary()
+    {
+        var handler = new UtilityIntentHandler();
+        var toolCalls = new List<ToolCallRecord>();
+
+        var response = await handler.TryHandleAsync(new UtilityIntentExecutionRequest
+        {
+            UserMessage = "Run tool_ping and confirm whether the MCP server is responding.",
+            Route = new RouterOutput { Intent = Intents.GeneralTool },
+            ToolCallsMade = toolCalls,
+            ExecuteGenericToolCallAsync = (utilityResult, calls, _) =>
+            {
+                calls.Add(new ToolCallRecord
+                {
+                    ToolName = utilityResult.McpToolName!,
+                    Arguments = utilityResult.McpToolArgs!,
+                    Result = "{\"status\":\"ok\",\"tool_count\":45}",
+                    Success = true
+                });
+                return Task.CompletedTask;
+            }
+        });
+
+        Assert.NotNull(response);
+        Assert.Contains("responding", response!.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("healthy", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("45 tools", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(toolCalls);
+        Assert.Equal("tool_ping", toolCalls[0].ToolName);
+    }
 }

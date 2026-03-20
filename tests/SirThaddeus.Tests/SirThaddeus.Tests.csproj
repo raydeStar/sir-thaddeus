@@ -37,6 +37,7 @@
     <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
     <ProjectReference Include="..\..\packages\voice\SirThaddeus.Voice\SirThaddeus.Voice.csproj" />
     <ProjectReference Include="..\..\packages\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
+    <ProjectReference Include="..\..\packages\knowledge-store\SirThaddeus.KnowledgeStore\SirThaddeus.KnowledgeStore.csproj" />
     <ProjectReference Include="..\..\apps\mcp-server\SirThaddeus.McpServer\SirThaddeus.McpServer.csproj" />
   </ItemGroup>
 

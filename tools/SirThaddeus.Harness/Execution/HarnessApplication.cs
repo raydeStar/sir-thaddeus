@@ -4,6 +4,7 @@ using SirThaddeus.Harness.Artifacts;
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Iteration;
 using SirThaddeus.Harness.Models;
+using SirThaddeus.Harness.Reporting;
 using SirThaddeus.Harness.Scoring;
 using SirThaddeus.Harness.Suites;
 
@@ -22,6 +23,7 @@ public sealed class HarnessApplication
         var selectedSuites = ResolveSelectedSuites(options);
         var runId = DateTimeOffset.UtcNow.ToString("yyyyMMdd_HHmmss");
         var settings = SettingsManager.Load();
+        var runStart = DateTimeOffset.UtcNow;
 
         Console.WriteLine($"Harness command: {options.Command}");
         Console.WriteLine($"Selection: {DescribeSelection(options, selectedSuites)}");
@@ -32,6 +34,7 @@ public sealed class HarnessApplication
         var passCount = 0;
         var failCount = 0;
         var summaries = new List<string>();
+        var reportResults = new List<SuiteReporter.TestResult>();
 
         await using var headlessClient = new HeadlessRuntimeHarnessClient(settings);
 
@@ -52,6 +55,8 @@ public sealed class HarnessApplication
                 _artifactWriter,
                 _scoringEngine,
                 _judgeClient);
+
+            var suiteScoreCards = new List<ScoreCard>();
 
             foreach (var test in suite.Tests)
             {
@@ -108,8 +113,43 @@ public sealed class HarnessApplication
                 Console.WriteLine();
 
                 summaries.Add(BuildSummaryLine(suite.Name, test, best, passed, minScore));
+                suiteScoreCards.Add(best.Score);
+
+                reportResults.Add(new SuiteReporter.TestResult
+                {
+                    SuiteName = suite.Name,
+                    TestId = test.Id,
+                    TestName = test.Name,
+                    Score = best.Score,
+                    MinScore = minScore,
+                    Passed = passed,
+                    Attempts = attempts.Count,
+                    ArtifactDirectory = best.ArtifactDirectory
+                });
             }
+
+            ScoringEngine.DetectScoringAnomalies(suiteScoreCards, suite.Name);
         }
+
+        var durationSeconds = (DateTimeOffset.UtcNow - runStart).TotalSeconds;
+        var artifactsRunRoot = Path.Combine(options.ArtifactsRoot, runId);
+
+        var reportContext = new SuiteReporter.ReportContext
+        {
+            RunId = runId,
+            ModelName = settings.Llm.Model,
+            JudgeMode = options.JudgeMode.ToString().ToLowerInvariant(),
+            ArtifactsRoot = artifactsRunRoot,
+            DurationSeconds = Math.Round(durationSeconds, 1)
+        };
+
+        SuiteReporter.PrintSummary(reportResults, reportContext);
+
+        // Write machine-readable JSON summary
+        var jsonSummaryPath = Path.Combine(
+            Path.IsPathRooted(artifactsRunRoot) ? artifactsRunRoot : Path.GetFullPath(artifactsRunRoot),
+            "summary.json");
+        SuiteReporter.WriteJsonSummary(reportResults, reportContext, jsonSummaryPath);
 
         Console.WriteLine("== Run Summary");
         foreach (var line in summaries)

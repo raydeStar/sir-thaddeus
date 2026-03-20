@@ -86,6 +86,36 @@ public class RouterV2Tests
     }
 
     [Fact]
+    public async Task RouteAsync_PreferencePrompt_StaysChatAndAvoidsLlm()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "Tell me about your favorite thing to help people with. What makes you good at it?"
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_SelfContainedReasoningPrompt_StaysChatAndAvoidsLlm()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "My name is Alex. What is 2 + 2? Then tell me what my name is."
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
     public async Task RouteAsync_WhenTier1DoesNotMatch_FallsBackToLlmClassification()
     {
         var llmCalls = 0;

@@ -1146,13 +1146,26 @@ public sealed partial class AgentOrchestrator
 
         var match = Regex.Match(
             message,
-            @"\bfile_read\b.*?\bon\s+(?<path>.+?)(?:\s+and\s+|[?.!]|$)",
+            @"\bfile_read\b.*?\bon\s+(?<path>.+)$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         if (!match.Success)
             return true;
 
-        var candidate = match.Groups["path"].Value.Trim().Trim('"', '\'');
+        var candidate = match.Groups["path"].Value.Trim();
+        var windowsPathMatch = Regex.Match(
+            candidate,
+            @"^[A-Za-z]:\\[^\r\n]*?(?=(?:\s+(?:and|then|treat|summarize|explain|do)\b)|[?!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (windowsPathMatch.Success)
+            candidate = windowsPathMatch.Value;
+
+        candidate = Regex.Replace(
+            candidate,
+            @"\s+(?:and|then|treat|summarize|explain|do)\s+.*$",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        candidate = candidate.Trim().Trim('"', '\'').TrimEnd('?', '!', '.', ',');
         if (string.IsNullOrWhiteSpace(candidate))
             return true;
 
@@ -1195,12 +1208,18 @@ public sealed partial class AgentOrchestrator
         {
             var match = Regex.Match(
                 message,
-                @"\bfile_list\b.*?\bon\s+(?<path>.+?)(?:\s+and\s+|[?.!]|$)",
+                @"\bfile_list\b.*?\bon\s+(?<path>.+)$",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             if (match.Success)
             {
-                var candidate = match.Groups["path"].Value.Trim().Trim('"', '\'');
+                var candidate = match.Groups["path"].Value.Trim();
+                candidate = Regex.Replace(
+                    candidate,
+                    @"\s+(?:and|then)\s+.*$",
+                    string.Empty,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                candidate = candidate.Trim().Trim('"', '\'').TrimEnd('?', '!');
                 if (!string.IsNullOrWhiteSpace(candidate))
                     path = candidate;
             }
@@ -1211,6 +1230,36 @@ public sealed partial class AgentOrchestrator
 
         argsJson = JsonSerializer.Serialize(new { path });
         return true;
+    }
+
+    private static bool TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(
+        string message,
+        out string rootId,
+        out string entry)
+    {
+        rootId = string.Empty;
+        entry = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        if (!message.Contains("knowledge_store_journal_log_entry", StringComparison.OrdinalIgnoreCase) ||
+            !message.Contains("knowledge_store_read_file", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var match = Regex.Match(
+            message,
+            @"knowledge_store_journal_log_entry.*?root\s+'(?<root>[^']+)'.*?journal\s+entry\s+'(?<entry>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (!match.Success)
+            return false;
+
+        rootId = match.Groups["root"].Value.Trim();
+        entry = match.Groups["entry"].Value.Trim();
+        return !string.IsNullOrWhiteSpace(rootId) && !string.IsNullOrWhiteSpace(entry);
     }
 
     private async Task<AgentResponse> ExecuteExplicitFileReadAsync(
@@ -1355,6 +1404,151 @@ public sealed partial class AgentOrchestrator
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = roundTrips
         };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+        string rootId,
+        string entry,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var journalArgsJson = JsonSerializer.Serialize(new { rootId, entry, timeHint = (string?)null });
+        var journalResult = await _mcp.CallToolAsync(
+            "knowledge_store_journal_log_entry",
+            journalArgsJson,
+            cancellationToken);
+
+        var journalSuccess = TryParseKnowledgeStoreToolResult(
+            journalResult,
+            out var journalMessage,
+            out _,
+            out var journalPath);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_journal_log_entry",
+            Arguments = journalArgsJson,
+            Result = journalResult,
+            Success = journalSuccess
+        });
+
+        if (!journalSuccess || string.IsNullOrWhiteSpace(journalPath))
+        {
+            var failureText = string.IsNullOrWhiteSpace(journalMessage)
+                ? "I wasn't able to save that journal entry to the knowledge store."
+                : $"I wasn't able to save that journal entry to the knowledge store: {journalMessage}";
+
+            AppendAssistantMessage(failureText);
+            LogEvent("AGENT_RESPONSE", failureText);
+            return new AgentResponse
+            {
+                Text = failureText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var readArgsJson = JsonSerializer.Serialize(new { path = journalPath, rootId });
+        var readResult = await _mcp.CallToolAsync(
+            "knowledge_store_read_file",
+            readArgsJson,
+            cancellationToken);
+
+        var readSuccess = TryParseKnowledgeStoreToolResult(
+            readResult,
+            out var readMessage,
+            out var readContent,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_read_file",
+            Arguments = readArgsJson,
+            Result = readResult,
+            Success = readSuccess
+        });
+
+        string responseText;
+        if (!readSuccess)
+        {
+            responseText = string.IsNullOrWhiteSpace(readMessage)
+                ? $"I saved the journal entry to `{journalPath}`, but I couldn't read the journal file back for verification."
+                : $"I saved the journal entry to `{journalPath}`, but I couldn't read the journal file back for verification: {readMessage}";
+        }
+        else
+        {
+            var containsEntry = !string.IsNullOrWhiteSpace(readContent) &&
+                                readContent.Contains(entry, StringComparison.Ordinal);
+            responseText = containsEntry
+                ? $"I saved the journal entry to `{journalPath}` and verified that the walk entry text is present in the journal file."
+                : $"I saved the journal entry to `{journalPath}`, but the exact walk entry text was not present when I read the journal file back.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private static bool TryParseKnowledgeStoreToolResult(
+        string? resultJson,
+        out string? message,
+        out string? content,
+        out string? filePath)
+    {
+        message = null;
+        content = null;
+        filePath = null;
+
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            message = root.TryGetProperty("message", out var messageEl) && messageEl.ValueKind == JsonValueKind.String
+                ? messageEl.GetString()
+                : null;
+            content = root.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.String
+                ? contentEl.GetString()
+                : null;
+            filePath = root.TryGetProperty("filePath", out var pathEl) && pathEl.ValueKind == JsonValueKind.String
+                ? pathEl.GetString()
+                : null;
+            filePath ??= root.TryGetProperty("file_path", out var snakePathEl) && snakePathEl.ValueKind == JsonValueKind.String
+                ? snakePathEl.GetString()
+                : null;
+
+            if (root.TryGetProperty("success", out var successEl) &&
+                (successEl.ValueKind == JsonValueKind.True || successEl.ValueKind == JsonValueKind.False))
+            {
+                return successEl.GetBoolean();
+            }
+
+            if (root.TryGetProperty("ok", out var okEl) &&
+                (okEl.ValueKind == JsonValueKind.True || okEl.ValueKind == JsonValueKind.False))
+            {
+                return okEl.GetBoolean();
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<string?> ReadSingleFolderFileAsync(

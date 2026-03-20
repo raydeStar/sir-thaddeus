@@ -900,7 +900,9 @@
                     <Border Classes="settingsCard">
                       <StackPanel Spacing="12">
                         <CheckBox Content="Do not allow any access to my files"
+                                  x:Name="DisableAllFileAccessCheckBox"
                                   IsChecked="{Binding DisableAllFileAccess}"
+                                  Click="DisableAllFileAccessCheckBox_Click"
                                   Classes="settingsCheck"/>
                         <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. If no folder is listed, file access stays blocked."
                                    Classes="hint"

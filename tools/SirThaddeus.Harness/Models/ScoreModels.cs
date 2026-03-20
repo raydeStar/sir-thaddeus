@@ -24,6 +24,40 @@ public sealed record ScoreCard
 
     [JsonPropertyName("judge_suggestions")]
     public IReadOnlyList<string> JudgeSuggestions { get; init; } = [];
+
+    // Granular breakdown for reporting
+    [JsonPropertyName("keyword_penalty")]
+    public double KeywordPenalty { get; init; }
+
+    [JsonPropertyName("deflection_penalty")]
+    public double DeflectionPenalty { get; init; }
+
+    [JsonPropertyName("tool_incorporation_penalty")]
+    public double ToolIncorporationPenalty { get; init; }
+
+    [JsonPropertyName("assertion_density_penalty")]
+    public double AssertionDensityPenalty { get; init; }
+
+    [JsonPropertyName("personality_adjustment")]
+    public double PersonalityAdjustment { get; init; }
+
+    [JsonPropertyName("deflection_phrase_count")]
+    public int DeflectionPhraseCount { get; init; }
+
+    [JsonPropertyName("hedge_ratio")]
+    public double HedgeRatio { get; init; }
+
+    [JsonPropertyName("tool_tokens_incorporated")]
+    public int ToolTokensIncorporated { get; init; }
+
+    [JsonPropertyName("tool_tokens_available")]
+    public int ToolTokensAvailable { get; init; }
+
+    [JsonPropertyName("required_keywords_found")]
+    public int RequiredKeywordsFound { get; init; }
+
+    [JsonPropertyName("required_keywords_total")]
+    public int RequiredKeywordsTotal { get; init; }
 }
 
 public sealed record CursorJudgePacket

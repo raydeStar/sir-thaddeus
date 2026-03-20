@@ -250,6 +250,19 @@ public partial class MainWindow : Window
         _transcriptionService.Dispose();
         _microphoneCaptureService.Dispose();
         _pttGate.Dispose();
+
+        if (_backendSettings.IsDirty)
+        {
+            try
+            {
+                SettingsManager.Save(_backendSettings.BuildPersistableSnapshot());
+            }
+            catch
+            {
+                // Best effort only on shutdown.
+            }
+        }
+
         PersistUiSettings();
 
         base.OnClosed(e);
@@ -292,7 +305,12 @@ public partial class MainWindow : Window
         _uiSettingsStore.Save(_uiSettings);
     }
 
-    private async void SaveSettingsButton_Click(object? sender, RoutedEventArgs e)
+    private async Task SaveBackendSettingsAsync(
+        string connectedStatus,
+        string localStatus,
+        string localHealthStatus,
+        string syncFailureStatus,
+        bool appendTranscript)
     {
         var snapshot = _backendSettings.BuildPersistableSnapshot();
 
@@ -301,19 +319,26 @@ public partial class MainWindow : Window
             if (_runtimeApiClient is not null)
             {
                 var persisted = await _runtimeApiClient.SaveSettingsAsync(snapshot, CancellationToken.None);
-                _backendSettings.ApplySavedSnapshot(persisted, "Settings saved and applied to the connected runtime.");
+                _backendSettings.ApplySavedSnapshot(persisted, connectedStatus);
                 await RefreshSearchStatusAsync();
-                AppendTranscript("[system] Settings saved and applied to the connected runtime.");
+                if (appendTranscript)
+                {
+                    AppendTranscript("[system] " + connectedStatus);
+                }
+
                 return;
             }
 
             SettingsManager.Save(snapshot);
             var localPersisted = SettingsManager.Load();
-            _backendSettings.ApplySavedSnapshot(localPersisted, "Settings saved locally. Connect or restart the runtime to apply them.");
+            _backendSettings.ApplySavedSnapshot(localPersisted, localStatus);
             _backendSettings.ResetSearchHealthState(
                 "Not connected",
-                "Settings saved locally. Connect the runtime to inspect live web-search and MCP health.");
-            AppendTranscript("[system] Settings saved locally.");
+                localHealthStatus);
+            if (appendTranscript)
+            {
+                AppendTranscript("[system] " + localStatus);
+            }
         }
         catch (Exception ex)
         {
@@ -321,19 +346,35 @@ public partial class MainWindow : Window
             {
                 SettingsManager.Save(snapshot);
                 var localPersisted = SettingsManager.Load();
-                _backendSettings.ApplySavedSnapshot(localPersisted, "Settings saved locally. Runtime sync failed; reconnect to apply them.");
+                _backendSettings.ApplySavedSnapshot(localPersisted, syncFailureStatus);
                 _backendSettings.ResetSearchHealthState(
                     "Unavailable",
-                    "Settings saved locally, but runtime sync failed. Reconnect to inspect live web-search and MCP health.");
-                AppendTranscript("[error] Runtime settings sync failed: " + ex.Message);
-                AppendTranscript("[system] Settings saved locally.");
+                    syncFailureStatus);
+                if (appendTranscript)
+                {
+                    AppendTranscript("[error] Runtime settings sync failed: " + ex.Message);
+                    AppendTranscript("[system] " + syncFailureStatus);
+                }
             }
             catch (Exception saveEx)
             {
                 _backendSettings.SetStatus("Settings save failed: " + saveEx.Message);
-                AppendTranscript("[error] Settings save failed: " + saveEx.Message);
+                if (appendTranscript)
+                {
+                    AppendTranscript("[error] Settings save failed: " + saveEx.Message);
+                }
             }
         }
+    }
+
+    private async void SaveSettingsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await SaveBackendSettingsAsync(
+            connectedStatus: "Settings saved and applied to the connected runtime.",
+            localStatus: "Settings saved locally. Connect or restart the runtime to apply them.",
+            localHealthStatus: "Settings saved locally. Connect the runtime to inspect live web-search and MCP health.",
+            syncFailureStatus: "Settings saved locally. Runtime sync failed; reconnect to apply them.",
+            appendTranscript: true);
     }
 
     private void ReloadSettingsButton_Click(object? sender, RoutedEventArgs e)
@@ -388,13 +429,48 @@ public partial class MainWindow : Window
         if (folder?.TryGetLocalPath() is not { Length: > 0 } path)
             return;
 
+        var previousCount = _backendSettings.AllowedFileRoots.Count;
         _backendSettings.AddAllowedFileRoot(path);
+        if (_backendSettings.AllowedFileRoots.Count == previousCount)
+            return;
+
+        await SaveBackendSettingsAsync(
+            connectedStatus: "File access settings saved and applied to the connected runtime.",
+            localStatus: "File access settings saved locally.",
+            localHealthStatus: "File access settings saved locally. Connect the runtime to inspect live web-search and MCP health.",
+            syncFailureStatus: "File access settings saved locally. Runtime sync failed; reconnect to apply them.",
+            appendTranscript: false);
     }
 
-    private void RemoveAllowedFileRootButton_Click(object? sender, RoutedEventArgs e)
+    private async void RemoveAllowedFileRootButton_Click(object? sender, RoutedEventArgs e)
     {
         if (AllowedFileRootsList.SelectedItem is string path)
+        {
+            var previousCount = _backendSettings.AllowedFileRoots.Count;
             _backendSettings.RemoveAllowedFileRoot(path);
+            if (_backendSettings.AllowedFileRoots.Count == previousCount)
+                return;
+
+            await SaveBackendSettingsAsync(
+                connectedStatus: "File access settings saved and applied to the connected runtime.",
+                localStatus: "File access settings saved locally.",
+                localHealthStatus: "File access settings saved locally. Connect the runtime to inspect live web-search and MCP health.",
+                syncFailureStatus: "File access settings saved locally. Runtime sync failed; reconnect to apply them.",
+                appendTranscript: false);
+        }
+    }
+
+    private async void DisableAllFileAccessCheckBox_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_backendSettings.IsDirty)
+            return;
+
+        await SaveBackendSettingsAsync(
+            connectedStatus: "File access settings saved and applied to the connected runtime.",
+            localStatus: "File access settings saved locally.",
+            localHealthStatus: "File access settings saved locally. Connect the runtime to inspect live web-search and MCP health.",
+            syncFailureStatus: "File access settings saved locally. Runtime sync failed; reconnect to apply them.",
+            appendTranscript: false);
     }
 
     private void BeginVoiceHostLifecycleTransition(bool enabled, bool restartManagedProcess = false)

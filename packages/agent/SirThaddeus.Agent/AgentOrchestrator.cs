@@ -462,6 +462,31 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(multiIntentResponse, usageBaseline);
         }
 
+        if (TryBuildExplicitFileReadArgs(userMessage, out var earlyFileReadArgs, out var earlyFilePath))
+        {
+            var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
+                earlyFileReadArgs,
+                earlyFilePath,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+
+            return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
+        }
+
+        if (TryBuildExplicitFileListArgs(userMessage, out var earlyFileListArgs, out var earlyFolderPath))
+        {
+            var explicitFileListResponse = await ExecuteExplicitFileListAsync(
+                earlyFileListArgs,
+                earlyFolderPath,
+                userMessage,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+
+            return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
+        }
+
         // ── Parallel I/O Setup ───────────────────────────────────────
         // Kick off independent async tasks simultaneously to minimize
         // total turn latency.
@@ -481,7 +506,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         // ── Route: classify intent + determine requirements ──────────
         var routeResolution = await ResolveRouteAsync(userMessage, lowerIncoming, cancellationToken);
-        var route = routeResolution.Route;
+        var route = NormalizeRouteForPrompt(routeResolution.Route, lowerIncoming);
         var webEvidence = routeResolution.WebEvidence;
 
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
@@ -842,7 +867,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
             if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
-                TryBuildExplicitFileReadArgs(contextualUserMessage, out var explicitFileReadArgs, out var explicitFilePath))
+                TryBuildExplicitFileReadArgs(userMessage, out var explicitFileReadArgs, out var explicitFilePath))
             {
                 var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
                     explicitFileReadArgs,
@@ -855,7 +880,60 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }
 
             if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
-                TryBuildExplicitFileListArgs(contextualUserMessage, out var explicitFileListArgs, out var explicitFolderPath))
+                TryBuildExplicitFileReadArgs(contextualUserMessage, out explicitFileReadArgs, out explicitFilePath))
+            {
+                var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
+                    explicitFileReadArgs,
+                    explicitFilePath,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(userMessage, out var knowledgeStoreRootId, out var knowledgeStoreEntry))
+            {
+                var knowledgeStoreResponse = await ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+                    knowledgeStoreRootId,
+                    knowledgeStoreEntry,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(contextualUserMessage, out knowledgeStoreRootId, out knowledgeStoreEntry))
+            {
+                var knowledgeStoreResponse = await ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+                    knowledgeStoreRootId,
+                    knowledgeStoreEntry,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileListArgs(userMessage, out var explicitFileListArgs, out var explicitFolderPath))
+            {
+                var explicitFileListResponse = await ExecuteExplicitFileListAsync(
+                    explicitFileListArgs,
+                    explicitFolderPath,
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileListArgs(contextualUserMessage, out explicitFileListArgs, out explicitFolderPath))
             {
                 var explicitFileListResponse = await ExecuteExplicitFileListAsync(
                     explicitFileListArgs,
@@ -940,6 +1018,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var fallbackEligible =
                     hasRefusalOrUncertaintySignals &&
                     route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    !IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lowerIncoming) &&
+                    !IntentFeatureExtractor.LooksLikeIdentityLookup(lowerIncoming) &&
                     (IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) ||
                      IntentFeatureExtractor.LooksLikeFactLookup(lowerIncoming) ||
                      IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming)) &&
@@ -1002,7 +1082,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     LogEvent("CHAT_FALLBACK_TO_FILE",
                         "Chat-only refusal/uncertainty detected — falling back to file tools.");
 
-                    if (TryBuildExplicitFileReadArgs(contextualUserMessage, out var fallbackFileReadArgs, out var fallbackFilePath))
+                    if (TryBuildExplicitFileReadArgs(userMessage, out var fallbackFileReadArgs, out var fallbackFilePath) ||
+                        TryBuildExplicitFileReadArgs(contextualUserMessage, out fallbackFileReadArgs, out fallbackFilePath))
                     {
                         return AttachContextSnapshot(
                             await ExecuteExplicitFileReadAsync(
@@ -1014,7 +1095,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                             usageBaseline);
                     }
 
-                    if (TryBuildExplicitFileListArgs(contextualUserMessage, out var fallbackFileListArgs, out var fallbackFolderPath))
+                    if (TryBuildExplicitFileListArgs(userMessage, out var fallbackFileListArgs, out var fallbackFolderPath) ||
+                        TryBuildExplicitFileListArgs(contextualUserMessage, out fallbackFileListArgs, out fallbackFolderPath))
                     {
                         return AttachContextSnapshot(
                             await ExecuteExplicitFileListAsync(
@@ -1035,7 +1117,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         RequiredCapabilities = [ToolCapability.FileRead],
                         Confidence = 1.0
                     });
-                    var fileTools = PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy);
+                    var fileTools = FilterKnowledgeStoreToolsIfNeeded(
+                        PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy),
+                        contextualUserMessage);
 
                     LogEvent("AGENT_TOOLS_POLICY_FILTERED",
                         $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
@@ -1072,7 +1156,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             // Await the pre-warmed tool definitions (kicked off early
             // alongside memory/slots to overlap with routing latency).
             var allTools = await toolDefsTask;
-            var tools = PolicyGate.FilterTools(allTools, policy);
+            var tools = FilterKnowledgeStoreToolsIfNeeded(
+                PolicyGate.FilterTools(allTools, policy),
+                contextualUserMessage);
 
             LogEvent("AGENT_TOOLS_POLICY_FILTERED",
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
@@ -1209,5 +1295,129 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     {
         var match = Regex.Match(text ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
         return match.Success ? match.Value.ToLowerInvariant() : null;
+    }
+
+    private static IReadOnlyList<ToolDefinition> FilterKnowledgeStoreToolsIfNeeded(
+        IReadOnlyList<ToolDefinition> tools,
+        string userMessage)
+    {
+        if (tools.Count == 0)
+            return tools;
+
+        var lower = (userMessage ?? string.Empty).ToLowerInvariant();
+        if (lower.Contains("knowledge_store_", StringComparison.Ordinal))
+        {
+            return tools
+                .Where(tool => !IsGenericFileTool(tool.Function.Name))
+                .ToList();
+        }
+
+        if (ShouldExposeKnowledgeStoreTools(userMessage))
+            return tools;
+
+        return tools
+            .Where(tool => !IsKnowledgeStoreTool(tool.Function.Name))
+            .ToList();
+    }
+
+    private static bool ShouldExposeKnowledgeStoreTools(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        var explicitKnowledgeStoreIntent =
+            lower.Contains("knowledge_store", StringComparison.Ordinal) ||
+            lower.Contains("knowledge store", StringComparison.Ordinal) ||
+            lower.Contains("wiki", StringComparison.Ordinal) ||
+            lower.Contains("note in my", StringComparison.Ordinal) ||
+            lower.Contains("notes folder", StringComparison.Ordinal) ||
+            lower.Contains("local notes", StringComparison.Ordinal) ||
+            lower.Contains("save a note", StringComparison.Ordinal);
+
+        var journalingIntent =
+            lower.Contains("journal", StringComparison.Ordinal) &&
+            (lower.Contains("write", StringComparison.Ordinal) ||
+             lower.Contains("save", StringComparison.Ordinal) ||
+             lower.Contains("log", StringComparison.Ordinal) ||
+             lower.Contains("entry", StringComparison.Ordinal) ||
+             lower.Contains("note", StringComparison.Ordinal) ||
+             lower.Contains("daily", StringComparison.Ordinal) ||
+             lower.Contains("today", StringComparison.Ordinal));
+
+        if (!explicitKnowledgeStoreIntent && !journalingIntent)
+            return false;
+
+        if (!explicitKnowledgeStoreIntent &&
+            (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) ||
+             IntentFeatureExtractor.LooksLikeWebSearchRequest(lower) ||
+             IntentFeatureExtractor.LooksLikeFactLookup(lower) ||
+             IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lower)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsKnowledgeStoreTool(string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return false;
+
+        return toolName.Contains("knowledge_store", StringComparison.OrdinalIgnoreCase) ||
+               toolName.StartsWith("KnowledgeStore", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsGenericFileTool(string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return false;
+
+        return toolName.Equals("file_read", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Equals("file_list", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Equals("FileRead", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Equals("FileList", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Contains("file_read_preview", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Contains("file_read_apply", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Contains("file_list_preview", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Contains("file_list_apply", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static RouterOutput NormalizeRouteForPrompt(RouterOutput route, string lowerIncoming)
+    {
+        if (string.IsNullOrWhiteSpace(lowerIncoming))
+            return route;
+
+        if (lowerIncoming.Contains("knowledge_store_", StringComparison.Ordinal) ||
+            lowerIncoming.Contains("knowledge store", StringComparison.Ordinal))
+        {
+            return DefaultRouter.MakeRoute(Intents.FileTask, confidence: 0.99, needsFile: true);
+        }
+
+        if ((IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) ||
+             string.Equals(
+                 IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lowerIncoming),
+                 Intents.FileTask,
+                 StringComparison.OrdinalIgnoreCase)) &&
+            !route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultRouter.MakeRoute(Intents.FileTask, confidence: 0.98, needsFile: true);
+        }
+
+        if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming) &&
+            !RouteArbitrationPolicy.IsLookupIntent(route.Intent))
+        {
+            return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.95, needsWeb: true, needsSearch: true);
+        }
+
+        if ((IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lowerIncoming) ||
+             IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lowerIncoming)) &&
+            !route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+        }
+
+        return route;
     }
 }

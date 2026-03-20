@@ -170,7 +170,11 @@ public static class IntentFeatureExtractor
             return null;
 
         if (ContainsAny(lower,
-            ["file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read"]))
+            [
+                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read",
+                "knowledge_store", "knowledge store", "knowledge_store_create_file", "knowledge_store_append_to_file",
+                "knowledge_store_read_file", "knowledge_store_list_files", "knowledge_store_journal_log_entry", "knowledge_store_list_roots"
+            ]))
         {
             return Intents.FileTask;
         }
@@ -1232,7 +1236,7 @@ public static class IntentFeatureExtractor
                lower.Contains("what does ", StringComparison.Ordinal);
     }
 
-    private static bool LooksLikePreferenceOrOpinionPrompt(string lower)
+    public static bool LooksLikePreferenceOrOpinionPrompt(string lower)
     {
         return lower.Contains("what is your favorite", StringComparison.Ordinal) ||
                lower.Contains("what's your favorite", StringComparison.Ordinal) ||
@@ -1248,6 +1252,62 @@ public static class IntentFeatureExtractor
                lower.Contains("tell me about yourself", StringComparison.Ordinal) ||
                lower.Contains("what makes you good at", StringComparison.Ordinal) ||
                lower.Contains("should i ", StringComparison.Ordinal);
+    }
+
+    public static bool LooksLikeSelfContainedReasoningPrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (LooksLikePreferenceOrOpinionPrompt(lower) ||
+            LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower) ||
+            LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            lower.Contains("search ", StringComparison.Ordinal) ||
+            lower.Contains("look up", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("recent", StringComparison.Ordinal) ||
+            lower.Contains("news", StringComparison.Ordinal) ||
+            lower.Contains("weather", StringComparison.Ordinal) ||
+            lower.Contains(".com", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var hasNameDeclaration =
+            lower.Contains("my name is ", StringComparison.Ordinal) ||
+            lower.Contains("i am ", StringComparison.Ordinal);
+
+        if (!hasNameDeclaration)
+            return false;
+
+        var asksToRecallName =
+            lower.Contains("what my name is", StringComparison.Ordinal) ||
+            lower.Contains("what's my name", StringComparison.Ordinal) ||
+            lower.Contains("whats my name", StringComparison.Ordinal) ||
+            lower.Contains("tell me what my name is", StringComparison.Ordinal) ||
+            lower.Contains("tell me my name", StringComparison.Ordinal);
+
+        if (!asksToRecallName)
+            return false;
+
+        var hasSimpleArithmetic =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\bwhat is\s+\d+\s*[\+\-\*/x]\s*\d+\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant) ||
+            lower.Contains(" plus ", StringComparison.Ordinal) ||
+            lower.Contains(" minus ", StringComparison.Ordinal) ||
+            lower.Contains(" times ", StringComparison.Ordinal) ||
+            lower.Contains(" divided by ", StringComparison.Ordinal);
+
+        return hasSimpleArithmetic;
     }
 
     /// <summary>

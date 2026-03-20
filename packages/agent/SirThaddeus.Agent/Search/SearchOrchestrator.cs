@@ -1078,26 +1078,6 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
-        var browserFallback = await CallBrowserSearchFallbackAsync(userMessage, toolCallsMade, ct);
-        if (!string.IsNullOrWhiteSpace(browserFallback) &&
-            !LooksLikeNoResultsPayload(browserFallback) &&
-            WebToolFailureMapper.TryBuildFailureResponse(browserFallback, toolCallsMade) is null)
-        {
-            var fallbackSources = ParseSourcesFromToolResult(browserFallback);
-            if (fallbackSources.Count > 0)
-            {
-                var summaryInput = "[Browser fallback search results]\n" + StripSourcesJson(browserFallback);
-                return await SummarizeAndRespond(
-                    summaryInput,
-                    FactFindSnippetOnlyInstruction,
-                    history,
-                    toolCallsMade,
-                    SummaryFallbackKind.FactFind,
-                    fallbackSources,
-                    ct);
-            }
-        }
-
         var response = await BuildOfflineReasoningResponseAsync(
             userMessage,
             memoryPackText,

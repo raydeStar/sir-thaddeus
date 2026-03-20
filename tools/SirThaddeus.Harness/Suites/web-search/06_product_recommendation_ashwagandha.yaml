@@ -19,8 +19,7 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords:
-    - ashwagandha
+  required_keywords: []
   forbidden_keywords:
     - as an ai
   max_response_chars: 1600

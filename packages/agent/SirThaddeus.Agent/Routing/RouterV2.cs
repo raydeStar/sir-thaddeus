@@ -61,6 +61,12 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.92);
 
+        if (IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+
+        if (IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lower))
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
             request is { HasRecentSearchResults: true })
         {

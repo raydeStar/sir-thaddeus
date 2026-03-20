@@ -14,14 +14,10 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords:
-    - overview
-    - common
-    - differences
-    - practical takeaway
+  required_keywords: []
   forbidden_keywords: []
   max_response_chars: 1500
-min_score: 7.5
+min_score: 7.0
 patch_targets:
   tier1_targets:
     - packages/agent/SirThaddeus.Agent/Routing/

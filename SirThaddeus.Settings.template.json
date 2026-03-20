@@ -54,5 +54,13 @@
   "clipboard": {
     "enabled": true
   },
+  "knowledgeStore": {
+    "enabled": false,
+    "roots": [],
+    "maxFilesPerFolder": 200,
+    "maxFolderDepth": 3,
+    "maxRootSizeBytes": 52428800,
+    "maxFileSizeBytes": 524288
+  },
   "activePersonalityId": "helpful_default"
 }

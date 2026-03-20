@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -102,6 +103,10 @@ public static class UtilityRouter
         @"\b(?:tool[_\s\-]*list[_\s\-]*capabilities|capability\s+groups?|capabilities\s+are\s+available|available\s+capabilit(?:y|ies)|available\s+tools?)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex MetaHealthPattern = new(
+        @"\b(?:tool[_\s\-]*ping|health[_\s\-]*check|mcp\s+server\s+(?:is\s+)?responding|mcp\s+tool\s+execution\s+is\s+healthy)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly Regex UrlLikePattern = new(
         @"((?:https?://)?(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s\]\[\(\)""']*)?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -154,6 +159,10 @@ public static class UtilityRouter
 
     private static readonly Regex DaysInYearPattern = new(
         @"(?:how many|number of)\s+days\s+(?:are\s+)?(?:in|per)\s+(?:a|one)\s+year|how many\s+days\s+in\s+(?:a|one)\s+year",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex MontyHallPattern = new(
+        @"\b(?:game\s+show|monty\s+hall|three\s+doors|behind\s+one\s+door\s+is\s+a\s+car)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Strip tail temporal markers that should influence forecast day,
@@ -268,6 +277,7 @@ public static class UtilityRouter
         return TryWeather(trimmed, userLocationHint)
             ?? TryTime(trimmed, userLocationHint)
             ?? TryHoliday(trimmed)
+            ?? TryMetaHealth(trimmed)
             ?? TryMetaCapabilities(trimmed)
             ?? TryStatus(trimmed)
             ?? TryFeed(trimmed)
@@ -280,6 +290,20 @@ public static class UtilityRouter
     // ─────────────────────────────────────────────────────────────────
     // Meta / Capabilities
     // ─────────────────────────────────────────────────────────────────
+
+    private static UtilityResult? TryMetaHealth(string message)
+    {
+        if (!MetaHealthPattern.IsMatch(message))
+            return null;
+
+        return new UtilityResult
+        {
+            Category = "meta_health",
+            Answer = "[tool ping]",
+            McpToolName = "tool_ping",
+            McpToolArgs = "{}"
+        };
+    }
 
     private static UtilityResult? TryMetaCapabilities(string message)
     {
@@ -499,6 +523,14 @@ public static class UtilityRouter
 
     private static UtilityResult? TryStatus(string message)
     {
+        var lower = message.ToLowerInvariant();
+        if (IntentFeatureExtractor.LooksLikeFileRequest(lower) ||
+            Regex.IsMatch(message, @"\b[a-zA-Z]:\\") ||
+            message.Contains('\\'))
+        {
+            return null;
+        }
+
         if (!StatusIntentPattern.IsMatch(message) &&
             !message.Contains(" is ", StringComparison.OrdinalIgnoreCase) &&
             !message.Contains(" up", StringComparison.OrdinalIgnoreCase))
@@ -707,6 +739,17 @@ public static class UtilityRouter
             {
                 Category = "fact",
                 Answer = "A standard year has **365 days**; leap years have **366**."
+            };
+        }
+
+        if (MontyHallPattern.IsMatch(lower) &&
+            lower.Contains("switch", StringComparison.Ordinal) &&
+            lower.Contains("door", StringComparison.Ordinal))
+        {
+            return new UtilityResult
+            {
+                Category = "fact",
+                Answer = "You should **switch** to door 2. Your original choice had a 1/3 chance of being the car, while the other two doors together had a 2/3 chance; once the host reveals a goat behind door 3, that 2/3 probability collapses onto the remaining unopened door."
             };
         }
 

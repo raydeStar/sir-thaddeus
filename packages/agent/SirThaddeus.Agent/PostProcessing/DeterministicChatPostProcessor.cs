@@ -131,12 +131,12 @@ public sealed class DeterministicChatPostProcessor
         if (activeProfile is null)
             return sanitized;
 
-        // Safety refusals are semantically sensitive.
-        // Only allow deterministic cleanup; no signature, no reduction.
-        if (responseKind is ResponseKind.SafetyRefusal)
-            return sanitized;
-
         var presentationOptions = PersonalityFormattingPolicy.BuildPresentationOptions(activeProfile);
+
+        // Safety refusals are semantically sensitive.
+        // Only allow presentation formatting; no reduction.
+        if (responseKind is ResponseKind.SafetyRefusal)
+            return PresentationFormatter.Apply(sanitized, presentationOptions);
 
         // Tool-backed responses default to strict mode (no signature/reduction).
         // For search/news style replies we can opt into presentation-only

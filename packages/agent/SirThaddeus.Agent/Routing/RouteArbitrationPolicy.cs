@@ -54,6 +54,16 @@ internal static class RouteArbitrationPolicy
             return false;
         }
 
+        if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+            (IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) ||
+             string.Equals(
+                 IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lowerIncoming),
+                 Intents.FileTask,
+                 StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
         if (route.Confidence < 0.95)
             return true;
 

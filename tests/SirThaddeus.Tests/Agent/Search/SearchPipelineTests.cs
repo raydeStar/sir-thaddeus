@@ -246,6 +246,15 @@ public class UtilityRouterTests
     }
 
     [Theory]
+    [InlineData(@"Call file_read exactly once on C:\Users\Public\nonexistent.txt. Do not call status_check_url.")]
+    [InlineData(@"Call file_read exactly once on C:\Users\Public\Documents\readme.txt and summarize it.")]
+    public void Status_DoesNotRouteExplicitFilePrompts(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.Null(result);
+    }
+
+    [Theory]
     [InlineData("read this feed https://example.com/rss.xml")]
     [InlineData("fetch rss from docs.github.com/feed.xml")]
     public void Feed_RoutesToFeedTool(string input)
@@ -334,6 +343,20 @@ public class UtilityRouterTests
         Assert.Null(result.McpToolName);
     }
 
+    [Fact]
+    public void MontyHall_ReturnsDeterministicSwitchAnswer()
+    {
+        var result = UtilityRouter.TryHandle(
+            "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?");
+
+        Assert.NotNull(result);
+        Assert.Equal("fact", result!.Category);
+        Assert.Contains("switch", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1/3", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2/3", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.McpToolName);
+    }
+
     [Theory]
     [InlineData("political climate in Washington")]
     [InlineData("how to weather the storm")]
@@ -352,6 +375,18 @@ public class UtilityRouterTests
     {
         var result = UtilityRouter.TryHandle(input);
         Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("Use tool_ping and report whether MCP tool execution is healthy.")]
+    [InlineData("Run tool_ping and confirm whether the MCP server is responding.")]
+    public void MetaHealth_RoutesToToolPing(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("meta_health", result!.Category);
+        Assert.Equal("tool_ping", result.McpToolName);
+        Assert.Equal("{}", result.McpToolArgs);
     }
 }
 

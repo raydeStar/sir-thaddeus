@@ -13,8 +13,12 @@ public static class RuntimeMcpEnvironmentBuilder
         {
             ["ST_ACTIVE_PROFILE_ID"] = settings.ActiveProfileId ?? "",
             ["ST_ACTIVE_PERSONALITY_ID"] = settings.ActivePersonalityId ?? "",
-            ["ST_SETTINGS_PATH"] = SettingsManager.GetSettingsPath(),
-            ["ST_AUDIT_PATH"] = JsonLineAuditLogger.GetDefaultPath()
+            ["ST_SETTINGS_PATH"] = ResolveInheritedOrDefault(
+                "ST_SETTINGS_PATH",
+                SettingsManager.GetSettingsPath()),
+            ["ST_AUDIT_PATH"] = ResolveInheritedOrDefault(
+                "ST_AUDIT_PATH",
+                JsonLineAuditLogger.GetDefaultPath())
         };
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -102,6 +106,14 @@ public static class RuntimeMcpEnvironmentBuilder
             : settings.DeepDive.DefaultLocale.Trim();
 
         return env;
+    }
+
+    private static string ResolveInheritedOrDefault(string variableName, string defaultValue)
+    {
+        var inherited = Environment.GetEnvironmentVariable(variableName);
+        return string.IsNullOrWhiteSpace(inherited)
+            ? defaultValue
+            : inherited.Trim();
     }
 
     public static bool HasChanged(AppSettings? previous, AppSettings current)

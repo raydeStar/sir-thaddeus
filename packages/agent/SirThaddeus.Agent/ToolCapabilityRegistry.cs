@@ -66,6 +66,18 @@ public static class ToolCapabilityRegistry
             ["FileListApply"] = ToolCapability.FileRead,
             ["document_read"] = ToolCapability.FileRead,
             ["DocumentRead"] = ToolCapability.FileRead,
+            ["knowledge_store_list_roots"] = ToolCapability.Meta,
+            ["KnowledgeStoreListRoots"] = ToolCapability.Meta,
+            ["knowledge_store_read_file"] = ToolCapability.FileRead,
+            ["KnowledgeStoreReadFile"] = ToolCapability.FileRead,
+            ["knowledge_store_list_files"] = ToolCapability.FileRead,
+            ["KnowledgeStoreListFiles"] = ToolCapability.FileRead,
+            ["knowledge_store_create_file"] = ToolCapability.FileWrite,
+            ["KnowledgeStoreCreateFile"] = ToolCapability.FileWrite,
+            ["knowledge_store_append_to_file"] = ToolCapability.FileWrite,
+            ["KnowledgeStoreAppendToFile"] = ToolCapability.FileWrite,
+            ["knowledge_store_journal_log_entry"] = ToolCapability.FileWrite,
+            ["KnowledgeStoreJournalLogEntry"] = ToolCapability.FileWrite,
 
             // System
             // Clipboard is treated as a system capability for routing.
