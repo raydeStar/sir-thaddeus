@@ -188,6 +188,9 @@ public sealed partial class DeepDiveCoordinator
             .Take(maxOpenedSources)
             .ToList();
 
+        if (sources.Count == 0)
+            warnings.Add("Fallback search came back with 0 results for the query.");
+
         foreach (var source in sources)
         {
             sourceRefs.Add(new SourceRef
@@ -200,32 +203,11 @@ public sealed partial class DeepDiveCoordinator
 
         var extractedChunks = new List<string>();
 
-        // -- Last-resort fallback: browse a search engine directly --
-        // When all web_search providers returned 0 results (SearxNG not
-        // running, DDG blocked, Google News RSS doesn't index businesses),
-        // browse a Google search URL directly to extract structured data.
+        // Do not browse a generic search engine results page when web_search returned
+        // no sources. Those pages are usually junk for synthesis and create noisy tool
+        // traces with no real grounding value.
         if (sources.Count == 0)
-        {
-            AddAuditStep(auditSteps, "search", "web_search returned 0 results - browsing Google search directly.");
-            var googleUrl = $"https://www.google.com/search?q={Uri.EscapeDataString(cleanedQuery + webLocationSuffix + " hours address phone")}";
-            var browseArgs = JsonSerializer.Serialize(new { url = googleUrl });
-            var browseContent = await CallToolBoundedAsync(
-                BrowseTool,
-                BrowseToolAlt,
-                browseArgs,
-                "open_page",
-                $"Browsed Google search: {googleUrl}");
-            if (!string.IsNullOrWhiteSpace(browseContent) && !browseContent.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && !browseContent.StartsWith("Tool error:", StringComparison.OrdinalIgnoreCase))
-            {
-                extractedChunks.Add(browseContent!);
-                sourceRefs.Add(new SourceRef
-                {
-                    Name = "Google Search",
-                    Url = googleUrl,
-                    FetchedIso = now.ToString("O")
-                });
-            }
-        }
+            AddAuditStep(auditSteps, "search", "web_search returned 0 results - skipping generic search-engine browse fallback.");
 
         foreach (var source in sources.Take(2))
         {
@@ -752,11 +734,19 @@ public sealed partial class DeepDiveCoordinator
                 parts.Add(ratingBullet);
         }
 
+        var warningsCard = briefing.Cards.FirstOrDefault(c =>
+            c.Type.Equals("warnings", StringComparison.OrdinalIgnoreCase));
+        if (warningsCard is not null)
+        {
+            foreach (var providerLine in BuildProviderFailureLeadLines(warningsCard.Bullets))
+                parts.Add(providerLine);
+        }
+
         if (briefing.Hero.Confidence.Equals(DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase))
         {
             parts.Add(!string.IsNullOrWhiteSpace(briefing.Hero.Phone)
-                ? "I could not verify live open status from reliable sources. Call the store to confirm current hours."
-                : "I could not verify live open status from reliable sources. Check the listed source before visiting.");
+                ? "Current open status is unknown from the available sources. Call the store to confirm current hours."
+                : "Current open status is unknown from the available sources. Check the listed source before visiting.");
         }
 
         if (!string.IsNullOrWhiteSpace(briefing.Hero.Website))
@@ -765,6 +755,25 @@ public sealed partial class DeepDiveCoordinator
         parts.Add("Briefing summary: hours and review details are based on currently available web sources.");
 
         return string.Join("\n", parts);
+    }
+
+    private static IReadOnlyList<string> BuildProviderFailureLeadLines(IReadOnlyList<string> warnings)
+    {
+        var lines = new List<string>();
+
+        if (warnings.Any(w => w.Contains("Google Places API key is not configured", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.Add("Google Places API key is not configured, so places lookup is unavailable for this request.");
+        }
+        else if (warnings.Any(w => w.Contains("Places provider unavailable", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.Add("Places lookup was unavailable, so I fell back to web-only evidence.");
+        }
+
+        if (warnings.Any(w => w.Contains("0 results", StringComparison.OrdinalIgnoreCase)))
+            lines.Add("The fallback search came back with 0 results for this query.");
+
+        return lines;
     }
 
     private static string NormalizeHeroTitleForLead(string title)

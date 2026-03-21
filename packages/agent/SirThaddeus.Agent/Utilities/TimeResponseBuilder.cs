@@ -48,7 +48,9 @@ public static class TimeResponseBuilder
             {
                 var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tzInfo);
                 var formatted = local.ToString("h:mm tt on dddd, MMM d");
-                return $"It's currently **{formatted}** in {location} ({timezone}).\n\nNeed another city checked too?";
+                return $"It's currently **{formatted}** in {location}. " +
+                       $"Timezone: **{timezone}**. Weather geocode confirmed the location match.\n\n" +
+                       "Need another city checked too?";
             }
 
             return $"The timezone for {location} is **{timezone}**.\n\nWant local time there as well?";

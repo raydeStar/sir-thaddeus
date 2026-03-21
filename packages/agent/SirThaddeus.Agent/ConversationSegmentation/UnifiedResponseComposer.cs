@@ -43,7 +43,11 @@ public sealed class UnifiedResponseComposer
 
         // Failed segments get a brief, clear note — not a raw error dump.
         if (failed.Count > 0)
-            parts.Add(BuildFailureSummary(failed));
+        {
+            var failureSummary = BuildFailureSummary(succeeded, failed);
+            if (!string.IsNullOrWhiteSpace(failureSummary))
+                parts.Add(failureSummary);
+        }
 
         if (request.Deferred.Count > 0)
             parts.Add(BuildDeferredLine(request.Executed, request.Deferred));
@@ -79,8 +83,13 @@ public sealed class UnifiedResponseComposer
             parts.Add(joined);
     }
 
-    private static string BuildFailureSummary(IReadOnlyList<SegmentExecutionResult> failed)
+    private static string BuildFailureSummary(
+        IReadOnlyList<SegmentExecutionResult> succeeded,
+        IReadOnlyList<SegmentExecutionResult> failed)
     {
+        if (succeeded.Count > 0 && failed.All(f => IsPresentationOnlyFragment(f.SegmentText)))
+            return "";
+
         if (failed.Count == 1)
         {
             var desc = QuoteShort(failed[0].SegmentText);
@@ -89,6 +98,22 @@ public sealed class UnifiedResponseComposer
 
         var items = string.Join(", ", failed.Select(f => QuoteShort(f.SegmentText)));
         return $"I wasn't able to resolve a couple of things ({items}) — try being more specific or ask again.";
+    }
+
+    private static bool IsPresentationOnlyFragment(string text)
+    {
+        var lower = (text ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("in one sentence", StringComparison.Ordinal) ||
+               lower.Contains("in two sentences", StringComparison.Ordinal) ||
+               lower.Contains("in 2 sentences", StringComparison.Ordinal) ||
+               lower.Contains("summarize it", StringComparison.Ordinal) ||
+               lower.Contains("summarise it", StringComparison.Ordinal) ||
+               lower.Contains("short version", StringComparison.Ordinal) ||
+               lower.Contains("briefly", StringComparison.Ordinal) ||
+               lower.Contains("bullet points", StringComparison.Ordinal);
     }
 
     private static string BuildSocialLead(string originalMessage, IReadOnlyList<string> nonActionable)

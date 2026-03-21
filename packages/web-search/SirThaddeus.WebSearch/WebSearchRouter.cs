@@ -16,7 +16,8 @@ namespace SirThaddeus.WebSearch;
 //   "searxng"     - SearxNG only
 //   "search_api"  - hosted search API only
 //   "api"         - alias for search_api
-//   "ddg_html"    - DDG only (currently broken - DDG blocks automated access)
+//   "ddg_html"    - DDG only (may be rate-limited — DDG blocks heavy automated access)
+//                   Also used as last-resort fallback in auto mode
 //   "google_news" - Google News RSS only
 //   "manual"      - return "paste URLs manually" message
 
@@ -157,7 +158,16 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         }
 
         var fallback = await _googleNews.SearchAsync(query, options, ct);
-        return AttachSearchDiagnostic(fallback, _googleNews.Name, "fallback", diagnostics);
+        fallback = AttachSearchDiagnostic(fallback, _googleNews.Name, "fallback", diagnostics);
+
+        if (fallback.Results.Count > 0)
+            return fallback;
+
+        // Last resort: DuckDuckGo HTML scraping — may be rate-limited
+        // or blocked, but worth trying when all else has failed.
+        diagnostics = [.. fallback.Diagnostics];
+        var ddgFallback = await _ddg.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "last-resort", diagnostics);
     }
 
     /// <summary>

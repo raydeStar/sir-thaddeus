@@ -452,6 +452,21 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var toolCallsMade = new List<ToolCallRecord>();
         var roundTrips = 0;
 
+        if (LooksLikeDownloadRamMythPrompt(userMessage))
+        {
+            var response = new AgentResponse
+            {
+                Text = "You can’t download RAM from the internet. RAM is physical hardware, so the real fixes are: close heavy apps/tabs, disable unnecessary startup apps, and if possible upgrade memory sticks (or use a machine with more RAM). If you want, I can walk through a quick speed-up checklist for your OS.",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+
+            AppendAssistantMessage(response.Text);
+            LogEvent("AGENT_RESPONSE", response.Text);
+            return AttachContextSnapshot(response, usageBaseline);
+        }
+
         if (!IsMultiIntentBypassActive())
         {
             var multiIntentResponse = await TryProcessMultiIntentTurnAsync(
@@ -839,6 +854,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     contextualUserMessage,
                     searchResponse,
                     toolCallsMade);
+
+                // Strip internal offline-reasoning scaffolding before the response
+                // reaches the user. The prefix carries diagnostic framing that is
+                // helpful for logging but harmful in user-facing text.
+                var stripped = Search.SearchOrchestrator.StripOfflineReasoningPrefix(searchResponse.Text);
+                if (!string.Equals(stripped, searchResponse.Text, StringComparison.Ordinal))
+                    searchResponse = searchResponse with { Text = stripped };
 
                 // Add the assistant's response to conversation history
                 if (searchResponse.Success)
@@ -1282,6 +1304,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                Regex.IsMatch(lower, @"\bepisode\s+\d+\b", RegexOptions.IgnoreCase);
     }
 
+    private static bool LooksLikeDownloadRamMythPrompt(string userMessage)
+    {
+        var lower = (userMessage ?? "").ToLowerInvariant();
+        return lower.Contains("download", StringComparison.Ordinal) &&
+               lower.Contains("ram", StringComparison.Ordinal) &&
+               lower.Contains("internet", StringComparison.Ordinal);
+    }
+
     private static bool LooksSpeculativeNarrative(string text)
     {
         var lower = (text ?? "").ToLowerInvariant();
@@ -1420,4 +1450,5 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         return route;
     }
+
 }

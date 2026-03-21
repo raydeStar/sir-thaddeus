@@ -407,6 +407,7 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 return null;
 
             var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var aliases = new List<string>();
             foreach (var item in doc.RootElement.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object)
@@ -420,6 +421,19 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 var category = categoryEl.GetString()?.Trim();
                 if (!string.IsNullOrWhiteSpace(category))
                     groups.Add(category);
+
+                if (item.TryGetProperty("aliases", out var aliasesEl) && aliasesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var aliasEl in aliasesEl.EnumerateArray())
+                    {
+                        if (aliasEl.ValueKind != JsonValueKind.String)
+                            continue;
+
+                        var alias = aliasEl.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(alias) && alias.Any(char.IsUpper))
+                            aliases.Add(alias);
+                    }
+                }
             }
 
             if (groups.Count == 0)
@@ -431,8 +445,16 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 .ToList();
 
             var listText = string.Join(", ", ordered);
-            return $"Available capability groups: {listText}.\n\n" +
-                   "Use `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
+            var exampleAliases = aliases
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+
+            var summary = $"Capability manifest reports {doc.RootElement.GetArrayLength()} tools across these groups: {listText}.";
+            if (exampleAliases.Count > 0)
+                summary += $" Example aliases: {string.Join(", ", exampleAliases)}.";
+
+            return summary + "\n\nUse `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
         }
         catch
         {
@@ -463,12 +485,29 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             var toolCount = root.TryGetProperty("tool_count", out var toolCountEl) && toolCountEl.ValueKind == JsonValueKind.Number
                 ? toolCountEl.GetInt32()
                 : (int?)null;
+            var protocolVersion = root.TryGetProperty("protocol_version", out var protocolEl) && protocolEl.ValueKind == JsonValueKind.String
+                ? protocolEl.GetString()
+                : null;
+            var contractVersion = root.TryGetProperty("contract_version", out var contractEl) && contractEl.ValueKind == JsonValueKind.String
+                ? contractEl.GetString()
+                : null;
 
             if (string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
             {
-                return toolCount is > 0
-                    ? $"MCP server is responding and tool execution is healthy with {toolCount.Value} tools available."
-                    : "MCP server is responding and tool execution is healthy.";
+                var details = new List<string>
+                {
+                    "MCP server is responding",
+                    "tool execution is healthy",
+                    "status is ok"
+                };
+                if (!string.IsNullOrWhiteSpace(protocolVersion))
+                    details.Add($"protocol {protocolVersion}");
+                if (!string.IsNullOrWhiteSpace(contractVersion))
+                    details.Add($"contract {contractVersion}");
+                if (toolCount is > 0)
+                    details.Add($"{toolCount.Value} tools available");
+
+                return string.Join(", ", details) + ".";
             }
 
             return string.IsNullOrWhiteSpace(status)

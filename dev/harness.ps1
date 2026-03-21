@@ -144,11 +144,18 @@ $argsToRun = @('run', '--project', $ProjectPath, '--') + $effectiveHarnessArgs
 
 if (Test-KnowledgeStoreHarnessNeeded -Arguments $effectiveHarnessArgs) {
     Invoke-WithKnowledgeStoreHarnessSettings {
+        # Temporarily allow native command stderr (e.g. SearXNG status messages)
+        $prevPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         & dotnet @argsToRun
+        $ErrorActionPreference = $prevPref
     }
 }
 else {
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & dotnet @argsToRun
+    $ErrorActionPreference = $prevPref
 }
 
 exit $LASTEXITCODE

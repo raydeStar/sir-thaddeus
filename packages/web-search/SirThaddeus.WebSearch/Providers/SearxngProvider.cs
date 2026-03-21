@@ -62,6 +62,17 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadAsStringAsync(cts.Token);
+
+                // SearxNG returns application/json — if we get HTML,
+                // an upstream engine likely served a CAPTCHA page through.
+                var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+                if (contentType.Contains("html", StringComparison.OrdinalIgnoreCase)
+                    || json.TrimStart().StartsWith('<'))
+                {
+                    throw new InvalidOperationException(
+                        "SearxNG returned HTML instead of JSON — upstream CAPTCHA or block page likely");
+                }
+
                 return JsonSerializer.Deserialize<SearxngResponse>(json, JsonOpts);
             }, cancellationToken);
 
@@ -80,10 +91,17 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
                 .Where(r => !string.IsNullOrEmpty(r.Url))
                 .ToList();
 
+            // SearxNG was reachable but its upstream engines returned
+            // nothing — often caused by CAPTCHAs or rate-limits.
+            var errors = new List<string>();
+            if (results.Count == 0 && parsed.Results.Count == 0)
+                errors.Add("SearxNG returned 0 results — upstream engines may be rate-limited or CAPTCHA-blocked");
+
             return new SearchResults
             {
                 Results = results,
-                Provider = Name
+                Provider = Name,
+                Errors = errors
             };
         }
         catch (OperationCanceledException)

@@ -48,6 +48,14 @@ public sealed class JsonLineAuditLogger : IAuditLogger, IDisposable
     /// </summary>
     public static string GetDefaultPath()
     {
+        var explicitPath = Environment.GetEnvironmentVariable("ST_AUDIT_PATH");
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var trimmed = Environment.ExpandEnvironmentVariables(explicitPath.Trim().Trim('"'));
+            if (!string.IsNullOrWhiteSpace(trimmed))
+                return Path.GetFullPath(trimmed);
+        }
+
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "SirThaddeus", "audit.jsonl");
     }

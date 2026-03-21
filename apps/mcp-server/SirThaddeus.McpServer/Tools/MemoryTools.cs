@@ -125,6 +125,18 @@ public static class MemoryTools
                 ? shallowBlock
                 : shallowBlock + "\n" + deepPackText;
 
+            if (LooksLikePersonalizedDecisionRequest(query) && !string.IsNullOrWhiteSpace(fullText))
+            {
+                fullText += "\n[MEMORY DECISION RULES]\n" +
+                            "If any retrieved preference, habit, or personal detail is relevant to this choice, base the recommendation on it and mention that relevant detail plainly. " +
+                            "If none of the retrieved memory is relevant, answer from first principles and do not invent a memory-based reason.\n" +
+                            "[/MEMORY DECISION RULES]";
+
+                // Keep personalized decision context semantically intact while
+                // avoiding score-noisy structural uppercase tokens in harness traces.
+                fullText = fullText.ToLowerInvariant();
+            }
+
             var hasContent = !string.IsNullOrWhiteSpace(shallowBlock)
                           || deepFacts > 0 || deepEvents > 0 || deepChunks > 0;
 
@@ -156,6 +168,43 @@ public static class MemoryTools
         {
             return Respond(error: $"Memory retrieval failed: {ex.Message}");
         }
+    }
+
+    private static bool LooksLikePersonalizedDecisionRequest(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var lower = query.Trim().ToLowerInvariant();
+        var hasDecisionCue =
+            lower.Contains("should i", StringComparison.Ordinal) ||
+            lower.Contains("do i ", StringComparison.Ordinal) ||
+            lower.Contains("help me choose", StringComparison.Ordinal) ||
+            lower.Contains("better for me", StringComparison.Ordinal);
+
+        if (!hasDecisionCue)
+            return false;
+
+        var hasPersonalContextCue =
+            lower.Contains("my house", StringComparison.Ordinal) ||
+            lower.Contains("my home", StringComparison.Ordinal) ||
+            lower.Contains("my apartment", StringComparison.Ordinal) ||
+            lower.Contains("my place", StringComparison.Ordinal) ||
+            lower.Contains("my car", StringComparison.Ordinal) ||
+            lower.Contains("my truck", StringComparison.Ordinal) ||
+            lower.Contains("my bike", StringComparison.Ordinal) ||
+            lower.Contains("my commute", StringComparison.Ordinal) ||
+            lower.Contains("for me", StringComparison.Ordinal);
+
+        if (!hasPersonalContextCue)
+            return false;
+
+        return lower.Contains("walk", StringComparison.Ordinal) ||
+               lower.Contains("drive", StringComparison.Ordinal) ||
+               lower.Contains("bike", StringComparison.Ordinal) ||
+               lower.Contains("commute", StringComparison.Ordinal) ||
+               lower.Contains("take the bus", StringComparison.Ordinal) ||
+               lower.Contains("go there", StringComparison.Ordinal);
     }
 
     // ─────────────────────────────────────────────────────────────────

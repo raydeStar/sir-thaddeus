@@ -208,6 +208,22 @@ public sealed partial class AgentOrchestrator
         if (footmanDecision is { IsAuthoritative: true })
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
 
+        // ── Heuristic safety valve: downgrade WebLookup → ChatOnly ───
+        // When the deterministic heuristic says "no web lookup needed"
+        // AND Footman did not authoritatively confirm the lookup,
+        // the LLM router likely over-indexed on surface topic words.
+        // Placed before GetLookupFloorIntent so strong deterministic
+        // signals (deep-dive, news, local biz) can still upgrade back.
+        if (RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            !webEvidence.ShouldLookup &&
+            footmanDecision?.IsAuthoritative != true)
+        {
+            route = DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: route.Confidence);
+            LogEvent("HEURISTIC_LOOKUP_DOWNGRADE",
+                $"webScore={webEvidence.Score:0.0}, reason={webEvidence.ReasonCode} — " +
+                "low heuristic evidence and no Footman confirmation, routing to chat");
+        }
+
         var lookupFloorIntent = RouteArbitrationPolicy.GetLookupFloorIntent(lowerIncoming, route, webEvidence);
         if (!string.IsNullOrWhiteSpace(lookupFloorIntent))
         {

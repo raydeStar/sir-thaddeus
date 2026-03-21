@@ -515,13 +515,13 @@ public sealed partial class SearchOrchestrator
         var text = isLocalNewsRequest switch
         {
             true when !string.IsNullOrWhiteSpace(locationHint) =>
-                $"I couldn't find usable live local news results for {locationHint} right now. " +
+                $"Web search returned no usable live local news results for {locationHint} right now. " +
                 "Try asking for state news, naming a local outlet, or narrowing it to a topic like schools, crime, politics, or weather.",
             true =>
-                "I couldn't find usable live local news results for that request right now. " +
+                "Web search returned no usable live local news results for that request right now. " +
                 "Try including a city, naming a local outlet, or setting your location in Settings and trying again.",
             _ =>
-                "I couldn't find usable live news results for that request right now. " +
+                "Web search returned no usable live news results for that request right now. " +
                 "Try narrowing it to a topic, place, or timeframe."
         };
 

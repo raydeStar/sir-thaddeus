@@ -1060,7 +1060,9 @@ public sealed partial class SearchOrchestrator
             if (directFallback is not null)
                 return directFallback;
 
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+            // Fall through to offline reasoning instead of the static
+            // BuildNoResultsResponse — knowledge-based suggestions are
+            // more useful than a bare "I could not retrieve" message.
         }
 
         return await BuildNoResultsReasoningResponseAsync(
@@ -3122,7 +3124,7 @@ public sealed partial class SearchOrchestrator
         string Message,
         int ResultCount);
 
-    private static string StripOfflineReasoningPrefix(string text)
+    internal static string StripOfflineReasoningPrefix(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text ?? "";

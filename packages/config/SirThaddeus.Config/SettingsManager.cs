@@ -21,6 +21,14 @@ public static class SettingsManager
     /// </summary>
     public static string GetSettingsDirectory()
     {
+        var explicitPath = TryGetExplicitSettingsPath();
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var explicitDirectory = Path.GetDirectoryName(explicitPath);
+            if (!string.IsNullOrWhiteSpace(explicitDirectory))
+                return explicitDirectory;
+        }
+
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "SirThaddeus");
     }
@@ -28,8 +36,13 @@ public static class SettingsManager
     /// <summary>
     /// Gets the full path to settings.json.
     /// </summary>
-    public static string GetSettingsPath() =>
-        Path.Combine(GetSettingsDirectory(), "settings.json");
+    public static string GetSettingsPath()
+    {
+        var explicitPath = TryGetExplicitSettingsPath();
+        return !string.IsNullOrWhiteSpace(explicitPath)
+            ? explicitPath
+            : Path.Combine(GetSettingsDirectory(), "settings.json");
+    }
 
     /// <summary>
     /// Canonical personality profile directory for Windows builds.
@@ -217,6 +230,18 @@ public static class SettingsManager
 
         var json = JsonSerializer.Serialize(Normalize(settings), JsonOptions);
         File.WriteAllText(GetSettingsPath(), json);
+    }
+
+    private static string? TryGetExplicitSettingsPath()
+    {
+        var explicitPath = Environment.GetEnvironmentVariable("ST_SETTINGS_PATH");
+        if (string.IsNullOrWhiteSpace(explicitPath))
+            return null;
+
+        var trimmed = Environment.ExpandEnvironmentVariables(explicitPath.Trim().Trim('"'));
+        return string.IsNullOrWhiteSpace(trimmed)
+            ? null
+            : Path.GetFullPath(trimmed);
     }
 
     private static AppSettings Normalize(AppSettings settings)
