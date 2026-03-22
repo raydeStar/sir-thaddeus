@@ -428,6 +428,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"reduction={{mode={personalityTurnContext.Reduction.Mode},applied={personalityTurnContext.Reduction.Applied}}}");
 
         var lowerIncoming = userMessage.Trim().ToLowerInvariant();
+
+        if (LooksLikeHighRiskIllicitInstructionRequest(userMessage))
+        {
+            LogEvent("AGENT_SAFETY_BOUNDARY", "Detected high-risk illicit instruction request.");
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = BuildSafetyBoundaryWithAlternativeReply(),
+                Success = true,
+                ToolCallsMade = [],
+                LlmRoundTrips = 0
+            }, usageBaseline);
+        }
+
         if (!LooksLikeReasoningFollowUp(lowerIncoming))
         {
             _lastFirstPrinciplesRationale = [];

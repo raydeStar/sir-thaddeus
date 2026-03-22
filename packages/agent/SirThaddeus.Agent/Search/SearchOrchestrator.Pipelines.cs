@@ -322,10 +322,11 @@ public sealed partial class SearchOrchestrator
             });
         }
 
-        var releasedProductExistence = TryBuildReleasedProductExistenceResponse(
+        var releasedProductExistence = await TryBuildReleasedProductExistenceResponseAsync(
             userMessage ?? "",
             sources,
-            toolCallsMade);
+            toolCallsMade,
+            ct);
         if (releasedProductExistence is not null)
             return releasedProductExistence;
 

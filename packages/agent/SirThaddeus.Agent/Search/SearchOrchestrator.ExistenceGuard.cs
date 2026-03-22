@@ -7,14 +7,26 @@ namespace SirThaddeus.Agent.Search;
 
 public sealed partial class SearchOrchestrator
 {
-    private AgentResponse? TryBuildReleasedProductExistenceResponse(
+    private async Task<AgentResponse?> TryBuildReleasedProductExistenceResponseAsync(
         string userMessage,
         IReadOnlyList<SourceItem> sources,
-        List<ToolCallRecord> toolCallsMade)
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
     {
         var text = BuildReleasedProductExistenceAnswer(userMessage, sources);
         if (string.IsNullOrWhiteSpace(text))
             return null;
+
+        if (text.Contains("I could not confirm from the returned snippets", StringComparison.OrdinalIgnoreCase))
+        {
+            var offline = await TryBuildExistenceOfflineReasoningResponseAsync(userMessage, toolCallsMade, ct);
+            if (offline is not null)
+                return offline;
+
+            // If offline reasoning is unavailable, return null so downstream
+            // synthesis can still attempt to answer from retrieved sources.
+            return null;
+        }
 
         return new AgentResponse
         {

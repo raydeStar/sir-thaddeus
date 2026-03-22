@@ -69,6 +69,10 @@ public sealed class DeterministicChatPostProcessor
         // what the agent can/cannot do.
         text = StripChatOnlyDeflectionParagraphs(text);
 
+        // Strip sentence-level operational/tooling leakage that can appear
+        // inside otherwise valid paragraphs in casual chat-only replies.
+        text = StripChatOnlyOperationalLeakSentences(text);
+
         // Strip hallucinated URLs — in chat-only responses no URLs were
         // verified via tools, so any http(s) link is fabricated.
         text = StripHallucinatedUrls(text);
@@ -339,6 +343,40 @@ public sealed class DeterministicChatPostProcessor
             return text; // never remove everything
 
         return string.Join("\n\n", filtered).Trim();
+    }
+
+    private static string StripChatOnlyOperationalLeakSentences(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var parts = Regex.Split(text, @"(?<=[.!?])\s+")
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+        if (parts.Count == 0)
+            return text;
+
+        static bool IsOperationalLeakSentence(string sentence)
+        {
+            var lower = sentence.Trim().ToLowerInvariant();
+
+            return lower.Contains("locally on your machine", StringComparison.Ordinal) ||
+                   lower.Contains("running locally on your", StringComparison.Ordinal) ||
+                   lower.Contains("if a tool is required", StringComparison.Ordinal) ||
+                   lower.Contains("run it directly on your system", StringComparison.Ordinal) ||
+                   lower.Contains("command output", StringComparison.Ordinal) ||
+                   lower.Contains("command history", StringComparison.Ordinal) ||
+                   lower.Contains("run `ls`", StringComparison.Ordinal) ||
+                   lower.Contains("run ls", StringComparison.Ordinal) ||
+                   (lower.Contains("terminal", StringComparison.Ordinal) && lower.Contains("showing", StringComparison.Ordinal)) ||
+                   (lower.Contains("local resources", StringComparison.Ordinal) && lower.Contains("tools", StringComparison.Ordinal));
+        }
+
+        var filtered = parts.Where(part => !IsOperationalLeakSentence(part)).ToList();
+        if (filtered.Count == 0)
+            return text;
+
+        return string.Join(" ", filtered).Trim();
     }
 
     private static bool IsCapabilityLimitationParagraph(string paragraph)

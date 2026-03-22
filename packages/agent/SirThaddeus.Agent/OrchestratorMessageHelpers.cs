@@ -5,6 +5,10 @@ namespace SirThaddeus.Agent;
 
 internal static partial class OrchestratorMessageHelpers
 {
+    private static readonly Regex HighRiskIllicitInstructionRegex = new(
+        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide)\b[\s\S]{0,160}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|bypass\s+(?:a\s+)?lock|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     internal static string StripCodeFenceWrapper(string content)
     {
         if (!content.StartsWith("```", StringComparison.Ordinal))
@@ -157,6 +161,27 @@ internal static partial class OrchestratorMessageHelpers
 
     internal static string BuildRespectfulResetReply()
         => "Let's reset. I'm here to help, and I'll keep this respectful and focused on your request.";
+
+    internal static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+
+        if (!lower.Contains("instruction", StringComparison.Ordinal) &&
+            !lower.Contains("step", StringComparison.Ordinal) &&
+            !lower.Contains("how to", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return HighRiskIllicitInstructionRegex.IsMatch(lower);
+    }
+
+    internal static string BuildSafetyBoundaryWithAlternativeReply()
+        => "I can’t help with instructions to bypass security or cause harm. " +
+           "If you’re locked out of something you own, I can help with safe, legal options like contacting a licensed locksmith, verifying ownership requirements, and steps to prevent future lockouts.";
 
     /// <summary>
     /// Detects and truncates self-dialogue — where the model generates
