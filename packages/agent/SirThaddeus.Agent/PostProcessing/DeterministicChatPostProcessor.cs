@@ -69,6 +69,10 @@ public sealed class DeterministicChatPostProcessor
         // what the agent can/cannot do.
         text = StripChatOnlyDeflectionParagraphs(text);
 
+        // Strip hallucinated URLs — in chat-only responses no URLs were
+        // verified via tools, so any http(s) link is fabricated.
+        text = StripHallucinatedUrls(text);
+
         return text;
     }
 
@@ -344,20 +348,53 @@ public sealed class DeterministicChatPostProcessor
             return false;
 
         // Paragraphs asserting inability to access external services
-        return lower.Contains("don't have access to external") ||
-               lower.Contains("do not have access to external") ||
-               lower.Contains("don't have access to network") ||
-               lower.Contains("can't check live news") ||
-               lower.Contains("cannot check live news") ||
-               lower.Contains("can't browse the web") ||
-               lower.Contains("cannot browse the web") ||
-               lower.Contains("tools are locked down") ||
-               lower.Contains("don't have real-time") ||
-               lower.Contains("don't have internet") ||
-               lower.Contains("without access to the internet") ||
-               lower.Contains("i lack internet") ||
-               lower.Contains("can't access external data") ||
-               lower.Contains("cannot access external data");
+        if (lower.Contains("don't have access to external") ||
+            lower.Contains("do not have access to external") ||
+            lower.Contains("don't have access to network") ||
+            lower.Contains("can't check live news") ||
+            lower.Contains("cannot check live news") ||
+            lower.Contains("can't browse the web") ||
+            lower.Contains("cannot browse the web") ||
+            lower.Contains("tools are locked down") ||
+            lower.Contains("don't have real-time") ||
+            lower.Contains("don't have internet") ||
+            lower.Contains("without access to the internet") ||
+            lower.Contains("i lack internet") ||
+            lower.Contains("can't access external data") ||
+            lower.Contains("cannot access external data"))
+        {
+            return true;
+        }
+
+        // Paragraphs that expose internal tool/system architecture
+        // (e.g. "Status Check: ** Local Resources: ** I'm running within…")
+        return lower.Contains("running entirely within your") ||
+               lower.Contains("running locally on your") ||
+               lower.Contains("tools you've given me") ||
+               lower.Contains("tools you have given me") ||
+               (lower.Contains("local resources") && lower.Contains("tools"));
+    }
+
+    /// <summary>
+    /// Strips hallucinated http(s) URLs from chat-only responses.
+    /// When no tools were called, any URL in the text was fabricated
+    /// by the model and must be removed to pass citation hygiene checks.
+    /// </summary>
+    private static string StripHallucinatedUrls(string text)
+    {
+        if (!text.Contains("http://", StringComparison.OrdinalIgnoreCase) &&
+            !text.Contains("https://", StringComparison.OrdinalIgnoreCase))
+            return text;
+
+        // Strip backtick-wrapped URLs, then bare URLs
+        var result = Regex.Replace(text, @"`https?://[^\s`]+`", "", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"https?://\S+", "", RegexOptions.IgnoreCase);
+
+        // Clean up leftover double-spaces and excess blank lines
+        result = Regex.Replace(result, @"  +", " ");
+        result = Regex.Replace(result, @"\n\s*\n\s*\n", "\n\n");
+
+        return result.Trim();
     }
 
     /// <summary>

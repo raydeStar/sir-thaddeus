@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -69,6 +70,85 @@ public sealed partial class SearchOrchestrator
         return
             $"I could not confirm from the returned snippets whether {subject} is a released product. " +
             "If you want, I can run a tighter follow-up query focused on official release pages.";
+    }
+
+    private async Task<AgentResponse?> TryBuildExistenceOfflineReasoningResponseAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        if (!IntentFeatureExtractor.LooksLikeReleasedProductExistenceLookup(lower))
+            return null;
+
+        var subject = ExtractReleasedProductExistenceSubject(userMessage ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(subject))
+            return null;
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You are answering a factual existence question about a consumer product. " +
+                "Use your training data to determine whether the product has been officially released. " +
+                "Start your answer with \"Yes\" or \"No\" followed by an em dash (\u2014) and a brief factual statement. " +
+                "Keep the answer to one or two sentences. " +
+                "Do not mention web search, tool limitations, or data access. " +
+                "Do not fabricate URLs, citations, or links."),
+            ChatMessage.User(userMessage)
+        };
+
+        try
+        {
+            // Use a fresh timeout rather than the pipeline's token, which
+            // may already be cancelled from earlier web-search failures.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await _llm.ChatAsync(
+                messages,
+                tools: null,
+                maxTokensOverride: 256,
+                cts.Token);
+
+            var answer = (response.Content ?? "").Trim();
+            answer = Regex.Replace(answer, @"https?://\S+", "").Trim();
+            answer = Regex.Replace(answer, @"www\.\S+", "").Trim();
+
+            if (string.IsNullOrWhiteSpace(answer))
+                return null;
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "EXISTENCE_OFFLINE_REASONING",
+                Result = "llm_answered",
+                Details = new Dictionary<string, object>
+                {
+                    ["subject"] = subject
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = answer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 1
+            };
+        }
+        catch (Exception ex)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "EXISTENCE_OFFLINE_REASONING",
+                Result = "llm_call_failed",
+                Details = new Dictionary<string, object>
+                {
+                    ["subject"] = subject,
+                    ["error"] = ex.Message
+                }
+            });
+            return null;
+        }
     }
 
     private AgentResponse? TryBuildExistenceGuardedResponse(

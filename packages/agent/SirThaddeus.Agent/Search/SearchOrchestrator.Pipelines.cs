@@ -265,6 +265,14 @@ public sealed partial class SearchOrchestrator
 
         if (isNoResults)
         {
+            // For existence queries, use LLM general knowledge before falling
+            // through to generic error handling — search provider flakiness
+            // should not prevent a confident factual answer.
+            var existenceResponse = await TryBuildExistenceOfflineReasoningResponseAsync(
+                userMessage ?? string.Empty, toolCallsMade, ct);
+            if (existenceResponse is not null)
+                return existenceResponse;
+
             if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
             {
                 // Return recognized errors (unavailable, timeout, policy) directly.

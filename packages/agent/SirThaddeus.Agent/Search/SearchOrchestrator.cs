@@ -1133,6 +1133,11 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        var existenceResponse = await TryBuildExistenceOfflineReasoningResponseAsync(
+            userMessage, toolCallsMade.ToList(), ct);
+        if (existenceResponse is not null)
+            return existenceResponse;
+
         // When a tool explicitly reported unavailability, surface that directly
         // instead of falling through to the general offline reasoning path.
         if (toolCallsMade.Any(t =>
