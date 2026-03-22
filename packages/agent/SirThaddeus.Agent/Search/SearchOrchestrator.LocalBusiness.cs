@@ -416,10 +416,14 @@ public sealed partial class SearchOrchestrator
 
     private string? ResolveLocalBusinessLocationContext(string userMessage)
     {
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage)?.Trim();
+        if (!string.IsNullOrWhiteSpace(explicitLocation))
+            return explicitLocation;
+
         if (!string.IsNullOrWhiteSpace(UserLocationHint))
             return UserLocationHint.Trim();
 
-        return ExtractInlineLocationFromMessage(userMessage);
+        return null;
     }
 
     private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessLocation(
@@ -650,7 +654,19 @@ public sealed partial class SearchOrchestrator
         });
 
         if (candidateNames.Count == 0)
+        {
+            var supplementalNames = await FetchSupplementalLocalBusinessNamesAsync(
+                userMessage,
+                locationContext,
+                [],
+                toolCallsMade,
+                ct);
+
+            if (supplementalNames.Count > 0)
+                return BuildCleanedLocalBusinessResponse(userMessage, supplementalNames, locationContext, toolCallsMade);
+
             return BuildLocalBusinessDiscoveryResponse(userMessage, sources, toolCallsMade);
+        }
 
         // ── Phase 2: Look up each candidate via places_lookup ──
         var enriched = new List<EnrichedBusiness>();
@@ -694,9 +710,30 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
-        var discovery = await DiscoverOpenPlacesAsync(userMessage, locationContext, toolCallsMade, ct);
+        var discovery = await DiscoverOpenPlacesAsync(
+            userMessage,
+            locationContext,
+            toolCallsMade,
+            ct,
+            radiusMeters: LocalBusinessNearbyPrimaryRadiusMeters,
+            maxResults: LocalBusinessDiscoveryFetchMaxResults);
         if (discovery is null)
             return (false, null);
+
+        if (discovery.Results.Count > 0 &&
+            discovery.Results.Count < LocalBusinessMinimumDisplayResults)
+        {
+            var expanded = await DiscoverOpenPlacesAsync(
+                userMessage,
+                locationContext,
+                toolCallsMade,
+                ct,
+                radiusMeters: LocalBusinessNearbyExpandedRadiusMeters,
+                maxResults: LocalBusinessDiscoveryFetchMaxResults);
+
+            if (expanded is not null && expanded.Results.Count > 0)
+                discovery = MergePlacesDiscoveryResults(discovery, expanded);
+        }
 
         if (discovery.Results.Count == 0)
         {
@@ -709,7 +746,7 @@ public sealed partial class SearchOrchestrator
             return (false, null);
         }
 
-        var sources = BuildSourceItemsFromPlacesDiscovery(discovery);
+        var sources = BuildSourceItemsFromPlacesDiscovery(discovery, PreferredUnits);
         var responseLocation = string.IsNullOrWhiteSpace(locationContext)
             ? discovery.ResolvedLocation
             : locationContext;
@@ -724,7 +761,7 @@ public sealed partial class SearchOrchestrator
                 if (!string.IsNullOrWhiteSpace(candidate.Address))
                     detailParts.Add(candidate.Address);
                 if (candidate.DistanceMeters.HasValue)
-                    detailParts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value));
+                    detailParts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value, PreferredUnits));
 
                 return new EnrichedBusiness(
                     candidate.Name,
@@ -738,6 +775,36 @@ public sealed partial class SearchOrchestrator
             })
             .ToList();
 
+        if (businesses.Count < LocalBusinessMinimumDisplayResults)
+        {
+            var supplementalNames = await FetchSupplementalLocalBusinessNamesAsync(
+                userMessage,
+                responseLocation,
+                businesses.Select(b => b.Name),
+                toolCallsMade,
+                ct);
+
+            foreach (var name in supplementalNames)
+            {
+                businesses.Add(new EnrichedBusiness(
+                    name,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+
+                if (businesses.Count >= LocalBusinessTargetResults)
+                    break;
+            }
+        }
+
+        var includesSupplementalSpots = businesses.Any(biz =>
+            string.IsNullOrWhiteSpace(biz.Address) &&
+            !string.IsNullOrWhiteSpace(biz.Name));
+
         Session.RecordSearchResults(
             SearchMode.WebFactFind,
             userMessage,
@@ -747,7 +814,69 @@ public sealed partial class SearchOrchestrator
         Session.LastWasLocalBusinessDiscovery = true;
         Session.RecordLocalBusinessCandidates(GetRequestedLocalBusinessLabel(userMessage), sources);
 
-        return (true, BuildEnrichedLocalBusinessResponse(userMessage, businesses, responseLocation, toolCallsMade));
+        return (true, BuildEnrichedLocalBusinessResponse(
+            userMessage,
+            businesses,
+            responseLocation,
+            toolCallsMade,
+            includesSupplementalSpots));
+    }
+
+    private async Task<IReadOnlyList<string>> FetchSupplementalLocalBusinessNamesAsync(
+        string userMessage,
+        string? locationContext,
+        IEnumerable<string> existingNames,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        var location = string.IsNullOrWhiteSpace(locationContext)
+            ? UserLocationHint
+            : locationContext;
+        var query = string.IsNullOrWhiteSpace(location)
+            ? $"best {label} near me"
+            : $"best {label} in {location}";
+
+        var seen = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
+
+        var existingCount = seen.Count;
+
+        var toolResult = await CallWebSearchAsync(
+            query,
+            "any",
+            toolCallsMade,
+            ct,
+            originalUserMessage: userMessage,
+            maxResults: LocalBusinessFetchMaxResults);
+
+        if (string.IsNullOrWhiteSpace(toolResult) || LooksLikeNoResultsPayload(toolResult))
+            return [];
+
+        var sources = ParseSourcesFromToolResult(toolResult);
+        if (sources.Count == 0)
+            return [];
+
+        sources = [.. SelectLocalBusinessDiscoverySources(
+            userMessage,
+            sources,
+            LocalBusinessTargetResults,
+            location)];
+
+        foreach (var source in sources)
+        {
+            var name = ExtractBusinessNameFromSourceTitle(source.Title, userMessage);
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            if (!seen.Add(name))
+                continue;
+
+            names.Add(name);
+            if (names.Count + existingCount >= LocalBusinessTargetResults)
+                break;
+        }
+
+        return names;
     }
 
     /// <summary>Test-only forwarder for <see cref="ExtractBusinessNameFromSourceTitle"/>.</summary>
@@ -856,14 +985,16 @@ public sealed partial class SearchOrchestrator
         string userMessage,
         string? locationContext,
         List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
+        CancellationToken ct,
+        int radiusMeters,
+        int maxResults)
     {
         var args = JsonSerializer.Serialize(new
         {
             query = userMessage,
             userLocationHint = locationContext ?? UserLocationHint,
-            maxResults = LocalBusinessTargetResults,
-            radiusMeters = 4_000,
+            maxResults,
+            radiusMeters,
             locale = "en-US"
         });
 
@@ -903,6 +1034,50 @@ public sealed partial class SearchOrchestrator
         });
 
         return ParsePlacesDiscoveryResult(result!);
+    }
+
+    private static PlacesDiscoveryResult MergePlacesDiscoveryResults(
+        PlacesDiscoveryResult primary,
+        PlacesDiscoveryResult expanded)
+    {
+        var merged = new List<PlaceDiscoveryCandidate>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        static string Key(PlaceDiscoveryCandidate candidate)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate.Id))
+                return candidate.Id;
+
+            var name = candidate.Name?.Trim().ToLowerInvariant() ?? string.Empty;
+            var address = candidate.Address?.Trim().ToLowerInvariant() ?? string.Empty;
+            return name + "|" + address;
+        }
+
+        void AddRange(IEnumerable<PlaceDiscoveryCandidate> candidates)
+        {
+            foreach (var candidate in candidates)
+            {
+                var key = Key(candidate);
+                if (string.IsNullOrWhiteSpace(key) || !seen.Add(key))
+                    continue;
+
+                merged.Add(candidate);
+                if (merged.Count >= LocalBusinessTargetResults)
+                    break;
+            }
+        }
+
+        AddRange(primary.Results);
+        if (merged.Count < LocalBusinessTargetResults)
+            AddRange(expanded.Results);
+
+        return primary with
+        {
+            ResolvedLocation = string.IsNullOrWhiteSpace(primary.ResolvedLocation)
+                ? expanded.ResolvedLocation
+                : primary.ResolvedLocation,
+            Results = merged
+        };
     }
 
     private static readonly Regex NumberedListRegex = new(
@@ -1114,6 +1289,20 @@ public sealed partial class SearchOrchestrator
             }
         }
 
+        // If the result is a permanent config error (e.g. missing API key),
+        // record as failed and return null — no point retrying.
+        if (result is not null && LooksLikePlacesConfigError(result))
+        {
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName  = resolvedToolName,
+                Arguments = args,
+                Result    = "[Places provider unavailable]",
+                Success   = false
+            });
+            return null;
+        }
+
         toolCallsMade.Add(new ToolCallRecord
         {
             ToolName  = resolvedToolName,
@@ -1124,6 +1313,11 @@ public sealed partial class SearchOrchestrator
 
         return ParsePlaceLookupResult(result!);
     }
+
+    private static bool LooksLikePlacesConfigError(string result) =>
+        result.Contains("API key is not configured", StringComparison.OrdinalIgnoreCase) ||
+        result.Contains("API key not set", StringComparison.OrdinalIgnoreCase) ||
+        result.Contains("provider is not configured", StringComparison.OrdinalIgnoreCase);
 
     private async Task<AgentResponse?> TryBuildLocalBusinessDirectPlaceFallbackAsync(
         string userMessage,
@@ -1154,21 +1348,58 @@ public sealed partial class SearchOrchestrator
         {
             var business = await LookupPlaceAsync(query, location, toolCallsMade, ct);
             if (business is null)
+            {
+                // If the last tool call was a permanent config failure, stop retrying.
+                if (toolCallsMade.Count > 0 &&
+                    !toolCallsMade[^1].Success &&
+                    toolCallsMade[^1].ToolName.Contains("places", StringComparison.OrdinalIgnoreCase))
+                    break;
                 continue;
+            }
             if (IsGenericNonBusinessName(business.Name))
                 continue;
             if (!seen.Add(business.Name))
                 continue;
 
             enriched.Add(business);
-            if (enriched.Count >= 3)
+            if (enriched.Count >= LocalBusinessTargetResults)
                 break;
         }
 
         if (enriched.Count == 0)
             return null;
 
-        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade);
+        if (enriched.Count < LocalBusinessMinimumDisplayResults)
+        {
+            var supplementalNames = await FetchSupplementalLocalBusinessNamesAsync(
+                userMessage,
+                location,
+                enriched.Select(b => b.Name),
+                toolCallsMade,
+                ct);
+
+            foreach (var name in supplementalNames)
+            {
+                enriched.Add(new EnrichedBusiness(
+                    name,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+
+                if (enriched.Count >= LocalBusinessTargetResults)
+                    break;
+            }
+        }
+
+        var includesSupplementalSpots = enriched.Any(biz =>
+            string.IsNullOrWhiteSpace(biz.Address) &&
+            !string.IsNullOrWhiteSpace(biz.Name));
+
+        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots);
     }
 
     private static EnrichedBusiness? ParsePlaceLookupResult(string json)
@@ -1342,7 +1573,9 @@ public sealed partial class SearchOrchestrator
         }
     }
 
-    private static List<SourceItem> BuildSourceItemsFromPlacesDiscovery(PlacesDiscoveryResult discovery)
+    private static List<SourceItem> BuildSourceItemsFromPlacesDiscovery(
+        PlacesDiscoveryResult discovery,
+        string? preferredUnits)
     {
         return discovery.Results
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Name))
@@ -1357,13 +1590,15 @@ public sealed partial class SearchOrchestrator
                     Url = url,
                     Title = candidate.Name,
                     Domain = "openstreetmap.org",
-                    Snippet = BuildOpenPlaceSnippet(candidate)
+                    Snippet = BuildOpenPlaceSnippet(candidate, preferredUnits)
                 };
             })
             .ToList();
     }
 
-    private static string BuildOpenPlaceSnippet(PlaceDiscoveryCandidate candidate)
+    private static string BuildOpenPlaceSnippet(
+        PlaceDiscoveryCandidate candidate,
+        string? preferredUnits)
     {
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(candidate.Address))
@@ -1371,14 +1606,24 @@ public sealed partial class SearchOrchestrator
         if (!string.IsNullOrWhiteSpace(candidate.Category))
             parts.Add(candidate.Category);
         if (candidate.DistanceMeters.HasValue)
-            parts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value));
+            parts.Add(FormatPlaceDistance(candidate.DistanceMeters.Value, preferredUnits));
         return string.Join(" · ", parts);
     }
 
-    private static string FormatPlaceDistance(int distanceMeters)
+    private static string FormatPlaceDistance(int distanceMeters, string? preferredUnits)
     {
-        if (distanceMeters < 1_000)
-            return $"{distanceMeters} m away";
+        var normalizedUnits = NormalizePreferredUnits(preferredUnits);
+
+        if (normalizedUnits == "metric")
+        {
+            if (distanceMeters < 1_000)
+                return $"{distanceMeters} m away";
+
+            var kilometers = distanceMeters / 1_000.0;
+            return kilometers >= 10
+                ? $"{Math.Round(kilometers):0} km away"
+                : $"{kilometers:F1} km away";
+        }
 
         var miles = distanceMeters / 1609.344;
         return miles >= 10
@@ -1390,7 +1635,8 @@ public sealed partial class SearchOrchestrator
         string userMessage,
         IReadOnlyList<EnrichedBusiness> businesses,
         string? locationContext,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        bool includesSupplementalSpots = false)
     {
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
         var locText = string.IsNullOrWhiteSpace(locationContext)
@@ -1398,9 +1644,16 @@ public sealed partial class SearchOrchestrator
             : $" nearby in {locationContext}";
 
         var sb = new StringBuilder();
-        sb.Append(businesses.Count == 1
-            ? $"Here's a {SingularizeBusinessLabel(businessLabel)} I found{locText}:"
-            : $"Here are {businesses.Count} {businessLabel} I found{locText}:");
+        if (includesSupplementalSpots)
+        {
+            sb.Append($"Here are {businesses.Count} options I found{locText} (including nearby spots beyond strict {businessLabel}):");
+        }
+        else
+        {
+            sb.Append(businesses.Count == 1
+                ? $"Here's a {SingularizeBusinessLabel(businessLabel)} I found{locText}:"
+                : $"Here are {businesses.Count} {businessLabel} I found{locText}:");
+        }
         sb.AppendLine();
         sb.AppendLine();
 
@@ -1441,9 +1694,16 @@ public sealed partial class SearchOrchestrator
         }
 
         sb.AppendLine();
-        sb.Append("If you want, I can bring up more info on any one of these ");
-        sb.Append(businessLabel);
-        sb.Append('.');
+        if (includesSupplementalSpots)
+        {
+            sb.Append($"If you want, I can narrow this down to strict {businessLabel} only, or pull more details on any one of these spots.");
+        }
+        else
+        {
+            sb.Append("If you want, I can bring up more info on any one of these ");
+            sb.Append(businessLabel);
+            sb.Append('.');
+        }
 
         return new AgentResponse
         {

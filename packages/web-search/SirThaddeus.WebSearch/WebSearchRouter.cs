@@ -6,10 +6,9 @@ namespace SirThaddeus.WebSearch;
 //
 // Orchestrates search requests across available providers.
 //
-// Probe order (auto mode):
+// Probe/fallback order (auto mode):
 //   1. SearxNG (if configured and available)
-//   2. Search API (if configured)
-//   3. Google News RSS (reliable fallback for news-ish lookups)
+//   2. DuckDuckGo HTML (free fallback)
 //
 // Modes:
 //   "auto"        - probe in order, cache availability
@@ -117,8 +116,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             return await _googleNews.IsAvailableAsync(cancellationToken);
 
         return await _searxng.IsAvailableAsync(cancellationToken)
-            || await _searchApi.IsAvailableAsync(cancellationToken)
-            || await _googleNews.IsAvailableAsync(cancellationToken);
+            || await _ddg.IsAvailableAsync(cancellationToken);
     }
 
     private async Task<SearchResults> SearchAutoAsync(
@@ -144,30 +142,9 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             diagnostics = [.. result.Diagnostics];
         }
 
-        if (_searchApiAvailable == true)
-        {
-            var result = await _searchApi.SearchAsync(query, options, ct);
-            result = AttachSearchDiagnostic(result, _searchApi.Name, "search", diagnostics);
-            if (result.Results.Count > 0)
-                return result;
-
-            // Search API returned no usable results or errored out.
-            // Mark it stale so the next request re-probes.
-            _searchApiAvailable = false;
-            diagnostics = [.. result.Diagnostics];
-        }
-
-        var fallback = await _googleNews.SearchAsync(query, options, ct);
-        fallback = AttachSearchDiagnostic(fallback, _googleNews.Name, "fallback", diagnostics);
-
-        if (fallback.Results.Count > 0)
-            return fallback;
-
-        // Last resort: DuckDuckGo HTML scraping — may be rate-limited
-        // or blocked, but worth trying when all else has failed.
-        diagnostics = [.. fallback.Diagnostics];
+        // Free fallback: DuckDuckGo HTML scraping.
         var ddgFallback = await _ddg.SearchAsync(query, options, ct);
-        return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "last-resort", diagnostics);
+        return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
     }
 
     /// <summary>

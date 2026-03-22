@@ -391,7 +391,7 @@ public sealed partial class DeepDiveCoordinator
             var now = DateTimeOffset.UtcNow;
             var title = GetString(place, "name", query);
             var address = GetString(place, "address", "");
-            var phone = GetString(place, "phone", "");
+            var phone = NormalizePhoneForDisplay(GetString(place, "phone", ""));
             var website = GetString(place, "website", "");
             var directions = GetString(place, "directionsUrl", "");
             var openNow = GetBoolean(place, "openNow");
@@ -627,7 +627,7 @@ public sealed partial class DeepDiveCoordinator
                 : "Details from web sources",
             ClosesText = closesText,
             Address = extraction.Address ?? "",
-            Phone = extraction.Phone ?? "",
+            Phone = NormalizePhoneForDisplay(extraction.Phone),
             Website = extraction.Website ?? "",
             Cards = cards,
             AuditSteps = auditSteps
@@ -718,8 +718,9 @@ public sealed partial class DeepDiveCoordinator
             parts.Add($"Address: {briefing.Hero.Address}");
 
         // Phone
-        if (!string.IsNullOrWhiteSpace(briefing.Hero.Phone))
-            parts.Add($"Phone: {briefing.Hero.Phone}");
+        var normalizedPhone = NormalizePhoneForDisplay(briefing.Hero.Phone);
+        if (!string.IsNullOrWhiteSpace(normalizedPhone))
+            parts.Add($"Phone: {normalizedPhone}");
 
         // Pull a true rating line from the reviews card when available.
         // Avoid matching arbitrary snippets that happen to include '/5'.
@@ -744,7 +745,7 @@ public sealed partial class DeepDiveCoordinator
 
         if (briefing.Hero.Confidence.Equals(DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase))
         {
-            parts.Add(!string.IsNullOrWhiteSpace(briefing.Hero.Phone)
+            parts.Add(!string.IsNullOrWhiteSpace(normalizedPhone)
                 ? "Current open status is unknown from the available sources. Call the store to confirm current hours."
                 : "Current open status is unknown from the available sources. Check the listed source before visiting.");
         }
@@ -760,15 +761,6 @@ public sealed partial class DeepDiveCoordinator
     private static IReadOnlyList<string> BuildProviderFailureLeadLines(IReadOnlyList<string> warnings)
     {
         var lines = new List<string>();
-
-        if (warnings.Any(w => w.Contains("Google Places API key is not configured", StringComparison.OrdinalIgnoreCase)))
-        {
-            lines.Add("Google Places API key is not configured, so places lookup is unavailable for this request.");
-        }
-        else if (warnings.Any(w => w.Contains("Places provider unavailable", StringComparison.OrdinalIgnoreCase)))
-        {
-            lines.Add("Places lookup was unavailable, so I fell back to web-only evidence.");
-        }
 
         if (warnings.Any(w => w.Contains("0 results", StringComparison.OrdinalIgnoreCase)))
             lines.Add("The fallback search came back with 0 results for this query.");
@@ -789,6 +781,15 @@ public sealed partial class DeepDiveCoordinator
         normalized = Regex.Replace(normalized, @"(?<=\p{L})'(?=\p{L})", "");
         return normalized;
     }
+
+    private static string NormalizePhoneForDisplay(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return "";
+
+        return Regex.Replace(phone, @"\s+", " ").Trim();
+    }
+
     private static List<string> BuildReviewBullets(
         IReadOnlyList<string> reviews,
         double? rating,
@@ -836,8 +837,9 @@ public sealed partial class DeepDiveCoordinator
         var bullets = new List<string>();
         if (!string.IsNullOrWhiteSpace(address))
             bullets.Add($"Address: {address}");
-        if (!string.IsNullOrWhiteSpace(phone))
-            bullets.Add($"Phone: {phone}");
+        var normalizedPhone = NormalizePhoneForDisplay(phone);
+        if (!string.IsNullOrWhiteSpace(normalizedPhone))
+            bullets.Add($"Phone: {normalizedPhone}");
         if (!string.IsNullOrWhiteSpace(website))
             bullets.Add($"Website listed for quick verification: {website}");
 

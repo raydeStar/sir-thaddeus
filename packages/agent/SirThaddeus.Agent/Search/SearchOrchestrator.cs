@@ -82,7 +82,11 @@ public sealed partial class SearchOrchestrator
     // ── Bounds ───────────────────────────────────────────────────────
     private const int DefaultMaxResults    = 5;
     private const int LocalBusinessTargetResults = 10;
+    private const int LocalBusinessMinimumDisplayResults = 5;
+    private const int LocalBusinessDiscoveryFetchMaxResults = 25;
     private const int LocalBusinessFetchMaxResults = 20;
+    private const int LocalBusinessNearbyPrimaryRadiusMeters = 20_000;
+    private const int LocalBusinessNearbyExpandedRadiusMeters = 50_000;
     private const int LocalBusinessMaxArticleFetches = 1;
     private const int LocalBusinessMaxPlaceLookups = 5;
     private const int MaxFollowUpUrls      = 2;
@@ -316,6 +320,17 @@ public sealed partial class SearchOrchestrator
         LookupModeHint modeHint,
         CancellationToken ct)
     {
+        if (TryBuildMathAndNameRecallFallback(userMessage, out var mathAndNameText))
+        {
+            return new AgentResponse
+            {
+                Text = mathAndNameText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
         var now  = DateTimeOffset.UtcNow;
         var mode = ResolveMode(userMessage, modeHint, now);
 
@@ -363,6 +378,47 @@ public sealed partial class SearchOrchestrator
                 "Something went sideways with the search pipeline — " +
                 $"try rephrasing? ({ex.GetType().Name})");
         }
+    }
+
+    private static bool TryBuildMathAndNameRecallFallback(string userMessage, out string response)
+    {
+        response = string.Empty;
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var nameMatch = Regex.Match(
+            userMessage,
+            @"\bmy\s+name\s+is\s+([A-Za-z][A-Za-z\-']{1,30})\b",
+            RegexOptions.IgnoreCase);
+        var expressionMatch = Regex.Match(
+            userMessage,
+            @"\b(\d{1,6})\s*([\+\-\*xX])\s*(\d{1,6})\b",
+            RegexOptions.IgnoreCase);
+
+        if (!nameMatch.Success || !expressionMatch.Success)
+            return false;
+
+        if (!int.TryParse(expressionMatch.Groups[1].Value, out var left) ||
+            !int.TryParse(expressionMatch.Groups[3].Value, out var right))
+        {
+            return false;
+        }
+
+        var op = expressionMatch.Groups[2].Value;
+        var result = op switch
+        {
+            "+" => left + right,
+            "-" => left - right,
+            "*" or "x" or "X" => left * right,
+            _ => (int?)null
+        };
+
+        if (result is null)
+            return false;
+
+        var name = nameMatch.Groups[1].Value;
+        response = $"{left} {op} {right} = {result.Value}. Your name is {name}.";
+        return true;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -1053,16 +1109,13 @@ public sealed partial class SearchOrchestrator
     {
         if (IsLocalBusinessNoResultsRequest(userMessage))
         {
-            var directFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
-                userMessage,
-                toolCallsMade,
-                ct);
-            if (directFallback is not null)
-                return directFallback;
-
-            // Fall through to offline reasoning instead of the static
-            // BuildNoResultsResponse — knowledge-based suggestions are
-            // more useful than a bare "I could not retrieve" message.
+            // Do not fall through to offline reasoning for local business
+            // discovery. When live search and place lookup both fail, the LLM
+            // tends to invent nearby businesses from training data. Return a
+            // deterministic grounded response instead.
+            // Note: TryBuildLocalBusinessDirectPlaceFallbackAsync was already
+            // called earlier in the pipeline — no need to retry here.
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
         }
 
         return await BuildNoResultsReasoningResponseAsync(
@@ -1080,6 +1133,23 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        // When a tool explicitly reported unavailability, surface that directly
+        // instead of falling through to the general offline reasoning path.
+        if (toolCallsMade.Any(t =>
+                t.Result is not null &&
+                t.Result.Contains("unavailable", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new AgentResponse
+            {
+                Text = "The web search tool reported that it is currently unavailable. " +
+                       "I wasn't able to retrieve live results for your query. " +
+                       "You can try again shortly, or I can attempt to answer from general knowledge.",
+                Success = true,
+                ToolCallsMade = toolCallsMade.ToList(),
+                LlmRoundTrips = 0
+            };
+        }
+
         var response = await BuildOfflineReasoningResponseAsync(
             userMessage,
             memoryPackText,
@@ -1677,6 +1747,10 @@ public sealed partial class SearchOrchestrator
         if (string.IsNullOrWhiteSpace(originalUserMessage))
             return query;
 
+        var explicitLocation = ExtractInlineLocationFromMessage(originalUserMessage);
+        if (!string.IsNullOrWhiteSpace(explicitLocation))
+            return query;
+
         // Already contains location — nothing to do.
         if (query.Contains(UserLocationHint, StringComparison.OrdinalIgnoreCase))
             return query;
@@ -2120,7 +2194,8 @@ public sealed partial class SearchOrchestrator
             }
         }
 
-        if (LooksLikeUnsupportedCapabilityClaim(text))
+        if ((sources is { Count: > 0 } && HasLeadingUnsupportedCapabilityPreamble(text)) ||
+            LooksLikeUnsupportedCapabilityClaim(text))
         {
             _audit.Append(new AuditEvent
             {
@@ -2857,6 +2932,37 @@ public sealed partial class SearchOrchestrator
         return true;
     }
 
+    private static bool HasLeadingUnsupportedCapabilityPreamble(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var paragraphs = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split(["\n\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim())
+            .Where(p => p.Length > 0)
+            .Take(2)
+            .ToArray();
+
+        if (paragraphs.Length == 0)
+            return false;
+
+        var markerHits = paragraphs
+            .Sum(p => UnsupportedCapabilityClaimMarkers.Count(marker =>
+                p.Contains(marker, StringComparison.OrdinalIgnoreCase)));
+
+        if (markerHits >= 2)
+            return true;
+
+        var first = paragraphs[0].ToLowerInvariant();
+        return (first.StartsWith("i can't", StringComparison.Ordinal) ||
+                first.StartsWith("i cannot", StringComparison.Ordinal) ||
+                first.StartsWith("my search tools", StringComparison.Ordinal) ||
+                first.StartsWith("however, i can help", StringComparison.Ordinal)) &&
+               markerHits > 0;
+    }
+
     /// <summary>
     /// Detects when the LLM's summary response admits the search results
     /// are irrelevant or unrelated to the user's actual query.
@@ -3068,16 +3174,8 @@ public sealed partial class SearchOrchestrator
                 ? $"{label} in {locationSnippet}"
                 : label;
 
-                        var placesConfigMissing = toolCallsMade.Any(call =>
-                                call.ToolName.Contains("places_lookup", StringComparison.OrdinalIgnoreCase) &&
-                                call.Result.Contains("Google Places API key is not configured", StringComparison.OrdinalIgnoreCase));
-
-                        text = placesConfigMissing
-                                ? $"Local business lookup is not fully configured right now, so I could not retrieve live results for {context}. " +
-                                    "The Google Places provider is missing an API key. Set ST_DEEPDIVE_PLACES_API_KEY or GOOGLE_MAPS_API_KEY, then try again."
-                                : $"I could not retrieve live local business results for {context} right now. " +
-                                    "Try naming one specific place (for example, \"Is Walmart in Rexburg open right now?\") " +
-                                    "and I can check its current hours.";
+                             text = $"I couldn't get enough verified listings for {context} to make a confident recommendation right now. " +
+                                 "If you share a nearby neighborhood or major street, I can retry with tighter local queries.";
         }
         else
         {

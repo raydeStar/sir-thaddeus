@@ -121,7 +121,108 @@ public sealed class ScoringEngine
             }
         }
 
+        // Infrastructure / configuration error detection — the agent surfaced
+        // an internal setup problem to the user instead of answering.
+        var isStubMode = string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase);
+        if (test.Assertions.ForbidInfrastructureErrors && !isStubMode)
+        {
+            var infraMatch = DetectInfrastructureErrorResponse(response.Text ?? "");
+            if (infraMatch is not null)
+                failures.Add($"Response is an infrastructure/configuration error, not a real answer: {infraMatch}");
+        }
+
+        if (!isStubMode)
+        {
+            var localBusinessFallbackMatch = DetectLocalBusinessFallbackNonAnswer(response.Text ?? "");
+            if (localBusinessFallbackMatch is not null)
+                failures.Add($"Response is a local-business fallback non-answer, not a grounded recommendation: {localBusinessFallbackMatch}");
+        }
+
         return failures;
+    }
+
+    /// <summary>
+    /// Returns the first matching infrastructure-error phrase found in the
+    /// response, or null if the response looks like genuine content.
+    /// </summary>
+    private static string? DetectInfrastructureErrorResponse(string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return null;
+
+        var lower = responseText.ToLowerInvariant();
+
+        // Phrase families that indicate the agent dumped a config/infra error
+        // to the user instead of providing an actual answer.
+        ReadOnlySpan<string> infraPatterns =
+        [
+            "missing an api key",
+            "missing api key",
+            "missing a key",
+            "not fully configured",
+            "not configured",
+            "is not configured",
+            "provider is disabled",
+            "provider is missing",
+            "api key is not set",
+            "api key not set",
+            "set st_",                         // env-var setup instructions
+            "set google_maps_api_key",
+            "set your api key",
+            "could not retrieve live results",
+            "api.*unavailable",
+        ];
+
+        foreach (var pattern in infraPatterns)
+        {
+            if (pattern.Contains('*'))
+            {
+                // Treat as simple glob: split on * and check ordered containment
+                var parts = pattern.Split('*');
+                var idx = 0;
+                var allFound = true;
+                foreach (var part in parts)
+                {
+                    var pos = lower.IndexOf(part, idx, StringComparison.Ordinal);
+                    if (pos < 0) { allFound = false; break; }
+                    idx = pos + part.Length;
+                }
+                if (allFound) return pattern;
+            }
+            else
+            {
+                if (lower.Contains(pattern, StringComparison.Ordinal))
+                    return pattern;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Detects deterministic local-business fallback templates that do not
+    /// provide an actual recommendation. These should hard-fail.
+    /// </summary>
+    private static string? DetectLocalBusinessFallbackNonAnswer(string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return null;
+
+        var lower = responseText.ToLowerInvariant();
+        ReadOnlySpan<string> nonAnswerPatterns =
+        [
+            "could not retrieve live local business results",
+            "try naming one specific place",
+            "i can check its current hours"
+        ];
+
+        foreach (var pattern in nonAnswerPatterns)
+        {
+            if (lower.Contains(pattern, StringComparison.Ordinal))
+                return pattern;
+        }
+
+        return null;
     }
 
     private static string NormalizeToolName(string value)
@@ -323,6 +424,7 @@ public sealed class ScoringEngine
             .Where(s => string.Equals(s.StepType, "tool_result", StringComparison.OrdinalIgnoreCase))
             .Where(s => !string.IsNullOrWhiteSpace(s.Result))
             .Where(s => s.Error is null)  // Only count successful results
+            .Where(s => !LooksLikeToolErrorOrEmptyResult(s.Result!))
             .ToList();
 
         if (toolResults.Count == 0)
@@ -351,6 +453,29 @@ public sealed class ScoringEngine
         else penalty = 0.0;
 
         return (penalty, incorporated, significantTokens.Count);
+    }
+
+    /// <summary>
+    /// Filters out tool results that are clearly error messages or empty-result
+    /// indicators even when the trace error field is null. Prevents false
+    /// tool-incorporation penalties from error text.
+    /// </summary>
+    private static bool LooksLikeToolErrorOrEmptyResult(string result)
+    {
+        // "[Places lookup error: ...]", "[Tool error: ...]", etc.
+        if (result.TrimStart().StartsWith('[') &&
+            result.Contains("error", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // "[search: 0 result(s) returned]"
+        if (result.Contains("0 result", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Config/infra error text
+        if (result.Contains("is not configured", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     /// <summary>

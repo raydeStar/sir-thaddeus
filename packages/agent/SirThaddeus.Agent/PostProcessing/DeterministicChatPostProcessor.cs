@@ -64,6 +64,11 @@ public sealed class DeterministicChatPostProcessor
             return BuildRespectfulResetReply();
         }
 
+        // Strip paragraphs that volunteer capability limitations or
+        // reference internal tool names — the user did not ask about
+        // what the agent can/cannot do.
+        text = StripChatOnlyDeflectionParagraphs(text);
+
         return text;
     }
 
@@ -115,8 +120,10 @@ public sealed class DeterministicChatPostProcessor
         sanitized = TruncateSelfDialogue(sanitized);
         sanitized = TrimHallucinatedConversationTail(sanitized, latestUserMessage);
         sanitized = SanitizeCommon(sanitized, preserveRationale);
+        sanitized = TrimAfterSignatureLine(sanitized);
         sanitized = SourceCitationFormatter.Apply(sanitized, toolCallsMade);
         sanitized = ApplySmallModelQualityGuards(sanitized, latestUserMessage);
+        sanitized = StripTrailingDeflectionDisclaimer(sanitized);
 
         if (LooksLikeUnsafeMirroringResponse(userMessage: null, assistantText: sanitized))
             return BuildRespectfulResetReply();
@@ -305,6 +312,105 @@ public sealed class DeterministicChatPostProcessor
 
         var first = sentences[0].Trim();
         return string.IsNullOrWhiteSpace(first) ? text : first;
+    }
+
+    /// <summary>
+    /// Strips paragraphs that volunteer capability limitations or reference
+    /// internal tool names from chat-only responses. Small models frequently
+    /// inject sentences like "I don't have access to external data" or
+    /// "I'll check your command history" that leak tool knowledge or trigger
+    /// deflection penalties.
+    /// </summary>
+    private static string StripChatOnlyDeflectionParagraphs(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var paragraphs = text.Split("\n\n", StringSplitOptions.None);
+        if (paragraphs.Length < 2)
+            return text;
+
+        var filtered = paragraphs.Where(p => !IsCapabilityLimitationParagraph(p)).ToList();
+        if (filtered.Count == 0)
+            return text; // never remove everything
+
+        return string.Join("\n\n", filtered).Trim();
+    }
+
+    private static bool IsCapabilityLimitationParagraph(string paragraph)
+    {
+        var lower = paragraph.Trim().ToLowerInvariant();
+        if (lower.Length < 40)
+            return false;
+
+        // Paragraphs asserting inability to access external services
+        return lower.Contains("don't have access to external") ||
+               lower.Contains("do not have access to external") ||
+               lower.Contains("don't have access to network") ||
+               lower.Contains("can't check live news") ||
+               lower.Contains("cannot check live news") ||
+               lower.Contains("can't browse the web") ||
+               lower.Contains("cannot browse the web") ||
+               lower.Contains("tools are locked down") ||
+               lower.Contains("don't have real-time") ||
+               lower.Contains("don't have internet") ||
+               lower.Contains("without access to the internet") ||
+               lower.Contains("i lack internet") ||
+               lower.Contains("can't access external data") ||
+               lower.Contains("cannot access external data");
+    }
+
+    /// <summary>
+    /// Strips trailing note/disclaimer paragraphs that contain deflection-style
+    /// phrases. Small models frequently append "Note: I can't access …" or
+    /// similar qualifiers that add no value and trigger deflection scoring penalties.
+    /// </summary>
+    private static string StripTrailingDeflectionDisclaimer(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var paragraphs = text.Split("\n\n", StringSplitOptions.None);
+        if (paragraphs.Length < 2)
+            return text;
+
+        // Only check the last 1-2 paragraphs (disclaimers are always trailing)
+        static bool IsDeflectionDisclaimer(string paragraph)
+        {
+            var lower = paragraph.Trim().ToLowerInvariant();
+
+            // Must start with a note/disclaimer marker or italic asterisk note
+            var isNote = lower.StartsWith("note:", StringComparison.Ordinal) ||
+                         lower.StartsWith("*note:", StringComparison.Ordinal) ||
+                         lower.StartsWith("_note:", StringComparison.Ordinal) ||
+                         lower.StartsWith("**note:", StringComparison.Ordinal) ||
+                         lower.StartsWith("disclaimer:", StringComparison.Ordinal) ||
+                         lower.StartsWith("*disclaimer:", StringComparison.Ordinal);
+
+            if (!isNote) return false;
+
+            // Must also contain a deflection-style phrase
+            return lower.Contains("i can't access", StringComparison.Ordinal) ||
+                   lower.Contains("i cannot access", StringComparison.Ordinal) ||
+                   lower.Contains("i don't have access", StringComparison.Ordinal) ||
+                   lower.Contains("i'm unable to", StringComparison.Ordinal) ||
+                   lower.Contains("without tools", StringComparison.Ordinal) ||
+                   lower.Contains("i don't have real-time", StringComparison.Ordinal) ||
+                   lower.Contains("unable to search", StringComparison.Ordinal) ||
+                   lower.Contains("i cannot browse", StringComparison.Ordinal) ||
+                   lower.Contains("i cannot search", StringComparison.Ordinal) ||
+                   lower.Contains("my knowledge cutoff", StringComparison.Ordinal);
+        }
+
+        // Trim trailing deflection paragraphs (preserve earlier content)
+        var trimmedCount = paragraphs.Length;
+        while (trimmedCount > 1 && IsDeflectionDisclaimer(paragraphs[trimmedCount - 1]))
+            trimmedCount--;
+
+        if (trimmedCount == paragraphs.Length)
+            return text;
+
+        return string.Join("\n\n", paragraphs[..trimmedCount]).Trim();
     }
 
     private static string SanitizeCommon(string text, bool preserveRationale = false)
@@ -516,6 +622,29 @@ public sealed class DeterministicChatPostProcessor
 
         // Generic short answer: append a conversational continuation
         return $"{trimmed}\n\nNeed me to expand on that?";
+    }
+
+    private static string TrimAfterSignatureLine(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+                             .Replace('\r', '\n');
+        var signature = "\n-- Sir Thaddeus";
+        var signatureIndex = normalized.IndexOf(signature, StringComparison.Ordinal);
+        if (signatureIndex < 0)
+            return text;
+
+        var afterSignature = signatureIndex + signature.Length;
+        if (afterSignature >= normalized.Length)
+            return text;
+
+        var trailing = normalized[afterSignature..].Trim();
+        if (trailing.Length == 0)
+            return text;
+
+        return normalized[..afterSignature].TrimEnd();
     }
 
     private static bool LooksLikeEmailToolName(string toolName)

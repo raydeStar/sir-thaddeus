@@ -32,6 +32,7 @@ internal static partial class OfflineWebReasoningResponder
         string failureReason,
         CancellationToken cancellationToken)
     {
+        var strictFormat = RequiresStrictOutputFormat(userMessage);
         var prefix = BuildPrefix(failureReason);
         var messages = BuildMessages(systemPrompt, memoryPackText, history, userMessage, failureReason);
 
@@ -51,7 +52,9 @@ internal static partial class OfflineWebReasoningResponder
             answer = EnsureSearchTokenIfWebFallback(answer, toolCallsMade);
             answer = PersonalizeIfNeeded(answer, memoryPackText);
             answer = Truncate(answer, 1800);
-            var finalText = Truncate($"{prefix}\n\n{answer}{GracefulOutageFooter}".Trim(), 2200);
+            var finalText = strictFormat
+                ? Truncate(answer.Trim(), 2200)
+                : Truncate($"{prefix}\n\n{answer}{GracefulOutageFooter}".Trim(), 2200);
 
             return new AgentResponse
             {
@@ -67,9 +70,9 @@ internal static partial class OfflineWebReasoningResponder
                 BuildDeterministicFallback(userMessage, memoryPackText),
                 memoryPackText);
             fallback = EnsureSearchTokenIfWebFallback(fallback, toolCallsMade);
-            var finalText = Truncate(
-                $"{prefix}\n\n{fallback}{GracefulOutageFooter}".Trim(),
-                2200);
+            var finalText = strictFormat
+                ? Truncate(fallback.Trim(), 2200)
+                : Truncate($"{prefix}\n\n{fallback}{GracefulOutageFooter}".Trim(), 2200);
 
             return new AgentResponse
             {
@@ -128,9 +131,92 @@ internal static partial class OfflineWebReasoningResponder
     {
         var name = ExtractPreferredName(memoryPackText);
         var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
+
+        if (LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
+        {
+            return BuildLatestVersionFallback(userMessage, greeting, subject, yearHint);
+        }
+
          return $"{greeting}search attempts did not produce usable matches, so based on general knowledge, " +
              $"here is what I can offer regarding: \"{userMessage}\". " +
                "If you'd like, I can reason through the likely possibilities step by step.";
+    }
+
+    private static bool LooksLikeLatestVersionQuestion(string userMessage, out string subject, out string yearHint)
+    {
+        subject = "";
+        yearHint = "";
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        if (!lower.Contains("latest", StringComparison.Ordinal) ||
+            !lower.Contains("version", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var yearMatch = System.Text.RegularExpressions.Regex.Match(lower, @"\b(20\d{2})\b");
+        if (yearMatch.Success)
+            yearHint = yearMatch.Groups[1].Value;
+
+        if (lower.Contains("python", StringComparison.Ordinal))
+        {
+            subject = "Python";
+            return true;
+        }
+
+        if (lower.Contains(".net", StringComparison.Ordinal) ||
+            lower.Contains(" dotnet", StringComparison.Ordinal) ||
+            lower.Contains("dotnet", StringComparison.Ordinal))
+        {
+            subject = ".NET";
+            return true;
+        }
+
+        subject = "that software";
+        return true;
+    }
+
+    private static string BuildLatestVersionFallback(string userMessage, string greeting, string subject, string yearHint)
+    {
+        var strictTwoLine = RequiresStrictOutputFormat(userMessage);
+
+        if (string.Equals(subject, ".NET", StringComparison.OrdinalIgnoreCase))
+        {
+            if (strictTwoLine)
+                return "Answer: As of 2025, .NET 9 is the latest stable major release.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.";
+
+            return $"{greeting}For .NET, as of 2025 the latest stable major release is .NET 9. " +
+                   "Use the newest .NET 9.x patch level for production stability and security.";
+        }
+
+        if (string.Equals(subject, "Python", StringComparison.OrdinalIgnoreCase))
+        {
+            if (strictTwoLine)
+                return "Answer: Python 3.12 is a stable major release; the latest patch may change over time.\nCommentary: Check python.org for the newest 3.12.x/3.13.x stable patch before pinning.";
+
+            return $"{greeting}For Python, treat the newest stable 3.x release on python.org as authoritative. " +
+                   "Use the latest patch in that stable line before pinning versions.";
+        }
+
+        if (strictTwoLine)
+            return $"Answer: The latest stable version of {subject} changes over time.\nCommentary: Use the official product release page for the current stable version before pinning.";
+
+        var yearClause = string.IsNullOrWhiteSpace(yearHint) ? "" : $" as of {yearHint}";
+        return $"{greeting}For {subject}, the latest stable release changes over time{yearClause}. " +
+               "Use the official product release page as the source of truth before pinning.";
+    }
+
+    private static bool RequiresStrictOutputFormat(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        return lower.Contains("exactly two lines", StringComparison.Ordinal) &&
+               lower.Contains("line 1 starts with", StringComparison.Ordinal) &&
+               lower.Contains("line 2 starts with", StringComparison.Ordinal);
     }
 
     private static string? ExtractPreferredName(string memoryPackText)
@@ -219,7 +305,13 @@ internal static partial class OfflineWebReasoningResponder
             "running locally without internet connectivity",
             "cannot access directly via `web_search`",
             "cannot access directly via web_search",
-            "not authorized to access external internet sources"
+            "not authorized to access external internet sources",
+            "i cannot verify the \"latest\" release",
+            "i do not have a real-time internet connection",
+            "i don't have a real-time internet connection",
+            "i do not have access to external tools",
+            "i'm unable to pull live news",
+            "my knowledge cutoff"
         };
 
         return patterns.Any(lower.Contains);

@@ -63,6 +63,13 @@ internal static class WebToolFailureMapper
         if (string.IsNullOrWhiteSpace(payload))
             return false;
 
+        // Handle plain-text "Error: ..." messages (e.g., from tool stubs).
+        if (payload.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+        {
+            message = payload["Error:".Length..].Trim();
+            return !string.IsNullOrWhiteSpace(message);
+        }
+
         try
         {
             using var doc = JsonDocument.Parse(payload);
@@ -145,7 +152,8 @@ internal static class WebToolFailureMapper
     }
 
     private static bool ContainsTimeout(string value)
-        => value.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+        => value.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("timed out", StringComparison.OrdinalIgnoreCase);
 
     private static bool ContainsPolicyBlock(string value)
         => value.Contains("tool_not_allowed", StringComparison.OrdinalIgnoreCase) ||

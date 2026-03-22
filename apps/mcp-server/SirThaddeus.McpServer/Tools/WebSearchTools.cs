@@ -87,6 +87,10 @@ public static class WebSearchTools
         [Description("Recency filter: day, week, month, or any (default)")] string recency = "any",
         CancellationToken cancellationToken = default)
     {
+        var stubbedError = ToolStubGuard.GetStubbedError("web_search");
+        if (stubbedError is not null)
+            return stubbedError;
+
         if (string.IsNullOrWhiteSpace(query))
             return "Error: Search query is required.";
 

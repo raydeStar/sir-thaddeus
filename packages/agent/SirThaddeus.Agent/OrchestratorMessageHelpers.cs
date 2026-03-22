@@ -531,6 +531,16 @@ internal static partial class OrchestratorMessageHelpers
         var hasSymbolicExpression = NumericOperatorExpressionRegex().IsMatch(assistantText);
         var hasEquals = assistantText.Contains('=');
 
+        // When the response discusses probability or odds the fractions and
+        // equals signs are illustrative, not unsolicited computation.
+        if (hasSymbolicExpression &&
+            (lower.Contains("probability") || lower.Contains("probabilities") ||
+             lower.Contains("odds of") || lower.Contains("odds are") ||
+             lower.Contains("chances are") || lower.Contains("likelihood")))
+        {
+            return false;
+        }
+
         return hasSymbolicExpression && (hasMathVerb || hasEquals);
     }
 
@@ -538,6 +548,20 @@ internal static partial class OrchestratorMessageHelpers
     {
         var lower = userMessage.ToLowerInvariant();
         if (lower.Contains("liter") && lower.Contains("jug"))
+            return true;
+
+        // Accept direct symbolic expressions like "2 + 2" as legitimate
+        // math asks, even when the user message also includes non-math text.
+        if (NumericOperatorExpressionRegex().IsMatch(userMessage))
+            return true;
+
+        // Probability and choice-based reasoning puzzles naturally produce
+        // mathematical notation (fractions, equations) in their answers.
+        if (lower.Contains("probability") || lower.Contains("game show") ||
+            lower.Contains("coin flip") || lower.Contains("dice roll"))
+            return true;
+
+        if (ProbabilityDecisionProblemRegex().IsMatch(userMessage))
             return true;
 
         var utility = UtilityRouter.TryHandle(userMessage);
@@ -623,6 +647,16 @@ internal static partial class OrchestratorMessageHelpers
         @"\b(?:can|could|would)\s+you\s+(?:do|calculate|solve|work\s*out)\b.{0,40}\b\d[\d,\.\s]*[+\-*/x×÷]\s*\d[\d,\.]*\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
     private static partial Regex AssistantAsksUserToComputeMathRegex();
+
+    /// <summary>
+    /// Matches decision/probability puzzle patterns in user messages —
+    /// numbered doors/boxes combined with a decision verb such as
+    /// "switch", "stick", "pick", or "choose".
+    /// </summary>
+    [GeneratedRegex(
+        @"\b(?:door|box|envelope|curtain)\s+\d.*\b(?:switch|stick|pick|choose|open)\b|\b(?:switch|stick|pick|choose|open)\b.*\b(?:door|box|envelope|curtain)\s+\d",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
+    private static partial Regex ProbabilityDecisionProblemRegex();
 
     [GeneratedRegex(
         @"\b(?:i\s+care\s+about\s+you|you\s+don'?t\s+have\s+to\s+pretend|my\s+real\s+name\s+is|what(?:'s|\s+is)\s+your\s+real\s+name|that\s+means\s+everything\s+to\s+me|i\s+was\s+just\s+joking\s+about\s+the\s+weight\s+thing|you(?:'re|\s+are)\s+not\s+fat|always\s+around\s+when\s+you\s+need\s+someone\s+to\s+talk)\b",

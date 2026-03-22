@@ -1055,6 +1055,9 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        if (LooksLikeLocalBusinessDiscovery(lower))
+            return true;
+
         ReadOnlySpan<string> businessTerms =
         [
             "restaurant", "restaurants", "cafe", "coffee shop", "diner",

@@ -182,13 +182,34 @@ public sealed partial class SearchOrchestrator
 
         if (isLocalBusinessQuery)
         {
-            var openPlaces = await TryHandleLocalBusinessWithOpenPlacesAsync(
+            var inlineLocation = ExtractInlineLocationFromMessage(userMessage ?? string.Empty);
+            var isNearbyStyleQuery =
+                string.IsNullOrWhiteSpace(inlineLocation) &&
+                (lowerMessage.Contains("nearby", StringComparison.Ordinal) ||
+                 lowerMessage.Contains("near me", StringComparison.Ordinal));
+
+            // Nearby local-business requests with no explicit city/state are a
+            // good fit for places_discover (Open Places). This avoids empty
+            // generic web-search results while keeping explicit-location
+            // requests on the existing constrained path.
+            if (isNearbyStyleQuery)
+            {
+                var (attemptedOpenPlaces, openPlacesResponse) = await TryHandleLocalBusinessWithOpenPlacesAsync(
+                    userMessage ?? string.Empty,
+                    localBusinessLocation,
+                    toolCallsMade,
+                    ct);
+
+                if (attemptedOpenPlaces && openPlacesResponse is not null)
+                    return openPlacesResponse;
+            }
+
+            var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
                 userMessage ?? string.Empty,
-                localBusinessLocation,
                 toolCallsMade,
                 ct);
-            if (openPlaces.Attempted && openPlaces.Response is not null)
-                return openPlaces.Response;
+            if (directPlaceFallback is not null)
+                return directPlaceFallback;
         }
 
         var toolResult = await CallWebSearchAsync(
@@ -196,7 +217,17 @@ public sealed partial class SearchOrchestrator
             originalUserMessage: userMessage,
             maxResults: isLocalBusinessQuery ? LocalBusinessFetchMaxResults : null);
 
-        if (!isLocalBusinessQuery)
+        if (isLocalBusinessQuery)
+        {
+            toolResult = await TryRecoverNoResultsLocalBusinessAsync(
+                userMessage ?? string.Empty,
+                query.Query,
+                toolResult,
+                localBusinessLocation,
+                toolCallsMade,
+                ct);
+        }
+        else
         {
             toolResult = await TryRecoverNoResultsWebFactFindAsync(
                 userMessage ?? string.Empty,
@@ -236,15 +267,22 @@ public sealed partial class SearchOrchestrator
         {
             if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
             {
-                return await BuildOfflineReasoningResponseAsync(
-                    userMessage ?? "", memoryPackText, history, toolCallsMade, factFailure.Text, ct);
+                // Return recognized errors (unavailable, timeout, policy) directly.
+                // Wrapping in offline reasoning strips the prefix containing keywords.
+                return factFailure;
             }
 
             if (LooksLikeNoResultsPayload(toolResult))
             {
+                if (isLocalBusinessQuery)
+                    return BuildNoResultsResponse(userMessage ?? string.Empty, toolCallsMade);
+
                 return await BuildNoResultsFallbackAsync(
                     userMessage ?? "", memoryPackText, history, toolCallsMade, ct);
             }
+
+            if (isLocalBusinessQuery)
+                return BuildNoResultsResponse(userMessage ?? string.Empty, toolCallsMade);
 
             return await BuildOfflineReasoningResponseAsync(
                 userMessage ?? "", memoryPackText, history, toolCallsMade, "Web search returned no results.", ct);
@@ -434,6 +472,11 @@ public sealed partial class SearchOrchestrator
             return initialToolResult;
         }
 
+        // Skip recovery when the tool reported a structured error (unavailable,
+        // timeout, etc.) — retrying with different queries won't help.
+        if (WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is not null)
+            return initialToolResult;
+
         // ── Phase 1: broaden recency with the same query ─────────────
         // When the LLM chose a tight recency (day/week/month) and got
         // zero results, widen the time window before rewriting the query.
@@ -514,6 +557,105 @@ public sealed partial class SearchOrchestrator
                         ["query"] = candidate
                     }
                 });
+                return lastResult;
+            }
+        }
+
+        return lastResult;
+    }
+
+    private async Task<string> TryRecoverNoResultsLocalBusinessAsync(
+        string userMessage,
+        string primaryQuery,
+        string initialToolResult,
+        string? localBusinessLocation,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!LooksLikeNoResultsPayload(initialToolResult) &&
+            WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is null)
+        {
+            return initialToolResult;
+        }
+
+        // Skip recovery when the tool reported a structured hard failure.
+        if (WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is not null)
+            return initialToolResult;
+
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        var singular = SingularizeBusinessLabel(label);
+        var resolvedLocation = string.IsNullOrWhiteSpace(localBusinessLocation)
+            ? UserLocationHint
+            : localBusinessLocation;
+
+        var candidates = new List<string>();
+        void AddCandidate(string? query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return;
+
+            var normalized = query.Trim();
+            if (!candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                candidates.Add(normalized);
+        }
+
+        AddCandidate(primaryQuery);
+
+        if (!string.IsNullOrWhiteSpace(resolvedLocation))
+        {
+            AddCandidate($"{label} near {resolvedLocation}");
+            AddCandidate($"{singular} near {resolvedLocation}");
+            AddCandidate($"{label} in {resolvedLocation}");
+            AddCandidate($"best {label} in {resolvedLocation}");
+            AddCandidate($"{label} {resolvedLocation}");
+        }
+        else
+        {
+            AddCandidate($"{label} near me");
+            AddCandidate($"{singular} near me");
+            AddCandidate(label);
+        }
+
+        var lastResult = initialToolResult;
+        foreach (var candidate in candidates)
+        {
+            if (string.Equals(candidate, primaryQuery, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_BUSINESS_NO_RESULTS_RETRY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = candidate,
+                    ["location"] = resolvedLocation ?? "(none)"
+                }
+            });
+
+            lastResult = await CallWebSearchAsync(
+                candidate,
+                "any",
+                toolCallsMade,
+                ct,
+                originalUserMessage: userMessage,
+                maxResults: LocalBusinessFetchMaxResults);
+
+            if (HasUsableSearchResults(lastResult))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "LOCAL_BUSINESS_NO_RESULTS_RETRY",
+                    Result = "recovered",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["query"] = candidate,
+                        ["location"] = resolvedLocation ?? "(none)"
+                    }
+                });
+
                 return lastResult;
             }
         }

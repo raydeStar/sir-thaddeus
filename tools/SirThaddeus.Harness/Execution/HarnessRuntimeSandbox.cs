@@ -91,6 +91,11 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         environment["ST_CHAT_HISTORY_PATH"] = Path.Combine(dataDirectory, "chat-history.json");
         environment["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(dataDirectory, "briefing-history.json");
 
+        // Propagate stub configuration so the MCP server can force-fail
+        // specific tools during contract tests.
+        if (string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase))
+            ApplyStubEnvironment(environment, test.Stub);
+
         return new HarnessRuntimeSandbox(
             sandboxRoot,
             settingsPath,
@@ -109,6 +114,22 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         catch
         {
             // Best-effort cleanup. Sandbox directories live under temp.
+        }
+    }
+
+    /// <summary>
+    /// Translates the test stub config into <c>ST_STUB_*</c> environment
+    /// variables that the MCP server's <c>ToolStubGuard</c> honours.
+    /// </summary>
+    private static void ApplyStubEnvironment(
+        Dictionary<string, string> environment,
+        Models.HarnessStubConfig stub)
+    {
+        // Per-tool overrides take precedence
+        foreach (var (toolName, failure) in stub.PerToolFailures)
+        {
+            var envKey = $"ST_STUB_{toolName.ToUpperInvariant().Replace("-", "_")}";
+            environment[envKey] = failure;
         }
     }
 

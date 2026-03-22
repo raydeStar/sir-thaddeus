@@ -36,10 +36,9 @@ public sealed partial class SearchOrchestrator
             return null;
 
         var subject = ExtractReleasedProductExistenceSubject(userMessage ?? string.Empty);
+        var subjectTokens = BuildSubjectTokens(subject);
         var subjectMatches = sources
-            .Where(source =>
-                ($"{source.Title} {source.Snippet}")
-                .Contains(subject, StringComparison.OrdinalIgnoreCase))
+            .Where(source => SourceMentionsSubject(source, subject, subjectTokens))
             .ToList();
 
         var positiveEvidence = subjectMatches
@@ -52,13 +51,24 @@ public sealed partial class SearchOrchestrator
             var yearClause = year is null ? string.Empty : $" with a {year} introduction/release year";
 
             return
-                $"I could not verify definitive proof from the provided search results alone, but the available evidence strongly indicates {subject} exists as a released product. " +
-                $"The returned sources include official or catalog-style references to {subject}{yearClause} and place it in Apple's released iPhone lineup.";
+                    $"Yes — {subject} does exist as a released product{yearClause}. " +
+                    $"The sources include official or catalog-style references that place {subject} in Apple's released iPhone lineup.";
+        }
+
+        var negativeEvidence = subjectMatches
+            .Where(source => HasReleasedProductNegativeSignal(source))
+            .ToList();
+
+        if (negativeEvidence.Count > 0)
+        {
+            return
+                $"Based on the available release lists, {subject} does not appear to exist as a released product. " +
+                $"The returned sources include negative indicators (for example unreleased/rumor language) rather than official released-model references.";
         }
 
         return
-            $"Based on the available release lists, {subject} likely does not exist as a released product. " +
-            $"The returned sources enumerate Apple's iPhone lineup and release timelines, but none identify {subject} as an official released model.";
+            $"I could not confirm from the returned snippets whether {subject} is a released product. " +
+            "If you want, I can run a tighter follow-up query focused on official release pages.";
     }
 
     private AgentResponse? TryBuildExistenceGuardedResponse(
@@ -268,6 +278,52 @@ public sealed partial class SearchOrchestrator
                text.Contains("in production", StringComparison.OrdinalIgnoreCase) ||
                source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
                source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasReleasedProductNegativeSignal(SourceItem source)
+    {
+        var text = $"{source.Title} {source.Snippet}";
+        return text.Contains("not released", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("unreleased", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("doesn't exist", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("no such", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("rumor", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("rumour", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("concept", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<string> BuildSubjectTokens(string subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return [];
+
+        var tokens = Regex.Matches(subject.ToLowerInvariant(), @"[a-z0-9]+")
+            .Select(match => match.Value)
+            .Where(token => token.Length >= 2)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return tokens;
+    }
+
+    private static bool SourceMentionsSubject(SourceItem source, string subject, IReadOnlyList<string> subjectTokens)
+    {
+        var text = $"{source.Title} {source.Snippet}";
+        if (text.Contains(subject, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (subjectTokens.Count == 0)
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        var matchedTokenCount = subjectTokens.Count(token => lower.Contains(token, StringComparison.Ordinal));
+
+        if (subjectTokens.Count <= 2)
+            return matchedTokenCount == subjectTokens.Count;
+
+        // For longer subjects, allow one token miss to avoid over-pruning.
+        return matchedTokenCount >= subjectTokens.Count - 1;
     }
 
     private static string? TryExtractReleaseYear(IReadOnlyList<SourceItem> sources)

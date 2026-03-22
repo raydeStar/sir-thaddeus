@@ -15,7 +15,7 @@ public static class DeepDiveWebExtractor
     // ── Phone ──────────────────────────────────────────────────────
     // Matches US/CA formats: (208) 356-1234, 208-356-1234, +1 208 356 1234
     private static readonly Regex PhoneRegex = new(
-        @"(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}",
+        @"(?:\+?1[ .-]?)?\(?\d{3}\)?[ .\-]\d{3}[ .\-]\d{4}",
         RegexOptions.Compiled);
 
     // ── Address ────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ public static class DeepDiveWebExtractor
                 continue;
 
             // Phone — first clean match
-            phone ??= TryMatchFirst(PhoneRegex, chunk);
+            phone ??= NormalizeSingleLine(TryMatchFirst(PhoneRegex, chunk));
 
             // Address — first clean match
             address ??= TryMatchFirst(AddressRegex, chunk);
@@ -239,6 +239,15 @@ public static class DeepDiveWebExtractor
     {
         var match = regex.Match(input);
         return match.Success ? match.Value.Trim() : null;
+    }
+
+    private static string? NormalizeSingleLine(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var normalized = Regex.Replace(value, @"\s+", " ").Trim();
+        return normalized.Length == 0 ? null : normalized;
     }
 
     /// <summary>
