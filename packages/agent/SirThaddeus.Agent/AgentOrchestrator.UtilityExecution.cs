@@ -1262,6 +1262,109 @@ public sealed partial class AgentOrchestrator
         return !string.IsNullOrWhiteSpace(rootId) && !string.IsNullOrWhiteSpace(entry);
     }
 
+    private static bool TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+        string message,
+        out string rootId,
+        out string relativePath,
+        out string content,
+        out string listPath,
+        out string createArgsJson,
+        out string listArgsJson)
+    {
+        rootId = string.Empty;
+        relativePath = string.Empty;
+        content = string.Empty;
+        listPath = string.Empty;
+        createArgsJson = "{}";
+        listArgsJson = "{}";
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        if (!message.Contains("knowledge_store_create_file", StringComparison.OrdinalIgnoreCase) ||
+            !message.Contains("knowledge_store_list_files", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rootMatch = Regex.Match(
+            message,
+            @"\brootId\s+'(?<root>[^']+)'|\bin\s+root\s+'(?<root2>[^']+)'|\broot\s+'(?<root3>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (rootMatch.Success)
+        {
+            rootId = rootMatch.Groups["root"].Success
+                ? rootMatch.Groups["root"].Value.Trim()
+                : rootMatch.Groups["root2"].Success
+                    ? rootMatch.Groups["root2"].Value.Trim()
+                    : rootMatch.Groups["root3"].Value.Trim();
+        }
+
+        var pathMatch = Regex.Match(
+            message,
+            @"\brelativePath\s+'(?<path>[^']+)'|\bto\s+create\s+(?<path2>[A-Za-z0-9_./\\-]+\.md)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (pathMatch.Success)
+        {
+            relativePath = pathMatch.Groups["path"].Success
+                ? pathMatch.Groups["path"].Value.Trim()
+                : pathMatch.Groups["path2"].Value.Trim();
+        }
+
+        var contentMatch = Regex.Match(
+            message,
+            @"(?:markdown\s+)?content\s+exactly:\s*'(?<content>.*?)'\s*(?:then\s+call|then\s+use|then\b|and\s+then\b|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!contentMatch.Success)
+        {
+            contentMatch = Regex.Match(
+                message,
+                @"\bexactly\s+'(?<content>.*?)'\s*(?:then\s+call|then\s+use|then\b|and\s+then\b|$)",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        }
+
+        if (contentMatch.Success)
+            content = contentMatch.Groups["content"].Value;
+
+        var listPathMatch = Regex.Match(
+            message,
+            @"knowledge_store_list_files.*?\bpath(?:\s+exactly)?\s+'(?<path>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (listPathMatch.Success)
+        {
+            listPath = listPathMatch.Groups["path"].Value.Trim();
+        }
+        else
+        {
+            var folderMatch = Regex.Match(
+                message,
+                @"knowledge_store_list_files.*?\bon\s+the\s+(?<folder>[A-Za-z0-9_./\\-]+)\s+folder",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (folderMatch.Success)
+                listPath = folderMatch.Groups["folder"].Value.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(listPath) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            var normalizedPath = relativePath.Replace('\\', '/');
+            var separator = normalizedPath.LastIndexOf('/');
+            listPath = separator > 0 ? normalizedPath[..separator] : ".";
+        }
+
+        if (string.IsNullOrWhiteSpace(rootId) ||
+            string.IsNullOrWhiteSpace(relativePath) ||
+            string.IsNullOrWhiteSpace(content) ||
+            string.IsNullOrWhiteSpace(listPath))
+        {
+            return false;
+        }
+
+        createArgsJson = JsonSerializer.Serialize(new { rootId, relativePath, content });
+        listArgsJson = JsonSerializer.Serialize(new { path = listPath });
+        return true;
+    }
+
     private async Task<AgentResponse> ExecuteExplicitFileReadAsync(
         string fileReadArgsJson,
         string? explicitPath,
@@ -1484,6 +1587,108 @@ public sealed partial class AgentOrchestrator
             responseText = containsEntry
                 ? $"I saved the journal entry to `{journalPath}` and verified that the walk entry text is present in the journal file."
                 : $"I saved the journal entry to `{journalPath}`, but the exact walk entry text was not present when I read the journal file back.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+        string rootId,
+        string relativePath,
+        string listPath,
+        string createArgsJson,
+        string listArgsJson,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var createResult = await _mcp.CallToolAsync(
+            "knowledge_store_create_file",
+            createArgsJson,
+            cancellationToken);
+
+        var createSuccess = TryParseKnowledgeStoreToolResult(
+            createResult,
+            out var createMessage,
+            out _,
+            out var createdFilePath);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_create_file",
+            Arguments = createArgsJson,
+            Result = createResult,
+            Success = createSuccess
+        });
+
+        if (!createSuccess)
+        {
+            var createFailureText = string.IsNullOrWhiteSpace(createMessage)
+                ? $"I wasn't able to create `{relativePath}` in knowledge-store root `{rootId}`."
+                : $"I wasn't able to create `{relativePath}` in knowledge-store root `{rootId}`: {createMessage}";
+
+            AppendAssistantMessage(createFailureText);
+            LogEvent("AGENT_RESPONSE", createFailureText);
+            return new AgentResponse
+            {
+                Text = createFailureText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var listResult = await _mcp.CallToolAsync(
+            "knowledge_store_list_files",
+            listArgsJson,
+            cancellationToken);
+
+        var listSuccess = TryParseKnowledgeStoreToolResult(
+            listResult,
+            out var listMessage,
+            out var listContent,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_list_files",
+            Arguments = listArgsJson,
+            Result = listResult,
+            Success = listSuccess
+        });
+
+        string responseText;
+        if (!listSuccess)
+        {
+            responseText = string.IsNullOrWhiteSpace(listMessage)
+                ? $"I created `{relativePath}`, but listing `{listPath}` failed in the knowledge store."
+                : $"I created `{relativePath}`, but listing `{listPath}` failed in the knowledge store: {listMessage}";
+        }
+        else
+        {
+            var normalizedTargetPath = relativePath.Replace('\\', '/');
+            var normalizedCreatedPath = (createdFilePath ?? string.Empty).Replace('\\', '/');
+            var normalizedListing = (listContent ?? string.Empty).Replace('\\', '/');
+            var targetFileName = Path.GetFileName(normalizedTargetPath);
+
+            var found = normalizedListing.Contains(normalizedTargetPath, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(normalizedCreatedPath) &&
+                         normalizedListing.Contains(normalizedCreatedPath, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(targetFileName) &&
+                         normalizedListing.Contains(targetFileName, StringComparison.OrdinalIgnoreCase));
+
+            responseText = found
+                ? $"I created `{relativePath}` and confirmed it was found when listing `{listPath}`."
+                : $"I created `{relativePath}`, but it was not found when listing `{listPath}`.";
         }
 
         AppendAssistantMessage(responseText);

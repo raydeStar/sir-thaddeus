@@ -515,6 +515,28 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
         }
 
+        if (TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+                userMessage,
+                out var earlyKnowledgeStoreRootId,
+                out var earlyKnowledgeStoreRelativePath,
+                out _,
+                out var earlyKnowledgeStoreListPath,
+                out var earlyKnowledgeStoreCreateArgs,
+                out var earlyKnowledgeStoreListArgs))
+        {
+            var explicitKnowledgeStoreCreateListResponse = await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+                earlyKnowledgeStoreRootId,
+                earlyKnowledgeStoreRelativePath,
+                earlyKnowledgeStoreListPath,
+                earlyKnowledgeStoreCreateArgs,
+                earlyKnowledgeStoreListArgs,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+
+            return AttachContextSnapshot(explicitKnowledgeStoreCreateListResponse, usageBaseline);
+        }
+
         // ── Parallel I/O Setup ───────────────────────────────────────
         // Kick off independent async tasks simultaneously to minimize
         // total turn latency.
@@ -951,6 +973,52 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     cancellationToken);
 
                 return AttachContextSnapshot(knowledgeStoreResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+                    userMessage,
+                    out var explicitKnowledgeStoreRootId,
+                    out var explicitKnowledgeStoreRelativePath,
+                    out _,
+                    out var explicitKnowledgeStoreListPath,
+                    out var explicitKnowledgeStoreCreateArgs,
+                    out var explicitKnowledgeStoreListArgs))
+            {
+                var knowledgeStoreCreateListResponse = await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+                    explicitKnowledgeStoreRootId,
+                    explicitKnowledgeStoreRelativePath,
+                    explicitKnowledgeStoreListPath,
+                    explicitKnowledgeStoreCreateArgs,
+                    explicitKnowledgeStoreListArgs,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreCreateListResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+                    contextualUserMessage,
+                    out explicitKnowledgeStoreRootId,
+                    out explicitKnowledgeStoreRelativePath,
+                    out _,
+                    out explicitKnowledgeStoreListPath,
+                    out explicitKnowledgeStoreCreateArgs,
+                    out explicitKnowledgeStoreListArgs))
+            {
+                var knowledgeStoreCreateListResponse = await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+                    explicitKnowledgeStoreRootId,
+                    explicitKnowledgeStoreRelativePath,
+                    explicitKnowledgeStoreListPath,
+                    explicitKnowledgeStoreCreateArgs,
+                    explicitKnowledgeStoreListArgs,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreCreateListResponse, usageBaseline);
             }
 
             if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
