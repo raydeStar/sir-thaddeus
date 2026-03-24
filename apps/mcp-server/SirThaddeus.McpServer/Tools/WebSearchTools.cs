@@ -194,8 +194,8 @@ public static class WebSearchTools
             var sb = new StringBuilder();
             sb.AppendLine($"No results found for \"{query}\".");
             sb.AppendLine($"Provider: {searchResult.Provider}");
-            foreach (var err in searchResult.Errors)
-                sb.AppendLine($"Warning: {err}");
+            if (searchResult.Errors.Count > 0)
+                sb.AppendLine("Some search providers were temporarily unavailable.");
             sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
             sb.AppendLine();
             sb.AppendLine(SourcesDelimiter);

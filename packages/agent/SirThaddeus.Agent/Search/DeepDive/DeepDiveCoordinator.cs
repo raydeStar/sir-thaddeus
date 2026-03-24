@@ -48,6 +48,7 @@ public sealed partial class DeepDiveCoordinator
         var toolCallCount = 0;
         var maxToolCalls = ParseIntEnv("ST_DEEPDIVE_MAX_TOOL_CALLS", DefaultMaxToolCalls, min: 1, max: 20);
         var maxOpenedSources = ParseIntEnv("ST_DEEPDIVE_MAX_SOURCES", DefaultMaxOpenedSources, min: 1, max: 10);
+        query = StripEmbeddedInstructionScaffold(query);
         var cleanedQuery = CleanQueryForWebFallback(query);
         var effectiveLocationHint = ResolveLocationHintForQuery(query, cleanedQuery, userLocationHint);
 
@@ -166,9 +167,9 @@ public sealed partial class DeepDiveCoordinator
         // For web search (unlike Places API), always inject location context when
         // no explicit city is in the query.  Search engines handle proximity
         // gracefully - "Target near Rexburg, ID hours" is better than "Target hours".
-        var webLocationSuffix = !string.IsNullOrWhiteSpace(userLocationHint)
-            && !cleanedQuery.Contains(userLocationHint, StringComparison.OrdinalIgnoreCase)
-            ? $" near {userLocationHint}"
+        var webLocationSuffix = !string.IsNullOrWhiteSpace(effectiveLocationHint)
+            && !cleanedQuery.Contains(effectiveLocationHint, StringComparison.OrdinalIgnoreCase)
+            ? $" near {effectiveLocationHint}"
             : "";
         var webArgs = JsonSerializer.Serialize(new
         {
@@ -184,9 +185,21 @@ public sealed partial class DeepDiveCoordinator
             "search",
             "Ran web search fallback.");
 
-        var sources = Search.SearchOrchestrator.ParseSourcesFromToolResult(webResult ?? "")
+        var explicitRegionTokens = ExtractExplicitRegionTokens(cleanedQuery);
+        var rawSources = Search.SearchOrchestrator.ParseSourcesFromToolResult(webResult ?? "")
+            .Where(IsNavigablePlaceFallbackSource)
+            .ToList();
+
+        var sources = rawSources
+            .Where(source => IsUsefulPlaceFallbackSource(source, cleanedQuery, explicitRegionTokens))
             .Take(maxOpenedSources)
             .ToList();
+
+        if (sources.Count == 0 && explicitRegionTokens.Count == 0 && rawSources.Count > 0)
+        {
+            AddAuditStep(auditSteps, "search", "Strict fallback source filter removed all candidates; retrying with broader non-junk web results.");
+            sources = rawSources.Take(maxOpenedSources).ToList();
+        }
 
         if (sources.Count == 0)
             warnings.Add("Fallback search came back with 0 results for the query.");
@@ -251,6 +264,16 @@ public sealed partial class DeepDiveCoordinator
             !string.IsNullOrWhiteSpace(extraction.Address) ||
             !string.IsNullOrWhiteSpace(extraction.Phone) ||
             extraction.Rating.HasValue;
+
+        if (sources.Count == 0 && !hasUsefulData && (explicitRegionTokens.Count > 0 || extractedChunks.Count == 0))
+        {
+            return new DeepDiveExecutionResult
+            {
+                Success = false,
+                IsPartial = true,
+                AssistantText = BuildNoGroundingResponse(cleanedQuery, effectiveLocationHint)
+            };
+        }
 
         var confidence = hasUsefulData && !hours.HasConflict
             ? DeepDiveConstants.ConfidenceMedium
@@ -753,9 +776,40 @@ public sealed partial class DeepDiveCoordinator
         if (!string.IsNullOrWhiteSpace(briefing.Hero.Website))
             parts.Add("Use the listed website to confirm current hours before visiting.");
 
+        var sourceDomainsLine = BuildSourceDomainsLeadLine(briefing);
+        if (!string.IsNullOrWhiteSpace(sourceDomainsLine))
+            parts.Add(sourceDomainsLine);
+
         parts.Add("Briefing summary: hours and review details are based on currently available web sources.");
 
         return string.Join("\n", parts);
+    }
+
+    private static string BuildSourceDomainsLeadLine(DeepDiveBriefing briefing)
+    {
+        var domains = briefing.Cards
+            .SelectMany(card => card.Sources)
+            .Select(source => source.Url)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url =>
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                    return "";
+
+                var host = uri.Host.Trim().ToLowerInvariant();
+                return host.StartsWith("www.", StringComparison.Ordinal)
+                    ? host[4..]
+                    : host;
+            })
+            .Where(host => !string.IsNullOrWhiteSpace(host))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
+
+        if (domains.Count == 0)
+            return string.Empty;
+
+        return $"Sources checked: {string.Join(", ", domains)}.";
     }
 
     private static IReadOnlyList<string> BuildProviderFailureLeadLines(IReadOnlyList<string> warnings)
@@ -947,7 +1001,11 @@ public sealed partial class DeepDiveCoordinator
         if (string.IsNullOrWhiteSpace(raw))
             return raw;
 
-        var cleaned = raw.Trim();
+        var cleaned = StripEmbeddedInstructionScaffold(raw).Trim();
+
+        cleaned = Regex.Replace(cleaned, @"^deep\s+dive\s+", string.Empty, RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"\bwhat to expect\b", string.Empty, RegexOptions.IgnoreCase);
+        cleaned = cleaned.Replace("+", " ", StringComparison.Ordinal);
 
         // Strip common leading question scaffolding.
         cleaned = CleanLeadPhraseRegex().Replace(cleaned, "").Trim();
@@ -959,12 +1017,48 @@ public sealed partial class DeepDiveCoordinator
 
         // Remove redundant words that we're going to append anyway.
         cleaned = CleanRedundantKeywordsRegex().Replace(cleaned, " ").Trim();
+        cleaned = CleanDanglingConnectorRegex().Replace(cleaned, " ").Trim();
 
         // Collapse whitespace.
         cleaned = string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
         // If we stripped too aggressively, fall back to the original.
         return cleaned.Length >= 4 ? cleaned : raw.Trim().TrimEnd('?', '.', '!');
+    }
+
+    private static string StripEmbeddedInstructionScaffold(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var cleaned = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+
+        var markers = new[]
+        {
+            "Verification requirement:",
+            "Do not answer from memory alone",
+            "If snippets are insufficient"
+        };
+
+        foreach (var marker in markers)
+        {
+            var idx = cleaned.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+                cleaned = cleaned[..idx].TrimEnd();
+        }
+
+        return cleaned.Trim();
+    }
+
+    private static string BuildNoGroundingResponse(string cleanedQuery, string? locationHint)
+    {
+        var subject = string.IsNullOrWhiteSpace(cleanedQuery) ? "that place" : cleanedQuery;
+        var locationClause = string.IsNullOrWhiteSpace(locationHint)
+            ? string.Empty
+            : $" near {locationHint}";
+
+        return $"I couldn't verify live hours, reviews, or contact details for {subject}{locationClause} from the available sources right now. Try a more specific business name, or try again later when search providers are responding.";
     }
 
     [System.Text.RegularExpressions.GeneratedRegex(
@@ -986,6 +1080,87 @@ public sealed partial class DeepDiveCoordinator
         @"\b(?:is|are|does|do)\s*$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
     private static partial System.Text.RegularExpressions.Regex CleanDanglingCopulaRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"(?:\b(?:with|and|plus)\b\s*)+$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
+    private static partial System.Text.RegularExpressions.Regex CleanDanglingConnectorRegex();
+
+    private static bool IsNavigablePlaceFallbackSource(SourceItem source)
+    {
+        if (string.IsNullOrWhiteSpace(source.Url))
+            return false;
+
+        if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host.Trim().ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal))
+            host = host[4..];
+
+        if (host.Contains("news.google.com", StringComparison.Ordinal) ||
+            host.Equals("news.google.com", StringComparison.Ordinal) ||
+            host.Contains("google.com", StringComparison.Ordinal) && uri.AbsolutePath.Contains("/rss/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsUsefulPlaceFallbackSource(
+        SourceItem source,
+        string cleanedQuery,
+        IReadOnlyList<string>? explicitRegionTokens = null)
+    {
+        if (!IsNavigablePlaceFallbackSource(source))
+            return false;
+
+        var combined = $"{source.Title} {source.Snippet} {source.Url}".Trim();
+        if (string.IsNullOrWhiteSpace(combined))
+            return false;
+
+        explicitRegionTokens ??= ExtractExplicitRegionTokens(cleanedQuery);
+        if (explicitRegionTokens.Count > 0)
+        {
+            var lowerCombined = combined.ToLowerInvariant();
+            if (!explicitRegionTokens.Any(token => lowerCombined.Contains(token, StringComparison.Ordinal)))
+                return false;
+        }
+
+        return ExtractedNameMatchesQuery(combined, cleanedQuery) ||
+               combined.Contains("hour", StringComparison.OrdinalIgnoreCase) ||
+               combined.Contains("address", StringComparison.OrdinalIgnoreCase) ||
+               combined.Contains("phone", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> ExtractExplicitRegionTokens(string cleanedQuery)
+    {
+        if (string.IsNullOrWhiteSpace(cleanedQuery))
+            return [];
+
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in Regex.Matches(cleanedQuery, @"\b[A-Z]{2}\b"))
+        {
+            var value = match.Value.Trim();
+            if (value.Length == 2)
+                tokens.Add(value.ToLowerInvariant());
+        }
+
+        var lowered = cleanedQuery.ToLowerInvariant();
+        foreach (var stateName in new[]
+                 {
+                     "oregon", "washington", "california", "idaho", "nevada", "utah",
+                     "arizona", "montana", "wyoming", "colorado", "texas", "florida",
+                     "new york", "illinois", "indiana", "ohio"
+                 })
+        {
+            if (lowered.Contains(stateName, StringComparison.Ordinal))
+                tokens.Add(stateName);
+        }
+
+        return tokens.ToList();
+    }
 
     /// <summary>
     /// Uses configured user location for place queries unless the query
@@ -1010,6 +1185,9 @@ public sealed partial class DeepDiveCoordinator
             return userLocationHint;
         }
 
+        if (LooksLikeSelfContainedPlaceQuery(cleanedQuery))
+            return null;
+
         // Check if the query already mentions the configured location
         // (city or state). Split the hint into tokens and check for any
         // significant word (skip short tokens like "WA" -> 2 chars is OK).
@@ -1026,6 +1204,30 @@ public sealed partial class DeepDiveCoordinator
             token.Length >= 2 && queryLower.Contains(token, StringComparison.Ordinal));
 
         return queryAlreadyHasLocation ? null : userLocationHint;
+    }
+
+    private static bool LooksLikeSelfContainedPlaceQuery(string cleanedQuery)
+    {
+        if (string.IsNullOrWhiteSpace(cleanedQuery))
+            return false;
+
+        var tokens = cleanedQuery
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim(',', '.', '?', '!', ':', ';', '"', '\''))
+            .Where(token => token.Length > 1)
+            .ToList();
+
+        if (tokens.Count < 2)
+            return false;
+
+        var genericTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "hours", "reviews", "address", "phone", "website", "open", "closed",
+            "close", "today", "tonight", "tomorrow", "details"
+        };
+
+        var signalTokens = tokens.Count(token => !genericTokens.Contains(token));
+        return signalTokens >= 2;
     }
 
     private static int ParseIntEnv(string key, int fallback, int min, int max)

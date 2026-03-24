@@ -68,7 +68,7 @@ public static class SearchModeRouter
         "more sources", "other sources", "other coverage",
         "related articles", "find more", "other perspectives",
         "different sources", "additional coverage",
-        "more coverage", "other reports"
+        "more coverage", "other reports", "anything else"
     ];
 
     // ── Referential markers (points at prior context) ────────────────
@@ -140,6 +140,13 @@ public static class SearchModeRouter
 
         // Check direct follow-up phrases
         foreach (var phrase in FollowUpPhrases)
+        {
+            if (lowerMessage.Contains(phrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        // "More sources" phrases should always be treated as follow-ups.
+        foreach (var phrase in MoreSourcesPhrases)
         {
             if (lowerMessage.Contains(phrase, StringComparison.Ordinal))
                 return true;

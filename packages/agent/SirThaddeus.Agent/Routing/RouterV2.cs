@@ -61,14 +61,34 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.92);
 
-        if (IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lower))
+        var looksLikeHistoricalKnowledgeAsk =
+            lower.Contains("historical figure", StringComparison.Ordinal) ||
+            (lower.Contains("historical", StringComparison.Ordinal) &&
+             lower.Contains("figure", StringComparison.Ordinal));
+        var looksLikeCurrentInfoLookup =
+            lower.Contains("what happened", StringComparison.Ordinal) ||
+            lower.Contains("news", StringComparison.Ordinal) ||
+            lower.Contains("last week", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal);
+
+        if (IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lower) &&
+            !looksLikeHistoricalKnowledgeAsk)
+        {
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+        }
+
+        if (IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lower) &&
+            !IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower) &&
+            !IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) &&
+            !looksLikeCurrentInfoLookup)
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
 
-        if (IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lower))
-            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+        var strongContinuationPhrase =
+            lower.Contains("anything else", StringComparison.Ordinal) ||
+            lower.Contains("what else", StringComparison.Ordinal);
 
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
-            request is { HasRecentSearchResults: true })
+            (request is { HasRecentSearchResults: true } || strongContinuationPhrase))
         {
             return DefaultRouter.MakeRoute(Intents.LookupSearch, confidence: 0.95, needsWeb: true, needsSearch: true, needsBrowser: true);
         }

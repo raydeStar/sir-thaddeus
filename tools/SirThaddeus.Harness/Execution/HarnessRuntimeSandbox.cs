@@ -56,6 +56,7 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
 
         var sandboxSettings = baseSettings with
         {
+            WebSearch = BuildHarnessWebSearchSettings(baseSettings.WebSearch),
             Memory = baseSettings.Memory with
             {
                 DbPath = Path.Combine(dataDirectory, "memory.db")
@@ -102,6 +103,23 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             auditPath,
             sandboxSettings,
             environment);
+    }
+
+    private static WebSearchSettings BuildHarnessWebSearchSettings(WebSearchSettings baseSettings)
+    {
+        var normalizedMode = (baseSettings.Mode ?? "auto").Trim().ToLowerInvariant();
+        var harnessMode = normalizedMode switch
+        {
+            "auto" => "auto",
+            "searxng" => "searxng",
+            _ => "auto"
+        };
+
+        return baseSettings with
+        {
+            Mode = harnessMode,
+            SearxngAutoStart = true
+        };
     }
 
     public void Dispose()

@@ -146,15 +146,45 @@ if (Test-KnowledgeStoreHarnessNeeded -Arguments $effectiveHarnessArgs) {
     Invoke-WithKnowledgeStoreHarnessSettings {
         # Temporarily allow native command stderr (e.g. SearXNG status messages)
         $prevPref = $ErrorActionPreference
+        $nativePrefVar = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+        $prevNativeStderrPref = if ($null -ne $nativePrefVar) { $nativePrefVar.Value } else { $null }
         $ErrorActionPreference = 'Continue'
-        & dotnet @argsToRun
+        if ($null -ne $nativePrefVar) {
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        & dotnet @argsToRun 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $_.ToString()
+            }
+            else {
+                $_
+            }
+        }
+        if ($null -ne $nativePrefVar) {
+            $PSNativeCommandUseErrorActionPreference = $prevNativeStderrPref
+        }
         $ErrorActionPreference = $prevPref
     }
 }
 else {
     $prevPref = $ErrorActionPreference
+    $nativePrefVar = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $prevNativeStderrPref = if ($null -ne $nativePrefVar) { $nativePrefVar.Value } else { $null }
     $ErrorActionPreference = 'Continue'
-    & dotnet @argsToRun
+    if ($null -ne $nativePrefVar) {
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    & dotnet @argsToRun 2>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+            $_.ToString()
+        }
+        else {
+            $_
+        }
+    }
+    if ($null -ne $nativePrefVar) {
+        $PSNativeCommandUseErrorActionPreference = $prevNativeStderrPref
+    }
     $ErrorActionPreference = $prevPref
 }
 

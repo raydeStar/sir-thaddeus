@@ -63,6 +63,7 @@ public static class DeepDiveWebExtractor
         if (sourceItems is { Count: > 0 })
         {
             businessName = InferBusinessNameFromSources(sourceItems);
+            address = InferAddressFromSources(sourceItems);
         }
 
         foreach (var chunk in textChunks)
@@ -233,6 +234,48 @@ public static class DeepDiveWebExtractor
             .OrderByDescending(g => g.Count())
             .ThenBy(g => g.Key.Length)
             .First().Key;
+    }
+
+    private static string? InferAddressFromSources(IReadOnlyList<SourceItem> sources)
+    {
+        foreach (var source in sources)
+        {
+            if (string.IsNullOrWhiteSpace(source.Title))
+                continue;
+
+            var title = source.Title.Trim();
+            var normalized = title;
+
+            var separators = new[] { " | ", " :: ", " — ", " – ", " - " };
+            foreach (var sep in separators)
+            {
+                var idx = normalized.IndexOf(sep, StringComparison.Ordinal);
+                if (idx > 0)
+                {
+                    normalized = normalized[..idx].Trim();
+                    break;
+                }
+            }
+
+            var firstComma = normalized.IndexOf(',');
+            if (firstComma >= 0 && firstComma + 1 < normalized.Length)
+                normalized = normalized[(firstComma + 1)..].Trim();
+
+            normalized = Regex.Replace(normalized, @",\s*us$", "", RegexOptions.IgnoreCase).Trim();
+
+            var match = Regex.Match(
+                normalized,
+                @"\d{1,6}\s+[^,]+(?:,\s*[^,]+){1,2},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!match.Success)
+                continue;
+
+            var candidate = Regex.Replace(match.Value, @"\s+", " ").Trim().TrimEnd(',', '.');
+            if (candidate.Length > 0)
+                return candidate;
+        }
+
+        return null;
     }
 
     private static string? TryMatchFirst(Regex regex, string input)

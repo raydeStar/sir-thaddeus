@@ -8,7 +8,9 @@ namespace SirThaddeus.WebSearch;
 //
 // Probe/fallback order (auto mode):
 //   1. SearxNG (if configured and available)
-//   2. DuckDuckGo HTML (free fallback)
+//   2. SearchApi (hosted fallback)
+//   3. Google News RSS fallback
+//   4. DuckDuckGo HTML (last resort)
 //
 // Modes:
 //   "auto"        - probe in order, cache availability
@@ -142,7 +144,24 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             diagnostics = [.. result.Diagnostics];
         }
 
-        // Free fallback: DuckDuckGo HTML scraping.
+        if (_searchApiAvailable == true)
+        {
+            var hostedFallback = await _searchApi.SearchAsync(query, options, ct);
+            hostedFallback = AttachSearchDiagnostic(hostedFallback, _searchApi.Name, "search", diagnostics);
+            if (hostedFallback.Results.Count > 0)
+                return hostedFallback;
+
+            diagnostics = [.. hostedFallback.Diagnostics];
+        }
+
+        var googleFallback = await _googleNews.SearchAsync(query, options, ct);
+        googleFallback = AttachSearchDiagnostic(googleFallback, _googleNews.Name, "fallback", diagnostics);
+        if (googleFallback.Results.Count > 0)
+            return googleFallback;
+
+        diagnostics = [.. googleFallback.Diagnostics];
+
+        // Last-resort free fallback.
         var ddgFallback = await _ddg.SearchAsync(query, options, ct);
         return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
     }

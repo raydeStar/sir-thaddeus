@@ -36,8 +36,7 @@ internal static class RouteArbitrationPolicy
         }
 
         if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            webEvidence.ShouldLookup &&
-            webEvidence.Score >= 2.8)
+            webEvidence.ShouldLookup)
         {
             return false;
         }
@@ -107,8 +106,7 @@ internal static class RouteArbitrationPolicy
 
         if (baseRoute.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
             IsLookupFloorEligiblePrompt(lowerIncoming) &&
-            webEvidence.ShouldLookup &&
-            webEvidence.Score >= 2.8)
+            webEvidence.ShouldLookup)
         {
             return true;
         }
@@ -139,7 +137,7 @@ internal static class RouteArbitrationPolicy
         if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
             return Intents.LookupFact;
 
-        if (webEvidence.ShouldLookup && webEvidence.Score >= 2.8)
+        if (webEvidence.ShouldLookup)
             return Intents.LookupFact;
 
         return null;

@@ -231,6 +231,21 @@ public static class UtilityRouter
         "my place", "my city", "my town", "home", "current location"
     };
 
+    // Follow-up phrases that refer to already-discussed weather context,
+    // not literal geocodable places.
+    private static readonly string[] ContextualWeatherReferences =
+    [
+        "this weather",
+        "that weather",
+        "this kind of weather",
+        "that kind of weather",
+        "kind of weather",
+        "these conditions",
+        "those conditions",
+        "these weather conditions",
+        "those weather conditions"
+    ];
+
     /// <summary>
     /// Returns <c>true</c> when <paramref name="place"/> is a pronoun
     /// that should be resolved from the user's profile location.
@@ -247,7 +262,20 @@ public static class UtilityRouter
     {
         if (string.IsNullOrWhiteSpace(userLocationHint))
             return place;
-        return IsProximityPronoun(place) ? userLocationHint.Trim() : place;
+
+        return IsProximityPronoun(place) || IsContextualWeatherReference(place)
+            ? userLocationHint.Trim()
+            : place;
+    }
+
+    internal static bool IsContextualWeatherReference(string? place)
+    {
+        if (string.IsNullOrWhiteSpace(place))
+            return false;
+
+        var normalized = Regex.Replace(place.Trim().ToLowerInvariant(), @"\s+", " ");
+        return ContextualWeatherReferences.Any(phrase =>
+            normalized.Equals(phrase, StringComparison.Ordinal));
     }
 
     /// <summary>

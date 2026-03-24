@@ -118,13 +118,37 @@ public sealed class UnifiedResponseComposer
 
     private static string BuildSocialLead(string originalMessage, IReadOnlyList<string> nonActionable)
     {
-        if (GreetingRegex.IsMatch(originalMessage))
+        if (LooksLikeGreetingOnly(originalMessage))
             return "Hey - thanks for the message.";
 
-        var combined = string.Join(" ", nonActionable);
-        return GreetingRegex.IsMatch(combined)
-            ? "Thanks for the update."
-            : "";
+        return "";
+    }
+
+    private static bool LooksLikeGreetingOnly(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim();
+        if (!GreetingRegex.IsMatch(trimmed))
+            return false;
+
+        var normalized = Regex.Replace(trimmed.ToLowerInvariant(), @"[^a-z\s]", " ");
+        var tokens = normalized
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+
+        if (tokens.Count == 0)
+            return false;
+
+        var greetingTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "hey", "hi", "hello", "yo", "good", "morning", "afternoon", "evening",
+            "how", "are", "you", "whats", "what", "up", "thanks", "thank"
+        };
+
+        var meaningful = tokens.Where(t => !greetingTokens.Contains(t)).ToList();
+        return meaningful.Count == 0;
     }
 
     private static string BuildContextClose(IReadOnlyList<string> nonActionable)

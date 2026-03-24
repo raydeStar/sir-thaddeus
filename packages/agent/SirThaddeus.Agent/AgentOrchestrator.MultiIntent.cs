@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.ConversationSegmentation;
+using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.Tools;
 using SirThaddeus.LlmClient;
 
@@ -34,7 +35,13 @@ public sealed partial class AgentOrchestrator
         List<ToolCallRecord> aggregateToolCalls,
         CancellationToken cancellationToken)
     {
-        var segmentation = _conversationSegmenter.Segment(userMessage);
+        var lowerMessage = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        if (SearchModeRouter.IsFollowUpMessage(lowerMessage) ||
+            lowerMessage.Contains("anything else", StringComparison.Ordinal) ||
+            lowerMessage.Contains("what else", StringComparison.Ordinal))
+            return null;
+
+        var segmentation = _conversationSegmenter.Segment(userMessage ?? string.Empty);
         if (!segmentation.HasActionable)
             return null; // Explicit no-actionable fast path
 
@@ -58,10 +65,19 @@ public sealed partial class AgentOrchestrator
 
         if (!segmentation.HighConfidence)
         {
-            var fallback = await _miniActionableExtractor.TryExtractAsync(
-                userMessage,
-                maxActionables: 2,
-                cancellationToken);
+            IReadOnlyList<ConversationSegment> fallback = [];
+            try
+            {
+                fallback = await _miniActionableExtractor.TryExtractAsync(
+                    userMessage ?? string.Empty,
+                    maxActionables: 2,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                LogEvent("SEGMENTATION_FALLBACK_SKIPPED",
+                    $"reason=mini_extractor_error, error={ex.Message}");
+            }
 
             if (fallback.Count > 0)
             {
@@ -96,7 +112,7 @@ public sealed partial class AgentOrchestrator
 
         var composedText = _unifiedResponseComposer.Compose(new UnifiedResponseComposeRequest
         {
-            OriginalMessage = userMessage,
+            OriginalMessage = userMessage ?? string.Empty,
             NonActionableContext = nonActionableContext,
             Executed = executionPlan.Executed,
             Deferred = executionPlan.Deferred

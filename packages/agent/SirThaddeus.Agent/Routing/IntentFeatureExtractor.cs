@@ -789,6 +789,7 @@ public static class IntentFeatureExtractor
             "list",
             "pull up",
             "give me",
+            "get me",
             "find me",
             "bring me",
             "send me"
@@ -816,6 +817,7 @@ public static class IntentFeatureExtractor
         return lower.Contains("news on ", StringComparison.Ordinal) ||
                lower.Contains("news about ", StringComparison.Ordinal) ||
                lower.Contains("news for ", StringComparison.Ordinal) ||
+             lower.Contains("local news", StringComparison.Ordinal) ||
                lower.Contains("headlines on ", StringComparison.Ordinal) ||
                lower.Contains("headlines about ", StringComparison.Ordinal) ||
                lower.Contains("latest news", StringComparison.Ordinal) ||
@@ -977,6 +979,18 @@ public static class IntentFeatureExtractor
     {
         if (string.IsNullOrWhiteSpace(lower))
             return false;
+
+        if (lower.Contains("knowledge_store", StringComparison.Ordinal) ||
+            lower.Contains("knowledge store", StringComparison.Ordinal) ||
+            lower.Contains("journal_log_entry", StringComparison.Ordinal) ||
+            lower.Contains("read_file", StringComparison.Ordinal) ||
+            lower.Contains("file_list", StringComparison.Ordinal) ||
+            lower.Contains("file_read", StringComparison.Ordinal) ||
+            lower.Contains("tool call", StringComparison.Ordinal) ||
+            lower.Contains("call ", StringComparison.Ordinal) && lower.Contains("tool", StringComparison.Ordinal))
+        {
+            return false;
+        }
 
         // Guard against non-place "open" topics.
         if (lower.Contains("open source", StringComparison.Ordinal))

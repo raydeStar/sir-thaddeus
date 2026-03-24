@@ -1591,8 +1591,44 @@ public class SearchPipelineGoldenTests
         Assert.True(third.Success);
         Assert.Contains("Best fit right now", third.Text, StringComparison.OrdinalIgnoreCase);
 
+        var fourth = await agent.ProcessAsync("Dang, what kinds of things can I do in that weather?");
+        Assert.True(fourth.Success);
+        Assert.Contains("Best fit right now", fourth.Text, StringComparison.OrdinalIgnoreCase);
+
         Assert.DoesNotContain(mcp.Calls,
             c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_WeatherContextualReference_UsesLocationHintInsteadOfLiteralPhrase()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var olympiaGeocode =
+            """{"query":"Olympia, WA","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Olympia, Washington, US","countryCode":"US","isUs":true,"latitude":47.0379,"longitude":-122.9007,"confidence":0.95}]}""";
+        var olympiaForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Olympia, Washington, US","countryCode":"US","isUs":true,"latitude":47.0379,"longitude":-122.9007},"current":{"temperature":30,"unit":"F","condition":"foggy","wind":"2 mph","humidityPercent":92},"daily":[{"date":"2026-02-10","tempHigh":36,"tempLow":26,"avgTemp":31,"unit":"F","condition":"foggy"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => olympiaGeocode,
+            "weather_forecast" => olympiaForecast,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var response = await agent.ProcessAsync("Dang, what kinds of things can I do in that weather?");
+        Assert.True(response.Success);
+        Assert.Contains("Best fit right now", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Olympia", response.Text, StringComparison.OrdinalIgnoreCase);
+
+        var geocodeCall = Assert.Single(mcp.Calls.Where(c =>
+            c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains("\"place\":\"Olympia, WA\"", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("that weather", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

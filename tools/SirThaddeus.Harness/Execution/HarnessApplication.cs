@@ -124,7 +124,8 @@ public sealed class HarnessApplication
                     MinScore = minScore,
                     Passed = passed,
                     Attempts = attempts.Count,
-                    ArtifactDirectory = best.ArtifactDirectory
+                    ArtifactDirectory = best.ArtifactDirectory,
+                    FinalResponse = best.FinalResponse
                 });
             }
 

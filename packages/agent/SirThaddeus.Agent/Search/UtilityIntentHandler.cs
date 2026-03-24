@@ -55,7 +55,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             utilityResult ??= UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
 
         if (utilityResult is null &&
-            !deterministicRouteRequested &&
             request.TryInferWithLlmAsync is not null &&
             ShouldUseLlmUtilityInference(route, message))
         {
@@ -67,7 +66,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             request.LogEvent?.Invoke(
                 "DETERMINISTIC_INLINE_MISS",
                 "Pre-router selected deterministic path, but utility parse failed at execution.");
-            return null;
         }
 
         if (utilityResult is null)
@@ -544,13 +542,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
         // Primary path: broad fallback route.
         if (intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase))
             return true;
-
-        // Secondary path: lookup-routed turns that still read like a
-        // utility request (e.g. flexible weather phrasing). This prevents
-        // accidental web fallback when deterministic utility matching
-        // misses the first pass.
-        if (!OrchestratorMessageHelpers.MightBeUtilityIntent(message))
-            return false;
 
         return intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
                intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase);

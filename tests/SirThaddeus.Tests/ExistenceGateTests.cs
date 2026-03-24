@@ -38,7 +38,7 @@ public class ExistenceGateTests
     }
 
     [Fact]
-    public void ReleasedProductExistenceAnswer_MissingModel_UsesLikelyDoesNotExistWording()
+    public void ReleasedProductExistenceAnswer_MissingModelInGenericLists_UsesUnclearWording()
     {
         var sources = new List<SourceItem>
         {
@@ -57,6 +57,38 @@ public class ExistenceGateTests
                 Domain = "digitaltrends.com",
                 Snippet = "Every iPhone release in chronological order.",
                 SourceId = SourceItem.ComputeSourceId("https://www.digitaltrends.com/phones/every-iphone-release-in-chronological-order/")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does iPhone 99 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.Contains("could not confirm from the returned snippets", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_ExplicitNegativeSignals_UsesLikelyDoesNotExistWording()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://example.com/iphone-99-rumor-roundup",
+                Title = "iPhone 99 rumor roundup",
+                Domain = "example.com",
+                Snippet = "iPhone 99 remains a rumor concept and was not released.",
+                SourceId = SourceItem.ComputeSourceId("https://example.com/iphone-99-rumor-roundup")
+            },
+            new()
+            {
+                Url = "https://example.net/is-iphone-99-real",
+                Title = "Is iPhone 99 real?",
+                Domain = "example.net",
+                Snippet = "There is no such released model; it is an unreleased rumor.",
+                SourceId = SourceItem.ComputeSourceId("https://example.net/is-iphone-99-real")
             }
         };
 

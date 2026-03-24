@@ -797,7 +797,16 @@ public sealed partial class AgentOrchestrator
 
         if (string.IsNullOrWhiteSpace(timeBrief))
         {
-            timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
+            if (string.Equals(geo.CountryCode, "JP", StringComparison.OrdinalIgnoreCase))
+            {
+                var tokyoNow = DateTime.UtcNow.AddHours(9);
+                var formatted = tokyoNow.ToString("h:mm tt on dddd, MMM d");
+                timeBrief = $"It's currently **{formatted}** in {geo.Name} (**UTC+9**).";
+            }
+            else
+            {
+                timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
@@ -1365,6 +1374,30 @@ public sealed partial class AgentOrchestrator
         return true;
     }
 
+    private static bool TryBuildExplicitKnowledgeStoreListRootsArgs(
+        string message,
+        out string argsJson)
+    {
+        argsJson = "{}";
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.Trim().ToLowerInvariant();
+        var explicitToolCall = lower.Contains("knowledge_store_list_roots", StringComparison.Ordinal);
+        var naturalLanguageRootsRequest =
+            lower.Contains("list", StringComparison.Ordinal) &&
+            lower.Contains("root", StringComparison.Ordinal) &&
+            (lower.Contains("knowledge store", StringComparison.Ordinal) ||
+             lower.Contains("knowledge-store", StringComparison.Ordinal));
+
+        if (!explicitToolCall && !naturalLanguageRootsRequest)
+            return false;
+
+        argsJson = "{}";
+        return true;
+    }
+
     private async Task<AgentResponse> ExecuteExplicitFileReadAsync(
         string fileReadArgsJson,
         string? explicitPath,
@@ -1701,6 +1734,112 @@ public sealed partial class AgentOrchestrator
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = roundTrips
         };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreListRootsAsync(
+        string argsJson,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mcp.CallToolAsync(
+            "knowledge_store_list_roots",
+            argsJson,
+            cancellationToken);
+
+        var success = TryParseKnowledgeStoreToolResult(
+            result,
+            out var message,
+            out _,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_list_roots",
+            Arguments = argsJson,
+            Result = result,
+            Success = success
+        });
+
+        string responseText;
+        if (!success)
+        {
+            responseText = string.IsNullOrWhiteSpace(message)
+                ? "I couldn't list the configured knowledge-store roots right now."
+                : $"I couldn't list the configured knowledge-store roots right now: {message}";
+        }
+        else if (TryExtractKnowledgeStoreRootSummary(result, out var rootId, out var displayName))
+        {
+            responseText =
+                $"Configured knowledge-store root id: {rootId}. Display name: {displayName}.";
+        }
+        else
+        {
+            responseText = "I listed the configured knowledge-store roots successfully.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private static bool TryExtractKnowledgeStoreRootSummary(
+        string? resultJson,
+        out string rootId,
+        out string displayName)
+    {
+        rootId = string.Empty;
+        displayName = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            if (!root.TryGetProperty("roots", out var roots) ||
+                roots.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var item in roots.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var candidateId = item.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                    ? idEl.GetString()
+                    : null;
+                var candidateDisplay = item.TryGetProperty("display_name", out var displayEl) && displayEl.ValueKind == JsonValueKind.String
+                    ? displayEl.GetString()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(candidateId) || string.IsNullOrWhiteSpace(candidateDisplay))
+                    continue;
+
+                rootId = candidateId.Trim();
+                displayName = candidateDisplay.Trim();
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryParseKnowledgeStoreToolResult(

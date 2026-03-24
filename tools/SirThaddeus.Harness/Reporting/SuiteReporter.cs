@@ -28,6 +28,7 @@ public static class SuiteReporter
         public required bool Passed { get; init; }
         public required int Attempts { get; init; }
         public string? ArtifactDirectory { get; init; }
+        public string? FinalResponse { get; init; }
     }
 
     public sealed record ReportContext
@@ -106,6 +107,14 @@ public static class SuiteReporter
                 WriteBoxContent(test.TestId);
                 WriteBoxContent(new string('┄', Math.Min(test.TestId.Length + 4, BoxWidth - 4)));
                 PrintScoreBreakdown(test.Score);
+
+                var preview = BuildResponsePreview(test.FinalResponse);
+                if (!string.IsNullOrWhiteSpace(preview))
+                {
+                    WriteBoxContent("Response preview:");
+                    foreach (var line in WrapForBox(preview, BoxWidth - 6))
+                        WriteBoxContent($"  {line}");
+                }
             }
 
             Console.WriteLine("│".PadRight(BoxWidth + 1) + "│");
@@ -161,6 +170,7 @@ public static class SuiteReporter
                 passed = r.Passed,
                 hard_pass = r.Score.HardPass,
                 attempts = r.Attempts,
+                final_response = r.FinalResponse,
                 breakdown = new
                 {
                     keyword_penalty = r.Score.KeywordPenalty,
@@ -283,7 +293,11 @@ public static class SuiteReporter
         else if (!test.Passed && sc.DeflectionPhraseCount > 0)
             lines.Add("→ Agent deflected without providing a real answer.");
 
-        return lines.Take(4).ToList();
+        var inlinePreview = BuildInlineResponsePreview(test.FinalResponse, 140);
+        if (!string.IsNullOrWhiteSpace(inlinePreview))
+            lines.Add($"Response: {inlinePreview}");
+
+        return lines.Take(5).ToList();
     }
 
     // ── Score breakdown for failed tests ──────────────────────
@@ -317,6 +331,57 @@ public static class SuiteReporter
         WriteBreakdownRow("Final Score",
             $"{sc.FinalScore:F1}",
             $"(min_score: applied externally)");
+    }
+
+    private static string BuildResponsePreview(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Replace('\n', ' ')
+            .Trim();
+
+        if (normalized.Length <= 360)
+            return normalized;
+
+        return normalized[..360].TrimEnd() + "…";
+    }
+
+    private static string BuildInlineResponsePreview(string? text, int maxLength)
+    {
+        var preview = BuildResponsePreview(text);
+        if (string.IsNullOrWhiteSpace(preview))
+            return "";
+
+        if (preview.Length <= maxLength)
+            return preview;
+
+        return preview[..maxLength].TrimEnd() + "…";
+    }
+
+    private static IEnumerable<string> WrapForBox(string text, int width)
+    {
+        if (string.IsNullOrWhiteSpace(text) || width < 8)
+            yield break;
+
+        var remaining = text.Trim();
+        while (remaining.Length > width)
+        {
+            var breakAt = remaining.LastIndexOf(' ', width);
+            if (breakAt <= 0)
+                breakAt = width;
+
+            var line = remaining[..breakAt].TrimEnd();
+            if (line.Length > 0)
+                yield return line;
+
+            remaining = remaining[breakAt..].TrimStart();
+        }
+
+        if (remaining.Length > 0)
+            yield return remaining;
     }
 
     private static void WriteBreakdownRow(string label, string value, string detail)

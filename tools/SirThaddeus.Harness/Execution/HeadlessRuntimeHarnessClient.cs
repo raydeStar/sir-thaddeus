@@ -321,8 +321,8 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
                 var success = entry.Message.Contains("(ok)", StringComparison.OrdinalIgnoreCase);
 
                 starts.TryGetValue(requestId ?? string.Empty, out var start);
-                var toolName = start.ToolName ?? "unknown";
-                var arguments = start.Arguments ?? "{}";
+                var toolName = start.ToolName ?? GetString(meta, "tool_name_canonical") ?? "unknown";
+                var arguments = start.Arguments ?? GetString(meta, "input_summary") ?? "{}";
                 var resultText = success ? outputSummary : (errorMessage ?? outputSummary);
 
                 toolCalls.Add(new ToolCallRecord

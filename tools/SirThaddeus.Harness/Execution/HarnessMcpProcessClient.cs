@@ -202,7 +202,8 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
 
         // Mirror desktop runtime MCP environment wiring so harness live mode
         // exercises the same provider stack and budgets.
-        var webModeRaw = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
+        var effectiveWebSearch = BuildHarnessWebSearchSettings(settings.WebSearch);
+        var webModeRaw = (effectiveWebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
         var webMode = webModeRaw switch
         {
             "api" => "search_api",
@@ -211,19 +212,19 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
             _ => "auto"
         };
         env["WEBSEARCH_MODE"] = webMode;
-        env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(settings.WebSearch.SearxngBaseUrl)
+        env["WEBSEARCH_SEARXNG_URL"] = string.IsNullOrWhiteSpace(effectiveWebSearch.SearxngBaseUrl)
             ? "http://localhost:8080"
-            : settings.WebSearch.SearxngBaseUrl.Trim();
-        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiProvider))
-            env["WEBSEARCH_API_PROVIDER"] = settings.WebSearch.SearchApiProvider.Trim();
-        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiKey))
-            env["WEBSEARCH_API_KEY"] = settings.WebSearch.SearchApiKey.Trim();
-        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiBaseUrl))
-            env["WEBSEARCH_API_BASE_URL"] = settings.WebSearch.SearchApiBaseUrl.Trim();
-        if (!string.IsNullOrWhiteSpace(settings.WebSearch.SearchApiEngine))
-            env["WEBSEARCH_API_ENGINE"] = settings.WebSearch.SearchApiEngine.Trim();
-        env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(settings.WebSearch.TimeoutMs, 2_000, 30_000).ToString();
-        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(settings.WebSearch.MaxResults, 1, 10).ToString();
+            : effectiveWebSearch.SearxngBaseUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(effectiveWebSearch.SearchApiProvider))
+            env["WEBSEARCH_API_PROVIDER"] = effectiveWebSearch.SearchApiProvider.Trim();
+        if (!string.IsNullOrWhiteSpace(effectiveWebSearch.SearchApiKey))
+            env["WEBSEARCH_API_KEY"] = effectiveWebSearch.SearchApiKey.Trim();
+        if (!string.IsNullOrWhiteSpace(effectiveWebSearch.SearchApiBaseUrl))
+            env["WEBSEARCH_API_BASE_URL"] = effectiveWebSearch.SearchApiBaseUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(effectiveWebSearch.SearchApiEngine))
+            env["WEBSEARCH_API_ENGINE"] = effectiveWebSearch.SearchApiEngine.Trim();
+        env["WEBSEARCH_TIMEOUT_MS"] = Math.Clamp(effectiveWebSearch.TimeoutMs, 2_000, 30_000).ToString();
+        env["WEBSEARCH_MAX_RESULTS"] = Math.Clamp(effectiveWebSearch.MaxResults, 1, 10).ToString();
 
         env["ST_WEATHER_PROVIDER_MODE"] = settings.Weather.ProviderMode;
         env["ST_WEATHER_FORECAST_CACHE_MINUTES"] =
@@ -253,6 +254,23 @@ public sealed class HarnessMcpProcessClient : IAsyncDisposable
             : settings.DeepDive.DefaultLocale.Trim();
 
         return env;
+    }
+
+    private static WebSearchSettings BuildHarnessWebSearchSettings(WebSearchSettings baseSettings)
+    {
+        var normalizedMode = (baseSettings.Mode ?? "auto").Trim().ToLowerInvariant();
+        var harnessMode = normalizedMode switch
+        {
+            "auto" => "auto",
+            "searxng" => "searxng",
+            _ => "auto"
+        };
+
+        return baseSettings with
+        {
+            Mode = harnessMode,
+            SearxngAutoStart = true
+        };
     }
 
     private static string ResolveMemoryDbPath(string dbPath)

@@ -519,13 +519,13 @@ public sealed partial class SearchOrchestrator
         var text = isLocalNewsRequest switch
         {
             true when !string.IsNullOrWhiteSpace(locationHint) =>
-                $"Web search returned no usable live local news results for {locationHint} right now. " +
+                $"I couldn't find usable live local news results for {locationHint} right now. " +
                 "Try asking for state news, naming a local outlet, or narrowing it to a topic like schools, crime, politics, or weather.",
             true =>
-                "Web search returned no usable live local news results for that request right now. " +
+                "I couldn't find usable live local news results for that request right now. " +
                 "Try including a city, naming a local outlet, or setting your location in Settings and trying again.",
             _ =>
-                "Web search returned no usable live news results for that request right now. " +
+                "I couldn't find usable live news results for that request right now. " +
                 "Try narrowing it to a topic, place, or timeframe."
         };
 
@@ -541,7 +541,7 @@ public sealed partial class SearchOrchestrator
     private static bool IsLocalBusinessNoResultsRequest(string userMessage)
     {
         var lower = (userMessage ?? "").Trim().ToLowerInvariant();
-        return
+        var hasBusinessCategory =
             lower.Contains("deli", StringComparison.Ordinal) ||
             lower.Contains("delis", StringComparison.Ordinal) ||
             lower.Contains("delicatessen", StringComparison.Ordinal) ||
@@ -568,9 +568,25 @@ public sealed partial class SearchOrchestrator
             lower.Contains("park", StringComparison.Ordinal) ||
             lower.Contains("parks", StringComparison.Ordinal) ||
             lower.Contains("dentist", StringComparison.Ordinal) ||
-            lower.Contains("clinic", StringComparison.Ordinal) ||
-            lower.Contains("open", StringComparison.Ordinal) ||
-            lower.Contains("hours", StringComparison.Ordinal);
+            lower.Contains("clinic", StringComparison.Ordinal);
+
+        if (hasBusinessCategory)
+            return true;
+
+        var hasBusinessContext =
+            lower.Contains("near me", StringComparison.Ordinal) ||
+            lower.Contains("nearby", StringComparison.Ordinal) ||
+            lower.Contains("in ", StringComparison.Ordinal) ||
+            lower.Contains("open now", StringComparison.Ordinal) ||
+            lower.Contains("business hours", StringComparison.Ordinal) ||
+            lower.Contains("hours for", StringComparison.Ordinal) ||
+            lower.Contains("where can i", StringComparison.Ordinal) ||
+            lower.Contains("find me", StringComparison.Ordinal) ||
+            lower.Contains("recommend", StringComparison.Ordinal);
+
+        return hasBusinessContext &&
+               (lower.Contains("open", StringComparison.Ordinal) ||
+                lower.Contains("hours", StringComparison.Ordinal));
     }
 
     // ── Enriched Local Business Discovery ────────────────────────────
@@ -777,28 +793,9 @@ public sealed partial class SearchOrchestrator
 
         if (businesses.Count < LocalBusinessMinimumDisplayResults)
         {
-            var supplementalNames = await FetchSupplementalLocalBusinessNamesAsync(
-                userMessage,
-                responseLocation,
-                businesses.Select(b => b.Name),
-                toolCallsMade,
-                ct);
-
-            foreach (var name in supplementalNames)
-            {
-                businesses.Add(new EnrichedBusiness(
-                    name,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null));
-
-                if (businesses.Count >= LocalBusinessTargetResults)
-                    break;
-            }
+            // Keep Open Places responses deterministic and tool-local.
+            // Avoid triggering web_search supplementation when we already
+            // have nearby structured place matches.
         }
 
         var includesSupplementalSpots = businesses.Any(biz =>
@@ -1367,39 +1364,63 @@ public sealed partial class SearchOrchestrator
         }
 
         if (enriched.Count == 0)
-            return null;
-
-        if (enriched.Count < LocalBusinessMinimumDisplayResults)
         {
-            var supplementalNames = await FetchSupplementalLocalBusinessNamesAsync(
-                userMessage,
-                location,
-                enriched.Select(b => b.Name),
-                toolCallsMade,
-                ct);
-
-            foreach (var name in supplementalNames)
+            var actionableConfigMessage = TryBuildPlacesConfigErrorMessage(toolCallsMade);
+            if (!string.IsNullOrWhiteSpace(actionableConfigMessage))
             {
-                enriched.Add(new EnrichedBusiness(
-                    name,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null));
-
-                if (enriched.Count >= LocalBusinessTargetResults)
-                    break;
+                return new AgentResponse
+                {
+                    Text = actionableConfigMessage,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade.ToList(),
+                    LlmRoundTrips = 0
+                };
             }
+
+            return null;
         }
 
-        var includesSupplementalSpots = enriched.Any(biz =>
-            string.IsNullOrWhiteSpace(biz.Address) &&
-            !string.IsNullOrWhiteSpace(biz.Name));
+        var sourceItems = enriched
+            .Where(b => !string.IsNullOrWhiteSpace(b.Name))
+            .Select(b => new SourceItem
+            {
+                SourceId = SourceItem.ComputeSourceId($"direct-place::{b.Name}"),
+                Url = string.IsNullOrWhiteSpace(b.Website) ? $"about:places/{Uri.EscapeDataString(b.Name)}" : b.Website!,
+                Title = b.Name,
+                Domain = "places_lookup",
+                Snippet = b.Address ?? ""
+            })
+            .ToList();
 
-        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots);
+        Session.RecordSearchResults(
+            SearchMode.WebFactFind,
+            userMessage,
+            "any",
+            sourceItems,
+            DateTimeOffset.UtcNow);
+        Session.LastWasLocalBusinessDiscovery = true;
+        Session.RecordLocalBusinessCandidates(label, sourceItems);
+
+        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots: false);
+    }
+
+    private static string? TryBuildPlacesConfigErrorMessage(IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var placesFailure = toolCallsMade.LastOrDefault(call =>
+            call.ToolName.Contains("places", StringComparison.OrdinalIgnoreCase) &&
+            !call.Success);
+        if (placesFailure is null)
+            return null;
+
+        var result = placesFailure.Result ?? "";
+        if (!result.Contains("Places provider unavailable", StringComparison.OrdinalIgnoreCase) &&
+            !result.Contains("API key", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return "I couldn't retrieve verified local business listings right now. " +
+               "If you share a nearby neighborhood or major street, I can retry with tighter local queries.";
     }
 
     private static EnrichedBusiness? ParsePlaceLookupResult(string json)

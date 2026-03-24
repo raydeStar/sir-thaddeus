@@ -64,18 +64,18 @@ public sealed partial class SearchOrchestrator
             var yearClause = year is null ? string.Empty : $" with a {year} introduction/release year";
 
             return
-                    $"Yes — {subject} does exist as a released product{yearClause}. " +
-                    $"The sources include official or catalog-style references that place {subject} in Apple's released iPhone lineup.";
+                    $"I could not verify definitive proof from a full official release database in this step, " +
+                    $"but the available sources indicate {subject} exists as a released product{yearClause}.";
         }
 
         var negativeEvidence = subjectMatches
             .Where(source => HasReleasedProductNegativeSignal(source))
             .ToList();
 
-        if (negativeEvidence.Count > 0)
+        if (negativeEvidence.Count > 0 && negativeEvidence.Count == subjectMatches.Count)
         {
             return
-                $"Based on the available release lists, {subject} does not appear to exist as a released product. " +
+                $"Based on the available release lists, {subject} likely does not exist as a released product. " +
                 $"The returned sources include negative indicators (for example unreleased/rumor language) rather than official released-model references.";
         }
 
@@ -106,7 +106,7 @@ public sealed partial class SearchOrchestrator
                 "Keep the answer to one or two sentences. " +
                 "Do not mention web search, tool limitations, or data access. " +
                 "Do not fabricate URLs, citations, or links."),
-            ChatMessage.User(userMessage)
+            ChatMessage.User(userMessage ?? string.Empty)
         };
 
         try
@@ -161,6 +161,102 @@ public sealed partial class SearchOrchestrator
             });
             return null;
         }
+    }
+
+    private async Task<AgentResponse?> TryBuildMediaInstallmentOfflineReasoningResponseAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var parsed = TryParseSeasonEpisode(userMessage ?? string.Empty);
+        if (parsed is null)
+            return null;
+
+        var (entity, season, episode) = parsed.Value;
+        if (string.IsNullOrWhiteSpace(entity))
+            return null;
+
+        var fallbackText =
+            $"I could not verify an official Season {season} Episode {episode} release for {entity} from the current evidence, so I should not invent a plot summary.";
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You are answering whether a requested TV, streaming, or media installment exists. " +
+                "If the requested season or episode does not exist because the series ended, was canceled, or was never made, say that directly. " +
+                "Do not invent plots, scenes, or episode summaries. " +
+                "Keep the answer to one or two sentences. " +
+                "Use plain factual wording and do not mention tool limitations."),
+            ChatMessage.User(userMessage ?? string.Empty)
+        };
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await _llm.ChatAsync(
+                messages,
+                tools: null,
+                maxTokensOverride: 220,
+                cts.Token);
+
+            var answer = (response.Content ?? string.Empty).Trim();
+            answer = Regex.Replace(answer, @"https?://\S+", string.Empty).Trim();
+            answer = Regex.Replace(answer, @"www\.\S+", string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(answer))
+                answer = fallbackText;
+
+            if (LooksLikeFabricatedMediaPlot(answer) || !LooksLikeMediaExistenceAnswer(answer))
+                answer = fallbackText;
+
+            return new AgentResponse
+            {
+                Text = answer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 1
+            };
+        }
+        catch
+        {
+            return new AgentResponse
+            {
+                Text = fallbackText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+    }
+
+    private static bool LooksLikeMediaExistenceAnswer(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+            return false;
+
+        var lower = answer.ToLowerInvariant();
+        return lower.Contains("does not exist", StringComparison.Ordinal) ||
+               lower.Contains("doesn't exist", StringComparison.Ordinal) ||
+               lower.Contains("was canceled", StringComparison.Ordinal) ||
+               lower.Contains("was cancelled", StringComparison.Ordinal) ||
+               lower.Contains("never released", StringComparison.Ordinal) ||
+               lower.Contains("never made", StringComparison.Ordinal) ||
+               lower.Contains("not verify", StringComparison.Ordinal) ||
+               lower.Contains("no official", StringComparison.Ordinal) ||
+               lower.Contains("ended before", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeFabricatedMediaPlot(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+            return false;
+
+        var lower = answer.ToLowerInvariant();
+        return answer.Length > 320 ||
+               lower.Contains("the plot", StringComparison.Ordinal) ||
+               lower.Contains("the episode follows", StringComparison.Ordinal) ||
+               lower.Contains("the story follows", StringComparison.Ordinal) ||
+               lower.Contains("the season concludes", StringComparison.Ordinal);
     }
 
     private AgentResponse? TryBuildExistenceGuardedResponse(

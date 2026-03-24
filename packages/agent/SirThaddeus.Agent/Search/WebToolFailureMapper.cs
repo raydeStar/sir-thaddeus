@@ -15,6 +15,9 @@ internal static class WebToolFailureMapper
         if (!TryParseStructuredError(toolResult, out var code, out var message))
             return null;
 
+        if (ContainsUnavailable(code) || ContainsUnavailable(message))
+            return null;
+
         var text = BuildMessage(code, message);
         return new AgentResponse
         {
@@ -42,12 +45,6 @@ internal static class WebToolFailureMapper
         if (ContainsPolicyBlock(code) || ContainsPolicyBlock(message))
         {
             return "Web search was blocked by the current tool policy for this run.";
-        }
-
-        if (ContainsUnavailable(code) || ContainsUnavailable(message))
-        {
-            return "The web search tool is currently unavailable. " +
-                   "Please verify MCP server connectivity and try again.";
         }
 
         return "Web search failed before returning results. Please retry in a moment.";
