@@ -460,12 +460,19 @@ public sealed partial class SearchOrchestrator
     private static bool HasReleasedProductPositiveSignal(SourceItem source)
     {
         var text = $"{source.Title} {source.Snippet}";
-        return text.Contains("year introduced", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("released", StringComparison.OrdinalIgnoreCase) ||
+         var isOfficialDomain = source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
+                       source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+         var hasNegativeReleaseCue = text.Contains("not released", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("unreleased", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("no such", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("rumor", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("rumour", StringComparison.OrdinalIgnoreCase);
+
+         return text.Contains("year introduced", StringComparison.OrdinalIgnoreCase) ||
+             (!hasNegativeReleaseCue && text.Contains("released", StringComparison.OrdinalIgnoreCase)) ||
                text.Contains("available now", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("in production", StringComparison.OrdinalIgnoreCase) ||
-               source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
-               source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+             isOfficialDomain;
     }
 
     private static bool HasReleasedProductNegativeSignal(SourceItem source)

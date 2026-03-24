@@ -63,7 +63,7 @@ internal static partial class OfflineWebReasoningResponder
                 answer = EnsureSearchTokenIfWebFallback(
                     BuildDeterministicFallback(userMessage, memoryPackText),
                     toolCallsMade);
-            var finalText = Truncate(answer.Trim(), 2200);
+            var finalText = BuildFinalText(answer, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
 
             return new AgentResponse
             {
@@ -79,7 +79,7 @@ internal static partial class OfflineWebReasoningResponder
                 BuildDeterministicFallback(userMessage, memoryPackText),
                 memoryPackText);
             fallback = EnsureSearchTokenIfWebFallback(fallback, toolCallsMade);
-            var finalText = Truncate(fallback.Trim(), 2200);
+            var finalText = BuildFinalText(fallback, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
 
             return new AgentResponse
             {
@@ -148,6 +148,35 @@ internal static partial class OfflineWebReasoningResponder
 
         return $"Live web lookup is unavailable right now ({reason}). " +
                "Here is a best-effort answer from built-in reasoning:";
+    }
+
+    private static string BuildFinalText(
+        string answer,
+        string userMessage,
+        string failureReason,
+        bool isLocalBusinessRequest,
+        bool isLocalNewsRequest,
+        bool isMediaInstallmentRequest,
+        bool strictFormat)
+    {
+        var trimmed = Truncate((answer ?? string.Empty).Trim(), 2200);
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return trimmed;
+
+        var shouldPrefix = !strictFormat &&
+                           !isLocalBusinessRequest &&
+                           !isLocalNewsRequest &&
+                           !isMediaInstallmentRequest &&
+                           !string.IsNullOrWhiteSpace(failureReason);
+
+        if (!shouldPrefix)
+            return trimmed;
+
+        var prefix = BuildPrefix(failureReason);
+        if (trimmed.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+            return trimmed;
+
+        return Truncate($"{prefix}\n\n{trimmed}", 2200);
     }
 
     private static string BuildDeterministicFallback(string userMessage, string memoryPackText = "")

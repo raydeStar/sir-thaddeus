@@ -1408,7 +1408,7 @@ public sealed partial class SearchOrchestrator
     {
         var placesFailure = toolCallsMade.LastOrDefault(call =>
             call.ToolName.Contains("places", StringComparison.OrdinalIgnoreCase) &&
-            !call.Success);
+            (!call.Success || (call.Result ?? string.Empty).Contains("API key", StringComparison.OrdinalIgnoreCase)));
         if (placesFailure is null)
             return null;
 
@@ -1419,8 +1419,8 @@ public sealed partial class SearchOrchestrator
             return null;
         }
 
-        return "I couldn't retrieve verified local business listings right now. " +
-               "If you share a nearby neighborhood or major street, I can retry with tighter local queries.";
+        return "Google Places provider is missing an API key. " +
+               "Set ST_DEEPDIVE_PLACES_API_KEY and retry, or share a nearby neighborhood, ZIP code, or major street so I can rerun a tighter local recommendation pass.";
     }
 
     private static EnrichedBusiness? ParsePlaceLookupResult(string json)

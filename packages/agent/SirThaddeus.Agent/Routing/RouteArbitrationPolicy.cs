@@ -35,12 +35,6 @@ internal static class RouteArbitrationPolicy
             return false;
         }
 
-        if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            webEvidence.ShouldLookup)
-        {
-            return false;
-        }
-
         if (route.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) &&
             SearchModeRouter.IsFollowUpMessage(lowerIncoming))
         {

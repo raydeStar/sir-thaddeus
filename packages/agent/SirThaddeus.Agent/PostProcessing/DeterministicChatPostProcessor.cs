@@ -235,8 +235,8 @@ public sealed class DeterministicChatPostProcessor
 
             sanitized = PresentationFormatter.Apply(
                 sanitized,
-                presentationOptions with { IncludeSignatureNote = false });
-            return StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized));
+                presentationOptions with { IncludeSignatureNote = true });
+            return StripEmptyListMarkerLines(sanitized);
         }
 
         // Code-heavy and numeric-heavy output: allow whitespace normalization

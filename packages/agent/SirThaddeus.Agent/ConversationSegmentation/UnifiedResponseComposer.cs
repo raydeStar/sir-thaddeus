@@ -121,6 +121,10 @@ public sealed class UnifiedResponseComposer
         if (LooksLikeGreetingOnly(originalMessage))
             return "Hey - thanks for the message.";
 
+        var combined = string.Join(" ", new[] { originalMessage }.Concat(nonActionable));
+        if (GreetingRegex.IsMatch(combined))
+            return "Thanks for the message.";
+
         return "";
     }
 

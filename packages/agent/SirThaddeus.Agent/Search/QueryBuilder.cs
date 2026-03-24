@@ -607,34 +607,6 @@ public sealed partial class QueryBuilder
             };
         }
 
-        if (mode == SearchMode.NewsAggregate)
-        {
-            var query = BuildDirectNewsQuery(userMessage, entity);
-            if (!string.IsNullOrWhiteSpace(query))
-            {
-                return new SearchQuery
-                {
-                    Query = query,
-                    Recency = DetectRecencyFromMessage(userMessage),
-                    UsedFallback = false
-                };
-            }
-        }
-
-        if (mode == SearchMode.WebFactFind)
-        {
-            var query = BuildDirectFactFindQuery(userMessage, entity, session);
-            if (!string.IsNullOrWhiteSpace(query) && ValidateQuery(query, userMessage, entity))
-            {
-                return new SearchQuery
-                {
-                    Query = query,
-                    Recency = "any",
-                    UsedFallback = false
-                };
-            }
-        }
-
         return null;
     }
 

@@ -3767,8 +3767,9 @@ public sealed partial class SearchOrchestrator
                 ? $"{label} in {locationSnippet}"
                 : label;
 
-                 text = $"I don’t have a reliable shortlist for {context} yet from the returned pages. " +
-                     "Share a nearby neighborhood, ZIP code, or major street and I’ll rerun a tighter local recommendation pass.";
+            text = $"I could not retrieve live local business results for {context} from the returned pages. " +
+                   $"I don’t have a reliable shortlist for {context} yet. " +
+                   "Share a nearby neighborhood, ZIP code, or major street and I’ll rerun a tighter local recommendation pass.";
         }
         else
         {
@@ -3800,8 +3801,8 @@ public sealed partial class SearchOrchestrator
                 result.Contains("API key not set", StringComparison.OrdinalIgnoreCase) ||
                 result.Contains("Places provider unavailable", StringComparison.OrdinalIgnoreCase))
             {
-                  return "I don’t have a reliable verified shortlist yet from the current provider response. " +
-                      "If you share a nearby neighborhood, ZIP code, or major street, I can rerun a tighter local recommendation pass.";
+                return "Google Places provider is missing an API key. " +
+                       "Set ST_DEEPDIVE_PLACES_API_KEY and retry, or share a nearby neighborhood, ZIP code, or major street so I can rerun a tighter local recommendation pass.";
             }
         }
 
