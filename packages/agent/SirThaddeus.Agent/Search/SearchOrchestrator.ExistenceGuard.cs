@@ -1,19 +1,32 @@
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Search;
 
 public sealed partial class SearchOrchestrator
 {
-    private AgentResponse? TryBuildReleasedProductExistenceResponse(
+    private async Task<AgentResponse?> TryBuildReleasedProductExistenceResponseAsync(
         string userMessage,
         IReadOnlyList<SourceItem> sources,
-        List<ToolCallRecord> toolCallsMade)
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
     {
         var text = BuildReleasedProductExistenceAnswer(userMessage, sources);
         if (string.IsNullOrWhiteSpace(text))
             return null;
+
+        if (text.Contains("I could not confirm from the returned snippets", StringComparison.OrdinalIgnoreCase))
+        {
+            var offline = await TryBuildExistenceOfflineReasoningResponseAsync(userMessage, toolCallsMade, ct);
+            if (offline is not null)
+                return offline;
+
+            // If offline reasoning is unavailable, return null so downstream
+            // synthesis can still attempt to answer from retrieved sources.
+            return null;
+        }
 
         return new AgentResponse
         {
@@ -36,10 +49,9 @@ public sealed partial class SearchOrchestrator
             return null;
 
         var subject = ExtractReleasedProductExistenceSubject(userMessage ?? string.Empty);
+        var subjectTokens = BuildSubjectTokens(subject);
         var subjectMatches = sources
-            .Where(source =>
-                ($"{source.Title} {source.Snippet}")
-                .Contains(subject, StringComparison.OrdinalIgnoreCase))
+            .Where(source => SourceMentionsSubject(source, subject, subjectTokens))
             .ToList();
 
         var positiveEvidence = subjectMatches
@@ -52,13 +64,199 @@ public sealed partial class SearchOrchestrator
             var yearClause = year is null ? string.Empty : $" with a {year} introduction/release year";
 
             return
-                $"I could not verify definitive proof from the provided search results alone, but the available evidence strongly indicates {subject} exists as a released product. " +
-                $"The returned sources include official or catalog-style references to {subject}{yearClause} and place it in Apple's released iPhone lineup.";
+                    $"I could not verify definitive proof from a full official release database in this step, " +
+                    $"but the available sources indicate {subject} exists as a released product{yearClause}.";
+        }
+
+        var negativeEvidence = subjectMatches
+            .Where(source => HasReleasedProductNegativeSignal(source))
+            .ToList();
+
+        if (negativeEvidence.Count > 0 && negativeEvidence.Count == subjectMatches.Count)
+        {
+            return
+                $"Based on the available release lists, {subject} likely does not exist as a released product. " +
+                $"The returned sources include negative indicators (for example unreleased/rumor language) rather than official released-model references.";
         }
 
         return
-            $"Based on the available release lists, {subject} likely does not exist as a released product. " +
-            $"The returned sources enumerate Apple's iPhone lineup and release timelines, but none identify {subject} as an official released model.";
+            $"I could not confirm from the returned snippets whether {subject} is a released product. " +
+            "If you want, I can run a tighter follow-up query focused on official release pages.";
+    }
+
+    private async Task<AgentResponse?> TryBuildExistenceOfflineReasoningResponseAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        if (!IntentFeatureExtractor.LooksLikeReleasedProductExistenceLookup(lower))
+            return null;
+
+        var subject = ExtractReleasedProductExistenceSubject(userMessage ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(subject))
+            return null;
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You are answering a factual existence question about a consumer product. " +
+                "Use your training data to determine whether the product has been officially released. " +
+                "Start your answer with \"Yes\" or \"No\" followed by an em dash (\u2014) and a brief factual statement. " +
+                "Keep the answer to one or two sentences. " +
+                "Do not mention web search, tool limitations, or data access. " +
+                "Do not fabricate URLs, citations, or links."),
+            ChatMessage.User(userMessage ?? string.Empty)
+        };
+
+        try
+        {
+            // Use a fresh timeout rather than the pipeline's token, which
+            // may already be cancelled from earlier web-search failures.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await _llm.ChatAsync(
+                messages,
+                tools: null,
+                maxTokensOverride: 256,
+                cts.Token);
+
+            var answer = (response.Content ?? "").Trim();
+            answer = Regex.Replace(answer, @"https?://\S+", "").Trim();
+            answer = Regex.Replace(answer, @"www\.\S+", "").Trim();
+
+            if (string.IsNullOrWhiteSpace(answer))
+                return null;
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "EXISTENCE_OFFLINE_REASONING",
+                Result = "llm_answered",
+                Details = new Dictionary<string, object>
+                {
+                    ["subject"] = subject
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = answer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 1
+            };
+        }
+        catch (Exception ex)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "EXISTENCE_OFFLINE_REASONING",
+                Result = "llm_call_failed",
+                Details = new Dictionary<string, object>
+                {
+                    ["subject"] = subject,
+                    ["error"] = ex.Message
+                }
+            });
+            return null;
+        }
+    }
+
+    private async Task<AgentResponse?> TryBuildMediaInstallmentOfflineReasoningResponseAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var parsed = TryParseSeasonEpisode(userMessage ?? string.Empty);
+        if (parsed is null)
+            return null;
+
+        var (entity, season, episode) = parsed.Value;
+        if (string.IsNullOrWhiteSpace(entity))
+            return null;
+
+        var fallbackText =
+            $"I could not verify an official Season {season} Episode {episode} release for {entity} from the current evidence, so I should not invent a plot summary.";
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You are answering whether a requested TV, streaming, or media installment exists. " +
+                "If the requested season or episode does not exist because the series ended, was canceled, or was never made, say that directly. " +
+                "Do not invent plots, scenes, or episode summaries. " +
+                "Keep the answer to one or two sentences. " +
+                "Use plain factual wording and do not mention tool limitations."),
+            ChatMessage.User(userMessage ?? string.Empty)
+        };
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await _llm.ChatAsync(
+                messages,
+                tools: null,
+                maxTokensOverride: 220,
+                cts.Token);
+
+            var answer = (response.Content ?? string.Empty).Trim();
+            answer = Regex.Replace(answer, @"https?://\S+", string.Empty).Trim();
+            answer = Regex.Replace(answer, @"www\.\S+", string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(answer))
+                answer = fallbackText;
+
+            if (LooksLikeFabricatedMediaPlot(answer) || !LooksLikeMediaExistenceAnswer(answer))
+                answer = fallbackText;
+
+            return new AgentResponse
+            {
+                Text = answer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 1
+            };
+        }
+        catch
+        {
+            return new AgentResponse
+            {
+                Text = fallbackText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+    }
+
+    private static bool LooksLikeMediaExistenceAnswer(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+            return false;
+
+        var lower = answer.ToLowerInvariant();
+        return lower.Contains("does not exist", StringComparison.Ordinal) ||
+               lower.Contains("doesn't exist", StringComparison.Ordinal) ||
+               lower.Contains("was canceled", StringComparison.Ordinal) ||
+               lower.Contains("was cancelled", StringComparison.Ordinal) ||
+               lower.Contains("never released", StringComparison.Ordinal) ||
+               lower.Contains("never made", StringComparison.Ordinal) ||
+               lower.Contains("not verify", StringComparison.Ordinal) ||
+               lower.Contains("no official", StringComparison.Ordinal) ||
+               lower.Contains("ended before", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeFabricatedMediaPlot(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+            return false;
+
+        var lower = answer.ToLowerInvariant();
+        return answer.Length > 320 ||
+               lower.Contains("the plot", StringComparison.Ordinal) ||
+               lower.Contains("the episode follows", StringComparison.Ordinal) ||
+               lower.Contains("the story follows", StringComparison.Ordinal) ||
+               lower.Contains("the season concludes", StringComparison.Ordinal);
     }
 
     private AgentResponse? TryBuildExistenceGuardedResponse(
@@ -262,12 +460,65 @@ public sealed partial class SearchOrchestrator
     private static bool HasReleasedProductPositiveSignal(SourceItem source)
     {
         var text = $"{source.Title} {source.Snippet}";
-        return text.Contains("year introduced", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("released", StringComparison.OrdinalIgnoreCase) ||
+         var isOfficialDomain = source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
+                       source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+         var hasNegativeReleaseCue = text.Contains("not released", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("unreleased", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("no such", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("rumor", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("rumour", StringComparison.OrdinalIgnoreCase);
+
+         return text.Contains("year introduced", StringComparison.OrdinalIgnoreCase) ||
+             (!hasNegativeReleaseCue && text.Contains("released", StringComparison.OrdinalIgnoreCase)) ||
                text.Contains("available now", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("in production", StringComparison.OrdinalIgnoreCase) ||
-               source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
-               source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+             isOfficialDomain;
+    }
+
+    private static bool HasReleasedProductNegativeSignal(SourceItem source)
+    {
+        var text = $"{source.Title} {source.Snippet}";
+        return text.Contains("not released", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("unreleased", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("doesn't exist", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("no such", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("rumor", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("rumour", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("concept", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<string> BuildSubjectTokens(string subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return [];
+
+        var tokens = Regex.Matches(subject.ToLowerInvariant(), @"[a-z0-9]+")
+            .Select(match => match.Value)
+            .Where(token => token.Length >= 2)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return tokens;
+    }
+
+    private static bool SourceMentionsSubject(SourceItem source, string subject, IReadOnlyList<string> subjectTokens)
+    {
+        var text = $"{source.Title} {source.Snippet}";
+        if (text.Contains(subject, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (subjectTokens.Count == 0)
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        var matchedTokenCount = subjectTokens.Count(token => lower.Contains(token, StringComparison.Ordinal));
+
+        if (subjectTokens.Count <= 2)
+            return matchedTokenCount == subjectTokens.Count;
+
+        // For longer subjects, allow one token miss to avoid over-pruning.
+        return matchedTokenCount >= subjectTokens.Count - 1;
     }
 
     private static string? TryExtractReleaseYear(IReadOnlyList<SourceItem> sources)

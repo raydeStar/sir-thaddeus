@@ -27,7 +27,10 @@ public interface IMcpToolClient
 /// </summary>
 public sealed record McpToolInfo
 {
+    /// <summary>The tool's unique name as registered on the MCP server.</summary>
     public required string Name { get; init; }
+
+    /// <summary>Human/LLM-readable description of what the tool does.</summary>
     public required string Description { get; init; }
 
     /// <summary>

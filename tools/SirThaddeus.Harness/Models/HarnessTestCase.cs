@@ -82,6 +82,16 @@ public sealed record HarnessAssertions
     [JsonPropertyName("require_no_hallucinated_citations")]
     [YamlMember(Alias = "require_no_hallucinated_citations")]
     public bool RequireNoHallucinatedCitations { get; init; } = true;
+
+    /// <summary>
+    /// When true (default), hard-fails if the final response looks like an
+    /// infrastructure or configuration error (missing API key, provider not
+    /// configured, env-var setup instructions). Automatically disabled for
+    /// stub-mode tests.
+    /// </summary>
+    [JsonPropertyName("forbid_infrastructure_errors")]
+    [YamlMember(Alias = "forbid_infrastructure_errors")]
+    public bool ForbidInfrastructureErrors { get; init; } = true;
 }
 
 public sealed record HarnessExpectations

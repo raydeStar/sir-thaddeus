@@ -51,6 +51,23 @@ public class IntentFeatureExtractorTests
         Assert.Equal("released_product_existence", evidence.ReasonCode);
     }
 
+    [Theory]
+    [InlineData("ok i want to run a few tests -- can you tell me what is on mys creen right now?")]
+    [InlineData("tell me what is on my screen right now")]
+    public void LooksLikeScreenRequest_ToleratesConversationalOrSplitWording(string input)
+    {
+        Assert.True(IntentFeatureExtractor.LooksLikeScreenRequest(input.ToLowerInvariant()));
+    }
+
+    [Theory]
+    [InlineData("can you see what is in my personal folder?")]
+    [InlineData("what is in my folder")]
+    [InlineData("can you read my personal folder and tell me whats in there?")]
+    public void LooksLikeFileRequest_DetectsNaturalFolderQuestions(string input)
+    {
+        Assert.True(IntentFeatureExtractor.LooksLikeFileRequest(input.ToLowerInvariant()));
+    }
+
     // ── HasLocalBusinessProximitySignals — proximity detection ────────
 
     [Theory]

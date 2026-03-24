@@ -890,6 +890,56 @@
               </ScrollViewer>
             </TabItem>
 
+            <TabItem x:Name="MyFilesTabItem" Header="My Files" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+
+                  <!-- File Access -->
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="FILE ACCESS" Classes="sectionLabel"/>
+                    <Border Classes="settingsCard">
+                      <StackPanel Spacing="12">
+                        <CheckBox Content="Do not allow any access to my files"
+                                  x:Name="DisableAllFileAccessCheckBox"
+                                  IsChecked="{Binding DisableAllFileAccess}"
+                                  Click="DisableAllFileAccessCheckBox_Click"
+                                  Classes="settingsCheck"/>
+                        <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. If no folder is listed, file access stays blocked."
+                                   Classes="hint"
+                                   TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button x:Name="AddAllowedFileRootButton"
+                                  Content="Add Folder"
+                                  Classes="actionBtn"
+                                  Click="AddAllowedFileRootButton_Click"/>
+                          <Button x:Name="RemoveAllowedFileRootButton"
+                                  Content="Remove Selected"
+                                  Classes="actionBtn"
+                                  Click="RemoveAllowedFileRootButton_Click"/>
+                        </StackPanel>
+                        <Border BorderBrush="{StaticResource Surface0Brush}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource RadiusSm}"
+                                Padding="8">
+                          <ListBox x:Name="AllowedFileRootsList"
+                                   ItemsSource="{Binding AllowedFileRoots}"
+                                   MinHeight="96"
+                                   Background="Transparent">
+                            <ListBox.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding .}" FontSize="12" TextWrapping="Wrap"/>
+                              </DataTemplate>
+                            </ListBox.ItemTemplate>
+                          </ListBox>
+                        </Border>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
             <TabItem x:Name="SearchTabItem" Header="Search" x:CompileBindings="False">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
@@ -1051,46 +1101,6 @@
                         <TextBlock Text="{Binding SearchStatusMessage}" Classes="hint"/>
                         <TextBlock Text="{Binding SearchMcpMessage}" Classes="hint"/>
                         <TextBlock Text="{Binding SearchLastFailureText}" Classes="hint"/>
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
-
-                  <!-- File Access -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="FILE ACCESS" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="12">
-                        <CheckBox Content="Do not allow any access to my files"
-                                  IsChecked="{Binding DisableAllFileAccess}"
-                                  Classes="settingsCheck"/>
-                        <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. If no folder is listed, file access stays blocked."
-                                   Classes="hint"
-                                   TextWrapping="Wrap"/>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <Button x:Name="AddAllowedFileRootButton"
-                                  Content="Add Folder"
-                                  Classes="actionBtn"
-                                  Click="AddAllowedFileRootButton_Click"/>
-                          <Button x:Name="RemoveAllowedFileRootButton"
-                                  Content="Remove Selected"
-                                  Classes="actionBtn"
-                                  Click="RemoveAllowedFileRootButton_Click"/>
-                        </StackPanel>
-                        <Border BorderBrush="{StaticResource Surface0Brush}"
-                                BorderThickness="1"
-                                CornerRadius="{StaticResource RadiusSm}"
-                                Padding="8">
-                          <ListBox x:Name="AllowedFileRootsList"
-                                   ItemsSource="{Binding AllowedFileRoots}"
-                                   MinHeight="96"
-                                   Background="Transparent">
-                            <ListBox.ItemTemplate>
-                              <DataTemplate>
-                                <TextBlock Text="{Binding .}" FontSize="12" TextWrapping="Wrap"/>
-                              </DataTemplate>
-                            </ListBox.ItemTemplate>
-                          </ListBox>
-                        </Border>
                       </StackPanel>
                     </Border>
                   </StackPanel>

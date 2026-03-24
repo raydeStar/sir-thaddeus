@@ -67,9 +67,6 @@ public static class ScreenTools
         )] string target = "active_window",
         CancellationToken cancellationToken = default)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("=== Screen Report ===");
-
         WindowInfo? windowInfo = null;
         int screenW = 0, screenH = 0;
         try
@@ -82,66 +79,59 @@ public static class ScreenTools
         {
         }
 
-        AppendWindowContext(sb, windowInfo, screenW, screenH);
-
-        UiaReadResult? uiaResult = null;
+        // ── Structured accessibility tree read ──────────────────────
+        UiaStructuredResult? structured = null;
         try
         {
-            uiaResult = await UiaScreenReader.ReadForegroundWindowAsync(cancellationToken).ConfigureAwait(false);
+            structured = await UiaScreenReader.ReadForegroundWindowStructuredAsync(cancellationToken)
+                .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) { throw; }
         catch
         {
-            uiaResult = UiaReadResult.Empty("Accessibility tree unavailable");
+            structured = UiaStructuredResult.Empty("Accessibility tree unavailable");
         }
 
-        var browserProcessName = uiaResult?.ProcessName ?? windowInfo?.ProcessName;
-        var isBrowser = IsBrowserProcess(browserProcessName);
-
-        if (uiaResult is { IsEmpty: false })
+        // No foreground window at all → desktop
+        if (structured is null ||
+            (structured.IsEmpty && string.IsNullOrWhiteSpace(structured.WindowTitle)))
         {
-            sb.AppendLine();
-            sb.AppendLine("Source: Accessibility Tree");
-            sb.AppendLine();
-            sb.AppendLine(uiaResult.Text);
-
-            if (isBrowser && !string.IsNullOrWhiteSpace(uiaResult.BrowserUrl))
-            {
-                await TryFetchBrowserPageAsync(sb, uiaResult.BrowserUrl!, cancellationToken, "Accessibility Tree URL");
-            }
-            else if (isBrowser)
-            {
-                sb.AppendLine();
-                sb.AppendLine("=== Browser Page Content ===");
-                sb.AppendLine("(Browser detected, but the address bar could not be read from the accessibility tree.)");
-            }
-
-            return sb.ToString();
+            return ScreenContentExtractor.EmptyDesktop().ToPromptText();
         }
 
-        var browserFetchSucceeded = false;
-        if (isBrowser && !string.IsNullOrWhiteSpace(uiaResult?.BrowserUrl))
+        var processName = structured.ProcessName ?? windowInfo?.ProcessName ?? "unknown";
+        var processId = structured.ProcessId > 0
+            ? structured.ProcessId
+            : windowInfo?.ProcessId ?? 0;
+        var windowTitle = !string.IsNullOrWhiteSpace(structured.WindowTitle)
+            ? structured.WindowTitle
+            : windowInfo?.Title ?? "(untitled)";
+        var isBrowser = IsBrowserProcess(processName);
+
+        // ── Browser page fetch (much richer than UIA for web content) ─
+        string? browserPageContent = null;
+        if (isBrowser && !string.IsNullOrWhiteSpace(structured.BrowserUrl))
         {
-            browserFetchSucceeded = await TryFetchBrowserPageAsync(
-                sb,
-                uiaResult.BrowserUrl!,
-                cancellationToken,
-                "Accessibility Tree URL");
-
-            if (browserFetchSucceeded)
-                return sb.ToString();
+            browserPageContent = await TryFetchBrowserPageContentAsync(
+                structured.BrowserUrl!, cancellationToken);
         }
 
-        sb.AppendLine();
-        sb.AppendLine("Source: Active Window Context");
-        if (!string.IsNullOrWhiteSpace(uiaResult?.FailureReason))
-            sb.AppendLine($"Accessibility: {uiaResult.FailureReason}");
+        // ── Build structured result from UIA nodes ──────────────────
+        if (!structured.IsEmpty || !string.IsNullOrWhiteSpace(browserPageContent))
+        {
+            var result = ScreenContentExtractor.Extract(
+                windowTitle, processName, processId,
+                structured.Nodes, structured.BrowserUrl,
+                browserPageContent);
+            return result.ToPromptText();
+        }
 
-        await AppendOcrFallbackAsync(sb, target, windowInfo, screenW, screenH).ConfigureAwait(false);
-        return sb.ToString();
+        // ── OCR fallback ────────────────────────────────────────────
+        var ocrText = await RunOcrFallbackAsync(target, windowInfo, screenW, screenH);
+        var ocrResult = ScreenContentExtractor.ExtractFromOcr(
+            windowTitle, processName, processId,
+            ocrText, structured.BrowserUrl);
+        return ocrResult.ToPromptText();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -175,6 +165,65 @@ public static class ScreenTools
     {
         if (string.IsNullOrWhiteSpace(processName)) return false;
         return BrowserProcessNames.Contains(processName);
+    }
+
+    /// <summary>
+    /// Fetch browser page content as a text string, or null if unavailable.
+    /// </summary>
+    private static async Task<string?> TryFetchBrowserPageContentAsync(
+        string url,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await ContentExtractor.ExtractAsync(url, 15, cancellationToken);
+            if (result.Error is not null || string.IsNullOrWhiteSpace(result.TextContent))
+                return null;
+
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(result.Title))
+                sb.AppendLine($"Page Title: \"{result.Title}\"");
+            if (!string.IsNullOrWhiteSpace(result.Author))
+                sb.AppendLine($"Author: {result.Author}");
+            if (result.PublishedDate.HasValue)
+                sb.AppendLine($"Date: {result.PublishedDate.Value:yyyy-MM-dd}");
+            sb.AppendLine();
+            sb.Append(ContentExtractor.Truncate(result.TextContent, MaxPageChars));
+            return sb.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Run OCR on the screen/window and return the raw text, or null if unavailable.
+    /// </summary>
+    private static async Task<string?> RunOcrFallbackAsync(
+        string target,
+        WindowInfo? windowInfo,
+        int screenW,
+        int screenH)
+    {
+        Bitmap? bitmap = null;
+        try
+        {
+            var captureRect = ResolveCaptureRect(target, windowInfo?.Bounds, screenW, screenH);
+            bitmap = CaptureRegion(captureRect);
+            var ocrText = await RunOcrAsync(bitmap).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(ocrText))
+                return null;
+            return ocrText.Length > MaxOcrChars ? ocrText[..MaxOcrChars] : ocrText;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            bitmap?.Dispose();
+        }
     }
 
     private static void AppendWindowContext(StringBuilder sb, WindowInfo? windowInfo, int screenW, int screenH)

@@ -1681,7 +1681,7 @@ public class ToolLoopTests
         var result = await agent.ProcessAsync("What can you see on the screen right now?");
 
         Assert.True(result.Success);
-        Assert.Contains("desktop", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("captured your current screen", result.Text, StringComparison.OrdinalIgnoreCase);
 
         // Verify screen_capture was actually called
         var toolCalls = result.ToolCallsMade
@@ -1911,7 +1911,173 @@ public class ToolLoopTests
         Assert.Contains(mcp.Calls, c =>
             c.Tool.Equals("file_read", StringComparison.OrdinalIgnoreCase) ||
             c.Tool.Equals("FileRead", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c =>
+            (c.Tool.Equals("file_read", StringComparison.OrdinalIgnoreCase) ||
+             c.Tool.Equals("FileRead", StringComparison.OrdinalIgnoreCase)) &&
+            c.Args.Contains("nonexistent.txt", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("failed", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplicitKnowledgeStoreJournalRoundTrip_InvokesToolsDeterministically()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse
+            {
+                IsComplete = true,
+                Content = "No tool call.",
+                FinishReason = "stop"
+            });
+
+        var toolSet = FakeMcpClient.StandardToolSet
+            .Concat(
+            [
+                MakeRegressionTool("knowledge_store_journal_log_entry", "Writes a journal entry",
+                    """{"type":"object","properties":{"rootId":{"type":"string"},"entry":{"type":"string"},"timeHint":{"type":"string"}},"required":["rootId","entry"]}"""),
+                MakeRegressionTool("knowledge_store_read_file", "Reads a knowledge-store file",
+                    """{"type":"object","properties":{"path":{"type":"string"},"rootId":{"type":"string"}},"required":["path"]}""")
+            ])
+            .ToArray();
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "knowledge_store_journal_log_entry" => """{"success":true,"message":"Entry logged.","filePath":"journal/2026-03-20.md"}""",
+                "knowledge_store_read_file" => """{"success":true,"message":"Read successful.","filePath":"journal/2026-03-20.md","content":"# Journal\n\nI went for a three mile walk after lunch."}""",
+                _ => "{}"
+            },
+            toolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "Call knowledge_store_journal_log_entry in root 'harness' to save the journal entry 'I went for a three mile walk after lunch.' Then, before giving any final answer, call knowledge_store_read_file with the exact relative journal path returned by the first tool result.");
+
+        Assert.True(result.Success);
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("knowledge_store_journal_log_entry", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("knowledge_store_read_file", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("journal/2026-03-20.md", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("walk entry text is present", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PreferencePrompt_DoesNotFallbackToWebSearch_WhenDraftIsUncertain()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I'm not sure.",
+                FinishReason = "stop"
+            });
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "Tell me about your favorite thing to help people with. What makes you good at it?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessPrompt_DoesNotExposeKnowledgeStoreTools()
+    {
+        List<string> exposedTools = [];
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools is not null)
+                exposedTools = tools.Select(t => t.Function.Name).ToList();
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "No tool call.",
+                FinishReason = "stop"
+            };
+        });
+
+        var toolSet = FakeMcpClient.StandardToolSet
+            .Concat(
+            [
+                MakeRegressionTool("knowledge_store_list_roots", "Lists knowledge-store roots",
+                    "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
+                MakeRegressionTool("knowledge_store_list_files", "Lists files in a knowledge-store path",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}"),
+                MakeRegressionTool("knowledge_store_read_file", "Reads a knowledge-store file",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}")
+            ])
+            .ToArray();
+
+        var mcp = new FakeMcpClient((tool, args) => "{}", toolSet);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Can you find me a good florist in Hillsboro, OR?");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(exposedTools, name => name.Contains("knowledge_store", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, call => call.Tool.Contains("knowledge_store", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExplicitKnowledgeStorePrompt_HidesGenericFileTools()
+    {
+        List<string> exposedTools = [];
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools is not null)
+                exposedTools = tools.Select(t => t.Function.Name).ToList();
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "No tool call.",
+                FinishReason = "stop"
+            };
+        });
+
+        var toolSet = FakeMcpClient.StandardToolSet
+            .Concat(
+            [
+                MakeRegressionTool("knowledge_store_create_file", "Creates a knowledge-store file",
+                    "{\"type\":\"object\",\"properties\":{\"rootId\":{\"type\":\"string\"},\"relativePath\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"rootId\",\"relativePath\",\"content\"],\"additionalProperties\":false}"),
+                MakeRegressionTool("knowledge_store_list_files", "Lists files in a knowledge-store path",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}")
+            ])
+            .ToArray();
+
+        var mcp = new FakeMcpClient((tool, args) => "{}", toolSet);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "Call knowledge_store_create_file with rootId 'harness', relativePath 'projects/test-note.md', and content 'hi'. Then call knowledge_store_list_files with path exactly 'projects'. Do not call file_list.");
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(exposedTools, name => name.Equals("file_list", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(exposedTools, name => name.Equals("knowledge_store_list_files", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static McpToolInfo MakeRegressionTool(string name, string desc, string schemaJson)
+    {
+        var schema = System.Text.Json.JsonSerializer.Deserialize<object>(schemaJson)!;
+        return new McpToolInfo { Name = name, Description = desc, InputSchema = schema };
     }
 }
 
@@ -2228,6 +2394,140 @@ public class PolicyFilteringTests
             .FirstOrDefault(t => t.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(failedCall);
         Assert.False(failedCall!.Success);
+    }
+
+    [Fact]
+    public async Task DeterministicScreenCapture_ReplacesGenericNoAccessDisclaimerWithCaptureSummary()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I can't read your screen directly because that would require a specific tool integration.",
+                FinishReason = "stop"
+            };
+        });
+
+        var screenReport = """
+[Screen Read]
+Window: Code — "Visual Studio Code"
+Content Type: Code
+
+Content:
+README.md open with a checklist and the words screen capture enabled.
+""";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" => screenReport,
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Can you read my screen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains("code editor", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Visual Studio Code", result.Text);
+        Assert.Contains("screen capture enabled", result.Text);
+        Assert.DoesNotContain("can't read your screen", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ScreenRequest_WithSplitWordStillUsesDeterministicCapture()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I cannot access your screen directly.",
+                FinishReason = "stop"
+            };
+        });
+
+        var screenReport = """
+[Screen Read]
+Window: Browser — Example
+Content Type: WebPage
+
+Content:
+Example page content from the browser.
+""";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "screen_capture" or "ScreenCapture" => screenReport,
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("ok i want to run a few tests -- can you tell me what is on mys creen right now?");
+
+        Assert.True(result.Success);
+        Assert.Contains("Example", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cannot access your screen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task FileRequest_ReadMyPersonalFolder_ListsContentsAndReadsSingleTextFile()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "I cannot view your files directly.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, args) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "file_list" or "FileList" => "[FILE] note.txt",
+                "file_read" or "FileRead" => "hello from the only text file",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("can you read my personal folder and tell me whats in there?");
+
+        Assert.True(result.Success);
+        Assert.Contains("I listed `my personal folder`.", result.Text, StringComparison.Ordinal);
+        Assert.Contains("[FILE] note.txt", result.Text, StringComparison.Ordinal);
+        Assert.Contains("hello from the only text file", result.Text, StringComparison.Ordinal);
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("file_list", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.ToolCallsMade, call => call.ToolName.Equals("file_read", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("cannot view your files", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

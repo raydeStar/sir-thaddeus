@@ -33,7 +33,11 @@ public static class FileTools
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
+            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            if (resolutionError is not null)
+                return resolutionError;
+
+            var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
             if (accessError is not null)
                 return accessError;
@@ -68,7 +72,11 @@ public static class FileTools
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
+            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            if (resolutionError is not null)
+                return resolutionError;
+
+            var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
             if (accessError is not null)
                 return accessError;
@@ -123,7 +131,11 @@ public static class FileTools
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
+            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            if (resolutionError is not null)
+                return BuildError("path_resolution_failed", path);
+
+            var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
             if (accessError is not null)
                 return BuildError("access_denied", fullPath);
@@ -185,7 +197,11 @@ public static class FileTools
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
+            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            if (resolutionError is not null)
+                return resolutionError;
+
+            var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
             if (accessError is not null)
                 return accessError;
@@ -225,7 +241,11 @@ public static class FileTools
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
+            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            if (resolutionError is not null)
+                return BuildError("path_resolution_failed", path);
+
+            var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
             if (accessError is not null)
                 return BuildError("access_denied", fullPath);
@@ -324,6 +344,67 @@ public static class FileTools
             error = code,
             path = path ?? ""
         }, JsonOpts);
+    }
+
+    private static string? ResolveRequestedPath(string path, out string? error)
+    {
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            error = "Error: path is required.";
+            return null;
+        }
+
+        var trimmed = path.Trim().Trim('"', '\'');
+        var allowedRoots = ParseAllowedRootsEnv("ST_DOCUMENT_READER_ALLOWED_ROOTS");
+
+        if (TryResolveAllowedRootAlias(trimmed, allowedRoots, out var aliasPath, out error))
+            return aliasPath;
+
+        try
+        {
+            if (!Path.IsPathRooted(trimmed) && allowedRoots.Count == 1)
+            {
+                var candidateWithinRoot = Path.Combine(allowedRoots[0], trimmed);
+                if (File.Exists(candidateWithinRoot) || Directory.Exists(candidateWithinRoot))
+                    return NormalizePath(candidateWithinRoot);
+            }
+
+            return NormalizePath(trimmed);
+        }
+        catch (Exception ex)
+        {
+            error = $"Error: Invalid path '{path}'. {ex.Message}";
+            return null;
+        }
+    }
+
+    private static bool TryResolveAllowedRootAlias(
+        string requestedPath,
+        IReadOnlyList<string> allowedRoots,
+        out string? resolvedPath,
+        out string? error)
+    {
+        resolvedPath = null;
+        error = null;
+
+        var normalized = requestedPath.Trim().ToLowerInvariant();
+        var isAlias = normalized is "my files" or "my file" or "my folder" or "my personal folder" or "personal folder";
+        if (!isAlias)
+            return false;
+
+        if (allowedRoots.Count == 1)
+        {
+            resolvedPath = allowedRoots[0];
+            return true;
+        }
+
+        error = allowedRoots.Count == 0
+            ? "Error: No allowed folders are configured. Add a folder in Settings > My Files before using file tools."
+            : "Error: More than one allowed folder is configured. Please specify which folder path to use.";
+
+        return true;
     }
 
     private static int ParseIntEnv(string key, int fallback, int min, int max)

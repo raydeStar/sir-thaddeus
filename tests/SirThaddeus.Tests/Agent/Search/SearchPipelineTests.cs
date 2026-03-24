@@ -246,6 +246,15 @@ public class UtilityRouterTests
     }
 
     [Theory]
+    [InlineData(@"Call file_read exactly once on C:\Users\Public\nonexistent.txt. Do not call status_check_url.")]
+    [InlineData(@"Call file_read exactly once on C:\Users\Public\Documents\readme.txt and summarize it.")]
+    public void Status_DoesNotRouteExplicitFilePrompts(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.Null(result);
+    }
+
+    [Theory]
     [InlineData("read this feed https://example.com/rss.xml")]
     [InlineData("fetch rss from docs.github.com/feed.xml")]
     public void Feed_RoutesToFeedTool(string input)
@@ -334,6 +343,20 @@ public class UtilityRouterTests
         Assert.Null(result.McpToolName);
     }
 
+    [Fact]
+    public void MontyHall_ReturnsDeterministicSwitchAnswer()
+    {
+        var result = UtilityRouter.TryHandle(
+            "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?");
+
+        Assert.NotNull(result);
+        Assert.Equal("fact", result!.Category);
+        Assert.Contains("switch", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1/3", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2/3", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.McpToolName);
+    }
+
     [Theory]
     [InlineData("political climate in Washington")]
     [InlineData("how to weather the storm")]
@@ -352,6 +375,18 @@ public class UtilityRouterTests
     {
         var result = UtilityRouter.TryHandle(input);
         Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("Use tool_ping and report whether MCP tool execution is healthy.")]
+    [InlineData("Run tool_ping and confirm whether the MCP server is responding.")]
+    public void MetaHealth_RoutesToToolPing(string input)
+    {
+        var result = UtilityRouter.TryHandle(input);
+        Assert.NotNull(result);
+        Assert.Equal("meta_health", result!.Category);
+        Assert.Equal("tool_ping", result.McpToolName);
+        Assert.Equal("{}", result.McpToolArgs);
     }
 }
 
@@ -1556,8 +1591,44 @@ public class SearchPipelineGoldenTests
         Assert.True(third.Success);
         Assert.Contains("Best fit right now", third.Text, StringComparison.OrdinalIgnoreCase);
 
+        var fourth = await agent.ProcessAsync("Dang, what kinds of things can I do in that weather?");
+        Assert.True(fourth.Success);
+        Assert.Contains("Best fit right now", fourth.Text, StringComparison.OrdinalIgnoreCase);
+
         Assert.DoesNotContain(mcp.Calls,
             c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_WeatherContextualReference_UsesLocationHintInsteadOfLiteralPhrase()
+    {
+        var llm = new FakeLlmClient("LLM should not be called");
+        var olympiaGeocode =
+            """{"query":"Olympia, WA","source":"photon","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Olympia, Washington, US","countryCode":"US","isUs":true,"latitude":47.0379,"longitude":-122.9007,"confidence":0.95}]}""";
+        var olympiaForecast =
+            """{"provider":"nws","providerReason":"us_primary","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Olympia, Washington, US","countryCode":"US","isUs":true,"latitude":47.0379,"longitude":-122.9007},"current":{"temperature":30,"unit":"F","condition":"foggy","wind":"2 mph","humidityPercent":92},"daily":[{"date":"2026-02-10","tempHigh":36,"tempLow":26,"avgTemp":31,"unit":"F","condition":"foggy"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => olympiaGeocode,
+            "weather_forecast" => olympiaForecast,
+            _ => "unexpected tool call"
+        });
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.")
+        {
+            UserLocationHint = "Olympia, WA"
+        };
+
+        var response = await agent.ProcessAsync("Dang, what kinds of things can I do in that weather?");
+        Assert.True(response.Success);
+        Assert.Contains("Best fit right now", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Olympia", response.Text, StringComparison.OrdinalIgnoreCase);
+
+        var geocodeCall = Assert.Single(mcp.Calls.Where(c =>
+            c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains("\"place\":\"Olympia, WA\"", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("that weather", geocodeCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

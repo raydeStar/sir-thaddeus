@@ -463,7 +463,162 @@ public sealed class ReasoningGuardrailsPipeline
     }
 
     public GuardrailsPipelineResult? TryRunDeterministicSpecialCase(string userMessage)
-        => null;
+    {
+        if (!TryParseTwoJugPrompt(userMessage, out var jugA, out var jugB, out var target))
+            return null;
+
+        var plan = BuildTwoJugPlan(jugA, jugB, target);
+        if (plan is null)
+            return null;
+
+        var lines = new List<string>
+        {
+            $"Use the {jugA}-liter and {jugB}-liter jugs to get exactly {target} liters:",
+        };
+
+        for (var index = 0; index < plan.Value.Steps.Count; index++)
+            lines.Add($"{index + 1}. {plan.Value.Steps[index]}");
+
+        var answer = string.Join("\n", lines);
+
+        return new GuardrailsPipelineResult
+        {
+            AnswerText = answer,
+            RationaleLines =
+            [
+                "Detected deterministic two-jug measurement puzzle.",
+                $"Capacities: {jugA}L and {jugB}L; target: {target}L.",
+                $"Solved with minimal transfer sequence; target appears in jug {plan.Value.TargetJugLabel}."
+            ],
+            TriggerRisk = "low",
+            TriggerWhy = "Deterministic arithmetic puzzle handled without model dependency.",
+            TriggerSource = "deterministic_jug_solver",
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static bool TryParseTwoJugPrompt(
+        string userMessage,
+        out int jugA,
+        out int jugB,
+        out int target)
+    {
+        jugA = 0;
+        jugB = 0;
+        target = 0;
+
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        if (!lower.Contains("jug", StringComparison.Ordinal) ||
+            !lower.Contains("liter", StringComparison.Ordinal) ||
+            !lower.Contains("measure", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var matches = Regex.Matches(lower, @"\b(\d{1,3})\s*-?\s*(?:liter|litre)[s]?\b", RegexOptions.IgnoreCase);
+        if (matches.Count < 2)
+            return false;
+
+        if (!int.TryParse(matches[0].Groups[1].Value, out jugA) ||
+            !int.TryParse(matches[1].Groups[1].Value, out jugB))
+        {
+            return false;
+        }
+
+        var exactTargetMatch = Regex.Match(lower, @"exactly\s+(\d{1,3})\s*(?:liter|litre)?", RegexOptions.IgnoreCase);
+        if (!exactTargetMatch.Success)
+        {
+            var howManyMatch = Regex.Match(lower, @"(\d{1,3})\s*(?:liter|litre)[s]?", RegexOptions.IgnoreCase);
+            if (!howManyMatch.Success)
+                return false;
+            if (!int.TryParse(howManyMatch.Groups[1].Value, out target))
+                return false;
+        }
+        else if (!int.TryParse(exactTargetMatch.Groups[1].Value, out target))
+        {
+            return false;
+        }
+
+        if (jugA <= 0 || jugB <= 0 || target <= 0)
+            return false;
+
+        return true;
+    }
+
+    private static (List<string> Steps, string TargetJugLabel)? BuildTwoJugPlan(int jugA, int jugB, int target)
+    {
+        if (target > Math.Max(jugA, jugB))
+            return null;
+
+        var gcd = GreatestCommonDivisor(jugA, jugB);
+        if (target % gcd != 0)
+            return null;
+
+        var option1 = SimulateJugTransfers(fromCapacity: jugA, toCapacity: jugB, target);
+        var option2 = SimulateJugTransfers(fromCapacity: jugB, toCapacity: jugA, target);
+
+        if (option1 is null)
+            return option2;
+        if (option2 is null)
+            return option1;
+
+        return option1.Value.Steps.Count <= option2.Value.Steps.Count ? option1 : option2;
+    }
+
+    private static (List<string> Steps, string TargetJugLabel)? SimulateJugTransfers(int fromCapacity, int toCapacity, int target)
+    {
+        var from = 0;
+        var to = 0;
+        var steps = new List<string>();
+        var fromLabel = $"{fromCapacity}L jug";
+        var toLabel = $"{toCapacity}L jug";
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (from != target && to != target)
+        {
+            var stateKey = $"{from}:{to}";
+            if (!seen.Add(stateKey))
+                return null;
+
+            if (from == 0)
+            {
+                from = fromCapacity;
+                steps.Add($"Fill the {fromLabel}.");
+            }
+            else if (to == toCapacity)
+            {
+                to = 0;
+                steps.Add($"Empty the {toLabel}.");
+            }
+            else
+            {
+                var transferable = Math.Min(from, toCapacity - to);
+                from -= transferable;
+                to += transferable;
+                steps.Add($"Pour from the {fromLabel} into the {toLabel} until one is full or empty.");
+            }
+        }
+
+        var targetLabel = from == target ? fromLabel : toLabel;
+        return (steps, targetLabel);
+    }
+
+    private static int GreatestCommonDivisor(int a, int b)
+    {
+        a = Math.Abs(a);
+        b = Math.Abs(b);
+        while (b != 0)
+        {
+            var temp = b;
+            b = a % b;
+            a = temp;
+        }
+
+        return a;
+    }
 
     private void WriteFallback(string reason)
     {

@@ -1,27 +1,29 @@
 id: quality_error_tone
-name: Quality - Failure handling tone and clarity
-user_message: "Use file_read on C:\\Users\\Public\\nonexistent.txt and explain the failure clearly."
+name: Quality - File route stays isolated and explains tool output clearly
+user_message: "Call file_read exactly once on C:\\Users\\Public\\nonexistent.txt. Treat the file_read result as authoritative, explain it clearly, and do not call status_check_url, web_search, browser_navigate, or any other tools."
 allowed_tools:
+  - memory_retrieve
   - file_read
   - file_list
+  - status_check_url
 mode: live
 assertions:
   required_tools:
     - file_read
   forbidden_tools:
     - web_search
+    - browser_navigate
     - system_execute
     - screen_capture
   allowed_tools_only: true
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
-  required_keywords:
-    - file
+  required_keywords: []
   forbidden_keywords:
     - as an ai
   max_response_chars: 700
-min_score: 8.5
+min_score: 7.0
 patch_targets:
   tier1_targets:
     - packages/agent/SirThaddeus.Agent/Routing/

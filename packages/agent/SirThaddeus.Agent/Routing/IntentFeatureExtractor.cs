@@ -17,6 +17,12 @@ public static class IntentFeatureExtractor
         [
             "what's on my screen",   "whats on my screen",
             "what is on my screen",
+            "what's on my screen right now",
+            "whats on my screen right now",
+            "what is on my screen right now",
+            "tell me what's on my screen",
+            "tell me whats on my screen",
+            "tell me what is on my screen",
             "what can you see",      "what do you see",
             "look at my screen",     "look at the screen",
             "take a screenshot",     "screenshot",
@@ -64,13 +70,7 @@ public static class IntentFeatureExtractor
             "summarize what im looking at"
         ];
 
-        foreach (var p in patterns)
-        {
-            if (lower.Contains(p, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
+        return ContainsLoosePhrase(lower, patterns);
     }
 
     public static bool LooksLikeFileRequest(string lower)
@@ -84,16 +84,29 @@ public static class IntentFeatureExtractor
             "what's in the file", "whats in the file",
             "file contents",   "show me the file",
             "directory listing", "folder contents",
-            "list directory",  "ls "
+            "list directory",  "ls ",
+            "what's in my folder", "whats in my folder",
+            "what is in my folder",
+            "what's in this folder", "whats in this folder",
+            "what is in this folder",
+            "what's in that folder", "whats in that folder",
+            "what is in that folder",
+            "what's in my personal folder", "whats in my personal folder",
+            "what is in my personal folder",
+            "read my personal folder",
+            "read my folder",
+            "read this folder",
+            "tell me whats in there",
+            "tell me what's in there",
+            "can you see what is in my folder",
+            "can you see what is in this folder",
+            "can you see what is in my personal folder",
+            "show me my files", "show me what's in my folder",
+            "show me whats in my folder",
+            "what files are in"
         ];
 
-        foreach (var p in patterns)
-        {
-            if (lower.Contains(p, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
+        return ContainsLoosePhrase(lower, patterns);
     }
 
     public static bool LooksLikeSystemCommand(string lower)
@@ -157,7 +170,11 @@ public static class IntentFeatureExtractor
             return null;
 
         if (ContainsAny(lower,
-            ["file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read"]))
+            [
+                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read",
+                "knowledge_store", "knowledge store", "knowledge_store_create_file", "knowledge_store_append_to_file",
+                "knowledge_store_read_file", "knowledge_store_list_files", "knowledge_store_journal_log_entry", "knowledge_store_list_roots"
+            ]))
         {
             return Intents.FileTask;
         }
@@ -772,6 +789,7 @@ public static class IntentFeatureExtractor
             "list",
             "pull up",
             "give me",
+            "get me",
             "find me",
             "bring me",
             "send me"
@@ -799,6 +817,7 @@ public static class IntentFeatureExtractor
         return lower.Contains("news on ", StringComparison.Ordinal) ||
                lower.Contains("news about ", StringComparison.Ordinal) ||
                lower.Contains("news for ", StringComparison.Ordinal) ||
+             lower.Contains("local news", StringComparison.Ordinal) ||
                lower.Contains("headlines on ", StringComparison.Ordinal) ||
                lower.Contains("headlines about ", StringComparison.Ordinal) ||
                lower.Contains("latest news", StringComparison.Ordinal) ||
@@ -961,6 +980,18 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        if (lower.Contains("knowledge_store", StringComparison.Ordinal) ||
+            lower.Contains("knowledge store", StringComparison.Ordinal) ||
+            lower.Contains("journal_log_entry", StringComparison.Ordinal) ||
+            lower.Contains("read_file", StringComparison.Ordinal) ||
+            lower.Contains("file_list", StringComparison.Ordinal) ||
+            lower.Contains("file_read", StringComparison.Ordinal) ||
+            lower.Contains("tool call", StringComparison.Ordinal) ||
+            lower.Contains("call ", StringComparison.Ordinal) && lower.Contains("tool", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         // Guard against non-place "open" topics.
         if (lower.Contains("open source", StringComparison.Ordinal))
             return false;
@@ -1037,6 +1068,9 @@ public static class IntentFeatureExtractor
     {
         if (string.IsNullOrWhiteSpace(lower))
             return false;
+
+        if (LooksLikeLocalBusinessDiscovery(lower))
+            return true;
 
         ReadOnlySpan<string> businessTerms =
         [
@@ -1219,7 +1253,7 @@ public static class IntentFeatureExtractor
                lower.Contains("what does ", StringComparison.Ordinal);
     }
 
-    private static bool LooksLikePreferenceOrOpinionPrompt(string lower)
+    public static bool LooksLikePreferenceOrOpinionPrompt(string lower)
     {
         return lower.Contains("what is your favorite", StringComparison.Ordinal) ||
                lower.Contains("what's your favorite", StringComparison.Ordinal) ||
@@ -1235,6 +1269,62 @@ public static class IntentFeatureExtractor
                lower.Contains("tell me about yourself", StringComparison.Ordinal) ||
                lower.Contains("what makes you good at", StringComparison.Ordinal) ||
                lower.Contains("should i ", StringComparison.Ordinal);
+    }
+
+    public static bool LooksLikeSelfContainedReasoningPrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (LooksLikePreferenceOrOpinionPrompt(lower) ||
+            LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower) ||
+            LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeIdentityLookup(lower) ||
+            lower.Contains("search ", StringComparison.Ordinal) ||
+            lower.Contains("look up", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("recent", StringComparison.Ordinal) ||
+            lower.Contains("news", StringComparison.Ordinal) ||
+            lower.Contains("weather", StringComparison.Ordinal) ||
+            lower.Contains(".com", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var hasNameDeclaration =
+            lower.Contains("my name is ", StringComparison.Ordinal) ||
+            lower.Contains("i am ", StringComparison.Ordinal);
+
+        if (!hasNameDeclaration)
+            return false;
+
+        var asksToRecallName =
+            lower.Contains("what my name is", StringComparison.Ordinal) ||
+            lower.Contains("what's my name", StringComparison.Ordinal) ||
+            lower.Contains("whats my name", StringComparison.Ordinal) ||
+            lower.Contains("tell me what my name is", StringComparison.Ordinal) ||
+            lower.Contains("tell me my name", StringComparison.Ordinal);
+
+        if (!asksToRecallName)
+            return false;
+
+        var hasSimpleArithmetic =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\bwhat is\s+\d+\s*[\+\-\*/x]\s*\d+\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant) ||
+            lower.Contains(" plus ", StringComparison.Ordinal) ||
+            lower.Contains(" minus ", StringComparison.Ordinal) ||
+            lower.Contains(" times ", StringComparison.Ordinal) ||
+            lower.Contains(" divided by ", StringComparison.Ordinal);
+
+        return hasSimpleArithmetic;
     }
 
     /// <summary>
@@ -1331,6 +1421,30 @@ public static class IntentFeatureExtractor
         return false;
     }
 
+    private static bool ContainsLoosePhrase(string lower, ReadOnlySpan<string> phrases)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        var compact = NormalizeCompactPhraseInput(lower);
+
+        foreach (var phrase in phrases)
+        {
+            if (lower.Contains(phrase, StringComparison.Ordinal) ||
+                normalized.Contains(phrase, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var compactPhrase = NormalizeCompactPhraseInput(phrase);
+            if (compactPhrase.Length > 0 && compact.Contains(compactPhrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     private static string NormalizeLoosePhraseInput(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1355,5 +1469,20 @@ public static class IntentFeatureExtractor
         }
 
         return buffer.ToString().Trim();
+    }
+
+    private static string NormalizeCompactPhraseInput(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var buffer = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c))
+                buffer.Append(c);
+        }
+
+        return buffer.ToString();
     }
 }

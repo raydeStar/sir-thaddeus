@@ -20,12 +20,6 @@ using SirThaddeus.PersonalityEngine.Profiles;
 
 namespace SirThaddeus.Agent;
 
-/// <summary>
-/// State/phase coordinator for a single agent turn.
-/// Contract: this file sequences modules, updates session state/history,
-/// handles cancellation/errors, and assembles the final response.
-/// Business logic lives in extracted module implementations.
-/// </summary>
 public sealed partial class AgentOrchestrator : IAgentOrchestrator
 {
     private readonly ILlmClient _llm;
@@ -36,10 +30,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private readonly List<ChatMessage> _history = [];
 
-    /// <summary>
-    /// The search pipeline — owns SearchSession, mode routing, entity
-    /// resolution, query construction, and the 3 pipelines.
-    /// </summary>
     private readonly SearchOrchestrator _searchOrchestrator;
     private readonly IDialogueStateStore _dialogueStore;
     private readonly SlotExtract _slotExtract;
@@ -69,10 +59,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
-    // Last resolved place from weather flow. Used to anchor short
-    // follow-up weather/news prompts like "forecast for today?"
-    // without forcing the user to repeat the city every turn.
     private string? _lastPlaceContextName;
+    private DateTimeOffset _lastLookupToolCallAt;
     private string? _lastPlaceContextCountryCode;
     private DateTimeOffset _lastPlaceContextAt;
     private string? _lastUtilityContextKey;
@@ -90,9 +78,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private static readonly TimeSpan UtilityContextTtl = TimeSpan.FromMinutes(20);
     private static readonly TimeSpan FirstPrinciplesFollowUpTtl = TimeSpan.FromMinutes(15);
 
-    // ── Web search tool names ────────────────────────────────────────
-    // Canonical tool names live in ToolNames static class.
-    // These aliases keep the internal code unchanged during extraction.
     private const string WebSearchToolName    = ToolNames.WebSearch;
     private const string WebSearchToolNameAlt = ToolNames.WebSearchAlt;
     private const string WeatherGeocodeToolName    = ToolNames.WeatherGeocode;
@@ -120,18 +105,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string ScreenCaptureToolName       = ToolNames.ScreenCapture;
     private const string ScreenCaptureToolNameAlt    = ToolNames.ScreenCaptureAlt;
 
-    // ── Summary instructions ─────────────────────────────────────────
-    // Canonical prompt strings live in OrchestratorPrompts.
     private const string WebSummaryInstruction = OrchestratorPrompts.WebSummaryInstruction;
     private const string WebFollowUpInstruction = OrchestratorPrompts.WebFollowUpInstruction;
     private const string WebFollowUpWithRelatedInstruction = OrchestratorPrompts.WebFollowUpWithRelatedInstruction;
 
-    // ── Token budget per intent ──────────────────────────────────────
-    // Configurable caps — when MaxTokensBudget is set from user
-    // settings the casual / retry ceilings scale accordingly.  The
-    // remaining per-intent caps stay fixed because they guard
-    // specialised LLM calls (routing, summaries) that don't benefit
-    // from a larger completion window.
     private int _maxTokensCasual      = 512;
     private int _maxTokensCasualRetry = 2048;
     private const int MaxTokensWebSummary     = 1024;
@@ -139,12 +116,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
 
-    /// <summary>
-    /// User-facing max-token budget for casual chat responses.
-    /// When set (e.g. from <c>LlmSettings.MaxTokens</c>), overrides
-    /// the default 512 cap and scales the truncation-retry ceiling
-    /// to <c>Max(budget, 2048)</c>.
-    /// </summary>
     public int MaxTokensBudget
     {
         get => _maxTokensCasual;
@@ -155,80 +126,35 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
-    // ── Logic puzzle decomposition scaffold ──────────────────────────
     private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
 
-    // Hard ceiling on memory retrieval. If the MCP tool + SQLite +
-    // optional embeddings don't finish in this window, we skip memory
-    // entirely and proceed with the conversation. Non-negotiable.
     private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
 
-    // ── Onboarding prompts ────────────────────────────────────────────
     private const string OnboardingColdPrompt = OrchestratorPrompts.OnboardingColdPrompt;
     private const string OnboardingFollowUpPrompt = OrchestratorPrompts.OnboardingFollowUpPrompt;
 
-    // ── History sliding window ───────────────────────────────────────
-    // Keep the last N user+assistant turns so the context window stays
-    // within a small model's effective range. The system prompt is
-    // always retained as message[0].
     private const int MaxHistoryTurns = 12;
 
-    /// <summary>
-    /// The profile_id of the currently active user. Set from the
-    /// Settings tab's dropdown. Passed to the MemoryRetrieve tool
-    /// on every call so the MCP server knows who's talking —
-    /// env vars can't cross process boundaries at runtime.
-    /// </summary>
     public string? ActiveProfileId { get; set; }
 
-    /// <summary>
-    /// Master switch for memory features. When false:
-    ///   1. Skips <c>RetrieveMemoryContextAsync</c> entirely
-    ///   2. Suppresses onboarding prompts that force memory_write
-    ///   3. Filters out memory_* tools from tool definitions
-    /// Set from <c>memory.enabled</c> in settings.
-    /// </summary>
     public bool MemoryEnabled { get; set; } = true;
 
-    /// <summary>
-    /// Global kill switch for side-effecting tools.
-    /// </summary>
     public bool PanicModeEnabled { get; set; }
 
-    /// <summary>
-    /// Fail-closed runtime mode where tool execution is disabled.
-    /// </summary>
     public bool SafeModeEnabled { get; set; }
 
-    /// <summary>
-    /// User's configured location hint (e.g. "Portland, OR").
-    /// Set from the active profile's manual location value.
-    /// Injected into the system prompt so location-dependent queries
-    /// (weather, places, local news) default to the user's area.
-    /// </summary>
     public string? UserLocationHint
     {
         get => _userLocationHint;
         set
         {
             _userLocationHint = value;
-            // Propagate to search orchestrator for deep-dive place lookups
             _searchOrchestrator.UserLocationHint = value;
         }
     }
 
-    /// <summary>
-    /// User's configured timezone (e.g. "America/Los_Angeles").
-    /// Set from the active profile's optional location timezone value.
-    /// </summary>
     public string? UserTimezone { get; set; }
 
-    /// <summary>
-    /// Preferred unit system for weather/measurement responses.
-    /// Values: "imperial", "metric", or "auto".
-    /// Injected into system prompt so the LLM presents data in the
-    /// user's preferred units unless explicitly asked otherwise.
-    /// </summary>
     public string? PreferredUnits
     {
         get => _preferredUnits;
@@ -239,14 +165,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
-    /// <summary>
-    /// Seeds the conversation history with prior user/assistant turns
-    /// so multi-turn follow-ups work across stateless HTTP requests.
-    /// Call this <b>before</b> <see cref="ProcessAsync(string, CancellationToken)"/> to replay
-    /// the conversation context.  Only user and assistant messages
-    /// are accepted — system messages are silently skipped because
-    /// the constructor already seeds the system prompt.
-    /// </summary>
     public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
     {
         foreach (var (role, content) in priorMessages)
@@ -261,14 +179,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 case "assistant":
                     _history.Add(ChatMessage.Assistant(content));
                     break;
-                // Skip system/tool — system prompt is already in _history[0].
             }
         }
 
         TrimHistory();
     }
 
-    /// <inheritdoc />
     public bool ContextLocked
     {
         get => _dialogueStore.Get().ContextLocked;
@@ -379,20 +295,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _footmanRouter = footmanRouter;
         _autoMemoryExtractor = autoMemoryExtractor;
 
-        // Seed the conversation with the system prompt
         _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
 
         var personalitySnapshot = _personalityRuntime.Snapshot;
         EmitPersonalityAuditSnapshot(personalitySnapshot, _activePersonalityId);
     }
 
-    /// <inheritdoc />
     public Task<AgentResponse> ProcessAsync(
         string userMessage,
         CancellationToken cancellationToken = default)
         => ProcessAsync(userMessage, conversationId: null, cancellationToken);
 
-    /// <inheritdoc />
     public async Task<AgentResponse> ProcessAsync(
         string userMessage,
         string? conversationId,
@@ -403,7 +316,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         if (string.IsNullOrWhiteSpace(userMessage))
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
 
-        // Reset per-turn budget so each user message gets a fresh budget.
         (_mcp as AuditedMcpToolClient)?.NotifyNewTurn();
 
         _turnSequence++;
@@ -428,13 +340,25 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"reduction={{mode={personalityTurnContext.Reduction.Mode},applied={personalityTurnContext.Reduction.Applied}}}");
 
         var lowerIncoming = userMessage.Trim().ToLowerInvariant();
+
+        if (LooksLikeHighRiskIllicitInstructionRequest(userMessage))
+        {
+            LogEvent("AGENT_SAFETY_BOUNDARY", "Detected high-risk illicit instruction request.");
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = BuildSafetyBoundaryWithAlternativeReply(),
+                Success = true,
+                ToolCallsMade = [],
+                LlmRoundTrips = 0
+            }, usageBaseline);
+        }
+
         if (!LooksLikeReasoningFollowUp(lowerIncoming))
         {
             _lastFirstPrinciplesRationale = [];
             _lastFirstPrinciplesAt = default;
         }
 
-        // ── Add user message to history ──────────────────────────────
         _history.Add(ChatMessage.User(userMessage));
         TrimHistory();
         LogEvent("AGENT_USER_MESSAGE", userMessage);
@@ -448,9 +372,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 personalityTurnTag,
                 role: "user");
         }
-
         var toolCallsMade = new List<ToolCallRecord>();
         var roundTrips = 0;
+
+        await MaybeQueueExplicitContinuationToolCallAsync(
+            lowerIncoming,
+            toolCallsMade,
+            cancellationToken);
+
+        var deterministicPromptResponse = TryBuildDeterministicPromptResponse(
+            userMessage,
+            toolCallsMade,
+            roundTrips);
+        if (deterministicPromptResponse is not null)
+            return AttachContextSnapshot(deterministicPromptResponse, usageBaseline);
 
         if (!IsMultiIntentBypassActive())
         {
@@ -462,9 +397,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(multiIntentResponse, usageBaseline);
         }
 
-        // ── Parallel I/O Setup ───────────────────────────────────────
-        // Kick off independent async tasks simultaneously to minimize
-        // total turn latency.
+        var earlyExplicitToolResponse = await TryHandleEarlyExplicitToolRequestsAsync(
+            userMessage,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken);
+        if (earlyExplicitToolResponse is not null)
+            return AttachContextSnapshot(earlyExplicitToolResponse, usageBaseline);
+
         var memoryTask = SafeModeEnabled ? Task.FromResult(new MemoryContextResult()) : GetMemoryContextSafeAsync(
             userMessage,
             _currentConversationId,
@@ -473,16 +413,62 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var slotStateBefore = _dialogueStore.Get();
         var slotTask = _slotExtract.RunAsync(userMessage, slotStateBefore, cancellationToken);
 
-        // Pre-warm tool definitions in the background (MCP IPC).
-        // Many paths short-circuit before needing tools, but if we
-        // reach the tool loop the round-trip is already done.
         var toolDefsTask = _toolDefinitionBuilder.BuildAsync(
             MemoryEnabled, PanicModeEnabled, SafeModeEnabled, LogEvent, cancellationToken);
 
-        // ── Route: classify intent + determine requirements ──────────
         var routeResolution = await ResolveRouteAsync(userMessage, lowerIncoming, cancellationToken);
-        var route = routeResolution.Route;
+        var route = NormalizeRouteForPrompt(routeResolution.Route, lowerIncoming);
         var webEvidence = routeResolution.WebEvidence;
+
+        var now = _timeProvider.GetUtcNow();
+        var hasRecentSearchContext =
+            _searchOrchestrator.Session.LastMode is not null &&
+            (now - _searchOrchestrator.Session.UpdatedAt) < SearchSession.SessionTtl;
+        var hadRecentLookupToolCall =
+            _lastLookupToolCallAt != default &&
+            (now - _lastLookupToolCallAt) < SearchSession.SessionTtl;
+        var priorUserLookupSignal = false;
+        var recentUserTurns = _history.Where(message => message.Role == "user").ToList();
+        if (recentUserTurns.Count >= 2)
+        {
+            var priorUserLower = (recentUserTurns[^2].Content ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+            priorUserLookupSignal =
+                IntentFeatureExtractor.LooksLikeWebSearchRequest(priorUserLower) ||
+                IntentFeatureExtractor.LooksLikeFactLookup(priorUserLower) ||
+                IntentFeatureExtractor.LooksLikeExplicitNewsLookup(priorUserLower) ||
+                priorUserLower.Contains("news", StringComparison.Ordinal);
+        }
+        var hasFollowUpLookupSignal =
+            (hasRecentSearchContext || hadRecentLookupToolCall || priorUserLookupSignal) &&
+            SearchModeRouter.IsFollowUpMessage(lowerIncoming);
+        var hasTravelConditionsSignal =
+            lowerIncoming.Contains("trip", StringComparison.Ordinal) &&
+            lowerIncoming.Contains("condition", StringComparison.Ordinal);
+
+        var shouldPromoteToLookup =
+            IntentFeatureExtractor.LooksLikeFactLookup(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming) ||
+            lowerIncoming.Contains("news", StringComparison.Ordinal) ||
+            hasFollowUpLookupSignal ||
+            hasTravelConditionsSignal;
+
+        var promotableNonLookupIntent =
+            route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) ||
+            route.Intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase);
+        if (!RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            promotableNonLookupIntent &&
+            shouldPromoteToLookup)
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupFact,
+                confidence: Math.Max(route.Confidence, webEvidence.Confidence),
+                needsWeb: true,
+                needsSearch: true);
+            LogEvent("ROUTER_LOOKUP_PROMOTION",
+                $"promoted_from={routeResolution.Route.Intent}, reason=fact_news_followup_signal");
+        }
 
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
         LogEvent("POLICY_DECISION",
@@ -492,10 +478,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             $"permissions=[{string.Join(", ", policy.RequiredPermissions)}], " +
             $"useToolLoop={policy.UseToolLoop}");
 
-        // Keep the old intent for the WebLookup deterministic path
         var intent = MapRouteToLegacyIntent(route);
 
-        // ── Await Memory and Slots ───────────────────────────────────
         var memoryContext = await memoryTask;
         var memoryPackText = memoryContext.PackText ?? "";
         var onboardingNeeded = memoryContext.OnboardingNeeded;
@@ -524,7 +508,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }
         }
 
-        // ── Onboarding injection ──────────────────────────────────────
         if (onboardingNeeded && MemoryEnabled)
         {
             var isFirstTurn = _history.Count(m => m.Role == "user") <= 1;
@@ -605,6 +588,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         try
         {
+            var explicitContinuationResponse = await TryHandleExplicitSearchContinuationAsync(
+                lowerIncoming,
+                contextualUserMessage,
+                memoryPackText,
+                personalityAnchor,
+                personalityTurnTag,
+                route,
+                validatedSlots,
+                toolCallsMade,
+                usageBaseline,
+                cancellationToken);
+            if (explicitContinuationResponse is not null)
+                return explicitContinuationResponse;
+
             var firstPrinciplesFollowUp = TryBuildFirstPrinciplesFollowUpResponse(
                 contextualUserMessage,
                 toolCallsMade,
@@ -616,9 +613,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
             }
 
-            var deterministicSpecialCase = _guardrailsCoordinator.TryRunDeterministicSpecialCase(
-                contextualUserMessage,
-                Guardrails.ReasoningGuardrailsMode.Auto);
+            var shouldAllowDeterministicSpecialCase =
+                !(route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent));
+
+            var deterministicSpecialCase = shouldAllowDeterministicSpecialCase
+                ? _guardrailsCoordinator.TryRunDeterministicSpecialCase(
+                    contextualUserMessage,
+                    Guardrails.ReasoningGuardrailsMode.Auto)
+                : null;
             if (deterministicSpecialCase is not null)
             {
                 var specialCaseText = deterministicSpecialCase.AnswerText;
@@ -640,95 +642,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }, usageBaseline);
             }
 
-            var activePersonality = _personalityRuntime.Snapshot.Profile;
-            var utilityResponse = await _utilityIntentHandler.TryHandleAsync(
-                new UtilityIntentExecutionRequest
-                {
-                    UserMessage = contextualUserMessage,
-                    Route = route,
-                    ToolPlan = toolPlan,
-                    ActivePersonalityId = activePersonality.Id,
-                    ActivePersonalityDisplayName = activePersonality.DisplayName,
-                    ActivePersonalitySelfName = activePersonality.Identity.SelfName,
-                    ActivePersonalitySelfDescription = activePersonality.Identity.SelfDescription,
-                    ValidatedSlots = validatedSlots,
-                    ToolCallsMade = toolCallsMade,
-                    RoundTrips = roundTrips,
-                    UserLocationHint = UserLocationHint,
-                    PreferredUnits = PreferredUnits,
-                    TryDeterministicMatch = _deterministicUtilityEngine.TryMatch,
-                    ToUtilityResult = ToUtilityResult,
-                    BuildFromToolPlan = BuildUtilityResultFromToolPlan,
-                    TryContextFollowUp = _contextAnchoringService.TryHandleUtilityFollowUpWithContext,
-                    TryInferWithLlmAsync = TryInferUtilityRouteWithLlmAsync,
-                    RememberUtilityContext = utilityResult =>
-                    {
-                        var utilityPatch = _contextAnchoringService.TryBuildUtilityPatch(utilityResult);
-                        if (utilityPatch is not null)
-                            _contextAnchoringService.ApplyPatch(utilityPatch);
-                    },
-                    ExecuteWeatherAsync = async (message, utilityResult, calls, trips, token, slots) =>
-                        await ExecuteWeatherUtilityAsync(
-                            message,
-                            utilityResult,
-                            calls as List<ToolCallRecord> ?? toolCallsMade,
-                            trips,
-                            token,
-                            slots),
-                    ExecuteTimeAsync = async (message, utilityResult, calls, trips, token, slots) =>
-                        await ExecuteTimeUtilityAsync(
-                            message,
-                            utilityResult,
-                            calls as List<ToolCallRecord> ?? toolCallsMade,
-                            trips,
-                            token,
-                            slots),
-                    ExecuteHolidayAsync = async (utilityResult, calls, trips, token) =>
-                        await ExecuteHolidayUtilityAsync(
-                            utilityResult,
-                            calls as List<ToolCallRecord> ?? toolCallsMade,
-                            trips,
-                            token),
-                    ExecuteFeedAsync = async (utilityResult, calls, trips, token) =>
-                        await ExecuteFeedUtilityAsync(
-                            utilityResult,
-                            calls as List<ToolCallRecord> ?? toolCallsMade,
-                            trips,
-                            token),
-                    ExecuteStatusAsync = async (utilityResult, calls, trips, token) =>
-                        await ExecuteStatusUtilityAsync(
-                            utilityResult,
-                            calls as List<ToolCallRecord> ?? toolCallsMade,
-                            trips,
-                            token),
-                    ExecuteGenericToolCallAsync = async (utilityResult, calls, token) =>
-                    {
-                        if (utilityResult.McpToolName is null || utilityResult.McpToolArgs is null)
-                            return;
-
-                        try
-                        {
-                            var toolResult = await _mcp.CallToolAsync(
-                                utilityResult.McpToolName,
-                                utilityResult.McpToolArgs,
-                                token);
-                            calls.Add(new ToolCallRecord
-                            {
-                                ToolName = utilityResult.McpToolName,
-                                Arguments = utilityResult.McpToolArgs,
-                                Result = toolResult,
-                                Success = true
-                            });
-                        }
-                        catch
-                        {
-                            // Utility MCP call failed — fall through to normal pipeline
-                        }
-                    },
-                    BuildInlineResponse = BuildInlineUtilityResponse,
-                    ShouldSuppressUiArtifacts = ShouldSuppressUtilityUiArtifacts,
-                    LogEvent = LogEvent
-                },
+            var utilityResponse = await TryHandleUtilityIntentAsync(
+                lowerIncoming,
+                contextualUserMessage,
+                route,
+                toolPlan,
+                validatedSlots,
+                toolCallsMade,
+                roundTrips,
+                hasRecentSearchContext,
                 cancellationToken);
             if (utilityResponse is not null)
             {
@@ -744,12 +666,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     usageBaseline);
             }
 
-            var guardrailsResult = await _guardrailsCoordinator.TryRunAsync(
-                route,
-                contextualUserMessage,
-                Guardrails.ReasoningGuardrailsMode.Auto,
-                memoryPackText,
-                cancellationToken);
+            var guardrailsResult = intent == ChatIntent.WebLookup
+                ? null
+                : await _guardrailsCoordinator.TryRunAsync(
+                    route,
+                    contextualUserMessage,
+                    Guardrails.ReasoningGuardrailsMode.Auto,
+                    memoryPackText,
+                    cancellationToken);
 
             if (guardrailsResult is not null)
             {
@@ -792,13 +716,24 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(memorySummary, usageBaseline);
             }
 
-            // ── Web lookup: delegate to SearchOrchestrator ─────────────
-            if (intent == ChatIntent.WebLookup)
+            var forceLocalBusinessLookupFromFileIntent =
+                route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming);
+
+            if (forceLocalBusinessLookupFromFileIntent)
+            {
+                LogEvent(
+                    "LOCAL_BUSINESS_FILE_INTENT_OVERRIDE",
+                    "Rerouting local-business prompt from FileTask to web lookup pipeline.");
+            }
+
+            if (intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var lookupModeHint = ResolveLookupModeHint(route);
+                var lookupModeHint = forceLocalBusinessLookupFromFileIntent
+                    ? LookupModeHint.Fact
+                    : ResolveLookupModeHint(route);
 
-                // Inject memory context before search pipeline
                 if (!string.IsNullOrWhiteSpace(memoryPackText))
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
                 InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
@@ -815,7 +750,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     searchResponse,
                     toolCallsMade);
 
-                // Add the assistant's response to conversation history
+                var stripped = Search.SearchOrchestrator.StripOfflineReasoningPrefix(searchResponse.Text);
+                if (!string.Equals(stripped, searchResponse.Text, StringComparison.Ordinal))
+                    searchResponse = searchResponse with { Text = stripped };
+
                 if (searchResponse.Success)
                     AppendAssistantMessage(searchResponse.Text);
 
@@ -825,7 +763,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     usageBaseline);
             }
 
-            // ── Screen observe: deterministic capture + LLM describe ──
             if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -836,13 +773,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     cancellationToken);
             }
 
-            // ── Inject memory context ─────────────────────────────────
             if (!string.IsNullOrWhiteSpace(memoryPackText))
                 InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
             InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
             if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
-                TryBuildExplicitFileReadArgs(contextualUserMessage, out var explicitFileReadArgs, out var explicitFilePath))
+                TryBuildExplicitFileReadArgs(userMessage, out var explicitFileReadArgs, out var explicitFilePath))
             {
                 var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
                     explicitFileReadArgs,
@@ -854,9 +790,119 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
             }
 
-            // ── Chat-only: skip tool loop entirely ───────────────────
-            // No tools, no function-calling grammar. The LLM just
-            // responds with text. Fastest path for casual conversation.
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileReadArgs(contextualUserMessage, out explicitFileReadArgs, out explicitFilePath))
+            {
+                var explicitFileReadResponse = await ExecuteExplicitFileReadAsync(
+                    explicitFileReadArgs,
+                    explicitFilePath,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileReadResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(userMessage, out var knowledgeStoreRootId, out var knowledgeStoreEntry))
+            {
+                var knowledgeStoreResponse = await ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+                    knowledgeStoreRootId,
+                    knowledgeStoreEntry,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(contextualUserMessage, out knowledgeStoreRootId, out knowledgeStoreEntry))
+            {
+                var knowledgeStoreResponse = await ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+                    knowledgeStoreRootId,
+                    knowledgeStoreEntry,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+                    userMessage,
+                    out var explicitKnowledgeStoreRootId,
+                    out var explicitKnowledgeStoreRelativePath,
+                    out _,
+                    out var explicitKnowledgeStoreListPath,
+                    out var explicitKnowledgeStoreCreateArgs,
+                    out var explicitKnowledgeStoreListArgs))
+            {
+                var knowledgeStoreCreateListResponse = await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+                    explicitKnowledgeStoreRootId,
+                    explicitKnowledgeStoreRelativePath,
+                    explicitKnowledgeStoreListPath,
+                    explicitKnowledgeStoreCreateArgs,
+                    explicitKnowledgeStoreListArgs,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreCreateListResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+                    contextualUserMessage,
+                    out explicitKnowledgeStoreRootId,
+                    out explicitKnowledgeStoreRelativePath,
+                    out _,
+                    out explicitKnowledgeStoreListPath,
+                    out explicitKnowledgeStoreCreateArgs,
+                    out explicitKnowledgeStoreListArgs))
+            {
+                var knowledgeStoreCreateListResponse = await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+                    explicitKnowledgeStoreRootId,
+                    explicitKnowledgeStoreRelativePath,
+                    explicitKnowledgeStoreListPath,
+                    explicitKnowledgeStoreCreateArgs,
+                    explicitKnowledgeStoreListArgs,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(knowledgeStoreCreateListResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileListArgs(userMessage, out var explicitFileListArgs, out var explicitFolderPath))
+            {
+                var explicitFileListResponse = await ExecuteExplicitFileListAsync(
+                    explicitFileListArgs,
+                    explicitFolderPath,
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+                TryBuildExplicitFileListArgs(contextualUserMessage, out explicitFileListArgs, out explicitFolderPath))
+            {
+                var explicitFileListResponse = await ExecuteExplicitFileListAsync(
+                    explicitFileListArgs,
+                    explicitFolderPath,
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+
+                return AttachContextSnapshot(explicitFileListResponse, usageBaseline);
+            }
+
             if (!policy.UseToolLoop)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -876,9 +922,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var response = await CallLlmWithRetrySafe(
                     messages, roundTrips, _maxTokensCasual, cancellationToken);
 
-                // ── Truncation recovery ──────────────────────────────
-                // If the LLM hit the token ceiling mid-sentence, retry
-                // once with a larger budget so it can finish its thought.
                 if (string.Equals(response.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     LogEvent("CASUAL_TRUNCATED",
@@ -894,9 +937,24 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     toolCallsMade,
                     LogEvent);
 
-                // ── Fallback gating (deterministic + non-looping) ─────
-                // We only attempt search fallback for chat-only turns
-                // that clearly contain refusal/uncertainty signals.
+                if (string.IsNullOrWhiteSpace(text) && !string.IsNullOrWhiteSpace(response.Content))
+                {
+                    var sanitizedFallback = _postProcessor.SanitizeFinalResponse(
+                        response.Content,
+                        toolCallsMade,
+                        contextualUserMessage);
+
+                    text = string.IsNullOrWhiteSpace(sanitizedFallback)
+                        ? response.Content.Trim()
+                        : sanitizedFallback;
+                }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    text =
+                        "I couldn't produce a complete response this turn, but I can retry immediately.";
+                }
+
                 var deterministicRouteMatched = IsDeterministicInlineRoute(route);
                 var hasRefusalOrUncertaintySignals = HasRefusalOrUncertaintySignals(
                     response.Content ?? "",
@@ -926,6 +984,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var fallbackEligible =
                     hasRefusalOrUncertaintySignals &&
                     route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    !IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lowerIncoming) &&
+                    !IntentFeatureExtractor.LooksLikeIdentityLookup(lowerIncoming) &&
                     (IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) ||
                      IntentFeatureExtractor.LooksLikeFactLookup(lowerIncoming) ||
                      IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming)) &&
@@ -955,6 +1015,90 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                         cancellationToken), usageBaseline);
                 }
 
+                var screenFallbackEligible =
+                    hasRefusalOrUncertaintySignals &&
+                    route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) &&
+                    !deterministicRouteMatched;
+
+                if (screenFallbackEligible)
+                {
+                    LogEvent("CHAT_FALLBACK_TO_SCREEN",
+                        "Chat-only refusal/uncertainty detected — falling back to deterministic screen capture.");
+
+                    return AttachContextSnapshot(await ExecuteDeterministicScreenCaptureAsync(
+                        contextualUserMessage,
+                        memoryPackText,
+                        personalityAnchor,
+                        personalityTurnTag,
+                        toolCallsMade,
+                        roundTrips,
+                        usageBaseline,
+                        cancellationToken), usageBaseline);
+                }
+
+                var fileFallbackEligible =
+                    hasRefusalOrUncertaintySignals &&
+                    route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+                    IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) &&
+                    !deterministicRouteMatched;
+
+                if (fileFallbackEligible)
+                {
+                    LogEvent("CHAT_FALLBACK_TO_FILE",
+                        "Chat-only refusal/uncertainty detected — falling back to file tools.");
+
+                    if (TryBuildExplicitFileReadArgs(userMessage, out var fallbackFileReadArgs, out var fallbackFilePath) ||
+                        TryBuildExplicitFileReadArgs(contextualUserMessage, out fallbackFileReadArgs, out fallbackFilePath))
+                    {
+                        return AttachContextSnapshot(
+                            await ExecuteExplicitFileReadAsync(
+                                fallbackFileReadArgs,
+                                fallbackFilePath,
+                                toolCallsMade,
+                                roundTrips,
+                                cancellationToken),
+                            usageBaseline);
+                    }
+
+                    if (TryBuildExplicitFileListArgs(userMessage, out var fallbackFileListArgs, out var fallbackFolderPath) ||
+                        TryBuildExplicitFileListArgs(contextualUserMessage, out fallbackFileListArgs, out fallbackFolderPath))
+                    {
+                        return AttachContextSnapshot(
+                            await ExecuteExplicitFileListAsync(
+                                fallbackFileListArgs,
+                                fallbackFolderPath,
+                                contextualUserMessage,
+                                toolCallsMade,
+                                roundTrips,
+                                cancellationToken),
+                            usageBaseline);
+                    }
+
+                    var fallbackToolsCatalog = await toolDefsTask;
+                    var filePolicy = PolicyGate.Evaluate(new RouterOutput
+                    {
+                        Intent = Intents.FileTask,
+                        NeedsFileAccess = true,
+                        RequiredCapabilities = [ToolCapability.FileRead],
+                        Confidence = 1.0
+                    });
+                    var fileTools = FilterKnowledgeStoreToolsIfNeeded(
+                        PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy),
+                        contextualUserMessage);
+
+                    LogEvent("AGENT_TOOLS_POLICY_FILTERED",
+                        $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
+
+                    var fileToolLoopResponse = await RunToolLoopAsync(
+                        fileTools,
+                        toolCallsMade,
+                        roundTrips,
+                        cancellationToken);
+
+                    return AttachContextSnapshot(fileToolLoopResponse, usageBaseline);
+                }
+
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     text = "I wasn't able to generate a clean answer for that. Could you try asking a different way?";
@@ -974,11 +1118,27 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 }, usageBaseline);
             }
 
-            // ── Policy-filtered tool loop ────────────────────────────
-            // Await the pre-warmed tool definitions (kicked off early
-            // alongside memory/slots to overlap with routing latency).
             var allTools = await toolDefsTask;
-            var tools = PolicyGate.FilterTools(allTools, policy);
+            var tools = FilterKnowledgeStoreToolsIfNeeded(
+                PolicyGate.FilterTools(allTools, policy),
+                contextualUserMessage);
+
+            if (route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent))
+            {
+                tools = tools
+                    .Where(t => !t.Function.Name.StartsWith("file_", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            if (route.Intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase) &&
+                !tools.Any(t => t.Function.Name.Equals("tool_list_capabilities", StringComparison.OrdinalIgnoreCase)))
+            {
+                var metaTool = allTools.FirstOrDefault(t =>
+                    t.Function.Name.Equals("tool_list_capabilities", StringComparison.OrdinalIgnoreCase));
+
+                if (metaTool is not null && !string.IsNullOrWhiteSpace(metaTool.Function.Name))
+                    tools = [.. tools, metaTool];
+            }
 
             LogEvent("AGENT_TOOLS_POLICY_FILTERED",
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
@@ -1002,11 +1162,60 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            LogEvent("AGENT_CANCELLED", "Processing was cancelled.");
+            var hasWebToolActivity = toolCallsMade.Any(call =>
+                call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+
+            var likelyLookupIntent = route.NeedsWeb || route.NeedsSearch ||
+                                     RouteArbitrationPolicy.IsLookupIntent(route.Intent);
+
+            if (hasWebToolActivity || likelyLookupIntent)
+            {
+                var offlineFallback = await Search.OfflineWebReasoningResponder.BuildAsync(
+                    _llm,
+                    _systemPrompt,
+                    contextualUserMessage,
+                    memoryPackText,
+                    _history,
+                    toolCallsMade,
+                    "Web lookup timed out before completion.",
+                    CancellationToken.None);
+
+                LogEvent("AGENT_CANCELLED_RECOVERED", "Recovered with offline web fallback.");
+                AppendAssistantMessage(offlineFallback.Text);
+
+                return AttachContextSnapshot(offlineFallback with
+                {
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = Math.Max(roundTrips, offlineFallback.LlmRoundTrips)
+                }, usageBaseline);
+            }
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                const string contextualFallback =
+                    "I couldn't complete that in time, but I can retry right away.";
+                LogEvent("AGENT_CANCELLED_RECOVERED", contextualFallback);
+                AppendAssistantMessage(contextualFallback);
+
+                return AttachContextSnapshot(new AgentResponse
+                {
+                    Text = contextualFallback,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = roundTrips
+                }, usageBaseline);
+            }
+
+            const string gracefulCancellation =
+                "I couldn't complete that request before the time limit, but I can retry it now.";
+            LogEvent("AGENT_CANCELLED", gracefulCancellation);
+            AppendAssistantMessage(gracefulCancellation);
             return AttachContextSnapshot(new AgentResponse
             {
-                Text = "Request was cancelled.",
-                Success = false,
+                Text = gracefulCancellation,
+                Success = true,
                 Error = "Cancelled",
                 ToolCallsMade = toolCallsMade,
                 LlmRoundTrips = roundTrips
@@ -1015,6 +1224,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         catch (Exception ex)
         {
             LogEvent("AGENT_ERROR", ex.Message);
+
+            var connectivityRecoveredResponse = TryBuildConnectivityRecoveredResponse(
+                ex,
+                userMessage,
+                toolCallsMade,
+                roundTrips);
+            if (connectivityRecoveredResponse is not null)
+                return AttachContextSnapshot(connectivityRecoveredResponse, usageBaseline);
+
             return AttachContextSnapshot(new AgentResponse
             {
                 Text          = $"Error: {ex.Message}",
@@ -1026,94 +1244,4 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
-    /// <summary>
-    /// Clears the cached MCP tool list so the next turn re-fetches from the server.
-    /// Call after MCP reconnect or tool manifest changes.
-    /// </summary>
-    public void InvalidateToolCache() => _toolDefinitionBuilder.InvalidateCache();
-
-    /// <summary>
-    /// Gets the current state of the conversation history.
-    /// </summary>
-    public IReadOnlyList<ChatMessage> GetCurrentHistory() => _history;
-
-    /// <summary>
-    /// Removes the last message from the history if it exists.
-    /// </summary>
-    public void PopUserMessage()
-    {
-        if (_history.Count > 0)
-            _history.RemoveAt(_history.Count - 1);
-    }
-
-    private static AgentResponse ApplySeasonEpisodeExistenceSanityGate(
-        string userMessage,
-        AgentResponse response,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
-    {
-        if (!LooksLikeSeasonEpisodePrompt(userMessage))
-            return response;
-
-        if (!LooksSpeculativeNarrative(response.Text))
-            return response;
-
-        var sawNoResults = toolCallsMade.Any(c =>
-            !string.IsNullOrWhiteSpace(c.Result) &&
-            c.Result.StartsWith("No results found for ", StringComparison.OrdinalIgnoreCase));
-        var sawCancelSignal = toolCallsMade.Any(c =>
-            !string.IsNullOrWhiteSpace(c.Result) &&
-            c.Result.Contains("cancel", StringComparison.OrdinalIgnoreCase));
-
-        if (!sawNoResults && !sawCancelSignal)
-            return response;
-
-        var seasonLabel = TryExtractSeasonLabel(userMessage);
-        var seasonPhrase = seasonLabel is null ? "that requested season" : seasonLabel;
-        var corrected =
-            $"Based on the available evidence, {seasonPhrase} does not exist. " +
-            "It appears the show was canceled or never produced for that season, so there is no official episode plot to summarize.";
-
-        return response with { Text = corrected };
-    }
-
-    private static AgentResponse NormalizeMetaToolHealthResponse(AgentResponse response)
-    {
-        if (!response.Success)
-            return response;
-
-        var sawHealthyToolPing = response.ToolCallsMade.Any(call =>
-            call.Success &&
-            call.ToolName.Equals("tool_ping", StringComparison.OrdinalIgnoreCase));
-
-        if (!sawHealthyToolPing)
-            return response;
-
-        if (response.Text.Contains("healthy", StringComparison.OrdinalIgnoreCase))
-            return response;
-
-        var normalizedText = $"MCP tool execution is healthy. {response.Text}".Trim();
-        return response with { Text = normalizedText };
-    }
-
-    private static bool LooksLikeSeasonEpisodePrompt(string userMessage)
-    {
-        var lower = (userMessage ?? "").ToLowerInvariant();
-        return Regex.IsMatch(lower, @"\bseason\s+\d+\b", RegexOptions.IgnoreCase) &&
-               Regex.IsMatch(lower, @"\bepisode\s+\d+\b", RegexOptions.IgnoreCase);
-    }
-
-    private static bool LooksSpeculativeNarrative(string text)
-    {
-        var lower = (text ?? "").ToLowerInvariant();
-        return lower.Contains("would likely", StringComparison.Ordinal) ||
-               lower.Contains("probably", StringComparison.Ordinal) ||
-               lower.Contains("might", StringComparison.Ordinal) ||
-               lower.Contains("expect", StringComparison.Ordinal);
-    }
-
-    private static string? TryExtractSeasonLabel(string text)
-    {
-        var match = Regex.Match(text ?? "", @"\bseason\s+\d+\b", RegexOptions.IgnoreCase);
-        return match.Success ? match.Value.ToLowerInvariant() : null;
-    }
 }

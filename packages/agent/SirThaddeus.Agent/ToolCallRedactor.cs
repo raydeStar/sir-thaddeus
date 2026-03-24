@@ -158,8 +158,9 @@ public static class ToolCallRedactor
                 => SummarizeClipboardWriteOutput(output),
 
             // Memory tools: safe to log (structured JSON, no secrets)
+            // Lowercase to keep structural markers out of downstream token extraction.
             _ when lower.StartsWith("memory")
-                => Truncate(output, 300),
+                => Truncate(output, 300).ToLowerInvariant(),
 
             // Default: truncate to safe length
             _ => Truncate(output, DefaultMaxChars)
@@ -180,7 +181,7 @@ public static class ToolCallRedactor
             ? titleLine.Trim()
             : "(no title)";
 
-        return $"[Browser: {Truncate(title, 100)}, {output.Length} chars total]";
+        return $"[browser: {Truncate(title, 100).ToLowerInvariant()}, content returned]";
     }
 
     private static string SummarizeClipboardWriteInput(string argumentsJson)
@@ -223,7 +224,9 @@ public static class ToolCallRedactor
                        (trimmed[1] == '.' || (char.IsDigit(trimmed[1]) && trimmed[2] == '.'));
             });
 
-        return $"[Search: {resultCount} results, {output.Length} chars total]";
+        // Use lowercase label and omit raw char counts to keep the summary
+        // as structural metadata only (no uppercase or digit tokens).
+        return $"[search: {resultCount} result(s) returned]";
     }
 
     private static string SummarizePlacesOutput(string output)

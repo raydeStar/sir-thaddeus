@@ -58,6 +58,7 @@ public class RouterV2Tests
     [Theory]
     [InlineData("what's on my screen right now?")]
     [InlineData("can you tell me what is on my screen?")]
+    [InlineData("ok i want to run a few tests -- can you tell me what is on mys creen right now?")]
     [InlineData("take a screenshot")]
     [InlineData("summarize this page")]
     [InlineData("what can you see")]
@@ -77,6 +78,36 @@ public class RouterV2Tests
     {
         var (router, getLlmCalls) = CreateRouterWithCallCounter();
         var route = await router.RouteAsync(new RouterRequest { UserMessage = message });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_PreferencePrompt_StaysChatAndAvoidsLlm()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "Tell me about your favorite thing to help people with. What makes you good at it?"
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_SelfContainedReasoningPrompt_StaysChatAndAvoidsLlm()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "My name is Alex. What is 2 + 2? Then tell me what my name is."
+        });
 
         Assert.Equal(Intents.ChatOnly, route.Intent);
         Assert.False(route.NeedsWeb);
@@ -194,6 +225,34 @@ public class RouterV2Tests
         var route = await router.RouteAsync(new RouterRequest
         {
             UserMessage = @"Use file_read on C:\Users\Public\Documents\readme.txt"
+        });
+
+        Assert.Equal(Intents.FileTask, route.Intent);
+        Assert.True(route.NeedsFileAccess);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_NaturalFolderQuestion_RoutesToFileTask()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "can you see what is in my personal folder?"
+        });
+
+        Assert.Equal(Intents.FileTask, route.Intent);
+        Assert.True(route.NeedsFileAccess);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
+    public async Task RouteAsync_ReadMyPersonalFolder_RoutesToFileTask()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "can you read my personal folder and tell me whats in there?"
         });
 
         Assert.Equal(Intents.FileTask, route.Intent);

@@ -75,7 +75,7 @@ public static class RetryHelper
             if (httpEx.StatusCode.HasValue)
             {
                 var code = (int)httpEx.StatusCode.Value;
-                return code >= 500; // 5xx only
+                return code >= 500 || code == 429; // 5xx + 429 Too Many Requests
             }
 
             // No status code → connection-level failure → transient

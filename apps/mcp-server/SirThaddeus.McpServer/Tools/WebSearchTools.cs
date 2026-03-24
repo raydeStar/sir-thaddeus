@@ -87,6 +87,10 @@ public static class WebSearchTools
         [Description("Recency filter: day, week, month, or any (default)")] string recency = "any",
         CancellationToken cancellationToken = default)
     {
+        var stubbedError = ToolStubGuard.GetStubbedError("web_search");
+        if (stubbedError is not null)
+            return stubbedError;
+
         if (string.IsNullOrWhiteSpace(query))
             return "Error: Search query is required.";
 
@@ -190,8 +194,8 @@ public static class WebSearchTools
             var sb = new StringBuilder();
             sb.AppendLine($"No results found for \"{query}\".");
             sb.AppendLine($"Provider: {searchResult.Provider}");
-            foreach (var err in searchResult.Errors)
-                sb.AppendLine($"Warning: {err}");
+            if (searchResult.Errors.Count > 0)
+                sb.AppendLine("Some search providers were temporarily unavailable.");
             sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
             sb.AppendLine();
             sb.AppendLine(SourcesDelimiter);

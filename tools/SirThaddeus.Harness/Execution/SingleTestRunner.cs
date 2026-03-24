@@ -66,7 +66,8 @@ internal sealed class SingleTestRunner
             artifacts.JudgeResultPath,
             _context.Options.JudgeTimeoutMs,
             _context.Options.JudgeRequired,
-            cancellationToken);
+            cancellationToken,
+            steps: steps);
 
         var score = _scoringEngine.Score(test, response, steps, judgeResult);
 

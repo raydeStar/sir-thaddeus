@@ -117,6 +117,32 @@ public class SearchOfflineFallbackTests
         Assert.Contains("Trader Joe", response.Text, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenWebSearchReturnsNoResults_DoesNotOpenBrowserFallback()
+    {
+        var llm = new StubLlmClient(
+            "I cannot verify live web facts for this question right now, so any answer may be incomplete or out of date.");
+        var mcp = new TrackingStubMcpClient("No results found for C# 13 changes");
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: "Use web_search to answer what changed in C# 13 and keep it practical.",
+            memoryPackText: "",
+            history: [ChatMessage.User("Use web_search to answer what changed in C# 13 and keep it practical.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("cannot verify live web facts", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
     private sealed class StubLlmClient(string responseText) : ILlmClient
     {
         public Task<LlmResponse> ChatAsync(
@@ -148,6 +174,23 @@ public class SearchOfflineFallbackTests
             string argumentsJson,
             CancellationToken cancellationToken = default)
         {
+            return Task.FromResult(webResponse);
+        }
+
+        public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
+    }
+
+    private sealed class TrackingStubMcpClient(string webResponse) : IMcpToolClient
+    {
+        public List<string> Calls { get; } = [];
+
+        public Task<string> CallToolAsync(
+            string toolName,
+            string argumentsJson,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add(toolName);
             return Task.FromResult(webResponse);
         }
 

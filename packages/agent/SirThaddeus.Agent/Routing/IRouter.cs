@@ -17,6 +17,13 @@ public sealed record RouterRequest
 /// </summary>
 public interface IRouter
 {
+    /// <summary>
+    /// Classifies the user's message and returns structured intent requirements
+    /// that downstream stages use to select an execution strategy.
+    /// </summary>
+    /// <param name="request">Routing input containing the user message and conversation state hints.</param>
+    /// <param name="cancellationToken">Token to cancel the classification.</param>
+    /// <returns>A routing decision with intent, confidence, and capability flags.</returns>
     Task<RouterOutput> RouteAsync(RouterRequest request, CancellationToken cancellationToken = default);
 }
 

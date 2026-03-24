@@ -118,6 +118,23 @@ public sealed partial class AgentOrchestrator
             $"system={route.NeedsSystemExecute}, risk={route.RiskLevel}, " +
             $"capabilities=[{string.Join(", ", route.RequiredCapabilities)}]");
 
+        if (!RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            _searchOrchestrator.Session.LastWasLocalBusinessDiscovery &&
+            _searchOrchestrator.Session.LastLocalBusinessCandidateTitles.Any(candidate =>
+                !string.IsNullOrWhiteSpace(candidate) &&
+                userMessage.Contains(candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupSearch,
+                confidence: Math.Max(route.Confidence, 0.95),
+                needsWeb: true,
+                needsSearch: true,
+                needsBrowser: true);
+
+            LogEvent("ROUTER_LOCAL_BUSINESS_PROMOTION",
+                "Promoted non-lookup route due to explicit mention of a prior local-business candidate.");
+        }
+
         RoutingDecision? footmanDecision = null;
         var actionTier = ActionTierClassifier.Classify(route, lowerIncoming, webEvidence);
         if (_footmanRouter is not null && RouteArbitrationPolicy.ShouldRunFootmanForRoute(route, lowerIncoming, webEvidence))
@@ -207,6 +224,23 @@ public sealed partial class AgentOrchestrator
 
         if (footmanDecision is { IsAuthoritative: true })
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
+
+        // ── Heuristic safety valve: downgrade WebLookup → ChatOnly ───
+        // When the deterministic heuristic says "no web lookup needed"
+        // AND Footman did not authoritatively confirm the lookup,
+        // the LLM router likely over-indexed on surface topic words.
+        // Placed before GetLookupFloorIntent so strong deterministic
+        // signals (deep-dive, news, local biz) can still upgrade back.
+        if (RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            !webEvidence.ShouldLookup &&
+            route.Confidence < 0.35 &&
+            footmanDecision?.IsAuthoritative != true)
+        {
+            route = DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: route.Confidence);
+            LogEvent("HEURISTIC_LOOKUP_DOWNGRADE",
+                $"webScore={webEvidence.Score:0.0}, reason={webEvidence.ReasonCode} — " +
+                "low heuristic evidence and no Footman confirmation, routing to chat");
+        }
 
         var lookupFloorIntent = RouteArbitrationPolicy.GetLookupFloorIntent(lowerIncoming, route, webEvidence);
         if (!string.IsNullOrWhiteSpace(lookupFloorIntent))

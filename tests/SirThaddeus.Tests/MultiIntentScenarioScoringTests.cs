@@ -411,4 +411,42 @@ public class MultiIntentScenarioScoringTests
         Assert.Contains("Target closes at 10 PM", composed);
         Assert.DoesNotContain("wasn't able", composed, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void S14_Composer_OmitsFormattingTailFailure_WhenMainResultSucceeded()
+    {
+        var composer = new UnifiedResponseComposer();
+        var composed = composer.Compose(new UnifiedResponseComposeRequest
+        {
+            OriginalMessage = "Look up the latest tech headlines and summarize it in two sentences.",
+            NonActionableContext = [],
+            Executed =
+            [
+                new SegmentExecutionResult
+                {
+                    SegmentId = "seg-1",
+                    SegmentText = "Look up the latest tech headlines",
+                    Intent = "search",
+                    Success = true,
+                    ResponseText = "Web search returned no usable live news results for that request right now.",
+                    UsedTools = true,
+                    ToolCallCount = 1
+                },
+                new SegmentExecutionResult
+                {
+                    SegmentId = "seg-2",
+                    SegmentText = "summarize it in two sentences",
+                    Intent = "chat",
+                    Success = false,
+                    ResponseText = "",
+                    UsedTools = false,
+                    ToolCallCount = 0
+                }
+            ],
+            Deferred = []
+        });
+
+        Assert.Contains("Web search returned no usable live news results", composed, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("wasn't able to resolve", composed, StringComparison.OrdinalIgnoreCase);
+    }
 }

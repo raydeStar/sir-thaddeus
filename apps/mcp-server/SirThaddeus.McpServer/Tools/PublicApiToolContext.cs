@@ -2,6 +2,10 @@ using SirThaddeus.WebSearch;
 
 namespace SirThaddeus.McpServer.Tools;
 
+/// <summary>
+/// Lazy-initialized shared service instances for public-API-backed MCP tools
+/// (timezone, holidays, etc.).
+/// </summary>
 internal static class PublicApiToolContext
 {
     private static readonly Lazy<PublicApiServiceOptions> Options = new(CreateOptions);

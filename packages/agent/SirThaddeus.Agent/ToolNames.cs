@@ -31,6 +31,10 @@ public static class ToolNames
     public const string StatusCheckAlt      = "StatusCheckUrl";
     public const string DocumentRead        = "document_read";
     public const string DocumentReadAlt     = "DocumentRead";
+    public const string FileRead            = "file_read";
+    public const string FileReadAlt         = "FileRead";
+    public const string FileList            = "file_list";
+    public const string FileListAlt         = "FileList";
     public const string ClipboardRead       = "clipboard_read";
     public const string ClipboardReadAlt    = "ClipboardRead";
     public const string ClipboardWrite      = "clipboard_write";

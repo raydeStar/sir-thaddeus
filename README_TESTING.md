@@ -38,10 +38,22 @@ Filtered runs skip the screen-observe harness so the fast loop stays fast.
 Restores packages, builds in Release, then runs the full suite.
 This includes the `screen-observe` harness suite.
 
+To include the live knowledge-store harness suite in that pass:
+
+```powershell
+.\dev\test_all.ps1 -IncludeKnowledgeStoreHarness
+```
+
 ## Production preflight (before release)
 
 ```powershell
 .\dev\preflight.ps1
+```
+
+To include the live knowledge-store harness suite in preflight:
+
+```powershell
+.\dev\preflight.ps1 -IncludeKnowledgeStoreHarness
 ```
 
 Runs bootstrap + full Release test suite as a single gate before packaging.
@@ -94,6 +106,43 @@ Recommended policy:
 - Keep `--max-iters 1` for PR runs.
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
 - Use `--all` before merges when you want one full headless pass.
+
+### Overnight harness runs
+
+For long local runs such as `./dev/harness.ps1 --all --judge none`:
+
+- Keep the local model endpoint running for the entire run if your setup depends on LM Studio or another local OpenAI-compatible server.
+- Avoid overlapping harness runs after code changes. A stale headless runtime or MCP server can hold build outputs open and make the next run fail for the wrong reason.
+- If you interrupt a long run after rebuilding product code, restart the harness cleanly instead of trusting partial results from the old binaries.
+
+## Knowledge-store harness
+
+The knowledge-store suite uses an isolated temporary root plus a patched settings file,
+so it is exposed through a dedicated helper:
+
+```powershell
+.\dev\run-knowledge-store-harness.ps1
+```
+
+This suite currently covers:
+
+- journal write plus direct read-back
+- create plus list round-trip
+- configured root discovery via `knowledge_store_list_roots`
+
+Append behavior remains covered in unit tests. The live append conversation case was intentionally not added to the default harness suite because it was not stable enough to serve as a trustworthy gate.
+
+You can also opt into it from the normal test entrypoints:
+
+```powershell
+.\dev\test.ps1 -IncludeKnowledgeStoreHarness
+.\dev\test_all.ps1 -IncludeKnowledgeStoreHarness
+```
+
+Notes:
+
+- This is a live harness suite. It is intended for local validation with a configured model/runtime, not the default hosted CI gate.
+- The helper rewrites `knowledgeStore` settings into an isolated temp root so the run does not mutate your normal notes.
 
 ## Screen awareness validation
 

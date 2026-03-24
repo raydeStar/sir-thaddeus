@@ -15,6 +15,9 @@ internal static class WebToolFailureMapper
         if (!TryParseStructuredError(toolResult, out var code, out var message))
             return null;
 
+        if (ContainsUnavailable(code) || ContainsUnavailable(message))
+            return null;
+
         var text = BuildMessage(code, message);
         return new AgentResponse
         {
@@ -44,12 +47,6 @@ internal static class WebToolFailureMapper
             return "Web search was blocked by the current tool policy for this run.";
         }
 
-        if (ContainsUnavailable(code) || ContainsUnavailable(message))
-        {
-            return "The web search tool is currently unavailable. " +
-                   "Please verify MCP server connectivity and try again.";
-        }
-
         return "Web search failed before returning results. Please retry in a moment.";
     }
 
@@ -62,6 +59,13 @@ internal static class WebToolFailureMapper
         message = "";
         if (string.IsNullOrWhiteSpace(payload))
             return false;
+
+        // Handle plain-text "Error: ..." messages (e.g., from tool stubs).
+        if (payload.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+        {
+            message = payload["Error:".Length..].Trim();
+            return !string.IsNullOrWhiteSpace(message);
+        }
 
         try
         {
@@ -145,7 +149,8 @@ internal static class WebToolFailureMapper
     }
 
     private static bool ContainsTimeout(string value)
-        => value.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+        => value.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+           value.Contains("timed out", StringComparison.OrdinalIgnoreCase);
 
     private static bool ContainsPolicyBlock(string value)
         => value.Contains("tool_not_allowed", StringComparison.OrdinalIgnoreCase) ||

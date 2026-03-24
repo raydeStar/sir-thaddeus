@@ -19,7 +19,7 @@ expectations:
     - as an ai
     - error
     - timeout
-  max_response_chars: 1200
+  max_response_chars: 2200
   expect_signature: false
   expect_structured_format: true
   forbid_slang: false

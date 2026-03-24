@@ -53,6 +53,12 @@ public static class ToolGroupPolicy
         ["file_read_apply"]      = "files",
         ["file_list_preview"]    = "files",
         ["file_list_apply"]      = "files",
+        ["knowledge_store_list_roots"] = "meta",
+        ["knowledge_store_read_file"] = "files",
+        ["knowledge_store_list_files"] = "files",
+        ["knowledge_store_create_file"] = "files",
+        ["knowledge_store_append_to_file"] = "files",
+        ["knowledge_store_journal_log_entry"] = "files",
 
         // System
         ["system_execute"]       = "system",

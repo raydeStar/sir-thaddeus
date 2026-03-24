@@ -17,7 +17,7 @@ public sealed class HelperModelTimeoutTests
             audit,
             timeout: TimeSpan.FromMilliseconds(20));
 
-        var decision = await classifier.ClassifyAsync("Explain how quicksort works");
+        var decision = await classifier.ClassifyAsync("I'm trying to plan my week and I'm not sure where to start.");
 
         Assert.Equal(MemoryIntentDecision.Unsure, decision);
 
@@ -48,6 +48,71 @@ public sealed class HelperModelTimeoutTests
 
         var decision = await classifier.ClassifyAsync(
             "What time is it right now? Tell me in one sentence.");
+
+        Assert.Equal(MemoryIntentDecision.Suppress, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task SmartIntentClassifier_PublicReasoningQuestion_ReturnsSuppress_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "Explain the Monty Hall problem and whether switching is better.");
+
+        Assert.Equal(MemoryIntentDecision.Suppress, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task SmartIntentClassifier_FirstPersonLogicPuzzle_ReturnsSuppress_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?");
+
+        Assert.Equal(MemoryIntentDecision.Suppress, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task SmartIntentClassifier_MontyHallFragment_ReturnsSuppress_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "Should I switch to door 2 or stick with door 1?");
+
+        Assert.Equal(MemoryIntentDecision.Suppress, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task SmartIntentClassifier_PersonalizedDecisionRequest_ReturnsInject_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "The car wash is 50m away from my house. Do I walk, or drive?");
+
+        Assert.Equal(MemoryIntentDecision.Inject, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task SmartIntentClassifier_CurrentNewsPrompt_ReturnsSuppress_WithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm);
+
+        var decision = await classifier.ClassifyAsync(
+            "What are the latest technology news headlines today?");
 
         Assert.Equal(MemoryIntentDecision.Suppress, decision);
         Assert.Equal(0, llm.CallCount);

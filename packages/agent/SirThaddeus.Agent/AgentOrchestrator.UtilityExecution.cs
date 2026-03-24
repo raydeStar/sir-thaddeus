@@ -68,14 +68,35 @@ public sealed partial class AgentOrchestrator
         LogEvent("SCREEN_CAPTURE_OK",
             $"Captured {screenResult.Result.Length} chars of screen data.");
 
+        // ── Deterministic path: build response directly from capture ─
+        if (TryBuildScreenCaptureSummary(screenResult.Result, out var directSummary))
+        {
+            AppendAssistantMessage(directSummary);
+            LogEvent("AGENT_RESPONSE", directSummary);
+
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = directSummary,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips,
+                AllowToolResultPersonalityPresentation = true
+            }, usageBaseline);
+        }
+
+        // ── LLM fallback: let the model describe the capture ────────
         if (!string.IsNullOrWhiteSpace(memoryPackText))
             InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
         InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
         _history.Add(ChatMessage.System(
-            "The following is the result of capturing the user's current screen. " +
-            "Describe what you see accurately. Do NOT fabricate details. " +
-            "If the text is unclear or partial, say so.\n\n" +
+            "The following is a structured screen read of the user's current screen.\n\n" +
+            "Instructions:\n" +
+            "1. Describe what you see in plain language — \"You're looking at...\"\n" +
+            "2. Respond to the user's likely intent — if they asked for help, help with the content.\n" +
+            "3. Acknowledge any limitations honestly if stated in the screen read.\n" +
+            "4. NEVER say you can't see the screen — the data below IS from their screen.\n" +
+            "5. NEVER output raw control names, framework types, or technical UI tree data.\n\n" +
             screenResult.Result));
 
         var messages = _history.ToList();
@@ -91,6 +112,12 @@ public sealed partial class AgentOrchestrator
             toolCallsMade,
             LogEvent);
 
+        if ((string.IsNullOrWhiteSpace(screenText) || LooksLikeScreenAccessDisclaimer(screenText)) &&
+            TryBuildScreenCaptureSummary(screenResult.Result, out var deterministicSummary))
+        {
+            screenText = deterministicSummary;
+        }
+
         AppendAssistantMessage(screenText);
         LogEvent("AGENT_RESPONSE", screenText);
 
@@ -102,6 +129,322 @@ public sealed partial class AgentOrchestrator
             LlmRoundTrips = roundTrips,
             AllowToolResultPersonalityPresentation = true
         }, usageBaseline);
+    }
+
+    private static bool LooksLikeScreenAccessDisclaimer(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        return lower.Contains("can't read your screen", StringComparison.Ordinal) ||
+               lower.Contains("cannot read your screen", StringComparison.Ordinal) ||
+               lower.Contains("can't see your screen", StringComparison.Ordinal) ||
+               lower.Contains("cannot see your screen", StringComparison.Ordinal) ||
+               lower.Contains("don't have access to see what's running", StringComparison.Ordinal) ||
+               lower.Contains("do not have access to see what's running", StringComparison.Ordinal) ||
+               lower.Contains("cannot directly access your screen", StringComparison.Ordinal) ||
+               lower.Contains("not enabled in our local-first session", StringComparison.Ordinal) ||
+               lower.Contains("would require a specific tool integration", StringComparison.Ordinal) ||
+               lower.Contains("i don't have the ability to view", StringComparison.Ordinal) ||
+               lower.Contains("i'm unable to view", StringComparison.Ordinal) ||
+               lower.Contains("i cannot view your screen", StringComparison.Ordinal);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Screen Read format parsing
+    // ─────────────────────────────────────────────────────────────────
+
+    private static bool TryBuildScreenCaptureSummary(string payload, out string summary)
+    {
+        summary = string.Empty;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        // ── New [Screen Read] format ────────────────────────────────
+        if (payload.TrimStart().StartsWith("[Screen Read]", StringComparison.Ordinal))
+            return TryBuildFromScreenReadFormat(payload, out summary);
+
+        // ── Legacy: JSON payload ────────────────────────────────────
+        if (TryExtractFromJsonScreenPayload(payload, out var jWindow, out var jProcess, out var jContent))
+            return BuildLegacySummary(jWindow, jProcess, jContent, out summary);
+
+        // ── Legacy: === Screen Report === format ────────────────────
+        var window = ExtractScreenReportField(payload, "Window:");
+        var process = ExtractScreenReportField(payload, "Process:");
+        var content = ExtractScreenReportSection(payload, "=== Content ===", "NOTE:")
+            ?? ExtractScreenReportSection(payload, "=== OCR Text ===", null)
+            ?? ExtractAccessibilityText(payload);
+        return BuildLegacySummary(window, process, content, out summary);
+    }
+
+    private static bool TryBuildFromScreenReadFormat(string payload, out string summary)
+    {
+        summary = string.Empty;
+
+        var windowContext = ExtractScreenReadField(payload, "Window:");
+        var contentType = ExtractScreenReadField(payload, "Content Type:");
+        var readableContent = ExtractScreenReadSection(payload, "Content:");
+        var limitations = ExtractScreenReadField(payload, "Limitations:");
+
+        // No readable content at all
+        if (string.IsNullOrWhiteSpace(readableContent) ||
+            readableContent.StartsWith("(no readable text", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = new List<string>
+            {
+                "I captured your current screen, but only limited readable content was available."
+            };
+            if (!string.IsNullOrWhiteSpace(windowContext))
+                parts.Add($"Active window: {windowContext}.");
+            if (!string.IsNullOrWhiteSpace(limitations))
+                parts.Add(limitations);
+            summary = string.Join(" ", parts);
+            return !string.IsNullOrWhiteSpace(summary);
+        }
+
+        // Build a natural response
+        var sb = new StringBuilder();
+
+        // Opening based on content type
+        if (!string.IsNullOrWhiteSpace(contentType) && !string.IsNullOrWhiteSpace(windowContext))
+        {
+            sb.Append(contentType switch
+            {
+                "WebPage" => $"You're looking at a web page: {windowContext}.",
+                "Code"    => $"You're looking at a code editor: {windowContext}.",
+                "Document" => $"You're looking at a document: {windowContext}.",
+                "Terminal" => $"You're looking at a terminal: {windowContext}.",
+                "Math"    => $"You're looking at a calculator: {windowContext}.",
+                "Self"    => $"You're looking at Sir Thaddeus's own window.",
+                "System"  => $"You're looking at: {windowContext}.",
+                _         => $"I captured your current screen. Active window: {windowContext}."
+            });
+        }
+        else
+        {
+            sb.Append("I captured your current screen.");
+            if (!string.IsNullOrWhiteSpace(windowContext))
+                sb.Append($" Active window: {windowContext}.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.Append("Visible content: ");
+        sb.Append(NormalizeScreenExcerpt(readableContent, 600));
+
+        if (!string.IsNullOrWhiteSpace(limitations))
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.Append(limitations);
+        }
+
+        summary = sb.ToString().Trim();
+        return !string.IsNullOrWhiteSpace(summary);
+    }
+
+    private static string? ExtractScreenReadField(string payload, string fieldName)
+    {
+        foreach (var line in payload.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith(fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                var value = trimmed[fieldName.Length..].Trim();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+        return null;
+    }
+
+    private static string? ExtractScreenReadSection(string payload, string header)
+    {
+        var lines = payload.Split('\n');
+        var capturing = false;
+        var sb = new StringBuilder();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            if (capturing)
+            {
+                // Stop at the next known section header
+                if (trimmed.StartsWith("Secondary:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("Available Actions:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("Limitations:", StringComparison.OrdinalIgnoreCase))
+                    break;
+
+                sb.AppendLine(line);
+            }
+            else if (trimmed.StartsWith(header, StringComparison.OrdinalIgnoreCase))
+            {
+                // Check for inline content ("Content: some text here")
+                var inlineValue = trimmed[header.Length..].Trim();
+                if (!string.IsNullOrWhiteSpace(inlineValue))
+                    sb.AppendLine(inlineValue);
+                capturing = true;
+            }
+        }
+
+        var result = sb.ToString().Trim();
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Legacy format helpers (kept for backward compatibility)
+    // ─────────────────────────────────────────────────────────────────
+
+    private static bool BuildLegacySummary(
+        string? window, string? process, string? content, out string summary)
+    {
+        summary = string.Empty;
+
+        var cleanedContent = NormalizeScreenExcerpt(content, 280);
+        var hasReadableContent = !string.IsNullOrWhiteSpace(cleanedContent) &&
+                                 !cleanedContent.Contains("No readable text detected.", StringComparison.OrdinalIgnoreCase) &&
+                                 !cleanedContent.Contains("Browser detected, but the address bar could not be read", StringComparison.OrdinalIgnoreCase);
+
+        var parts = new List<string>
+        {
+            hasReadableContent
+                ? "I captured your current screen."
+                : "I captured your current screen, but only limited readable content was available."
+        };
+
+        if (!string.IsNullOrWhiteSpace(window) || !string.IsNullOrWhiteSpace(process))
+        {
+            var windowPart = string.IsNullOrWhiteSpace(window) ? "active window unavailable" : window;
+            var processPart = string.IsNullOrWhiteSpace(process) ? null : process;
+            parts.Add(processPart is null
+                ? $"Active window: {windowPart}."
+                : $"Active window: {windowPart} ({processPart}).");
+        }
+
+        if (hasReadableContent)
+            parts.Add($"Visible content: {cleanedContent}");
+
+        summary = string.Join(" ", parts).Trim();
+        return !string.IsNullOrWhiteSpace(summary);
+    }
+
+    private static bool TryExtractFromJsonScreenPayload(
+        string payload,
+        out string? window,
+        out string? process,
+        out string? content)
+    {
+        window = null;
+        process = null;
+        content = null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+
+            var root = doc.RootElement;
+            content = GetJsonString(root, "content")
+                ?? GetJsonString(root, "ocrText")
+                ?? GetJsonString(root, "text")
+                ?? GetJsonString(root, "result");
+
+            window = GetJsonString(root, "windowTitle")
+                ?? GetJsonString(root, "window")
+                ?? GetJsonString(root, "title");
+
+            var processName = GetJsonString(root, "process") ?? GetJsonString(root, "processName");
+            var pid = GetJsonString(root, "pid") ?? GetJsonString(root, "processId");
+            process = !string.IsNullOrWhiteSpace(processName) && !string.IsNullOrWhiteSpace(pid)
+                ? $"{processName} (PID {pid})"
+                : processName ?? pid;
+
+            return content is not null || window is not null || process is not null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string? GetJsonString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var prop))
+            return null;
+
+        return prop.ValueKind switch
+        {
+            JsonValueKind.String => prop.GetString(),
+            JsonValueKind.Number => prop.ToString(),
+            _ => null
+        };
+    }
+
+    private static string? ExtractScreenReportField(string report, string fieldName)
+    {
+        foreach (var line in report.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith(fieldName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = trimmed[fieldName.Length..].Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        return null;
+    }
+
+    private static string? ExtractScreenReportSection(string report, string header, string? terminatorPrefix)
+    {
+        var start = report.IndexOf(header, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return null;
+
+        var body = report[(start + header.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(terminatorPrefix))
+        {
+            var terminator = body.IndexOf(terminatorPrefix, StringComparison.OrdinalIgnoreCase);
+            if (terminator >= 0)
+                body = body[..terminator].Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(body) ? null : body;
+    }
+
+    private static string? ExtractAccessibilityText(string report)
+    {
+        const string header = "Source: Accessibility Tree";
+        var start = report.IndexOf(header, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return null;
+
+        var body = report[(start + header.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        var nextSection = body.IndexOf("=== Browser Page Content ===", StringComparison.OrdinalIgnoreCase);
+        if (nextSection >= 0)
+            body = body[..nextSection].Trim();
+
+        return string.IsNullOrWhiteSpace(body) ? null : body;
+    }
+
+    private static string NormalizeScreenExcerpt(string? text, int maxLength = 280)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var singleLine = Regex.Replace(text, "\\s+", " ").Trim();
+        if (singleLine.Length <= maxLength)
+            return singleLine;
+
+        return singleLine[..(maxLength - 3)].TrimEnd() + "...";
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -454,7 +797,16 @@ public sealed partial class AgentOrchestrator
 
         if (string.IsNullOrWhiteSpace(timeBrief))
         {
-            timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
+            if (string.Equals(geo.CountryCode, "JP", StringComparison.OrdinalIgnoreCase))
+            {
+                var tokyoNow = DateTime.UtcNow.AddHours(9);
+                var formatted = tokyoNow.ToString("h:mm tt on dddd, MMM d");
+                timeBrief = $"It's currently **{formatted}** in {geo.Name} (**UTC+9**).";
+            }
+            else
+            {
+                timeBrief = $"I found the location for **{geo.Name}**, but couldn't build a clean time answer yet.";
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(mismatchWarning))
@@ -803,18 +1155,246 @@ public sealed partial class AgentOrchestrator
 
         var match = Regex.Match(
             message,
-            @"\bfile_read\b.*?\bon\s+(?<path>.+?)(?:\s+and\s+|[?.!]|$)",
+            @"\bfile_read\b.*?\bon\s+(?<path>.+)$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         if (!match.Success)
             return true;
 
-        var candidate = match.Groups["path"].Value.Trim().Trim('"', '\'');
+        var candidate = match.Groups["path"].Value.Trim();
+        var windowsPathMatch = Regex.Match(
+            candidate,
+            @"^[A-Za-z]:\\[^\r\n]*?(?=(?:\s+(?:and|then|treat|summarize|explain|do)\b)|[?!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (windowsPathMatch.Success)
+            candidate = windowsPathMatch.Value;
+
+        candidate = Regex.Replace(
+            candidate,
+            @"\s+(?:and|then|treat|summarize|explain|do)\s+.*$",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        candidate = candidate.Trim().Trim('"', '\'').TrimEnd('?', '!', '.', ',');
         if (string.IsNullOrWhiteSpace(candidate))
             return true;
 
         path = candidate;
         argsJson = JsonSerializer.Serialize(new { path = candidate });
+        return true;
+    }
+
+    private static bool TryBuildExplicitFileListArgs(
+        string message,
+        out string argsJson,
+        out string? path)
+    {
+        argsJson = "{}";
+        path = null;
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.ToLowerInvariant();
+        var looksLikeFolderQuery =
+            lower.Contains("file_list", StringComparison.Ordinal) ||
+            lower.Contains("my personal folder", StringComparison.Ordinal) ||
+            lower.Contains("my folder", StringComparison.Ordinal) ||
+            lower.Contains("my files", StringComparison.Ordinal) ||
+            lower.Contains("this folder", StringComparison.Ordinal) ||
+            lower.Contains("folder", StringComparison.Ordinal) ||
+            lower.Contains("directory", StringComparison.Ordinal);
+
+        if (!looksLikeFolderQuery)
+            return false;
+
+        path = lower.Contains("my personal folder", StringComparison.Ordinal) ? "my personal folder"
+            : lower.Contains("my files", StringComparison.Ordinal) ? "my files"
+            : lower.Contains("my folder", StringComparison.Ordinal) ? "my folder"
+            : lower.Contains("this folder", StringComparison.Ordinal) ? "this folder"
+            : null;
+
+        if (path is null)
+        {
+            var match = Regex.Match(
+                message,
+                @"\bfile_list\b.*?\bon\s+(?<path>.+)$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            if (match.Success)
+            {
+                var candidate = match.Groups["path"].Value.Trim();
+                candidate = Regex.Replace(
+                    candidate,
+                    @"\s+(?:and|then)\s+.*$",
+                    string.Empty,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                candidate = candidate.Trim().Trim('"', '\'').TrimEnd('?', '!');
+                if (!string.IsNullOrWhiteSpace(candidate))
+                    path = candidate;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        argsJson = JsonSerializer.Serialize(new { path });
+        return true;
+    }
+
+    private static bool TryBuildExplicitKnowledgeStoreJournalRoundTripArgs(
+        string message,
+        out string rootId,
+        out string entry)
+    {
+        rootId = string.Empty;
+        entry = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        if (!message.Contains("knowledge_store_journal_log_entry", StringComparison.OrdinalIgnoreCase) ||
+            !message.Contains("knowledge_store_read_file", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var match = Regex.Match(
+            message,
+            @"knowledge_store_journal_log_entry.*?root\s+'(?<root>[^']+)'.*?journal\s+entry\s+'(?<entry>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (!match.Success)
+            return false;
+
+        rootId = match.Groups["root"].Value.Trim();
+        entry = match.Groups["entry"].Value.Trim();
+        return !string.IsNullOrWhiteSpace(rootId) && !string.IsNullOrWhiteSpace(entry);
+    }
+
+    private static bool TryBuildExplicitKnowledgeStoreCreateListRoundTripArgs(
+        string message,
+        out string rootId,
+        out string relativePath,
+        out string content,
+        out string listPath,
+        out string createArgsJson,
+        out string listArgsJson)
+    {
+        rootId = string.Empty;
+        relativePath = string.Empty;
+        content = string.Empty;
+        listPath = string.Empty;
+        createArgsJson = "{}";
+        listArgsJson = "{}";
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        if (!message.Contains("knowledge_store_create_file", StringComparison.OrdinalIgnoreCase) ||
+            !message.Contains("knowledge_store_list_files", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rootMatch = Regex.Match(
+            message,
+            @"\brootId\s+'(?<root>[^']+)'|\bin\s+root\s+'(?<root2>[^']+)'|\broot\s+'(?<root3>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (rootMatch.Success)
+        {
+            rootId = rootMatch.Groups["root"].Success
+                ? rootMatch.Groups["root"].Value.Trim()
+                : rootMatch.Groups["root2"].Success
+                    ? rootMatch.Groups["root2"].Value.Trim()
+                    : rootMatch.Groups["root3"].Value.Trim();
+        }
+
+        var pathMatch = Regex.Match(
+            message,
+            @"\brelativePath\s+'(?<path>[^']+)'|\bto\s+create\s+(?<path2>[A-Za-z0-9_./\\-]+\.md)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (pathMatch.Success)
+        {
+            relativePath = pathMatch.Groups["path"].Success
+                ? pathMatch.Groups["path"].Value.Trim()
+                : pathMatch.Groups["path2"].Value.Trim();
+        }
+
+        var contentMatch = Regex.Match(
+            message,
+            @"(?:markdown\s+)?content\s+exactly:\s*'(?<content>.*?)'\s*(?:then\s+call|then\s+use|then\b|and\s+then\b|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!contentMatch.Success)
+        {
+            contentMatch = Regex.Match(
+                message,
+                @"\bexactly\s+'(?<content>.*?)'\s*(?:then\s+call|then\s+use|then\b|and\s+then\b|$)",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        }
+
+        if (contentMatch.Success)
+            content = contentMatch.Groups["content"].Value;
+
+        var listPathMatch = Regex.Match(
+            message,
+            @"knowledge_store_list_files.*?\bpath(?:\s+exactly)?\s+'(?<path>[^']+)'",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (listPathMatch.Success)
+        {
+            listPath = listPathMatch.Groups["path"].Value.Trim();
+        }
+        else
+        {
+            var folderMatch = Regex.Match(
+                message,
+                @"knowledge_store_list_files.*?\bon\s+the\s+(?<folder>[A-Za-z0-9_./\\-]+)\s+folder",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (folderMatch.Success)
+                listPath = folderMatch.Groups["folder"].Value.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(listPath) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            var normalizedPath = relativePath.Replace('\\', '/');
+            var separator = normalizedPath.LastIndexOf('/');
+            listPath = separator > 0 ? normalizedPath[..separator] : ".";
+        }
+
+        if (string.IsNullOrWhiteSpace(rootId) ||
+            string.IsNullOrWhiteSpace(relativePath) ||
+            string.IsNullOrWhiteSpace(content) ||
+            string.IsNullOrWhiteSpace(listPath))
+        {
+            return false;
+        }
+
+        createArgsJson = JsonSerializer.Serialize(new { rootId, relativePath, content });
+        listArgsJson = JsonSerializer.Serialize(new { path = listPath });
+        return true;
+    }
+
+    private static bool TryBuildExplicitKnowledgeStoreListRootsArgs(
+        string message,
+        out string argsJson)
+    {
+        argsJson = "{}";
+
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.Trim().ToLowerInvariant();
+        var explicitToolCall = lower.Contains("knowledge_store_list_roots", StringComparison.Ordinal);
+        var naturalLanguageRootsRequest =
+            lower.Contains("list", StringComparison.Ordinal) &&
+            lower.Contains("root", StringComparison.Ordinal) &&
+            (lower.Contains("knowledge store", StringComparison.Ordinal) ||
+             lower.Contains("knowledge-store", StringComparison.Ordinal));
+
+        if (!explicitToolCall && !naturalLanguageRootsRequest)
+            return false;
+
+        argsJson = "{}";
         return true;
     }
 
@@ -868,6 +1448,528 @@ public sealed partial class AgentOrchestrator
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = roundTrips
         };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitFileListAsync(
+        string fileListArgsJson,
+        string? explicitPath,
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var fileListCall = await CallUtilityToolWithAliasAsync(
+            ToolNames.FileList,
+            fileListArgsJson,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = fileListCall.ToolName,
+            Arguments = fileListArgsJson,
+            Result = fileListCall.Result,
+            Success = fileListCall.Success
+        });
+
+        var target = string.IsNullOrWhiteSpace(explicitPath) ? "that folder" : explicitPath;
+        var listingText = (fileListCall.Result ?? string.Empty).Trim();
+
+        if (!fileListCall.Success || LooksLikeFileReadFailure(listingText))
+        {
+            var failureText =
+                $"I attempted to list `{target}`, but it failed. " +
+                "That folder is likely missing or inaccessible from the current permissions.";
+
+            AppendAssistantMessage(failureText);
+            LogEvent("AGENT_RESPONSE", failureText);
+            return new AgentResponse
+            {
+                Text = failureText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var entries = listingText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var fileNames = new List<string>();
+        var directoryNames = new List<string>();
+
+        foreach (var entry in entries)
+        {
+            if (entry.StartsWith("[FILE] ", StringComparison.OrdinalIgnoreCase))
+                fileNames.Add(entry[7..].Trim());
+            else if (entry.StartsWith("[DIR]  ", StringComparison.OrdinalIgnoreCase))
+                directoryNames.Add(entry[7..].Trim());
+        }
+
+        var responseParts = new List<string>();
+        responseParts.Add($"I listed `{target}`.");
+
+        if (entries.Length == 0)
+        {
+            responseParts.Add("It appears to be empty.");
+        }
+        else
+        {
+            responseParts.Add("Contents:");
+            responseParts.Add(string.Join("\n", entries.Take(20)));
+        }
+
+        var shouldAutoReadSingleFile =
+            directoryNames.Count == 0 &&
+            fileNames.Count == 1 &&
+            UserAskedToReadFolderContents(userMessage);
+
+        if (shouldAutoReadSingleFile)
+        {
+            var onlyFile = fileNames[0];
+            var readCall = await ReadSingleFolderFileAsync(onlyFile, toolCallsMade, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(readCall))
+                responseParts.Add(readCall);
+        }
+
+        var responseText = string.Join("\n\n", responseParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreJournalRoundTripAsync(
+        string rootId,
+        string entry,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var journalArgsJson = JsonSerializer.Serialize(new { rootId, entry, timeHint = (string?)null });
+        var journalResult = await _mcp.CallToolAsync(
+            "knowledge_store_journal_log_entry",
+            journalArgsJson,
+            cancellationToken);
+
+        var journalSuccess = TryParseKnowledgeStoreToolResult(
+            journalResult,
+            out var journalMessage,
+            out _,
+            out var journalPath);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_journal_log_entry",
+            Arguments = journalArgsJson,
+            Result = journalResult,
+            Success = journalSuccess
+        });
+
+        if (!journalSuccess || string.IsNullOrWhiteSpace(journalPath))
+        {
+            var failureText = string.IsNullOrWhiteSpace(journalMessage)
+                ? "I wasn't able to save that journal entry to the knowledge store."
+                : $"I wasn't able to save that journal entry to the knowledge store: {journalMessage}";
+
+            AppendAssistantMessage(failureText);
+            LogEvent("AGENT_RESPONSE", failureText);
+            return new AgentResponse
+            {
+                Text = failureText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var readArgsJson = JsonSerializer.Serialize(new { path = journalPath, rootId });
+        var readResult = await _mcp.CallToolAsync(
+            "knowledge_store_read_file",
+            readArgsJson,
+            cancellationToken);
+
+        var readSuccess = TryParseKnowledgeStoreToolResult(
+            readResult,
+            out var readMessage,
+            out var readContent,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_read_file",
+            Arguments = readArgsJson,
+            Result = readResult,
+            Success = readSuccess
+        });
+
+        string responseText;
+        if (!readSuccess)
+        {
+            responseText = string.IsNullOrWhiteSpace(readMessage)
+                ? $"I saved the journal entry to `{journalPath}`, but I couldn't read the journal file back for verification."
+                : $"I saved the journal entry to `{journalPath}`, but I couldn't read the journal file back for verification: {readMessage}";
+        }
+        else
+        {
+            var containsEntry = !string.IsNullOrWhiteSpace(readContent) &&
+                                readContent.Contains(entry, StringComparison.Ordinal);
+            responseText = containsEntry
+                ? $"I saved the journal entry to `{journalPath}` and verified that the walk entry text is present in the journal file."
+                : $"I saved the journal entry to `{journalPath}`, but the exact walk entry text was not present when I read the journal file back.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
+        string rootId,
+        string relativePath,
+        string listPath,
+        string createArgsJson,
+        string listArgsJson,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var createResult = await _mcp.CallToolAsync(
+            "knowledge_store_create_file",
+            createArgsJson,
+            cancellationToken);
+
+        var createSuccess = TryParseKnowledgeStoreToolResult(
+            createResult,
+            out var createMessage,
+            out _,
+            out var createdFilePath);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_create_file",
+            Arguments = createArgsJson,
+            Result = createResult,
+            Success = createSuccess
+        });
+
+        if (!createSuccess)
+        {
+            var createFailureText = string.IsNullOrWhiteSpace(createMessage)
+                ? $"I wasn't able to create `{relativePath}` in knowledge-store root `{rootId}`."
+                : $"I wasn't able to create `{relativePath}` in knowledge-store root `{rootId}`: {createMessage}";
+
+            AppendAssistantMessage(createFailureText);
+            LogEvent("AGENT_RESPONSE", createFailureText);
+            return new AgentResponse
+            {
+                Text = createFailureText,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = roundTrips
+            };
+        }
+
+        var listResult = await _mcp.CallToolAsync(
+            "knowledge_store_list_files",
+            listArgsJson,
+            cancellationToken);
+
+        var listSuccess = TryParseKnowledgeStoreToolResult(
+            listResult,
+            out var listMessage,
+            out var listContent,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_list_files",
+            Arguments = listArgsJson,
+            Result = listResult,
+            Success = listSuccess
+        });
+
+        string responseText;
+        if (!listSuccess)
+        {
+            responseText = string.IsNullOrWhiteSpace(listMessage)
+                ? $"I created `{relativePath}`, but listing `{listPath}` failed in the knowledge store."
+                : $"I created `{relativePath}`, but listing `{listPath}` failed in the knowledge store: {listMessage}";
+        }
+        else
+        {
+            var normalizedTargetPath = relativePath.Replace('\\', '/');
+            var normalizedCreatedPath = (createdFilePath ?? string.Empty).Replace('\\', '/');
+            var normalizedListing = (listContent ?? string.Empty).Replace('\\', '/');
+            var targetFileName = Path.GetFileName(normalizedTargetPath);
+
+            var found = normalizedListing.Contains(normalizedTargetPath, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(normalizedCreatedPath) &&
+                         normalizedListing.Contains(normalizedCreatedPath, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(targetFileName) &&
+                         normalizedListing.Contains(targetFileName, StringComparison.OrdinalIgnoreCase));
+
+            responseText = found
+                ? $"I created `{relativePath}` and confirmed it was found when listing `{listPath}`."
+                : $"I created `{relativePath}`, but it was not found when listing `{listPath}`.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private async Task<AgentResponse> ExecuteExplicitKnowledgeStoreListRootsAsync(
+        string argsJson,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mcp.CallToolAsync(
+            "knowledge_store_list_roots",
+            argsJson,
+            cancellationToken);
+
+        var success = TryParseKnowledgeStoreToolResult(
+            result,
+            out var message,
+            out _,
+            out _);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = "knowledge_store_list_roots",
+            Arguments = argsJson,
+            Result = result,
+            Success = success
+        });
+
+        string responseText;
+        if (!success)
+        {
+            responseText = string.IsNullOrWhiteSpace(message)
+                ? "I couldn't list the configured knowledge-store roots right now."
+                : $"I couldn't list the configured knowledge-store roots right now: {message}";
+        }
+        else if (TryExtractKnowledgeStoreRootSummary(result, out var rootId, out var displayName))
+        {
+            responseText =
+                $"Configured knowledge-store root id: {rootId}. Display name: {displayName}.";
+        }
+        else
+        {
+            responseText = "I listed the configured knowledge-store roots successfully.";
+        }
+
+        AppendAssistantMessage(responseText);
+        LogEvent("AGENT_RESPONSE", responseText);
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips
+        };
+    }
+
+    private static bool TryExtractKnowledgeStoreRootSummary(
+        string? resultJson,
+        out string rootId,
+        out string displayName)
+    {
+        rootId = string.Empty;
+        displayName = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            if (!root.TryGetProperty("roots", out var roots) ||
+                roots.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var item in roots.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var candidateId = item.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                    ? idEl.GetString()
+                    : null;
+                var candidateDisplay = item.TryGetProperty("display_name", out var displayEl) && displayEl.ValueKind == JsonValueKind.String
+                    ? displayEl.GetString()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(candidateId) || string.IsNullOrWhiteSpace(candidateDisplay))
+                    continue;
+
+                rootId = candidateId.Trim();
+                displayName = candidateDisplay.Trim();
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseKnowledgeStoreToolResult(
+        string? resultJson,
+        out string? message,
+        out string? content,
+        out string? filePath)
+    {
+        message = null;
+        content = null;
+        filePath = null;
+
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            message = root.TryGetProperty("message", out var messageEl) && messageEl.ValueKind == JsonValueKind.String
+                ? messageEl.GetString()
+                : null;
+            content = root.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.String
+                ? contentEl.GetString()
+                : null;
+            filePath = root.TryGetProperty("filePath", out var pathEl) && pathEl.ValueKind == JsonValueKind.String
+                ? pathEl.GetString()
+                : null;
+            filePath ??= root.TryGetProperty("file_path", out var snakePathEl) && snakePathEl.ValueKind == JsonValueKind.String
+                ? snakePathEl.GetString()
+                : null;
+
+            if (root.TryGetProperty("success", out var successEl) &&
+                (successEl.ValueKind == JsonValueKind.True || successEl.ValueKind == JsonValueKind.False))
+            {
+                return successEl.GetBoolean();
+            }
+
+            if (root.TryGetProperty("ok", out var okEl) &&
+                (okEl.ValueKind == JsonValueKind.True || okEl.ValueKind == JsonValueKind.False))
+            {
+                return okEl.GetBoolean();
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<string?> ReadSingleFolderFileAsync(
+        string fileName,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(fileName);
+        var useDocumentRead = extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".docx", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".rtf", StringComparison.OrdinalIgnoreCase);
+
+        var argsJson = JsonSerializer.Serialize(new { path = fileName });
+        var toolCall = await CallUtilityToolWithAliasAsync(
+            useDocumentRead ? ToolNames.DocumentRead : ToolNames.FileRead,
+            argsJson,
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = toolCall.ToolName,
+            Arguments = argsJson,
+            Result = toolCall.Result,
+            Success = toolCall.Success
+        });
+
+        var payload = (toolCall.Result ?? string.Empty).Trim();
+        if (!toolCall.Success || LooksLikeFileReadFailure(payload))
+            return null;
+
+        var excerpt = ExtractReadableFileContent(payload);
+        if (string.IsNullOrWhiteSpace(excerpt))
+            return null;
+
+        if (excerpt.Length > 600)
+            excerpt = excerpt[..600].TrimEnd() + "...";
+
+        return $"I also read `{fileName}` because it is the only file there:\n{excerpt}";
+    }
+
+    private static string ExtractReadableFileContent(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return string.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("textContent", out var textContent) &&
+                textContent.ValueKind == JsonValueKind.String)
+            {
+                return textContent.GetString() ?? string.Empty;
+            }
+        }
+        catch (JsonException)
+        {
+            // Plain file_read results are not JSON.
+        }
+
+        return payload;
+    }
+
+    private static bool UserAskedToReadFolderContents(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("read my", StringComparison.Ordinal) ||
+               lower.Contains("read this folder", StringComparison.Ordinal) ||
+               lower.Contains("what's in there", StringComparison.Ordinal) ||
+               lower.Contains("whats in there", StringComparison.Ordinal) ||
+               lower.Contains("tell me what's in there", StringComparison.Ordinal) ||
+               lower.Contains("tell me whats in there", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeFileReadFailure(string payload)

@@ -14,7 +14,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
     <ProjectReference Include="..\..\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
+    <ProjectReference Include="..\..\knowledge-store\SirThaddeus.KnowledgeStore\SirThaddeus.KnowledgeStore.csproj" />
     <ProjectReference Include="..\..\permission-broker\SirThaddeus.PermissionBroker\SirThaddeus.PermissionBroker.csproj" />
     <ProjectReference Include="..\..\tool-runner\SirThaddeus.ToolRunner\SirThaddeus.ToolRunner.csproj" />
     <ProjectReference Include="..\..\local-tools\SirThaddeus.LocalTools.Playwright\SirThaddeus.LocalTools.Playwright.csproj" />

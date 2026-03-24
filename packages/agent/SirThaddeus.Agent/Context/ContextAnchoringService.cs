@@ -442,6 +442,7 @@ public sealed partial class ContextAnchoringService : IContextAnchoringService
                lowerMessage.Contains("what can i do", StringComparison.Ordinal) ||
                lowerMessage.Contains("could i do", StringComparison.Ordinal) ||
                lowerMessage.Contains("what should i do", StringComparison.Ordinal) ||
+             lowerMessage.Contains("kinds of things", StringComparison.Ordinal) ||
                lowerMessage.Contains("kind of things", StringComparison.Ordinal) ||
                lowerMessage.Contains("things to do", StringComparison.Ordinal) ||
                lowerMessage.Contains("ideas", StringComparison.Ordinal) ||

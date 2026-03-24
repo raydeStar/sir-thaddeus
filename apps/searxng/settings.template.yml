@@ -21,3 +21,13 @@ server:
   public_instance: false
   method: "GET"
 
+engines:
+  - name: google
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
+

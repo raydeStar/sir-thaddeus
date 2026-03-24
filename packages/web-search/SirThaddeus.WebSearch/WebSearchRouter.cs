@@ -6,17 +6,19 @@ namespace SirThaddeus.WebSearch;
 //
 // Orchestrates search requests across available providers.
 //
-// Probe order (auto mode):
+// Probe/fallback order (auto mode):
 //   1. SearxNG (if configured and available)
-//   2. Search API (if configured)
-//   3. Google News RSS (reliable fallback for news-ish lookups)
+//   2. SearchApi (hosted fallback)
+//   3. Google News RSS fallback
+//   4. DuckDuckGo HTML (last resort)
 //
 // Modes:
 //   "auto"        - probe in order, cache availability
 //   "searxng"     - SearxNG only
 //   "search_api"  - hosted search API only
 //   "api"         - alias for search_api
-//   "ddg_html"    - DDG only (currently broken - DDG blocks automated access)
+//   "ddg_html"    - DDG only (may be rate-limited — DDG blocks heavy automated access)
+//                   Also used as last-resort fallback in auto mode
 //   "google_news" - Google News RSS only
 //   "manual"      - return "paste URLs manually" message
 
@@ -116,8 +118,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             return await _googleNews.IsAvailableAsync(cancellationToken);
 
         return await _searxng.IsAvailableAsync(cancellationToken)
-            || await _searchApi.IsAvailableAsync(cancellationToken)
-            || await _googleNews.IsAvailableAsync(cancellationToken);
+            || await _ddg.IsAvailableAsync(cancellationToken);
     }
 
     private async Task<SearchResults> SearchAutoAsync(
@@ -145,19 +146,24 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
 
         if (_searchApiAvailable == true)
         {
-            var result = await _searchApi.SearchAsync(query, options, ct);
-            result = AttachSearchDiagnostic(result, _searchApi.Name, "search", diagnostics);
-            if (result.Results.Count > 0)
-                return result;
+            var hostedFallback = await _searchApi.SearchAsync(query, options, ct);
+            hostedFallback = AttachSearchDiagnostic(hostedFallback, _searchApi.Name, "search", diagnostics);
+            if (hostedFallback.Results.Count > 0)
+                return hostedFallback;
 
-            // Search API returned no usable results or errored out.
-            // Mark it stale so the next request re-probes.
-            _searchApiAvailable = false;
-            diagnostics = [.. result.Diagnostics];
+            diagnostics = [.. hostedFallback.Diagnostics];
         }
 
-        var fallback = await _googleNews.SearchAsync(query, options, ct);
-        return AttachSearchDiagnostic(fallback, _googleNews.Name, "fallback", diagnostics);
+        var googleFallback = await _googleNews.SearchAsync(query, options, ct);
+        googleFallback = AttachSearchDiagnostic(googleFallback, _googleNews.Name, "fallback", diagnostics);
+        if (googleFallback.Results.Count > 0)
+            return googleFallback;
+
+        diagnostics = [.. googleFallback.Diagnostics];
+
+        // Last-resort free fallback.
+        var ddgFallback = await _ddg.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
     }
 
     /// <summary>

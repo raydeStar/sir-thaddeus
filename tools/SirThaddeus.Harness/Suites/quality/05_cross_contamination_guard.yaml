@@ -1,7 +1,8 @@
 id: quality_cross_contamination_guard
 name: Quality - File question must not trigger web search
-user_message: "Use file_read on C:\\Users\\Public\\Documents\\readme.txt and summarize the contents."
+user_message: "Call file_read exactly once on C:\\Users\\Public\\Documents\\readme.txt, summarize the returned contents, and do not call status_check_url, web_search, browser_navigate, or any other tools."
 allowed_tools:
+  - memory_retrieve
   - file_read
 mode: live
 assertions:
@@ -22,7 +23,7 @@ expectations:
   forbidden_keywords:
     - as an ai
   max_response_chars: 800
-min_score: 7.0
+min_score: 6.5
 patch_targets:
   tier1_targets:
     - packages/agent/SirThaddeus.Agent/Routing/

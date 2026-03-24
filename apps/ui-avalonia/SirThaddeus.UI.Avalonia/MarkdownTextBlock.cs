@@ -77,8 +77,9 @@ public sealed partial class MarkdownTextBlock : SelectableTextBlock
     {
         var text = Markdown;
 
-        // Keep Text in sync for clipboard / accessibility / screen-readers.
-        Text = StripMarkdown(text);
+        // Avoid setting both Text and Inlines at once; Avalonia renders both,
+        // which duplicates the visible message content in chat bubbles.
+        Text = string.Empty;
 
         Inlines?.Clear();
         if (string.IsNullOrEmpty(text))
@@ -119,20 +120,5 @@ public sealed partial class MarkdownTextBlock : SelectableTextBlock
 
         if (pos < text.Length)
             Inlines.Add(new Run(text[pos..]));
-    }
-
-    /// <summary>
-    /// Returns a plain-text copy of <paramref name="text"/> with Markdown markers removed.
-    /// Used to populate <see cref="SelectableTextBlock.Text"/> for clipboard and accessibility.
-    /// </summary>
-    private static string StripMarkdown(string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return string.Empty;
-
-        var plain = BoldStripRegex().Replace(text, "$1");
-        plain = ItalicAsteriskStripRegex().Replace(plain, "$1");
-        plain = ItalicUnderscoreStripRegex().Replace(plain, "$1");
-        return plain;
     }
 }

@@ -5,6 +5,10 @@ namespace SirThaddeus.Agent;
 
 internal static partial class OrchestratorMessageHelpers
 {
+    private static readonly Regex HighRiskIllicitInstructionRegex = new(
+        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide)\b[\s\S]{0,160}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|bypass\s+(?:a\s+)?lock|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     internal static string StripCodeFenceWrapper(string content)
     {
         if (!content.StartsWith("```", StringComparison.Ordinal))
@@ -157,6 +161,27 @@ internal static partial class OrchestratorMessageHelpers
 
     internal static string BuildRespectfulResetReply()
         => "Let's reset. I'm here to help, and I'll keep this respectful and focused on your request.";
+
+    internal static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+
+        if (!lower.Contains("instruction", StringComparison.Ordinal) &&
+            !lower.Contains("step", StringComparison.Ordinal) &&
+            !lower.Contains("how to", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return HighRiskIllicitInstructionRegex.IsMatch(lower);
+    }
+
+    internal static string BuildSafetyBoundaryWithAlternativeReply()
+        => "I can’t help with instructions to bypass security or cause harm. " +
+           "If you’re locked out of something you own, I can help with safe, legal options like contacting a licensed locksmith, verifying ownership requirements, and steps to prevent future lockouts.";
 
     /// <summary>
     /// Detects and truncates self-dialogue — where the model generates
@@ -531,6 +556,16 @@ internal static partial class OrchestratorMessageHelpers
         var hasSymbolicExpression = NumericOperatorExpressionRegex().IsMatch(assistantText);
         var hasEquals = assistantText.Contains('=');
 
+        // When the response discusses probability or odds the fractions and
+        // equals signs are illustrative, not unsolicited computation.
+        if (hasSymbolicExpression &&
+            (lower.Contains("probability") || lower.Contains("probabilities") ||
+             lower.Contains("odds of") || lower.Contains("odds are") ||
+             lower.Contains("chances are") || lower.Contains("likelihood")))
+        {
+            return false;
+        }
+
         return hasSymbolicExpression && (hasMathVerb || hasEquals);
     }
 
@@ -538,6 +573,20 @@ internal static partial class OrchestratorMessageHelpers
     {
         var lower = userMessage.ToLowerInvariant();
         if (lower.Contains("liter") && lower.Contains("jug"))
+            return true;
+
+        // Accept direct symbolic expressions like "2 + 2" as legitimate
+        // math asks, even when the user message also includes non-math text.
+        if (NumericOperatorExpressionRegex().IsMatch(userMessage))
+            return true;
+
+        // Probability and choice-based reasoning puzzles naturally produce
+        // mathematical notation (fractions, equations) in their answers.
+        if (lower.Contains("probability") || lower.Contains("game show") ||
+            lower.Contains("coin flip") || lower.Contains("dice roll"))
+            return true;
+
+        if (ProbabilityDecisionProblemRegex().IsMatch(userMessage))
             return true;
 
         var utility = UtilityRouter.TryHandle(userMessage);
@@ -623,6 +672,16 @@ internal static partial class OrchestratorMessageHelpers
         @"\b(?:can|could|would)\s+you\s+(?:do|calculate|solve|work\s*out)\b.{0,40}\b\d[\d,\.\s]*[+\-*/x×÷]\s*\d[\d,\.]*\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
     private static partial Regex AssistantAsksUserToComputeMathRegex();
+
+    /// <summary>
+    /// Matches decision/probability puzzle patterns in user messages —
+    /// numbered doors/boxes combined with a decision verb such as
+    /// "switch", "stick", "pick", or "choose".
+    /// </summary>
+    [GeneratedRegex(
+        @"\b(?:door|box|envelope|curtain)\s+\d.*\b(?:switch|stick|pick|choose|open)\b|\b(?:switch|stick|pick|choose|open)\b.*\b(?:door|box|envelope|curtain)\s+\d",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline)]
+    private static partial Regex ProbabilityDecisionProblemRegex();
 
     [GeneratedRegex(
         @"\b(?:i\s+care\s+about\s+you|you\s+don'?t\s+have\s+to\s+pretend|my\s+real\s+name\s+is|what(?:'s|\s+is)\s+your\s+real\s+name|that\s+means\s+everything\s+to\s+me|i\s+was\s+just\s+joking\s+about\s+the\s+weight\s+thing|you(?:'re|\s+are)\s+not\s+fat|always\s+around\s+when\s+you\s+need\s+someone\s+to\s+talk)\b",

@@ -20,7 +20,7 @@ namespace SirThaddeus.Harness.Execution;
 /// </summary>
 internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 {
-    private readonly AppSettings _settings;
+    private readonly AppSettings _baseSettings;
     private readonly int _port;
     private readonly Uri _baseUri;
     private readonly HttpClient _http;
@@ -28,6 +28,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
     private readonly List<string> _stderr = [];
 
     private Process? _process;
+    private HarnessRuntimeSandbox? _sandbox;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -36,7 +37,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     public HeadlessRuntimeHarnessClient(AppSettings settings)
     {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _baseSettings = settings ?? throw new ArgumentNullException(nameof(settings));
         _port = GetFreeTcpPort();
         _baseUri = new Uri($"http://127.0.0.1:{_port}/");
         _http = new HttpClient
@@ -48,10 +49,17 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        if (_process is not null)
-            return;
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.CompletedTask;
+    }
 
-        StopOrphanedRuntimeProcesses();
+    internal async Task<HeadlessExecutionResult> ExecuteAsync(
+        HarnessTestCase test,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(test);
+
+        await EnsureFreshRuntimeAsync(test, cancellationToken);
 
         var runtimeProject = ResolveHeadlessRuntimeProject();
         var startInfo = new ProcessStartInfo
@@ -64,6 +72,9 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
+        foreach (var pair in _sandbox!.Environment)
+            startInfo.Environment[pair.Key] = pair.Value;
 
         _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _process.OutputDataReceived += (_, e) =>
@@ -89,13 +100,6 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
         await WaitForHealthyAsync(cancellationToken);
         await WaitForSearxngReadyAsync(cancellationToken);
-    }
-
-    internal async Task<HeadlessExecutionResult> ExecuteAsync(
-        HarnessTestCase test,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(test);
 
         await ClearSessionAsync(cancellationToken);
 
@@ -139,6 +143,20 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             Steps = finalSteps,
             ToolTurns = toolTurns
         };
+    }
+
+    private async Task EnsureFreshRuntimeAsync(HarnessTestCase test, CancellationToken cancellationToken)
+    {
+        DisposeRuntimeProcess();
+        _sandbox?.Dispose();
+        _sandbox = HarnessRuntimeSandbox.Create(_baseSettings, test);
+
+        lock (_stdout)
+            _stdout.Clear();
+        lock (_stderr)
+            _stderr.Clear();
+
+        await InitializeAsync(cancellationToken);
     }
 
     private static IReadOnlyList<AuditEntryDto> FilterNewAuditEntries(
@@ -303,8 +321,8 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
                 var success = entry.Message.Contains("(ok)", StringComparison.OrdinalIgnoreCase);
 
                 starts.TryGetValue(requestId ?? string.Empty, out var start);
-                var toolName = start.ToolName ?? "unknown";
-                var arguments = start.Arguments ?? "{}";
+                var toolName = start.ToolName ?? GetString(meta, "tool_name_canonical") ?? "unknown";
+                var arguments = start.Arguments ?? GetString(meta, "input_summary") ?? "{}";
                 var resultText = success ? outputSummary : (errorMessage ?? outputSummary);
 
                 toolCalls.Add(new ToolCallRecord
@@ -470,26 +488,6 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         }
     }
 
-    private static void StopOrphanedRuntimeProcesses()
-    {
-        foreach (var process in Process.GetProcessesByName("SirThaddeus.HeadlessRuntime"))
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(2_000);
-            }
-            catch
-            {
-                // Best-effort cleanup. A still-running process will surface during build/start.
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-    }
-
     private static JsonElement? ParseMetadata(string? metadataJson)
     {
         if (string.IsNullOrWhiteSpace(metadataJson))
@@ -536,7 +534,15 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         _http.Dispose();
+        DisposeRuntimeProcess();
+        _sandbox?.Dispose();
+        _sandbox = null;
 
+        return ValueTask.CompletedTask;
+    }
+
+    private void DisposeRuntimeProcess()
+    {
         try
         {
             if (_process is { HasExited: false })
@@ -552,8 +558,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         finally
         {
             _process?.Dispose();
+            _process = null;
         }
-
-        return ValueTask.CompletedTask;
     }
 }

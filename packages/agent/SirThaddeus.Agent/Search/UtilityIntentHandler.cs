@@ -55,7 +55,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             utilityResult ??= UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
 
         if (utilityResult is null &&
-            !deterministicRouteRequested &&
             request.TryInferWithLlmAsync is not null &&
             ShouldUseLlmUtilityInference(route, message))
         {
@@ -67,7 +66,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             request.LogEvent?.Invoke(
                 "DETERMINISTIC_INLINE_MISS",
                 "Pre-router selected deterministic path, but utility parse failed at execution.");
-            return null;
         }
 
         if (utilityResult is null)
@@ -151,6 +149,35 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                     Success = true,
                     ToolCallsMade = request.ToolCallsMade.ToList(),
                     LlmRoundTrips = request.RoundTrips
+                };
+            }
+
+            return null;
+        }
+
+        if (string.Equals(utilityResult.Category, "meta_health", StringComparison.OrdinalIgnoreCase))
+        {
+            if (utilityResult.McpToolName is not null &&
+                utilityResult.McpToolArgs is not null &&
+                request.ExecuteGenericToolCallAsync is not null)
+            {
+                await request.ExecuteGenericToolCallAsync(
+                    utilityResult,
+                    request.ToolCallsMade,
+                    cancellationToken);
+            }
+
+            var summary = BuildMetaToolPingSummary(request.ToolCallsMade);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                return new AgentResponse
+                {
+                    Text = summary,
+                    Success = true,
+                    ToolCallsMade = request.ToolCallsMade.ToList(),
+                    LlmRoundTrips = request.RoundTrips,
+                    SuppressSourceCardsUi = true,
+                    SuppressToolActivityUi = true
                 };
             }
 
@@ -378,6 +405,7 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 return null;
 
             var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var aliases = new List<string>();
             foreach (var item in doc.RootElement.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object)
@@ -391,6 +419,19 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 var category = categoryEl.GetString()?.Trim();
                 if (!string.IsNullOrWhiteSpace(category))
                     groups.Add(category);
+
+                if (item.TryGetProperty("aliases", out var aliasesEl) && aliasesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var aliasEl in aliasesEl.EnumerateArray())
+                    {
+                        if (aliasEl.ValueKind != JsonValueKind.String)
+                            continue;
+
+                        var alias = aliasEl.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(alias) && alias.Any(char.IsUpper))
+                            aliases.Add(alias);
+                    }
+                }
             }
 
             if (groups.Count == 0)
@@ -402,8 +443,74 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
                 .ToList();
 
             var listText = string.Join(", ", ordered);
-            return $"Available capability groups: {listText}.\n\n" +
-                   "Use `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
+            var exampleAliases = aliases
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+
+            var summary = $"Capability manifest reports {doc.RootElement.GetArrayLength()} tools across these groups: {listText}.";
+            if (exampleAliases.Count > 0)
+                summary += $" Example aliases: {string.Join(", ", exampleAliases)}.";
+
+            return summary + "\n\nUse `tool_list_capabilities` for per-tool aliases, limits, and permission requirements.";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? BuildMetaToolPingSummary(IList<ToolCallRecord> calls)
+    {
+        var pingCall = calls
+            .LastOrDefault(call => string.Equals(
+                call.ToolName,
+                "tool_ping",
+                StringComparison.OrdinalIgnoreCase));
+        if (pingCall is null || string.IsNullOrWhiteSpace(pingCall.Result))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(pingCall.Result);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var status = root.TryGetProperty("status", out var statusEl) && statusEl.ValueKind == JsonValueKind.String
+                ? statusEl.GetString()
+                : null;
+            var toolCount = root.TryGetProperty("tool_count", out var toolCountEl) && toolCountEl.ValueKind == JsonValueKind.Number
+                ? toolCountEl.GetInt32()
+                : (int?)null;
+            var protocolVersion = root.TryGetProperty("protocol_version", out var protocolEl) && protocolEl.ValueKind == JsonValueKind.String
+                ? protocolEl.GetString()
+                : null;
+            var contractVersion = root.TryGetProperty("contract_version", out var contractEl) && contractEl.ValueKind == JsonValueKind.String
+                ? contractEl.GetString()
+                : null;
+
+            if (string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                var details = new List<string>
+                {
+                    "MCP server is responding",
+                    "tool execution is healthy",
+                    "status is ok"
+                };
+                if (!string.IsNullOrWhiteSpace(protocolVersion))
+                    details.Add($"protocol {protocolVersion}");
+                if (!string.IsNullOrWhiteSpace(contractVersion))
+                    details.Add($"contract {contractVersion}");
+                if (toolCount is > 0)
+                    details.Add($"{toolCount.Value} tools available");
+
+                return string.Join(", ", details) + ".";
+            }
+
+            return string.IsNullOrWhiteSpace(status)
+                ? "MCP server is responding, but the health status was not clearly reported."
+                : $"MCP server is responding, but reported status '{status}'.";
         }
         catch
         {
@@ -435,13 +542,6 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
         // Primary path: broad fallback route.
         if (intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase))
             return true;
-
-        // Secondary path: lookup-routed turns that still read like a
-        // utility request (e.g. flexible weather phrasing). This prevents
-        // accidental web fallback when deterministic utility matching
-        // misses the first pass.
-        if (!OrchestratorMessageHelpers.MightBeUtilityIntent(message))
-            return false;
 
         return intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
                intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase);

@@ -167,6 +167,13 @@ public sealed partial class AgentOrchestrator
             response = response with { Text = sanitizedText };
         }
 
+        if (response.ToolCallsMade.Any(call =>
+                call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase)))
+        {
+            _lastLookupToolCallAt = _timeProvider.GetUtcNow();
+        }
+
         var current = _dialogueStore.Get();
         var summaryText = BuildRollingSummary(response.Text);
         _dialogueStore.Update(current with { RollingSummary = summaryText });

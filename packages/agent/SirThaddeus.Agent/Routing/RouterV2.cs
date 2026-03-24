@@ -11,6 +11,12 @@ public sealed class RouterV2 : IRouter
 {
     private readonly DefaultRouter _fallbackRouter;
 
+    /// <summary>
+    /// Creates a new <see cref="RouterV2"/> backed by the given LLM client and
+    /// deterministic utility engine.
+    /// </summary>
+    /// <param name="llm">LLM client used by the fallback router for classification.</param>
+    /// <param name="deterministicUtilityEngine">Engine for math/conversion shortcuts.</param>
     public RouterV2(
         ILlmClient llm,
         IDeterministicUtilityEngine deterministicUtilityEngine)
@@ -18,6 +24,7 @@ public sealed class RouterV2 : IRouter
         _fallbackRouter = new DefaultRouter(llm, deterministicUtilityEngine);
     }
 
+    /// <inheritdoc />
     public Task<RouterOutput> RouteAsync(RouterRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -54,8 +61,34 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeStrayTranscriptFragment(lower))
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.92);
 
+        var looksLikeHistoricalKnowledgeAsk =
+            lower.Contains("historical figure", StringComparison.Ordinal) ||
+            (lower.Contains("historical", StringComparison.Ordinal) &&
+             lower.Contains("figure", StringComparison.Ordinal));
+        var looksLikeCurrentInfoLookup =
+            lower.Contains("what happened", StringComparison.Ordinal) ||
+            lower.Contains("news", StringComparison.Ordinal) ||
+            lower.Contains("last week", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal);
+
+        if (IntentFeatureExtractor.LooksLikePreferenceOrOpinionPrompt(lower) &&
+            !looksLikeHistoricalKnowledgeAsk)
+        {
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+        }
+
+        if (IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lower) &&
+            !IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower) &&
+            !IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) &&
+            !looksLikeCurrentInfoLookup)
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+
+        var strongContinuationPhrase =
+            lower.Contains("anything else", StringComparison.Ordinal) ||
+            lower.Contains("what else", StringComparison.Ordinal);
+
         if (SearchModeRouter.IsFollowUpMessage(lower) &&
-            request is { HasRecentSearchResults: true })
+            (request is { HasRecentSearchResults: true } || strongContinuationPhrase))
         {
             return DefaultRouter.MakeRoute(Intents.LookupSearch, confidence: 0.95, needsWeb: true, needsSearch: true, needsBrowser: true);
         }
@@ -65,6 +98,9 @@ public sealed class RouterV2 : IRouter
 
         if (IntentFeatureExtractor.LooksLikeScreenRequest(lower))
             return DefaultRouter.MakeRoute(Intents.ScreenObserve, confidence: 0.95, needsScreen: true);
+
+        if (IntentFeatureExtractor.LooksLikeFileRequest(lower))
+            return DefaultRouter.MakeRoute(Intents.FileTask, confidence: 0.95, needsFile: true);
 
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return DefaultRouter.MakeRoute(Intents.LookupNews, confidence: 0.93, needsWeb: true, needsSearch: true);
