@@ -107,6 +107,14 @@ Recommended policy:
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
 - Use `--all` before merges when you want one full headless pass.
 
+### Overnight harness runs
+
+For long local runs such as `./dev/harness.ps1 --all --judge none`:
+
+- Keep the local model endpoint running for the entire run if your setup depends on LM Studio or another local OpenAI-compatible server.
+- Avoid overlapping harness runs after code changes. A stale headless runtime or MCP server can hold build outputs open and make the next run fail for the wrong reason.
+- If you interrupt a long run after rebuilding product code, restart the harness cleanly instead of trusting partial results from the old binaries.
+
 ## Knowledge-store harness
 
 The knowledge-store suite uses an isolated temporary root plus a patched settings file,

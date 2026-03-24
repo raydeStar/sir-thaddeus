@@ -144,6 +144,21 @@ public class DeepDiveBriefingContractTests
     }
 
     [Fact]
+    public void WebExtractor_NormalizesNoisyAddressAndPhoneFromSearchText()
+    {
+        var result = DeepDiveWebExtractor.Extract(
+        [
+            "08:00 AM - 12:00 PM See Hours 600 2nd Ave, Seattle, WA 98104",
+            "Call 1 206-728-2588. Rated 3.0 out of 5 stars. 212 reviews."
+        ]);
+
+        Assert.Equal("600 2nd Ave, Seattle, WA 98104", result.Address);
+        Assert.Equal("(206) 728-2588", result.Phone);
+        Assert.Equal(3.0, result.Rating);
+        Assert.Equal(212, result.ReviewCount);
+    }
+
+    [Fact]
     public void WebExtractor_InfersBusinessNameFromSourceTitles()
     {
         var sources = new List<SourceItem>

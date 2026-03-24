@@ -42,6 +42,14 @@ public static class DeepDiveWebExtractor
         @"(?:website|visit|official\s+site|homepage)[:\s]+(?<url>https?://[^\s""<>]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex StreetAddressCoreRegex = new(
+        @"\b\d{1,6}\s+[\w.'#&/\-\s]+?(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Cir|Circle|Hwy|Highway)\b\.?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex AddressLocalityRegex = new(
+        @",\s*[\w\s.]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Scans multiple text chunks (snippets, page content) and returns
     /// the best signal for each field. First match wins for single-value
@@ -72,10 +80,10 @@ public static class DeepDiveWebExtractor
                 continue;
 
             // Phone — first clean match
-            phone ??= NormalizeSingleLine(TryMatchFirst(PhoneRegex, chunk));
+            phone ??= NormalizePhone(TryMatchFirst(PhoneRegex, chunk));
 
             // Address — first clean match
-            address ??= TryMatchFirst(AddressRegex, chunk);
+            address ??= NormalizeAddress(TryMatchFirst(AddressRegex, chunk));
 
             // Website
             if (website is null)
@@ -270,7 +278,7 @@ public static class DeepDiveWebExtractor
             if (!match.Success)
                 continue;
 
-            var candidate = Regex.Replace(match.Value, @"\s+", " ").Trim().TrimEnd(',', '.');
+            var candidate = NormalizeAddress(match.Value);
             if (candidate.Length > 0)
                 return candidate;
         }
@@ -291,6 +299,52 @@ public static class DeepDiveWebExtractor
 
         var normalized = Regex.Replace(value, @"\s+", " ").Trim();
         return normalized.Length == 0 ? null : normalized;
+    }
+
+    private static string? NormalizePhone(string? value)
+    {
+        var normalized = NormalizeSingleLine(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var digits = Regex.Replace(normalized, @"\D", string.Empty);
+        if (digits.Length == 11 && digits.StartsWith("1", StringComparison.Ordinal))
+            digits = digits[1..];
+
+        if (digits.Length == 10)
+            return $"({digits[..3]}) {digits.Substring(3, 3)}-{digits[6..]}";
+
+        return normalized;
+    }
+
+    private static string? NormalizeAddress(string? value)
+    {
+        var normalized = NormalizeSingleLine(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        normalized = Regex.Replace(
+            normalized,
+            @"^(?:\d{1,2}(?::\d{2})?\s*(?:AM|PM)\b(?:\s*[-–]\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)\b)?\s*)+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        normalized = Regex.Replace(
+            normalized,
+            @"^(?:see\s+hours|hours|open\s+now|closed\s+now)\b[:\s-]*",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        normalized = normalized.Trim().Trim(',', '.');
+
+        var streetMatches = StreetAddressCoreRegex.Matches(normalized);
+        var localityMatch = AddressLocalityRegex.Match(normalized);
+        if (streetMatches.Count > 0 && localityMatch.Success)
+        {
+            var street = streetMatches[^1].Value.Trim().TrimEnd(',', '.');
+            var locality = localityMatch.Value.Trim();
+            return $"{street}{locality}";
+        }
+
+        return normalized;
     }
 
     /// <summary>
