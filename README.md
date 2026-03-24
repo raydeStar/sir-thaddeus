@@ -14,6 +14,7 @@
     </a>
     <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-lightgrey" alt="Platform Windows 10 and 11" />
     <img src="https://img.shields.io/badge/LLM-Local%20Models%20%7C%20LM%20Studio-orange" alt="Supports local models and LM Studio" />
+[![Hypercommit](https://img.shields.io/badge/Hypercommit-DB2475)](https://hypercommit.com/sir-thaddeus)
   </p>
 </div>
 
