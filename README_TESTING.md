@@ -1,5 +1,61 @@
 # Testing
 
+## Quick Start
+
+If you just want the shortest path:
+
+- First-time setup: `./dev/bootstrap.ps1`
+- Fast local check before coding more: `./dev/test.ps1`
+- One harness suite: `./dev/harness.ps1 --suite <name> --judge none`
+- One harness test: `./dev/harness.ps1 --suite <name> --test <id> --judge none`
+- Full pre-submit pass: `./dev/harness.ps1 --all --judge none`
+
+Use this rule of thumb:
+
+- `test.ps1` = normal code/test loop
+- `harness.ps1` = real conversation-level validation
+- `harness.ps1 stage ...` = fast pipeline diagnostics when you want to isolate routing or query behavior
+- `preflight.ps1` = release gate
+
+## Human Path
+
+If you are a person skimming this file and want the practical path:
+
+1. Run `./dev/bootstrap.ps1` once on a new machine.
+2. Use `./dev/test.ps1` while coding.
+3. If the change affects real assistant behavior, run a focused harness command.
+4. Before submitting, run the narrowest relevant harness suite or `./dev/harness.ps1 --all --judge none` if you want one full pass.
+
+Most common commands:
+
+```powershell
+./dev/test.ps1
+./dev/harness.ps1 --suite quality --judge none
+./dev/harness.ps1 --suite web-search --test web_local_business_deli --judge none
+./dev/harness.ps1 stage --suite continuity --test local_business_followup_anchor
+```
+
+## AI / Agent Path
+
+If you are using an AI workflow, use this loop:
+
+1. Start with the narrowest trustworthy test.
+2. Read artifacts before editing code.
+3. Fix product behavior, not scoring.
+4. Re-run the failing test, then the containing suite, then a broader pass.
+
+The AI-specific harness rules live here:
+
+- `.github/instructions/e2e-harness-rules.instructions.md`
+- `.github/instructions/harness-iteration-framework.instructions.md`
+
+Short version for AI-assisted work:
+
+- Prefer `./dev/harness.ps1 --suite <name> --test <id> --judge none` over repeated full runs.
+- Use stage suites under `tools/SirThaddeus.Harness/StageSuites/` for deterministic preprocess/classify/query regressions.
+- Use `followup_anchor` in stage suite `context` when a vague follow-up needs a deterministic resolved topic.
+- Do not modify harness scoring or suite expectations to make failures disappear.
+
 ## One-time setup
 
 ```powershell
@@ -8,6 +64,18 @@
 
 Validates that the .NET SDK is installed, creates the `artifacts/` output
 folder, and runs `dotnet restore` against the solution.
+
+## Which Test Should I Run?
+
+Use this when you are unsure:
+
+- Changed normal C# code and want a quick check: `./dev/test.ps1`
+- Need one xUnit subset: `./dev/test.ps1 -Filter "FullyQualifiedName~SomeTestName"`
+- Need one real assistant behavior suite: `./dev/harness.ps1 --suite <name> --judge none`
+- Need one real assistant behavior test: `./dev/harness.ps1 --suite <name> --test <id> --judge none`
+- Need fast pipeline-only validation: `./dev/harness.ps1 stage --suite <name>`
+- Need the whole conversation-level baseline: `./dev/harness.ps1 --all --judge none`
+- Need the release gate: `./dev/preflight.ps1`
 
 ## Run unit tests (fast loop)
 
@@ -117,6 +185,10 @@ Run one stage suite:
 ```powershell
 ./dev/harness.ps1 stage --suite continuity
 ```
+
+If you target a specific stage like `preprocess`, `classify`, or `query`, the
+selected stage tests must define checks for that stage. The harness now fails
+closed instead of silently passing unmatched specs.
 
 Run one stage test:
 

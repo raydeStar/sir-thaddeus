@@ -19,8 +19,10 @@ Usage:
     harness stage classify --input <message>
     harness stage query --input <message>
     harness stage trace --input <message>
-    harness stage --all --suite <name> [options]
-    harness stage --all --test <id> [options]
+    harness stage --all [options]
+    harness stage --suite <name> [options]
+    harness stage --test <id> [options]
+    harness stage --suite <name> --test <id> [options]
 
 Options:
     --all                          Run every headless suite (run) or every stage suite (stage)
@@ -143,6 +145,9 @@ Options:
 
         if (options.Command == HarnessCommandKind.Stage)
         {
+            if (options.RunAllSuites && !string.IsNullOrWhiteSpace(options.SuiteName))
+                throw new CommandLineException("Use either --all or --suite/--category for stage mode, not both.");
+
             // Stage command: needs either --input or --all with suite/test selection
             if (string.IsNullOrWhiteSpace(options.StageInput) && !options.RunAllSuites
                 && string.IsNullOrWhiteSpace(options.SuiteName)

@@ -85,6 +85,15 @@ internal sealed class StageTestValidator
         var failures = new List<string>();
         var info = new List<string>();
 
+        if (target == HarnessStageTarget.Preprocess && test.Checks.Preprocess is null)
+            failures.Add("Preprocess: target selected but the stage test does not define a preprocess check.");
+
+        if (target == HarnessStageTarget.Classify && test.Checks.Classify is null)
+            failures.Add("Classify: target selected but the stage test does not define a classify check.");
+
+        if (target == HarnessStageTarget.Query && test.Checks.Query is null)
+            failures.Add("Query: target selected but the stage test does not define a query check.");
+
         // ── Preprocess checks ────────────────────────────────────
         var preprocessed = preprocessor.Decompose(test.Input);
         info.Add($"Preprocessor: {preprocessed.Intents.Count} intent(s), multi={preprocessed.IsMultiIntent}");

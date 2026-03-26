@@ -51,6 +51,20 @@ public sealed class CommandLineParserTests
     }
 
     [Fact]
+    public void Parse_StageAllAndSuite_ThrowsHelpfulError()
+    {
+        var ex = Assert.Throws<CommandLineException>(() => CommandLineParser.Parse([
+            "stage",
+            "query",
+            "--all",
+            "--suite",
+            "continuity"
+        ]));
+
+        Assert.Contains("either --all or --suite", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Parse_UnknownStageTarget_ThrowsHelpfulError()
     {
         var ex = Assert.Throws<CommandLineException>(() => CommandLineParser.Parse(["stage", "mystery", "--input", "hello"]));
