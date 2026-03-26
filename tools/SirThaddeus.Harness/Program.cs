@@ -10,8 +10,12 @@ try
         return;
     }
 
-    var app = new HarnessApplication();
-    var exitCode = await app.RunAsync(options, CancellationToken.None);
+    var exitCode = options.Command switch
+    {
+        HarnessCommandKind.Stage => await new StageRunner().RunAsync(options, CancellationToken.None),
+        HarnessCommandKind.Inspect => await new HarnessInspector().RunAsync(options, CancellationToken.None),
+        _ => await new HarnessApplication().RunAsync(options, CancellationToken.None)
+    };
     Environment.ExitCode = exitCode;
 }
 catch (CommandLineException ex)

@@ -1737,17 +1737,18 @@ public sealed partial class SearchOrchestrator
     /// </summary>
     private string InjectLocationForLocalBusinessQuery(string query, string? originalUserMessage)
     {
-        if (string.IsNullOrWhiteSpace(UserLocationHint))
-            return query;
         if (string.IsNullOrWhiteSpace(originalUserMessage))
             return query;
 
-        var explicitLocation = ExtractInlineLocationFromMessage(originalUserMessage);
-        if (!string.IsNullOrWhiteSpace(explicitLocation))
+        var explicitLocation = ExtractInlineLocationFromMessage(originalUserMessage)?.Trim();
+        var location = !string.IsNullOrWhiteSpace(explicitLocation)
+            ? explicitLocation
+            : UserLocationHint?.Trim();
+        if (string.IsNullOrWhiteSpace(location))
             return query;
 
         // Already contains location — nothing to do.
-        if (query.Contains(UserLocationHint, StringComparison.OrdinalIgnoreCase))
+        if (query.Contains(location, StringComparison.OrdinalIgnoreCase))
             return query;
 
         // Already has a proximity signal that InjectLocationIfProximityQuery handled.
@@ -1758,7 +1759,8 @@ public sealed partial class SearchOrchestrator
         if (!IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerOriginal))
             return query;
 
-        var result = $"{query.TrimEnd('?', '.', '!', ',')} near {UserLocationHint.Trim()}";
+        var joiner = !string.IsNullOrWhiteSpace(explicitLocation) ? " in " : " near ";
+        var result = $"{query.TrimEnd('?', '.', '!', ',')}{joiner}{location}";
 
         _audit.Append(new AuditEvent
         {
@@ -1769,7 +1771,10 @@ public sealed partial class SearchOrchestrator
             {
                 ["original_query"] = query,
                 ["effective"] = result,
-                ["locationHint"] = UserLocationHint.Trim()
+                ["locationHint"] = location,
+                ["locationSource"] = !string.IsNullOrWhiteSpace(explicitLocation)
+                    ? "explicit_message"
+                    : "user_hint"
             }
         });
 
@@ -3212,14 +3217,14 @@ public sealed partial class SearchOrchestrator
         var index = 1;
         foreach (var cluster in clusters.Take(5))
         {
-            var representativeSource = cluster.Sources.FirstOrDefault();
-            if (representativeSource is not null && IsLowValueNewsLandingSource(representativeSource))
+            var representativeSource = SelectGroundedNewsRepresentativeSource(cluster.Sources);
+            if (representativeSource is null)
                 continue;
 
             var headline = NormalizeGroundedNewsHeadline(
-                cluster.RepresentativeTitle,
-                cluster.Sources[0].Domain);
-            var detail = ChooseGroundedNewsDetail(cluster.Sources);
+                representativeSource.Title,
+                representativeSource.Domain);
+            var detail = ChooseGroundedNewsDetail(cluster.Sources, representativeSource);
 
             if (string.IsNullOrWhiteSpace(headline) && string.IsNullOrWhiteSpace(detail))
                 continue;
@@ -3250,8 +3255,51 @@ public sealed partial class SearchOrchestrator
             : rendered;
     }
 
-    private static string ChooseGroundedNewsDetail(IReadOnlyList<SourceItem> sources)
+    private static SourceItem? SelectGroundedNewsRepresentativeSource(IReadOnlyList<SourceItem> sources)
     {
+        return sources
+            .Where(source => !IsLowValueNewsLandingSource(source))
+            .OrderByDescending(ScoreGroundedNewsSource)
+            .ThenByDescending(source => NormalizeSourceFallbackText(source.Title, 140).Length)
+            .FirstOrDefault();
+    }
+
+    private static int ScoreGroundedNewsSource(SourceItem source)
+    {
+        var title = NormalizeSourceFallbackText(source.Title, 160);
+        var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
+        var score = 0;
+
+        if (HasConcreteNewsDetail(title))
+            score += 6;
+        if (!LooksLikeLowValueNewsHeadline(title))
+            score += 4;
+        if (!string.IsNullOrWhiteSpace(snippet))
+            score += 2;
+        if (HasConcreteNewsDetail(snippet))
+            score += 4;
+        if (source.PublishedAt.HasValue)
+            score += 1;
+
+        score += CountHeadlineSignalWords(title);
+        return score;
+    }
+
+    private static string ChooseGroundedNewsDetail(IReadOnlyList<SourceItem> sources, SourceItem representativeSource)
+    {
+        var preferredSources = new[] { representativeSource }
+            .Concat(sources.Where(source => !ReferenceEquals(source, representativeSource)));
+
+        foreach (var source in preferredSources)
+        {
+            var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
+            if (!string.IsNullOrWhiteSpace(snippet) &&
+                !LooksLikeLowValueNewsLine(snippet))
+            {
+                return snippet;
+            }
+        }
+
         foreach (var source in sources)
         {
             var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
@@ -3276,7 +3324,7 @@ public sealed partial class SearchOrchestrator
             return "";
 
         var segments = normalized
-            .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Split(['|', '•'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Where(segment => !LooksLikeSourceBrandSegment(segment, domain))
             .ToList();
 
@@ -3284,11 +3332,22 @@ public sealed partial class SearchOrchestrator
             return normalized;
 
         var selected = segments
-            .OrderByDescending(segment => CountHeadlineSignalWords(segment))
+            .OrderByDescending(ScoreGroundedNewsHeadlineSegment)
             .ThenByDescending(segment => segment.Length)
             .First();
 
         return NormalizeSourceFallbackText(selected, 120);
+    }
+
+    private static int ScoreGroundedNewsHeadlineSegment(string segment)
+    {
+        var score = CountHeadlineSignalWords(segment);
+        if (HasConcreteNewsDetail(segment))
+            score += 6;
+        if (LooksLikeLowValueNewsHeadline(segment))
+            score -= 8;
+
+        return score;
     }
 
     private static string NormalizeGroundedNewsSnippet(string? snippet)
@@ -3344,6 +3403,22 @@ public sealed partial class SearchOrchestrator
     private static int CountHeadlineSignalWords(string segment)
     {
         return Regex.Matches(segment, @"[A-Za-z][A-Za-z'-]{3,}").Count;
+    }
+
+    private static bool LooksLikeLowValueNewsHeadline(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        var lower = text.ToLowerInvariant();
+        return lower.Contains("latest technology news", StringComparison.Ordinal) ||
+               lower.Contains("today's latest", StringComparison.Ordinal) ||
+               lower.Contains("live updates", StringComparison.Ordinal) ||
+               lower.Contains("top stories", StringComparison.Ordinal) ||
+               lower.Contains("week in review", StringComparison.Ordinal) ||
+               lower.Contains("roundup", StringComparison.Ordinal) ||
+               lower.Contains("what to know", StringComparison.Ordinal) ||
+               lower.Contains("everything to know", StringComparison.Ordinal);
     }
 
     private static List<string> BuildSourceFallbackLines(
@@ -3714,6 +3789,9 @@ public sealed partial class SearchOrchestrator
         return lower.Contains("bbc technology brings you the latest", StringComparison.Ordinal) ||
                lower.Contains("coverage from around the world", StringComparison.Ordinal) ||
                lower.Contains("technology, health, environment, ai", StringComparison.Ordinal) ||
+               lower.Contains("top stories", StringComparison.Ordinal) ||
+               lower.Contains("live updates", StringComparison.Ordinal) ||
+               lower.Contains("week in review", StringComparison.Ordinal) ||
                lower.Contains("today's latest technology news", StringComparison.Ordinal) && !HasConcreteNewsDetail(line);
     }
 

@@ -151,6 +151,10 @@ public sealed class HarnessApplication
             Path.IsPathRooted(artifactsRunRoot) ? artifactsRunRoot : Path.GetFullPath(artifactsRunRoot),
             "summary.json");
         SuiteReporter.WriteJsonSummary(reportResults, reportContext, jsonSummaryPath);
+        var markdownSummaryPath = Path.Combine(
+            Path.IsPathRooted(artifactsRunRoot) ? artifactsRunRoot : Path.GetFullPath(artifactsRunRoot),
+            "summary.md");
+        SuiteReporter.WriteMarkdownSummary(reportResults, reportContext, markdownSummaryPath);
 
         Console.WriteLine("== Run Summary");
         foreach (var line in summaries)

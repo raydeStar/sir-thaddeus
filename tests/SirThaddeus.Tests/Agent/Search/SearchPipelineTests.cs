@@ -3633,6 +3633,26 @@ public class LocalBusinessNameExtractionTests
     }
 
     [Fact]
+    public void DiscussionHeadline_RejectedAsBusinessName()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Help! Does anyone know of a good deli in Portland or close? - Reddit",
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void LocationOnlyTitle_RejectedAsBusinessName()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Hillsboro",
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Null(name);
+    }
+
+    [Fact]
     public void ExtractBusinessNames_FiltersGenericListingHeadings()
     {
         var article = """

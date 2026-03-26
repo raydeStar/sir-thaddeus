@@ -317,6 +317,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
 
         (_mcp as AuditedMcpToolClient)?.NotifyNewTurn();
+        if (!string.IsNullOrWhiteSpace(conversationId))
+            (_mcp as AuditedMcpToolClient)?.UpdateSessionId(conversationId);
 
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";

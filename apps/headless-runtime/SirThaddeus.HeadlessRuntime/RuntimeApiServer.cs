@@ -79,6 +79,7 @@ internal static partial class RuntimeApiServer
         MapCoreEndpoints(app, getSearchStatus, getSettings, PersistSettings, audit);
         MapMemoryEndpoints(app, getSettings);
         MapRunEndpoints(app, runs, buildOrchestrator, getSettings, permissionGate, PersistSettings, audit);
+        MapActivityEndpoints(app, audit, getSettings, PersistSettings, permissionGate);
 
         MapProfileEndpoints(app, getSettings, PersistSettings);
         MapPersonalityEndpoints(app, getSettings, PersistSettings);

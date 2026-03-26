@@ -428,6 +428,32 @@ public sealed partial class SearchOrchestrator
         if (releasedProductExistence is not null)
             return releasedProductExistence;
 
+        var knownLatestVersionAnswer = OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(
+            userMessage ?? string.Empty,
+            memoryPackText);
+        if (!string.IsNullOrWhiteSpace(knownLatestVersionAnswer))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "KNOWN_LATEST_VERSION_ANSWER",
+                Result = "deterministic",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? string.Empty, 120),
+                    ["source_count"] = sources.Count
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = knownLatestVersionAnswer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",
             sources,

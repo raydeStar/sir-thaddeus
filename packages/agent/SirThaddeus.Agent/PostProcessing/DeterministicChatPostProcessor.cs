@@ -199,14 +199,14 @@ public sealed class DeterministicChatPostProcessor
         }
 
         if (activeProfile is null)
-            return sanitized;
+            return FinalizeStructuredOutput(sanitized, latestUserMessage);
 
         var presentationOptions = PersonalityFormattingPolicy.BuildPresentationOptions(activeProfile);
 
         // Safety refusals are semantically sensitive.
         // Only allow presentation formatting; no reduction.
         if (responseKind is ResponseKind.SafetyRefusal)
-            return sanitized;
+            return FinalizeStructuredOutput(sanitized, latestUserMessage);
 
         // Tool-backed responses default to strict mode (no signature/reduction).
         // For search/news style replies we can opt into presentation-only
@@ -214,7 +214,9 @@ public sealed class DeterministicChatPostProcessor
         if (responseKind is ResponseKind.ToolResult)
         {
             if (!allowToolResultPersonalityPresentation)
-                return StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized));
+                return FinalizeStructuredOutput(
+                    StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized)),
+                    latestUserMessage);
 
             var semanticKind = _responseKindClassifier.Classify(
                 sanitized,
@@ -223,20 +225,24 @@ public sealed class DeterministicChatPostProcessor
             // Keep sensitive shapes unchanged even when personality
             // presentation is allowed for tool-backed responses.
             if (semanticKind is ResponseKind.SafetyRefusal)
-                return StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized));
+                return FinalizeStructuredOutput(
+                    StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized)),
+                    latestUserMessage);
 
             if (semanticKind is ResponseKind.CodeHeavy or ResponseKind.NumericHeavy)
             {
                 sanitized = PresentationFormatter.Apply(
                     sanitized,
                     presentationOptions with { IncludeSignatureNote = false });
-                return StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized));
+                return FinalizeStructuredOutput(
+                    StripEmptyListMarkerLines(StripTerminalSignatureLine(sanitized)),
+                    latestUserMessage);
             }
 
             sanitized = PresentationFormatter.Apply(
                 sanitized,
                 presentationOptions with { IncludeSignatureNote = true });
-            return StripEmptyListMarkerLines(sanitized);
+            return FinalizeStructuredOutput(StripEmptyListMarkerLines(sanitized), latestUserMessage);
         }
 
         // Code-heavy and numeric-heavy output: allow whitespace normalization
@@ -246,20 +252,23 @@ public sealed class DeterministicChatPostProcessor
             sanitized = PresentationFormatter.Apply(
                 sanitized,
                 presentationOptions with { IncludeSignatureNote = false });
-            return StripEmptyListMarkerLines(sanitized);
+            return FinalizeStructuredOutput(StripEmptyListMarkerLines(sanitized), latestUserMessage);
         }
 
         sanitized = PresentationFormatter.Apply(sanitized, presentationOptions);
 
         if (responseKind is ResponseKind.Reasoning)
-            return StripEmptyListMarkerLines(sanitized);
+            return FinalizeStructuredOutput(StripEmptyListMarkerLines(sanitized), latestUserMessage);
 
         sanitized = ReductionFormatter.Apply(
             sanitized,
             PersonalityFormattingPolicy.BuildReductionOptions(activeProfile, latestUserMessage));
 
-        return StripEmptyListMarkerLines(sanitized);
+        return FinalizeStructuredOutput(StripEmptyListMarkerLines(sanitized), latestUserMessage);
     }
+
+    private static string FinalizeStructuredOutput(string text, string? latestUserMessage)
+        => NormalizeStrictStructuredOutput(text, latestUserMessage);
 
     private static string StripSirThaddeusNameLeakage(string text)
     {
@@ -360,6 +369,8 @@ public sealed class DeterministicChatPostProcessor
 
         answerText = NormalizeDotNetSpacing(answerText);
         commentaryText = NormalizeDotNetSpacing(commentaryText);
+        answerText = RestoreLeadingDotNet(answerText, lowerPrompt);
+        commentaryText = RestoreLeadingDotNet(commentaryText, lowerPrompt);
 
         if (string.IsNullOrWhiteSpace(commentaryText))
             commentaryText = "Kept concise per your format request.";
@@ -380,6 +391,22 @@ public sealed class DeterministicChatPostProcessor
 
         normalized = Regex.Replace(normalized, @"\s{2,}", " ");
         return normalized.Trim();
+    }
+
+    private static string RestoreLeadingDotNet(string text, string lowerPrompt)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            !lowerPrompt.Contains(".net", StringComparison.Ordinal) &&
+            !lowerPrompt.Contains("dotnet", StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        return Regex.Replace(
+            text,
+            @"^(?i:net)(?=\s|$)",
+            ".NET",
+            RegexOptions.CultureInvariant);
     }
 
     private static bool LooksLikeCapitalOfFranceQuestion(string userMessage)

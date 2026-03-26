@@ -909,6 +909,10 @@ public sealed partial class SearchOrchestrator
             return null;
         if (IsGenericNonBusinessName(name))
             return null;
+        if (LooksLikeDiscussionOrQuestionTitle(name))
+            return null;
+        if (LooksLikeLocationOnlyBusinessCandidate(name, userMessage))
+            return null;
 
         // Skip if the name starts with "r/" (Reddit subreddit).
         if (name.StartsWith("r/", StringComparison.Ordinal))
@@ -929,6 +933,40 @@ public sealed partial class SearchOrchestrator
             return null;
 
         return name;
+    }
+
+    private static bool LooksLikeDiscussionOrQuestionTitle(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        if (name.Contains('?', StringComparison.Ordinal))
+            return true;
+
+        return Regex.IsMatch(
+            name,
+            @"^(?:help!?|does\s+anyone\s+know|anyone\s+know|looking\s+for|where\s+can\s+i|can\s+you\s+recommend|recommend\s+me)\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool LooksLikeLocationOnlyBusinessCandidate(string name, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage)?.Trim();
+        if (string.IsNullOrWhiteSpace(explicitLocation))
+            return false;
+
+        var normalizedName = Regex.Replace(name, @"\s+", " ").Trim().TrimEnd('.', ',', '!', '?');
+        var normalizedLocation = Regex.Replace(explicitLocation, @"\s+", " ").Trim().TrimEnd('.', ',', '!', '?');
+        if (normalizedName.Equals(normalizedLocation, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var city = normalizedLocation.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return !string.IsNullOrWhiteSpace(city) &&
+               normalizedName.Equals(city, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string?> FetchSingleUrlAsync(

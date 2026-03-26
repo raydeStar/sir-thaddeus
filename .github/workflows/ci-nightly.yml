@@ -1,0 +1,224 @@
+name: CI Nightly (E2E + UI Grade)
+
+on:
+  schedule:
+    # Runs at 3:00 AM UTC, 7 days a week
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Specific suite to run (empty = all nightly suites)'
+        required: false
+        type: string
+      judge:
+        description: 'Judge mode: none | model'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - model
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Per-commit gate (already in ci-pr.yml) ──────────────────
+  # This is the NIGHTLY extension — live smoke/integration lanes
+  # and optional UI grade-only lane.
+
+  live-harness:
+    name: Live Harness (${{ matrix.suite }})
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - smoke
+          - web-search
+          - tool-contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore & Build
+        shell: pwsh
+        run: |
+          dotnet restore SirThaddeus.sln
+          dotnet build SirThaddeus.sln -c Release --no-restore
+
+      - name: Run harness suite (${{ matrix.suite }})
+        shell: pwsh
+        run: |
+          $judgeMode = '${{ github.event.inputs.judge || 'none' }}'
+          $suiteFilter = '${{ github.event.inputs.suite }}'
+          $currentSuite = '${{ matrix.suite }}'
+
+          # Skip if specific suite requested and this isn't it
+          if ($suiteFilter -and $suiteFilter -ne $currentSuite) {
+              Write-Host "Skipping $currentSuite (filter: $suiteFilter)"
+              exit 0
+          }
+
+          ./dev/harness.ps1 --suite $currentSuite --judge $judgeMode --max-iters 1
+        continue-on-error: true
+
+      - name: Upload harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: harness-${{ matrix.suite }}
+          path: |
+            artifacts/harness/**
+          if-no-files-found: ignore
+
+  stage-tests:
+    name: Stage Pipeline Tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Run unit + stage tests
+        shell: pwsh
+        run: |
+          dotnet restore SirThaddeus.sln
+          dotnet test tests/SirThaddeus.Tests/ -c Release --no-restore --filter "Category!=Integration" `
+            --logger "trx;LogFileName=stage-tests.trx" --results-directory artifacts/test-results/
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: stage-test-results
+          path: artifacts/test-results/**/*.trx
+          if-no-files-found: ignore
+
+  ui-grade:
+    name: UI Grade-Only Lane
+    runs-on: windows-latest
+    timeout-minutes: 30
+    if: github.event_name == 'schedule' || github.event.inputs.suite == ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup .NET from global.json
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet restore SirThaddeus.sln
+          dotnet build SirThaddeus.sln -c Release --no-restore
+
+      - name: Run visual grading tests
+        shell: pwsh
+        run: |
+          dotnet test tests/SirThaddeus.Tests/ -c Release --no-restore `
+            --filter "FullyQualifiedName~VisualGrading" `
+            --logger "trx;LogFileName=visual-grade.trx" --results-directory artifacts/test-results/
+
+      - name: Upload visual grade artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: visual-grade-artifacts
+          path: |
+            artifacts/harness/**/visual_grade.json
+            artifacts/harness/**/visual_capture.txt
+            artifacts/test-results/**/*.trx
+          if-no-files-found: ignore
+
+  report:
+    name: Nightly Report
+    runs-on: windows-latest
+    needs: [live-harness, stage-tests, ui-grade]
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts/nightly-all/
+
+      - name: Generate nightly summary
+        shell: pwsh
+        run: |
+          $summary = @()
+          $summary += "# Nightly Test Run $(Get-Date -Format 'yyyy-MM-dd')"
+          $summary += ""
+
+          # Collect harness results
+          Get-ChildItem -Path artifacts/nightly-all/ -Include "score.json" -Recurse | ForEach-Object {
+              $score = Get-Content $_.FullName | ConvertFrom-Json
+              $relative = $_.FullName -replace [regex]::Escape((Get-Location).Path + "\"), ""
+              $summary += "- **$relative**: final_score=$($score.final_score), hard_pass=$($score.hard_pass)"
+          }
+
+          $summary += ""
+          $summary += "## Artifacts"
+          Get-ChildItem -Path artifacts/nightly-all/ -Include "*.trx" -Recurse | ForEach-Object {
+              $summary += "- $($_.Name)"
+          }
+
+          $summary -join "`n" | Out-File -FilePath artifacts/nightly-summary.md -Encoding utf8
+          Write-Host ($summary -join "`n")
+
+      - name: Upload nightly summary
+        uses: actions/upload-artifact@v6
+        with:
+          name: nightly-summary
+          path: artifacts/nightly-summary.md

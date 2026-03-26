@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/.codex-build/**;**/artifacts/**</DefaultItemExcludes>
     <!-- Suppress CS1591 (missing XML comment) until full coverage is achieved. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>

@@ -31,6 +31,16 @@ public interface IToolPermissionGate
         string toolName, string argumentsJson, CancellationToken ct);
 }
 
+public enum ToolPermissionAuditMode
+{
+    NotRequired,
+    ExplicitApproval,
+    PolicyAlways,
+    SessionGrant,
+    ToolExempt,
+    Denied
+}
+
 /// <summary>
 /// Result of a tool permission gate check.
 /// </summary>
@@ -48,22 +58,27 @@ public sealed record ToolPermissionResult
     /// <summary>Reason for denial (when <see cref="Granted"/> is false).</summary>
     public string? DenialReason { get; init; }
 
+    /// <summary>
+    /// Audit-facing classification for how the permission outcome was resolved.
+    /// </summary>
+    public ToolPermissionAuditMode AuditMode { get; init; } = ToolPermissionAuditMode.Denied;
+
     /// <summary>Tool does not require permission — always allowed.</summary>
-    public static ToolPermissionResult NotRequired() => new()
+    public static ToolPermissionResult NotRequired(ToolPermissionAuditMode auditMode = ToolPermissionAuditMode.NotRequired) => new()
     {
-        Granted = true, PermissionRequired = false
+        Granted = true, PermissionRequired = false, AuditMode = auditMode
     };
 
     /// <summary>Permission was requested and granted.</summary>
-    public static ToolPermissionResult Grant(string? tokenId = null) => new()
+    public static ToolPermissionResult Grant(string? tokenId = null, ToolPermissionAuditMode auditMode = ToolPermissionAuditMode.ExplicitApproval) => new()
     {
-        Granted = true, PermissionRequired = true, TokenId = tokenId
+        Granted = true, PermissionRequired = true, TokenId = tokenId, AuditMode = auditMode
     };
 
     /// <summary>Permission was requested and denied.</summary>
-    public static ToolPermissionResult Deny(string reason) => new()
+    public static ToolPermissionResult Deny(string reason, ToolPermissionAuditMode auditMode = ToolPermissionAuditMode.Denied) => new()
     {
-        Granted = false, PermissionRequired = true, DenialReason = reason
+        Granted = false, PermissionRequired = true, DenialReason = reason, AuditMode = auditMode
     };
 }
 

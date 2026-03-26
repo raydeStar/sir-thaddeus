@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SirThaddeus.UI.Avalonia.ViewModels"
         xmlns:local="using:SirThaddeus.UI.Avalonia"
+  xmlns:ic="using:FluentIcons.Avalonia"
         x:Class="SirThaddeus.UI.Avalonia.MainWindow"
         Width="1060"
         Height="760"
@@ -16,45 +17,96 @@
 
   <Grid RowDefinitions="Auto,*,Auto">
     <Border Grid.Row="0"
-            Background="{StaticResource CrustBrush}"
-            Padding="20,12,20,0"
-            BorderBrush="{StaticResource Surface0Brush}"
-            BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,*,Auto">
-        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
-          <Button x:Name="ConversationButton" Classes="headerBtn" Click="ConversationButton_Click">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <TextBlock x:Name="ConversationTitleText" Text="Conversation" FontWeight="SemiBold" FontSize="13"/>
-              <TextBlock Text="&#x25BE;" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
-            </StackPanel>
-          </Button>
-
-          <Button x:Name="ConnectionStatusButton" Classes="headerBtn" Click="ConnectionStatusButton_Click">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <TextBlock x:Name="ConnectionStatusText" Text="Disconnected" FontSize="12"/>
-            </StackPanel>
-          </Button>
-        </StackPanel>
-
-        <StackPanel Grid.Column="1"
+        Height="52"
+            Background="{DynamicResource BackgroundPrimary}">
+      <Grid Margin="18,0"
+        ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Column="0"
                     Orientation="Horizontal"
-                    HorizontalAlignment="Center"
+            HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    Spacing="0">
-          <ToggleButton x:Name="ChatTabButton" Content="Chat" IsChecked="True" Classes="viewTab" Click="ViewTab_Click"/>
-          <ToggleButton x:Name="BriefingTabButton" Content="Briefing" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
-          <ToggleButton x:Name="SettingsTabButton" Content="Settings" IsChecked="False" Classes="viewTab" Click="ViewTab_Click"/>
+            Spacing="8">
+          <TextBlock Text="Sir Thaddeus"
+                 Classes="workspaceTitle"
+                     FontWeight="SemiBold"
+                     Foreground="{DynamicResource TextPrimary}"
+                     VerticalAlignment="Center"/>
+        <Button x:Name="ConnectionStatusButton"
+            Classes="statusDotButton"
+            Click="ConnectionStatusButton_Click"
+            ToolTip.Tip="Disconnected"
+            TabIndex="30">
+        <Ellipse x:Name="ConnectionStatusDot"
+             Width="8"
+             Height="8"
+             Fill="{DynamicResource TextTertiary}"/>
+        </Button>
+        <TextBlock x:Name="ConnectionStatusText"
+             Classes="workspaceConnectionState"
+             IsVisible="False"
+             Text="Disconnected"
+             Foreground="{DynamicResource TextSecondary}"/>
+          <TextBlock x:Name="ConversationTitleText"
+                 Classes="workspaceConversationTitle"
+                     IsVisible="False"
+                 Text="Conversation"
+                 MaxWidth="260"
+                 TextTrimming="CharacterEllipsis"/>
+          <ToggleButton x:Name="ChatTabButton"
+                        IsVisible="False"
+                        Content="Chat"
+                        IsChecked="True"
+                        Click="ViewTab_Click"/>
+          <ToggleButton x:Name="BriefingTabButton"
+                        IsVisible="False"
+                        Content="Briefing"
+                        IsChecked="False"
+                        Click="ViewTab_Click"/>
         </StackPanel>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
-          <Button x:Name="ConnectButton" Content="Connect" Classes="headerBtn" Click="ConnectButton_Click"/>
-          <Button x:Name="NewChatButton" Content="New Chat" Classes="headerBtn" Click="NewChatButton_Click"/>
-          <Button x:Name="StopAllButton" Content="STOP ALL" Classes="cancelBtn" Click="StopAllButton_Click" Margin="4,0,0,0"/>
+                    <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Spacing="8">
+          <Button x:Name="StopAllButton"
+            Classes="stopAllIconButton"
+            Click="StopAllButton_Click"
+            ToolTip.Tip="Stop All"
+            Opacity="0.4"
+            TabIndex="31">
+            <ic:SymbolIcon Symbol="Stop"
+                           FontSize="20"
+                           Foreground="White"/>
+          </Button>
+          <ToggleButton x:Name="SettingsTabButton"
+                        Classes="iconToggleButton"
+                        IsChecked="False"
+                        Click="ViewTab_Click"
+                        ToolTip.Tip="Settings"
+                        TabIndex="32">
+            <ic:SymbolIcon Symbol="Settings"
+                           FontSize="20"
+                           Foreground="{DynamicResource TextSecondary}"/>
+          </ToggleButton>
+          <Button x:Name="NewChatButton"
+            Classes="iconButton"
+            Click="NewChatButton_Click"
+            ToolTip.Tip="New chat"
+            TabIndex="33">
+            <ic:SymbolIcon Symbol="NotepadEdit"
+                           FontSize="20"
+                           Foreground="{DynamicResource TextSecondary}"/>
+          </Button>
+          <Button x:Name="ConnectButton"
+                  IsVisible="False"
+                  Content="Connect"
+                  Click="ConnectButton_Click"/>
         </StackPanel>
       </Grid>
     </Border>
 
-    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
       <Border x:Name="ConversationDrawer"
               Grid.Column="0"
               Width="280"
@@ -100,66 +152,141 @@
         </Grid>
       </Border>
 
-      <Grid Grid.Column="1">
+      <Grid Grid.Column="0">
         <Grid x:Name="ChatView">
           <Grid>
 
-            <ScrollViewer
-                          x:Name="ChatScroller"
-                          Background="{StaticResource BaseBrush}"
-                          VerticalScrollBarVisibility="Auto"
+            <ScrollViewer x:Name="ChatScroller"
+                          Background="{DynamicResource BackgroundPrimary}"
+                    VerticalScrollBarVisibility="Hidden"
                           HorizontalScrollBarVisibility="Disabled">
-              <Grid>
-                <StackPanel x:Name="EmptyHero"
+              <Grid x:Name="ChatSurfaceLayout"
+                HorizontalAlignment="Stretch"
+                    MaxWidth="860"
+                  MinHeight="500"
+                    Margin="24,0,24,0">
+                <StackPanel x:Name="HomeCommandStage"
                             HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Margin="0,80,0,0"
-                            Spacing="4">
-                  <TextBlock Text="Sir Thaddeus"
-                             FontSize="36"
-                             FontWeight="Bold"
-                             Foreground="{StaticResource TextBrush}"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,4"
-                             Opacity="0.95"/>
-                  <TextBlock Text="Your AI. Your Rules."
-                             FontSize="16"
-                             FontWeight="Medium"
-                             Foreground="{StaticResource Subtext1Brush}"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,2"/>
-                  <TextBlock Text="A local-first copilot that only acts with explicit permission."
-                             FontSize="13"
-                             Foreground="{StaticResource Overlay0Brush}"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,28"/>
-                  <Border Background="{StaticResource Surface0Brush}"
-                          CornerRadius="{StaticResource RadiusMd}"
-                          Padding="20,14"
-                          HorizontalAlignment="Center">
-                    <StackPanel Spacing="6">
-                      <TextBlock Text="Hold to talk  &#x2014;  Ctrl+Alt+M"
-                                 FontSize="12"
-                                 Foreground="{StaticResource Subtext0Brush}"
-                                 HorizontalAlignment="Center"/>
-                      <TextBlock Text="Command Palette  &#x2014;  Ctrl+Space"
-                                 FontSize="12"
-                                 Foreground="{StaticResource Subtext0Brush}"
-                                 HorizontalAlignment="Center"/>
-                    </StackPanel>
-                  </Border>
+                      VerticalAlignment="Center"
+                      MaxWidth="560"
+                      Margin="0,-18,0,40"
+                      Spacing="18">
+                  <ItemsControl x:Name="RuntimeStatusStrip"
+                        Margin="0,0,0,6"
+                                HorizontalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel HorizontalAlignment="Center"/>
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Classes="runtimeStatusPill"
+                                Margin="3">
+                          <StackPanel Orientation="Horizontal"
+                                      Spacing="8">
+                            <ic:SymbolIcon Symbol="{ReflectionBinding IconSymbol}"
+                                           FontSize="14"
+                                           Foreground="{ReflectionBinding AccentBrush}"
+                                           VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="6">
+                              <TextBlock Text="{ReflectionBinding Label}"
+                                         Classes="runtimeStatusLabel"/>
+                              <TextBlock Text="{ReflectionBinding Value}"
+                                         Classes="runtimeStatusValue"
+                                         Foreground="{ReflectionBinding AccentBrush}"/>
+                            </StackPanel>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <StackPanel x:Name="EmptyHero"
+                              HorizontalAlignment="Center"
+                              Margin="0,6,0,0"
+                              Spacing="0">
+                    <Border Classes="homeHeroMedallion"
+                            Width="50"
+                            Height="50"
+                            CornerRadius="25"
+                            HorizontalAlignment="Center"
+                            Background="{DynamicResource BackgroundTertiary}"
+                            BorderBrush="{DynamicResource BorderMuted}"
+                            BorderThickness="1"
+                            Margin="0,0,0,12">
+                      <TextBlock Text="ST"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 FontFamily="Georgia, Cambria, Segoe UI Variable, Segoe UI"
+                                 FontSize="16"
+                                 FontWeight="Bold"
+                                 Foreground="{DynamicResource AccentPrimary}"/>
+                    </Border>
+                    <TextBlock Text="Ready for commands."
+                               Classes="homeHeroTitle"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimary}"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Choose a guided command or write directly below."
+                               Classes="homeHeroSubtitle"
+                               FontSize="13"
+                               Foreground="{DynamicResource TextSecondary}"
+                               HorizontalAlignment="Center"
+                               Margin="0,8,0,0"/>
+                  </StackPanel>
+
+                  <ItemsControl x:Name="SuggestionChipsPanel"
+                                Margin="0,2,0,0"
+                                HorizontalAlignment="Center"
+                                MaxWidth="500">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Spacing="10"/>
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Button Classes="suggestionChipButton"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Click="SuggestionChipButton_Click"
+                                TabIndex="10">
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ic:SymbolIcon Symbol="{ReflectionBinding IconSymbol}"
+                                           Classes="suggestionChipIcon"
+                                           FontSize="16"
+                                           Foreground="{DynamicResource TextSecondary}"/>
+                            <TextBlock Text="{ReflectionBinding Label}"
+                                       FontSize="14"
+                                       FontWeight="Medium"
+                                       Foreground="{DynamicResource TextSecondary}"/>
+                          </StackPanel>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
 
-                <ItemsControl x:Name="ChatMessagesList" Margin="24,20,24,60" Background="Transparent">
+                <ItemsControl x:Name="ChatMessagesList"
+                              HorizontalAlignment="Stretch"
+                              Width="{Binding Bounds.Width, ElementName=ChatSurfaceLayout}"
+                              Margin="0,20,0,36"
+                              Background="Transparent">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel HorizontalAlignment="Stretch"/>
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:ChatMessageItem">
-                      <Border Margin="0,0,0,12"
-                              Background="{StaticResource MantleBrush}"
+                      <Border Classes="chatMessageCard"
+                              Margin="0,0,0,14"
+                              HorizontalAlignment="Stretch"
                               CornerRadius="{StaticResource RadiusMd}"
-                              BorderBrush="{StaticResource Surface0Brush}"
-                              BorderThickness="1"
-                              Padding="0">
-                        <!-- Per-message context menu -->
+                              Padding="18,16">
                         <Border.ContextMenu>
                           <ContextMenu>
                             <MenuItem Header="Copy" Click="CopyMessage_Click"/>
@@ -167,89 +294,174 @@
                             <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
                           </ContextMenu>
                         </Border.ContextMenu>
-                        <Grid>
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="4"/>
-                            <ColumnDefinition Width="*"/>
-                          </Grid.ColumnDefinitions>
-                          <!-- Spines for role visual distinction -->
-                          <Border Grid.Column="0" Background="{StaticResource MauveBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsAssistant}"/>
-                          <Border Grid.Column="0" Background="{StaticResource BlueBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsUser}"/>
-                          <Border Grid.Column="0" Background="{StaticResource YellowBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsSystem}"/>
-                          <Border Grid.Column="0" Background="{StaticResource PeachBrush}" CornerRadius="8,0,0,8" VerticalAlignment="Stretch" IsVisible="{Binding IsToolActivity}"/>
+                        <StackPanel>
+                          <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                              <TextBlock Text="{Binding AuthorLabel}"
+                                         Classes="chatMessageAuthor"/>
+                              <TextBlock Text="/"
+                                         Classes="chatMessageMetaSeparator"
+                                         VerticalAlignment="Center"/>
+                              <TextBlock Text="{Binding TimeDisplay}"
+                                         Classes="chatMessageTimestamp"
+                                         VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="⋯"
+                                    FontSize="14"
+                                    FontWeight="Bold"
+                                    Padding="6,0"
+                                    MinWidth="0"
+                                    MinHeight="0"
+                                    Background="Transparent"
+                                    Foreground="{DynamicResource TextTertiary}"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    VerticalAlignment="Center"
+                                    Opacity="0"
+                                    Classes="messageMenuBtn">
+                              <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                  <MenuItem Header="Copy" Click="CopyMessage_Click"/>
+                                  <MenuItem Header="Retry" Click="RetryMessage_Click" IsVisible="{Binding IsUser}"/>
+                                  <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
+                                </MenuFlyout>
+                              </Button.Flyout>
+                            </Button>
+                          </Grid>
 
-                          <StackPanel Grid.Column="1" Margin="16,14,16,14">
-                            <!-- Header row: Author + Role + Time + Triple-dot menu -->
-                            <Grid Margin="0,0,0,8">
-                              <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                              </Grid.ColumnDefinitions>
-                              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{Binding AuthorLabel}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Subtext1Brush}"/>
-                                <TextBlock Text="{Binding RoleLabel}" FontSize="10" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"
-                                           IsVisible="{Binding RoleLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                                <TextBlock Text="{Binding TimeDisplay}" FontSize="11" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
-                              </StackPanel>
-                              <Button Grid.Column="1"
-                                      Content="⋯"
-                                      FontSize="14"
-                                      FontWeight="Bold"
-                                      Padding="6,0"
-                                      MinWidth="0"
-                                      MinHeight="0"
-                                      Background="Transparent"
-                                      Foreground="{StaticResource Overlay0Brush}"
-                                      BorderThickness="0"
-                                      Cursor="Hand"
-                                      VerticalAlignment="Center">
-                                <Button.Flyout>
-                                  <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                    <MenuItem Header="Copy" Click="CopyMessage_Click"/>
-                                    <MenuItem Header="Retry" Click="RetryMessage_Click" IsVisible="{Binding IsUser}"/>
-                                    <MenuItem Header="Read Aloud" Click="ReadAloudMessage_Click" IsVisible="{Binding IsAssistant}"/>
-                                  </MenuFlyout>
-                                </Button.Flyout>
-                              </Button>
-                            </Grid>
+                          <Border IsVisible="{Binding HasThoughtContent}"
+                                  Background="{DynamicResource BackgroundPrimary}"
+                                  CornerRadius="{StaticResource RadiusSm}"
+                                  Padding="12,8"
+                                  Margin="0,0,0,8">
+                            <Expander IsExpanded="{Binding IsThoughtExpanded}" Padding="0">
+                              <Expander.Header>
+                                <TextBlock Text="Reasoning" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextTertiary}"/>
+                              </Expander.Header>
+                              <SelectableTextBlock Text="{Binding ThoughtContent}"
+                                                   FontSize="12"
+                                                   FontFamily="Cascadia Mono, Consolas, monospace"
+                                                   LineHeight="18"
+                                                   Foreground="{DynamicResource TextSecondary}"
+                                                   Padding="0,6,0,0"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="300"/>
+                            </Expander>
+                          </Border>
 
-                            <!-- Thinking/Reasoning expander -->
-                            <Border IsVisible="{Binding HasThoughtContent}"
-                                    Background="{StaticResource BaseBrush}"
-                                    CornerRadius="{StaticResource RadiusSm}"
-                                    Padding="12,8"
-                                    Margin="0,0,0,8">
-                              <Expander IsExpanded="{Binding IsThoughtExpanded}" Padding="0">
-                                <Expander.Header>
-                                  <TextBlock Text="Reasoning" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Overlay0Brush}"/>
-                                </Expander.Header>
-                                <SelectableTextBlock Text="{Binding ThoughtContent}"
-                                                     FontSize="12"
-                                                     FontFamily="Cascadia Mono, Consolas, monospace"
-                                                     LineHeight="18"
-                                                     Foreground="{StaticResource Subtext0Brush}"
-                                                     Padding="0,6,0,0"
-                                                     TextWrapping="Wrap"
-                                                     MaxHeight="300"/>
-                              </Expander>
-                            </Border>
+                          <local:MarkdownTextBlock Markdown="{Binding Content}"
+                                                   FontSize="15"
+                                                   LineHeight="24"
+                                                   Foreground="{DynamicResource TextPrimary}"
+                                                   TextWrapping="Wrap"/>
 
-                            <!-- Message content -->
-                            <local:MarkdownTextBlock Markdown="{Binding Content}"
-                                                     FontSize="14"
-                                                     LineHeight="22"
-                                                     Foreground="{StaticResource TextBrush}"
-                                                     TextWrapping="Wrap"/>
+                          <ItemsControl IsVisible="{Binding HasSourceCards}"
+                                        ItemsSource="{Binding SourceCards}"
+                                        Margin="0,12,0,0">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <StackPanel Spacing="8"/>
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:ChatSourceCardItem">
+                                <Border Background="{DynamicResource BackgroundSecondary}"
+                                        BorderBrush="{DynamicResource BorderMuted}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="10">
+                                  <Grid ColumnDefinitions="92,*" ColumnSpacing="12">
+                                    <Border Width="92"
+                                            Height="72"
+                                            CornerRadius="8"
+                                            ClipToBounds="True"
+                                            Background="{DynamicResource BackgroundPrimary}">
+                                      <Grid>
+                                        <TextBlock Text="{Binding DomainInitial}"
+                                                   FontSize="20"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextTertiary}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                        <Image Source="{Binding ThumbnailImage}"
+                                               IsVisible="{Binding HasThumbnailImage}"
+                                               Stretch="UniformToFill"/>
+                                      </Grid>
+                                    </Border>
 
-                            <!-- Inline tool activity footer (compact, dim) -->
-                            <TextBlock IsVisible="{Binding HasToolSummary}"
-                                       Text="{Binding ToolSummary}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource Overlay0Brush}"
-                                       Margin="0,6,0,0"
-                                       Opacity="0.7"/>
-                          </StackPanel>
-                        </Grid>
+                                    <StackPanel Grid.Column="1" Spacing="6">
+                                      <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Border Width="18"
+                                                Height="18"
+                                                CornerRadius="9"
+                                                Background="{DynamicResource BackgroundPrimary}"
+                                                ClipToBounds="True">
+                                          <Grid>
+                                            <TextBlock Text="{Binding DomainInitial}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextTertiary}"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                            <Image Source="{Binding FaviconImage}"
+                                                   IsVisible="{Binding HasFaviconImage}"
+                                                   Stretch="UniformToFill"/>
+                                          </Grid>
+                                        </Border>
+                                        <TextBlock Text="{Binding Domain}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextSecondary}"
+                                                   VerticalAlignment="Center"/>
+                                      </StackPanel>
+
+                                      <TextBlock Text="{Binding Title}"
+                                                 FontSize="13"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{DynamicResource TextPrimary}"
+                                                 TextWrapping="Wrap"
+                                                 MaxLines="2"/>
+
+                                      <TextBlock Text="{Binding Excerpt}"
+                                                 IsVisible="{Binding HasExcerpt}"
+                                                 FontSize="12"
+                                                 Foreground="{DynamicResource TextSecondary}"
+                                                 TextWrapping="Wrap"
+                                                 MaxLines="3"/>
+
+                                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                        <TextBlock Text="{Binding MetaLine}"
+                                                   IsVisible="{Binding HasMetaLine}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource TextTertiary}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <Button Grid.Column="1"
+                                                Content="Open source"
+                                                Tag="{Binding Url}"
+                                                Click="AssistantSourceCardOpenButton_Click"
+                                                Classes="actionBtn"
+                                                MinHeight="28"
+                                                Padding="10,4"/>
+                                      </Grid>
+                                    </StackPanel>
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+
+                          <TextBlock IsVisible="{Binding HasToolSummary}"
+                                     Classes="chatMessageToolSummary"
+                                     Text="{Binding ToolSummary}"
+                                     Margin="0,8,0,0"
+                                     Opacity="0.7"/>
+                        </StackPanel>
                       </Border>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
@@ -1506,13 +1718,13 @@
 
       <!-- ── Progress Drawer (workflow checklist / narration) ── -->
       <Border x:Name="ProgressDrawer"
-              Grid.Column="2"
-              Width="320"
+              Grid.Column="1"
+              Width="292"
               IsVisible="False"
-              Background="{StaticResource CrustBrush}"
-              BorderBrush="{StaticResource Surface0Brush}"
+              Background="{DynamicResource BackgroundSecondary}"
+              BorderBrush="{DynamicResource BorderMuted}"
               BorderThickness="1,0,0,0">
-        <Grid RowDefinitions="Auto,*,Auto">
+        <Grid RowDefinitions="Auto,*">
           <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
             <TextBlock Text="Progress" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseProgressDrawerButton_Click"/>
@@ -1520,138 +1732,337 @@
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="12,0,12,12" Spacing="12">
-              <TextBlock x:Name="WorkflowNarrationText"
-                         Text=""
-                         FontSize="13"
-                         FontWeight="SemiBold"
-                         Foreground="{StaticResource Subtext1Brush}"
-                         TextWrapping="Wrap"/>
+              <Border Classes="progressRailSummaryCard"
+                      Padding="12,10">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Current run"
+                             Classes="progressRailSectionHeader"/>
+                  <TextBlock x:Name="WorkflowNarrationText"
+                             Text=""
+                             FontSize="13"
+                             FontWeight="SemiBold"
+                             Foreground="{DynamicResource TextPrimary}"
+                             TextWrapping="Wrap"/>
+                  <TextBlock x:Name="WorkflowToolStripText"
+                             Text=""
+                             FontSize="11"
+                             Foreground="{DynamicResource TextSecondary}"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="Timeline"
+                         Classes="progressRailSectionHeader"/>
 
               <ItemsControl x:Name="WorkflowChecklistList">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
-                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,3">
-                      <TextBlock Text="{Binding StateIcon}"
-                                 FontSize="13"
-                                 VerticalAlignment="Center"
-                                 Width="16"
-                                 Foreground="{StaticResource GreenBrush}"/>
-                      <TextBlock FontSize="13"
-                                 Foreground="{StaticResource Overlay0Brush}"
-                                 VerticalAlignment="Center"
-                                 TextWrapping="Wrap">
-                        <Run Text="{Binding Title}"/>
-                        <Run Text=" — " Foreground="{StaticResource Overlay0Brush}"/>
-                        <Run Text="{Binding StatusNote}" FontStyle="Italic"/>
-                      </TextBlock>
-                    </StackPanel>
+                    <Border Classes="progressRailItemCard"
+                            Margin="0,0,0,6"
+                            Padding="10,9">
+                      <Grid ColumnDefinitions="Auto,*"
+                            ColumnSpacing="10">
+                        <Border Classes="progressRailStateShell"
+                                Width="24"
+                                Height="24">
+                          <TextBlock Text="{Binding StateIcon}"
+                                     FontSize="12"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Foreground="{DynamicResource TextPrimary}"/>
+                        </Border>
+                        <StackPanel Grid.Column="1"
+                                    Spacing="3">
+                          <TextBlock Text="{Binding Title}"
+                                     FontSize="12"
+                                     FontWeight="SemiBold"
+                                     Foreground="{DynamicResource TextPrimary}"
+                                     TextWrapping="Wrap"/>
+                          <TextBlock Text="{Binding StatusNote}"
+                                     IsVisible="{Binding StatusNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                     FontSize="11"
+                                     Foreground="{DynamicResource TextSecondary}"
+                                     TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Grid>
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
           </ScrollViewer>
-
-          <TextBlock x:Name="WorkflowToolStripText"
-                     Grid.Row="2"
-                     Text=""
-                     FontSize="11"
-                     Foreground="{StaticResource Overlay0Brush}"
-                     Opacity="0.7"
-                     Margin="12,4,12,12"/>
         </Grid>
       </Border>
 
       <Border x:Name="ActionDrawer"
-              Grid.Column="2"
+              Grid.Column="1"
               Width="320"
               IsVisible="False"
-              Background="{StaticResource CrustBrush}"
-              BorderBrush="{StaticResource Surface0Brush}"
+              Background="{DynamicResource BackgroundPrimary}"
+              BorderBrush="{DynamicResource BorderMuted}"
               BorderThickness="1,0,0,0">
-        <Grid RowDefinitions="Auto,Auto,*">
+        <Grid RowDefinitions="Auto,*">
+          <!-- Header -->
           <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
             <TextBlock Text="Activity" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseActionDrawerButton_Click"/>
           </Grid>
 
-          <Border Grid.Row="1"
-                  Margin="12,0,12,8"
-                  Background="{StaticResource BaseBrush}"
-                  CornerRadius="{StaticResource RadiusMd}"
-                  BorderBrush="{StaticResource Surface0Brush}"
-                  BorderThickness="1"
-                  Padding="10,8">
-            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
-              <Border Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="8,3">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Border x:Name="ActionConnectionDot"
-                          Width="7"
-                          Height="7"
-                          CornerRadius="999"
-                          Background="{StaticResource Overlay0Brush}"
-                          VerticalAlignment="Center"/>
-                  <TextBlock x:Name="ActionConnectionStateText"
-                             Text="Disconnected"
-                             FontSize="11"
-                             FontWeight="SemiBold"
-                             VerticalAlignment="Center"/>
+          <ScrollViewer Grid.Row="1"
+                        Margin="12,0,12,12"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="10">
+
+              <!-- ═══ Connection Status Card ═══ -->
+              <Border Classes="activityRailSummaryCard" Padding="10,8">
+                <StackPanel Spacing="8">
+                  <Border Background="{StaticResource Surface0Brush}" CornerRadius="999" Padding="8,3" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Border x:Name="ActionConnectionDot"
+                              Width="7" Height="7" CornerRadius="999"
+                              Background="{StaticResource Overlay0Brush}"
+                              VerticalAlignment="Center"/>
+                      <TextBlock x:Name="ActionConnectionStateText"
+                                 Text="Disconnected"
+                                 FontSize="11" FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
+                  <StackPanel Spacing="2">
+                    <TextBlock x:Name="ActionRuntimeSummaryText"
+                               Text="Local runtime unavailable"
+                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ActionRuntimeStateText"
+                               Text="Managed runtime not running"
+                               FontSize="11" Foreground="{DynamicResource TextSecondary}"
+                               TextWrapping="Wrap"/>
+                  </StackPanel>
+                  <StackPanel Spacing="4">
+                    <Button x:Name="ActionRuntimeDetailsButton"
+                            Classes="activityRailDisclosureButton"
+                            Click="ActionRuntimeDetailsButton_Click">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="Connection details"
+                                   Classes="activityRailDisclosureLabel"
+                                   VerticalAlignment="Center"/>
+                        <ic:SymbolIcon x:Name="ActionRuntimeDetailsChevron"
+                                       Grid.Column="1" Symbol="ChevronDown"
+                                       FontSize="11" Foreground="{DynamicResource TextSecondary}"
+                                       VerticalAlignment="Center"/>
+                      </Grid>
+                    </Button>
+                    <Border x:Name="ActionRuntimeDetailsPanel"
+                            Classes="activityRailInlineDetailPanel"
+                            IsVisible="False" Padding="8,8">
+                      <StackPanel Spacing="8">
+                        <TextBlock x:Name="ActionRuntimeEndpointText"
+                                   Text="No endpoint configured"
+                                   Classes="activityRailValue" TextWrapping="Wrap"/>
+                        <Button Content="Copy endpoint"
+                                HorizontalAlignment="Left"
+                                Classes="headerBtn"
+                                Click="ActionCopyEndpointButton_Click"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
                 </StackPanel>
               </Border>
-              <TextBlock Grid.Column="1"
-                         Text="|"
-                         Foreground="{StaticResource Overlay0Brush}"
-                         VerticalAlignment="Center"/>
-              <TextBlock x:Name="ActionRuntimeStateText"
-                         Grid.Column="2"
-                         Text="Runtime: unknown"
-                         FontSize="11"
-                         Foreground="{StaticResource Overlay0Brush}"
-                         TextTrimming="CharacterEllipsis"
-                         VerticalAlignment="Center"/>
-            </Grid>
-          </Border>
 
-          <Border Grid.Row="2" Margin="12,0,12,12" Background="{StaticResource BaseBrush}" CornerRadius="{StaticResource RadiusMd}" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1">
-            <Grid RowDefinitions="Auto,*">
-              <TextBlock Grid.Row="0" Text="Recent Activity" Margin="10,8,10,6" FontWeight="SemiBold" FontSize="12"/>
-              <ListBox x:Name="ActionAuditPreviewList" Grid.Row="1" Margin="8,0,8,8" Background="Transparent"/>
-            </Grid>
-          </Border>
+              <!-- ═══ Session Summary ═══ -->
+              <Border Classes="activityRailPanel">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Session Summary"
+                             Classes="activityRailSectionHeader"/>
+                  <TextBlock x:Name="SessionSummaryText"
+                             Text="No tool calls this session"
+                             FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                             TextWrapping="Wrap"/>
+                  <TextBlock x:Name="SessionTimeRangeText"
+                             FontSize="10" Foreground="{DynamicResource TextTertiary}"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+              </Border>
+
+              <!-- ═══ Tool Categories (expandable) ═══ -->
+              <Border Classes="activityRailPanel">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Tool Activity"
+                             Classes="activityRailSectionHeader"/>
+                  <ItemsControl x:Name="CategoryList">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Classes="activityRailItemCard" Padding="8,6" Margin="0,0,0,4" CornerRadius="6">
+                          <StackPanel Spacing="4">
+                            <!-- Category header row -->
+                            <Button Classes="activityRailDisclosureButton"
+                                    Click="CategoryExpandButton_Click"
+                                    Tag="{ReflectionBinding CategoryKey}">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <StackPanel Spacing="1">
+                                  <TextBlock Text="{ReflectionBinding DisplayName}"
+                                             FontSize="12" FontWeight="SemiBold"
+                                             Foreground="{DynamicResource TextPrimary}"/>
+                                  <TextBlock Text="{ReflectionBinding Summary}"
+                                             FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="1"
+                                           Text="{ReflectionBinding LastCallTime}"
+                                           FontSize="10" Foreground="{DynamicResource TextTertiary}"
+                                           VerticalAlignment="Top"/>
+                              </Grid>
+                            </Button>
+                            <!-- Expanded call list -->
+                            <ItemsControl ItemsSource="{ReflectionBinding RecentCalls}"
+                                          IsVisible="{ReflectionBinding IsExpanded}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Border Padding="4,3" Margin="8,2,0,0"
+                                          BorderBrush="{DynamicResource BorderMuted}"
+                                          BorderThickness="0,0,0,1"
+                                          ToolTip.Tip="{ReflectionBinding TooltipText}">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                                      <Border Width="4" Height="4" CornerRadius="999"
+                                              Background="{ReflectionBinding AccentBrush}"
+                                              VerticalAlignment="Center" Margin="0,0,2,0"/>
+                                      <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="{ReflectionBinding DisplayName}"
+                                                   FontSize="11" FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextPrimary}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{ReflectionBinding InputSummary}"
+                                                   FontSize="10" Foreground="{DynamicResource TextSecondary}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="1"/>
+                                      </StackPanel>
+                                      <StackPanel Grid.Column="2" Spacing="1" VerticalAlignment="Top">
+                                        <TextBlock Text="{ReflectionBinding DurationText}"
+                                                   FontSize="9" Foreground="{DynamicResource TextTertiary}"
+                                                   HorizontalAlignment="Right"/>
+                                      </StackPanel>
+                                    </Grid>
+                                  </Border>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+
+              <!-- ═══ MCP Connections ═══ -->
+              <Border Classes="activityRailPanel">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="MCP Connections"
+                             Classes="activityRailSectionHeader"/>
+                  <ItemsControl x:Name="ConnectionList">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Classes="activityRailItemCard" Padding="8,6" Margin="0,0,0,4" CornerRadius="6"
+                                ToolTip.Tip="{ReflectionBinding TooltipText}">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="{ReflectionBinding DisplayName}"
+                                         FontSize="12" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource TextPrimary}"/>
+                              <TextBlock Text="{ReflectionBinding CallsSummary}"
+                                         FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                            </StackPanel>
+                            <Border Grid.Column="1" Classes="activityRailStatusBadge"
+                                    VerticalAlignment="Top">
+                              <TextBlock Text="{ReflectionBinding ApprovalLabel}"
+                                         FontSize="10" FontWeight="SemiBold"
+                                         Foreground="{ReflectionBinding ApprovalBrush}"/>
+                            </Border>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+
+              <!-- ═══ Selected Call Detail ═══ -->
+              <Border x:Name="SelectedCallDetailPanel"
+                      Classes="activityRailPanel"
+                      IsVisible="False">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Call Detail"
+                             Classes="activityRailSectionHeader"/>
+                  <Border Classes="activityRailDetailCard" Padding="10,10">
+                    <StackPanel Spacing="8">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock x:Name="CallDetailHeadingText"
+                                   Text="" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                        <Border Grid.Column="1" Classes="activityRailStatusBadge">
+                          <TextBlock x:Name="CallDetailStatusText" Text=""
+                                     FontSize="10" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource TextSecondary}"/>
+                        </Border>
+                      </Grid>
+                      <Grid ColumnDefinitions="Auto,*"
+                            RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                            ColumnSpacing="10" RowSpacing="6">
+                        <TextBlock Text="Tool" Classes="activityRailKey"/>
+                        <TextBlock x:Name="CallDetailToolText" Grid.Column="1"
+                                   Classes="activityRailValue" TextWrapping="Wrap"/>
+
+                        <TextBlock Grid.Row="1" Text="Input" Classes="activityRailKey"/>
+                        <TextBlock x:Name="CallDetailInputText" Grid.Row="1" Grid.Column="1"
+                                   Classes="activityRailValue" TextWrapping="Wrap"
+                                   MaxLines="3" TextTrimming="CharacterEllipsis"/>
+
+                        <TextBlock Grid.Row="2" Text="Output" Classes="activityRailKey"/>
+                        <TextBlock x:Name="CallDetailOutputText" Grid.Row="2" Grid.Column="1"
+                                   Classes="activityRailValue" TextWrapping="Wrap"
+                                   MaxLines="3" TextTrimming="CharacterEllipsis"/>
+
+                        <TextBlock Grid.Row="3" Text="Permission" Classes="activityRailKey"/>
+                        <TextBlock x:Name="CallDetailPermissionText" Grid.Row="3" Grid.Column="1"
+                                   Classes="activityRailValue" TextWrapping="Wrap"/>
+
+                        <TextBlock Grid.Row="4" Text="Duration" Classes="activityRailKey"/>
+                        <TextBlock x:Name="CallDetailDurationText" Grid.Row="4" Grid.Column="1"
+                                   Classes="activityRailValue"/>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </Border>
+
+              <Button HorizontalAlignment="Left"
+                      Content="Open full audit"
+                      Classes="headerBtn"
+                      Click="ActionOpenAuditTabButton_Click"/>
+
+            </StackPanel>
+          </ScrollViewer>
         </Grid>
       </Border>
     </Grid>
 
     <Border Grid.Row="2" x:Name="InputBar"
-            Background="{StaticResource CrustBrush}"
-            Padding="20,14"
-            BorderBrush="{StaticResource Surface0Brush}"
-            BorderThickness="0,1,0,0">
-      <StackPanel Spacing="8">
-        <Border x:Name="AttachmentChip"
-                IsVisible="False"
-                Background="{StaticResource Surface0Brush}"
-                CornerRadius="{StaticResource RadiusMd}"
-                BorderBrush="{StaticResource Surface1Brush}"
+            Background="{DynamicResource BackgroundPrimary}"
+        BorderBrush="{DynamicResource BorderMuted}"
+      Padding="24,8,24,16"
+        BorderThickness="0,1,0,0">
+      <Grid x:Name="InputBarLayout" MaxWidth="820" HorizontalAlignment="Stretch" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <Border Background="{DynamicResource BackgroundSecondary}"
+                BorderBrush="{DynamicResource BorderMuted}"
                 BorderThickness="1"
-                Padding="12,8">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-            <StackPanel Spacing="2">
-              <TextBlock x:Name="AttachmentNameText" Text="attachment.txt" FontSize="12" FontWeight="SemiBold"/>
-              <TextBlock x:Name="AttachmentMetaText" Text="0 chars" FontSize="11" Foreground="{StaticResource Overlay0Brush}"/>
-            </StackPanel>
-            <Button Grid.Column="1" Content="Remove" Classes="actionBtn" Click="RemoveAttachmentButton_Click"/>
-          </Grid>
-        </Border>
-
-        <Border Background="{StaticResource BaseBrush}"
-                BorderBrush="{StaticResource Surface0Brush}"
-                BorderThickness="1"
-                CornerRadius="{StaticResource RadiusMd}"
+                CornerRadius="12"
                 Padding="10,8"
-                IsVisible="False">
+                IsVisible="False"
+        Grid.Row="0"
+                HorizontalAlignment="Stretch">
           <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
             <Border x:Name="PttStateBadge"
-                    Background="{StaticResource Surface0Brush}"
+                    Background="{DynamicResource BorderMuted}"
                     CornerRadius="999"
                     Padding="10,4"
                     VerticalAlignment="Top">
@@ -1659,52 +2070,28 @@
                          Text="READY"
                          FontSize="10"
                          FontWeight="Bold"
-                         Foreground="{StaticResource BaseBrush}"/>
+                         Foreground="{DynamicResource TextPrimary}"/>
             </Border>
 
             <StackPanel Grid.Column="1" Spacing="2">
               <TextBlock x:Name="PttStatusText"
                          Text="Voice ready. Hold Talk or press Ctrl+Alt+M."
                          FontSize="11"
-                         Foreground="{StaticResource TextBrush}"
+                         Foreground="{DynamicResource TextPrimary}"
                          TextWrapping="Wrap"/>
               <TextBlock x:Name="PttDetailText"
                          Text="Preparing voice controls."
                          FontSize="10"
-                         Foreground="{StaticResource Overlay0Brush}"
+                         Foreground="{DynamicResource TextSecondary}"
                          TextWrapping="Wrap"/>
             </StackPanel>
           </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-          <Button x:Name="AttachFileButton"
-                  Grid.Column="0"
-                  Content="+"
-                  Width="40"
-                  Height="40"
-                  FontSize="18"
-                  FontWeight="Light"
-                  Classes="actionBtn"
-                  Click="AttachFileButton_Click"/>
-          <TextBox x:Name="PromptBox"
-                   Grid.Column="1"
-                   Watermark="Type a message... (Shift+Enter for new line)"
-                   AcceptsReturn="True"
-                   MinHeight="40"
-                   MaxHeight="120"
-                   TextWrapping="Wrap"
-                   TextChanged="PromptBox_TextChanged"
-                   Classes="chatInput"/>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom" Spacing="6">
-            <Button x:Name="PttHoldButton"
-                    Content="Hold Talk"
-                    Classes="actionBtn"/>
-            <Button x:Name="SendButton" Content="Send" Classes="sendBtn" Click="SendButton_Click"/>
-            <Button x:Name="StopButton" Content="STOP" Classes="cancelBtn" Click="StopButton_Click" IsVisible="False"/>
-          </StackPanel>
-        </Grid>
-      </StackPanel>
+        <local:ChatInputBar x:Name="ChatComposer"
+                            Grid.Row="1"
+                            HorizontalAlignment="Stretch"/>
+      </Grid>
     </Border>
   </Grid>
 </Window>
