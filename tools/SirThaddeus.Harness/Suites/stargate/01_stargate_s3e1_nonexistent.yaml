@@ -19,9 +19,14 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords: []
+  required_keywords:
+    - season 3
+    - episode 1
   forbidden_keywords:
     - as an ai
+    - openai
+    - softbank
+    - data center
   max_response_chars: 1200
 min_score: 7.0
 patch_targets:

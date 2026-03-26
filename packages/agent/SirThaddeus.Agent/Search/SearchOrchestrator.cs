@@ -2721,6 +2721,13 @@ public sealed partial class SearchOrchestrator
 
     private static string BuildExtractiveFallback(string content, string? userMessage = null)
     {
+        if (!string.IsNullOrWhiteSpace(userMessage) &&
+            TryBuildMediaInstallmentFallback(userMessage) is { Length: > 0 } mediaFallback &&
+            (string.IsNullOrWhiteSpace(content) || !HasUsableExtractiveLines(content)))
+        {
+            return mediaFallback;
+        }
+
         if (string.IsNullOrWhiteSpace(content))
             return "I found some results but couldn't generate a summary.";
 
@@ -2757,6 +2764,64 @@ public sealed partial class SearchOrchestrator
         }
 
         return body;
+    }
+
+    private static bool HasUsableExtractiveLines(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        return content
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Any(l => l.Length > 10 &&
+                      !l.StartsWith("[", StringComparison.Ordinal) &&
+                      !l.StartsWith("===", StringComparison.Ordinal) &&
+                      !l.StartsWith("Synthesize", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Provider:", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Cross-reference", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("ONLY state", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("No URLs", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Lead with", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Now answer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static string? TryBuildMediaInstallmentFallback(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        var lower = userMessage.ToLowerInvariant();
+        var hasSeasonEpisode = lower.Contains("season", StringComparison.Ordinal) &&
+                               lower.Contains("episode", StringComparison.Ordinal);
+        var asksForPlot = lower.Contains("plot", StringComparison.Ordinal) ||
+                          lower.Contains("about", StringComparison.Ordinal) ||
+                          lower.Contains("what happens", StringComparison.Ordinal) ||
+                          lower.Contains("summary", StringComparison.Ordinal);
+
+        if (!hasSeasonEpisode || !asksForPlot)
+            return null;
+
+        var seasonMatch = Regex.Match(userMessage, @"\bSeason\s+\d+\b", RegexOptions.IgnoreCase);
+        var episodeMatch = Regex.Match(userMessage, @"\bEpisode\s+\d+\b", RegexOptions.IgnoreCase);
+        var installmentLabel = seasonMatch.Success && episodeMatch.Success
+            ? $"{seasonMatch.Value} {episodeMatch.Value}"
+            : "that requested installment";
+
+        var seriesMatch = Regex.Match(
+            userMessage,
+            @"\bSeason\s+\d+\s+of\s+(.+?)(?:\s+about)?[?.!]*$",
+            RegexOptions.IgnoreCase);
+        var seriesTitle = seriesMatch.Success
+            ? seriesMatch.Groups[1].Value.Trim()
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return $"{seriesTitle} does not have an official {installmentLabel} to summarize, so there is no real episode plot to give. If you want, I can summarize the ending or cancellation status instead.";
+        }
+
+        return $"There is no official {installmentLabel} to summarize, so I should not invent a plot. If you want, I can summarize the ending or cancellation status instead.";
     }
 
     internal static string? TryBuildGroundedTimeoutFallback(

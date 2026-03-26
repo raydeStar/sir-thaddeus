@@ -14,8 +14,15 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
-  required_keywords: []
-  forbidden_keywords: []
+  required_keywords:
+    - aspire
+    - overview
+    - differences
+    - practical takeaway
+  forbidden_keywords:
+    - persona name
+    - retrieve memories
+    - no prior memories
   max_response_chars: 1500
 min_score: 7.0
 patch_targets:

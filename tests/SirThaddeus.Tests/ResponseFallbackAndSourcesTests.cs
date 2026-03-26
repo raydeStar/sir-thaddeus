@@ -154,6 +154,20 @@ public class SearchOfflineFallbackTests
     }
 
     [Fact]
+    public void TryBuildMediaInstallmentFallback_ForMissingSeasonEpisode_ReturnsNonInventedPlotFallback()
+    {
+        var response = SearchOrchestrator.TryBuildMediaInstallmentFallback(
+            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.NotNull(response);
+        Assert.Contains("Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not have an official", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no real episode plot", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("couldn't generate a clean summary", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenWebSearchUnavailable_UsesBestEffortReasoning()
     {
         var llm = new StubLlmClient(
@@ -212,7 +226,7 @@ public class SearchOfflineFallbackTests
             call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
     }
 
-    private sealed class StubLlmClient(string responseText) : ILlmClient
+    private sealed class StubLlmClient(string responseText, string finishReason = "stop") : ILlmClient
     {
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
@@ -222,7 +236,7 @@ public class SearchOfflineFallbackTests
             {
                 IsComplete = true,
                 Content = responseText,
-                FinishReason = "stop"
+                FinishReason = finishReason
             });
 
         public Task<LlmResponse> ChatAsync(
@@ -312,6 +326,33 @@ public class BareResponseEnrichmentTests
         Assert.NotEqual(bareAnswer, result);
         Assert.StartsWith(bareAnswer, result);
         Assert.True(result.Length > bareAnswer.Length + 5);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_CarWashPrompt_WithLocalBusinessContamination_UsesDeterministicFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Given that McDonalds at 850 University Blvd is currently open and serves until 11 PM tonight, let us focus on the task at hand: getting to the car wash.",
+            new List<ToolCallRecord>(),
+            "You're going to the car wash and it's only 50 meters away. Should you walk or drive?");
+
+        Assert.Contains("Drive", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("car wash", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("McDonalds", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_StargatePrompt_WithOffTopicProjectResults_UsesNonexistentEpisodeFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Here's the strongest evidence I found in the live results:\n- OpenAI's first data center in $500 billion Stargate project is open in Texas.",
+            new List<ToolCallRecord>(),
+            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.Contains("Stargate Universe", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 3 Episode 1", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OpenAI", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("data center", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
