@@ -6,7 +6,7 @@ namespace SirThaddeus.Tests;
 public sealed class UtilityIntentHandlerTests
 {
     [Fact]
-    public async Task TryHandleAsync_ChatOnly_DoesNotInvokeLlmUtilityInference()
+    public async Task TryHandleAsync_ChatOnly_SelfCapabilityPrompt_UsesDeterministicAnswer()
     {
         var handler = new UtilityIntentHandler();
         var inferCalled = false;
@@ -27,7 +27,8 @@ public sealed class UtilityIntentHandlerTests
         });
 
         Assert.False(inferCalled);
-        Assert.Null(response);
+        Assert.NotNull(response);
+        Assert.Contains("turning messy questions into something clear and usable", response!.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -31,6 +31,10 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
         if (identityResponse is not null)
             return identityResponse;
 
+        var selfCapabilityResponse = TryBuildSelfCapabilityResponse(request, message);
+        if (selfCapabilityResponse is not null)
+            return selfCapabilityResponse;
+
         UtilityRouter.UtilityResult? utilityResult = null;
 
         if (request.TryDeterministicMatch is not null &&
@@ -386,6 +390,50 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
         return trimmed.Length <= 220
             ? trimmed
             : trimmed[..220].TrimEnd() + "...";
+    }
+
+    private static AgentResponse? TryBuildSelfCapabilityResponse(
+        UtilityIntentExecutionRequest request,
+        string message)
+    {
+        var normalized = NormalizeIdentityPrompt(message);
+        if (!IsSelfCapabilityPrompt(normalized))
+            return null;
+
+        request.LogEvent?.Invoke("UTILITY_BYPASS", "category=self_capability");
+
+        return new AgentResponse
+        {
+            Text = BuildSelfCapabilityAnswer(),
+            Success = true,
+            ToolCallsMade = request.ToolCallsMade.ToList(),
+            LlmRoundTrips = request.RoundTrips,
+            SuppressSourceCardsUi = true,
+            SuppressToolActivityUi = true
+        };
+    }
+
+    private static bool IsSelfCapabilityPrompt(string normalized)
+    {
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        return normalized.Contains("favorite thing to help people with", StringComparison.Ordinal) ||
+               normalized.Contains("what are you good at", StringComparison.Ordinal) ||
+               normalized.Contains("what do you do best", StringComparison.Ordinal) ||
+               normalized.Contains("what makes you good at it", StringComparison.Ordinal) ||
+               normalized.Contains("what makes you good at that", StringComparison.Ordinal) ||
+               normalized.Contains("what do you help people with", StringComparison.Ordinal) ||
+               normalized.Contains("how do you help people", StringComparison.Ordinal);
+    }
+
+    private static string BuildSelfCapabilityAnswer()
+    {
+        return "If I had to pick, it is turning messy questions into something clear and usable. " +
+               "I do best when a situation needs practical reasoning, a steady read on what matters, " +
+               "and a next step that someone can actually use.\n\n" +
+               "What makes me good at that is discipline: I stay direct, keep close to the evidence in front of me, " +
+               "and try to turn confusion into a concrete answer instead of bluffing or filling the space with fluff.";
     }
 
     private static string? BuildMetaCapabilitiesSummary(IList<ToolCallRecord> calls)

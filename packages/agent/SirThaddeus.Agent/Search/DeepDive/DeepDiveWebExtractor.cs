@@ -50,6 +50,10 @@ public static class DeepDiveWebExtractor
         @",\s*[\w\s.]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex SourceTitleCityAtStreetRegex = new(
+        @"\bin\s+(?<city>[A-Za-z][A-Za-z .'-]+),\s*(?<state>[A-Z]{2})\s+at\s+(?<street>\d{1,6}\s+[\w.'#&/\-\s]+?(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Cir|Circle|Hwy|Highway))\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Scans multiple text chunks (snippets, page content) and returns
     /// the best signal for each field. First match wins for single-value
@@ -71,7 +75,7 @@ public static class DeepDiveWebExtractor
         if (sourceItems is { Count: > 0 })
         {
             businessName = InferBusinessNameFromSources(sourceItems);
-            address = InferAddressFromSources(sourceItems);
+            address = InferAddressFromSources([sourceItems[0]]);
         }
 
         foreach (var chunk in textChunks)
@@ -121,6 +125,9 @@ public static class DeepDiveWebExtractor
             // Collect review-like sentences (short, sentiment-bearing)
             CollectReviewSnippets(chunk, reviewSnippets);
         }
+
+        if (string.IsNullOrWhiteSpace(address) && sourceItems is { Count: > 0 })
+            address = InferAddressFromSources(sourceItems);
 
         return new WebExtractionResult
         {
@@ -252,6 +259,18 @@ public static class DeepDiveWebExtractor
                 continue;
 
             var title = source.Title.Trim();
+
+            var cityAtStreetMatch = SourceTitleCityAtStreetRegex.Match(title);
+            if (cityAtStreetMatch.Success)
+            {
+                var city = NormalizeSingleLine(cityAtStreetMatch.Groups["city"].Value);
+                var state = NormalizeSingleLine(cityAtStreetMatch.Groups["state"].Value)?.ToUpperInvariant();
+                var street = NormalizeSingleLine(cityAtStreetMatch.Groups["street"].Value);
+                var cityAtStreetCandidate = NormalizeAddress($"{street}, {city}, {state}");
+                if (!string.IsNullOrWhiteSpace(cityAtStreetCandidate))
+                    return cityAtStreetCandidate;
+            }
+
             var normalized = title;
 
             var separators = new[] { " | ", " :: ", " — ", " – ", " - " };

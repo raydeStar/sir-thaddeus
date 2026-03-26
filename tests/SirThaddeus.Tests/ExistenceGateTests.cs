@@ -33,8 +33,10 @@ public class ExistenceGateTests
             sources);
 
         Assert.NotNull(answer);
-        Assert.Contains("could not verify definitive proof", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("Yes", answer);
         Assert.Contains("iPhone 15 exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2023", answer);
+        Assert.DoesNotContain("could not verify", answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -329,6 +329,71 @@ Phone: (503) 555-9580
         Assert.True(response.Success);
         Assert.NotNull(response.DeepDiveBriefing);
         Assert.Equal("Portland Floral", response.DeepDiveBriefing!.Hero.Title);
+        Assert.Contains("appears open now", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeepDiveCoordinator_WebFallback_PrefersBrowsedSourceAddressInAssistantLead()
+    {
+        var webResult = """
+1. \"Fast food in Portland, OR at 5613 SE 82nd Ave | McDonald's\" - McDonalds
+2. \"McDonald's - 13459 NW Cornell Rd, Portland, OR 97229\" - Yelp
+3. \"McDonald's - 12090 SW Main St, Portland, OR 97223\" - MapQuest
+
+<!-- SOURCES_JSON -->
+{"sources":[{"title":"Fast food in Portland, OR at 5613 SE 82nd Ave | McDonald's","url":"https://www.mcdonalds.example/5613","domain":"mcdonalds.com","excerpt":"Monday: Open 24 hours"},{"title":"McDonald's - 13459 NW Cornell Rd, Portland, OR 97229","url":"https://www.yelp.example/mcdonalds-portland-6","domain":"yelp.com","excerpt":"Yelp listing for Portland location"},{"title":"McDonald's - 12090 SW Main St, Portland, OR 97223","url":"https://www.mapquest.example/mcdonalds","domain":"mapquest.com","excerpt":"Map listing"}]}
+""";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return """{"provider":"google_places","query":"demo","error":"key missing","place":null,"sources":[]}""";
+            }
+
+            if (tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return webResult;
+            }
+
+            if (tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Contains("mcdonalds.example/5613", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "McDonald's\nToday: Monday: Open 24 hours\nPhone: (503) 555-1111";
+                }
+
+                if (args.Contains("yelp.example/mcdonalds-portland-6", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "McDonald's\n13459 NW Cornell Rd, Portland, OR 97229\nPhone: (503) 643-9455\nOpen now";
+                }
+
+                return "Map listing";
+            }
+
+            return "{}";
+        });
+
+        var coordinator = new DeepDiveCoordinator(mcp, new TestAuditLogger());
+        var toolCalls = new List<ToolCallRecord>();
+
+        var result = await coordinator.BuildPlaceBriefingAsync(
+            query: "Is McDonalds in Portland OR open right now?",
+            timezone: "America/Los_Angeles",
+            locale: "en-US",
+            userLocationHint: "Portland, OR",
+            toolCallsMade: toolCalls,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Briefing);
+        Assert.Contains("appears open now", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("5613 SE 82nd Ave", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("13459 NW Cornell Rd", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("12090 SW Main St", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SourceRef Source(string name, string url) => new()

@@ -47,6 +47,17 @@ When diagnosing a failure, read these files in this order:
 3. `steps.jsonl` — did the agent call tools? did it use the results?
 4. `input.json` — what was the agent actually asked?
 
+If `score.json` says `PASS` but `final.txt` is clearly weak, hedged, incorrect, or unsupported, continue diagnosis. Treat the run as suspicious until the discrepancy is explained.
+
+When reading `steps.jsonl`, break the run into explicit stages. For each tool call, note:
+
+- the exact query or arguments
+- what came back
+- whether the result was relevant
+- what the agent did next because of that result
+
+If there were multiple searches, retries, or fallbacks, document them separately instead of collapsing them into "the agent searched".
+
 ## Diagnosing the Root Cause
 
 Before writing any code, identify which layer failed:
@@ -61,6 +72,7 @@ Before writing any code, identify which layer failed:
 ## What You Must Do
 
 - Read failure artifacts to understand what actually went wrong.
+- Break multi-step traces into numbered stages so the break point is explicit.
 - Fix the problem in the source logic: routing, synthesis, tool selection, prompts, fallback handling.
 - Ensure your fix works for ANY similar input, not just the specific test case.
 - Include a derivation trace explaining: what failed, the root cause, why your fix solves it generally.
@@ -105,6 +117,7 @@ Every fix must include this in the commit message or PR description:
 
 ### What Failed
 [test_id] scored [X]/10. List the penalties from score.json.
+If the score and the answer disagree, say so explicitly and quote the relevant part of `final.txt`.
 
 ### Root Cause
 Explain the actual bug or logic gap. Reference specific files and methods.

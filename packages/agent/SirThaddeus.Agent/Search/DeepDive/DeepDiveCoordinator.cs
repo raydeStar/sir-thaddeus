@@ -248,7 +248,8 @@ public sealed partial class DeepDiveCoordinator
 
         AddAuditStep(auditSteps, "extract", $"Extracted signals from {extractedChunks.Count} text chunks across {sources.Count} sources.");
         var hours = DeepDiveHoursParser.Parse(extractedChunks);
-        var extraction = DeepDiveWebExtractor.Extract(extractedChunks, sources);
+        var extractionSources = sources.Take(2).ToList();
+        var extraction = DeepDiveWebExtractor.Extract(extractedChunks, extractionSources);
 
         var hoursBullets = hours.Bullets.Count > 0
             ? hours.Bullets
@@ -591,6 +592,7 @@ public sealed partial class DeepDiveCoordinator
         var closesText = hoursBullets.Count > 0 && !hoursBullets[0].Contains("could not", StringComparison.OrdinalIgnoreCase)
             ? $"Today: {hoursBullets[0]}"
             : "Hours were not found in available sources.";
+            var statusLine = BuildFallbackStatusLine(hoursBullets, confidence);
 
         var cards = new List<DeepDiveCard>
         {
@@ -645,9 +647,7 @@ public sealed partial class DeepDiveCoordinator
             HeroTitle = heroTitle,
             Confidence = confidence,
             LastCheckedIso = now.ToString("O"),
-            StatusLine = confidence == DeepDiveConstants.ConfidenceLow
-                ? "Verification recommended"
-                : "Details from web sources",
+            StatusLine = statusLine,
             ClosesText = closesText,
             Address = extraction.Address ?? "",
             Phone = NormalizePhoneForDisplay(extraction.Phone),
@@ -725,12 +725,21 @@ public sealed partial class DeepDiveCoordinator
     {
         var parts = new List<string>();
 
+        var statusLead = BuildOpenStatusLeadLine(briefing.Hero.Title, briefing.Hero.StatusLine);
+        if (!string.IsNullOrWhiteSpace(statusLead))
+            parts.Add(statusLead);
+
         // Title + status
         var leadTitle = NormalizeHeroTitleForLead(briefing.Hero.Title);
         parts.Add($"**{leadTitle}**");
 
-        if (!string.IsNullOrWhiteSpace(briefing.Hero.StatusLine))
+        if (!string.IsNullOrWhiteSpace(briefing.Hero.StatusLine) &&
+            !briefing.Hero.StatusLine.Equals("Open now", StringComparison.OrdinalIgnoreCase) &&
+            !briefing.Hero.StatusLine.Equals("Closed now", StringComparison.OrdinalIgnoreCase) &&
+            !briefing.Hero.StatusLine.Equals("Status unavailable", StringComparison.OrdinalIgnoreCase))
+        {
             parts.Add(briefing.Hero.StatusLine);
+        }
 
         // Today's hours (the most common reason someone asks)
         if (!string.IsNullOrWhiteSpace(briefing.Hero.ClosesText))
@@ -783,6 +792,52 @@ public sealed partial class DeepDiveCoordinator
         parts.Add("Briefing summary: hours and review details are based on currently available web sources.");
 
         return string.Join("\n", parts);
+    }
+
+    private static string BuildOpenStatusLeadLine(string title, string? statusLine)
+    {
+        var leadTitle = NormalizeHeroTitleForLead(title);
+        if (string.IsNullOrWhiteSpace(statusLine))
+            return string.Empty;
+
+        if (statusLine.Equals("Open now", StringComparison.OrdinalIgnoreCase))
+            return $"Yes - {leadTitle} appears open now.";
+
+        if (statusLine.Equals("Closed now", StringComparison.OrdinalIgnoreCase))
+            return $"No - {leadTitle} appears closed right now.";
+
+        if (statusLine.Equals("Status unavailable", StringComparison.OrdinalIgnoreCase))
+            return $"I couldn't confirm whether {leadTitle} is open right now from the available sources.";
+
+        return string.Empty;
+    }
+
+    private static string BuildFallbackStatusLine(IReadOnlyList<string> hoursBullets, string confidence)
+    {
+        var firstBullet = hoursBullets.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(firstBullet))
+        {
+            return confidence == DeepDiveConstants.ConfidenceLow
+                ? "Verification recommended"
+                : "Details from web sources";
+        }
+
+        if (firstBullet.Contains("Open 24 hours", StringComparison.OrdinalIgnoreCase) ||
+            firstBullet.Contains("Open now", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Open now";
+        }
+
+        if (firstBullet.Equals("Closed", StringComparison.OrdinalIgnoreCase) ||
+            firstBullet.Contains(": Closed", StringComparison.OrdinalIgnoreCase) ||
+            firstBullet.Contains("Closed now", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Closed now";
+        }
+
+        return confidence == DeepDiveConstants.ConfidenceLow
+            ? "Verification recommended"
+            : "Details from web sources";
     }
 
     private static string BuildSourceDomainsLeadLine(DeepDiveBriefing briefing)

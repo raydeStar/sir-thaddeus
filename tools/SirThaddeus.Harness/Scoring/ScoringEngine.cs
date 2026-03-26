@@ -377,6 +377,7 @@ public sealed class ScoringEngine
         var deflectionPatterns = new[]
         {
             "i cannot verify",
+            "could not verify",
             "i'm unable to",
             "i don't have access",
             "web search returned no results",
@@ -521,7 +522,8 @@ public sealed class ScoringEngine
             "might", "possibly", "perhaps", "i think",
             "it's possible", "could be", "may have", "not sure",
             "i believe", "it seems", "appears to", "likely",
-            "if available", "when possible", "depending on"
+            "if available", "when possible", "depending on",
+            "indicate", "available sources indicate"
         };
 
         var hedgeCount = sentences.Count(s =>
