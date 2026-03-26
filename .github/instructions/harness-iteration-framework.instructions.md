@@ -1,7 +1,7 @@
 ---
 name: 'Harness Iteration Framework'
 description: 'Reusable workflow for running the full Sir Thaddeus E2E harness, breaking failures into stages, and iterating on product fixes with fast feedback.'
-applyTo: 'tools/SirThaddeus.Harness/**,packages/agent/**,apps/headless-runtime/**,apps/ui-avalonia/**,tests/SirThaddeus.Tests/Integration/**'
+applyTo: 'tools/SirThaddeus.Harness/**,tools/SirThaddeus.Harness/StageSuites/**,packages/agent/**,apps/headless-runtime/**,apps/ui-avalonia/**,tests/SirThaddeus.Tests/Integration/**'
 ---
 
 # Harness Iteration Framework
@@ -110,6 +110,7 @@ If a loop is too slow or too noisy, replace it.
 - Replace aggregate-score reading with direct artifact inspection.
 - Replace speculative fixes with trace-backed fixes.
 - Replace unstable end-to-end investigation with deterministic unit coverage where possible.
+- Replace repeated ad-hoc stage CLI commands with reusable stage suites when you have a stable pipeline regression to preserve.
 
 Anti-patterns:
 
@@ -134,6 +135,12 @@ Avoid:
 - keyword injection for known prompts
 - changes to harness score thresholds or suite expectations
 - fake tool calls or fabricated evidence
+
+For stage suites:
+
+- Put reusable stage regressions under `tools/SirThaddeus.Harness/StageSuites/`.
+- Use the stage test `context` block to model prior assistant text, `followup_anchor`, location, and recent-search flags.
+- Prefer `followup_anchor` for vague continuity follow-ups when you need deterministic topic resolution in the query-building seam.
 
 ## Phase 6: Verify In Expanding Rings
 

@@ -318,14 +318,14 @@ public sealed class DeterministicChatPostProcessor
         var sanitized = text.Trim();
 
         if (LooksLikeCarWashGoalQuestion(latestUserMessage) &&
-            LooksLikeCarWashCrossContamination(sanitized) &&
+            LooksLikeCarWashCrossContamination(latestUserMessage, sanitized) &&
             TryBuildDeterministicBenignFallback(latestUserMessage) is { Length: > 0 } carWashFallback)
         {
             return carWashFallback;
         }
 
         if (Search.SearchOrchestrator.TryBuildMediaInstallmentFallback(latestUserMessage) is { Length: > 0 } mediaFallback &&
-            LooksLikeMediaInstallmentConclusionMiss(sanitized))
+            LooksLikeMediaInstallmentConclusionMiss(latestUserMessage, sanitized))
         {
             return mediaFallback;
         }
@@ -370,47 +370,166 @@ public sealed class DeterministicChatPostProcessor
                 lower.Contains("drive", StringComparison.Ordinal));
     }
 
-    private static bool LooksLikeCarWashCrossContamination(string text)
+    private static bool LooksLikeCarWashCrossContamination(string userMessage, string text)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(text))
+            return false;
+
+        return ContainsUnexpectedBusinessDetail(text) ||
+               ContainsUnexpectedNamedEntity(userMessage, text);
+    }
+
+    private static bool LooksLikeMediaInstallmentConclusionMiss(string userMessage, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        var lower = text.ToLowerInvariant();
+        if (ContainsMediaInstallmentNonExistenceConclusion(lower))
+            return false;
+
+        var looksLikeSourceListFallback =
+            lower.StartsWith("here's the strongest evidence i found", StringComparison.Ordinal) ||
+            lower.StartsWith("here are the live results i found", StringComparison.Ordinal) ||
+            lower.StartsWith("here's what i found regarding", StringComparison.Ordinal);
+
+        if (looksLikeSourceListFallback)
+            return true;
+
+        return !MentionsRequestedMediaInstallment(userMessage, lower);
+    }
+
+    private static bool ContainsUnexpectedBusinessDetail(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
-        var lower = text.ToLowerInvariant();
-        return lower.Contains("mcdonald", StringComparison.Ordinal) ||
-               lower.Contains("currently open", StringComparison.Ordinal) ||
-               lower.Contains("serves until", StringComparison.Ordinal) ||
-               lower.Contains("university blvd", StringComparison.Ordinal) ||
-               lower.Contains("verification recommended", StringComparison.Ordinal) ||
-               lower.Contains("hours were not found", StringComparison.Ordinal) ||
-               lower.Contains("phone:", StringComparison.Ordinal) ||
-               lower.Contains("address:", StringComparison.Ordinal);
+        return Regex.IsMatch(
+                   text,
+                   @"\b\d{1,5}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s+(?:st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|pkwy|parkway|ct|court)\b",
+                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(
+                   text,
+                   @"\b\d{1,2}(?::\d{2})?\s?(?:AM|PM)\b",
+                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(
+                   text,
+                   @"(?:^|\n)\s*(?:phone|address|hours?)\s*:",
+                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+               text.Contains("verification recommended", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("currently open", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("hours were not found", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool LooksLikeMediaInstallmentConclusionMiss(string text)
+    private static bool ContainsUnexpectedNamedEntity(string userMessage, string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            return true;
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(text))
+            return false;
 
-        var lower = text.ToLowerInvariant();
-        if (lower.Contains("openai", StringComparison.Ordinal) ||
-            lower.Contains("softbank", StringComparison.Ordinal) ||
-            lower.Contains("oracle", StringComparison.Ordinal) ||
-            lower.Contains("data center", StringComparison.Ordinal) ||
-            lower.Contains("texas", StringComparison.Ordinal) ||
-            lower.Contains("sg-1", StringComparison.Ordinal) ||
-            lower.StartsWith("here's the strongest evidence i found", StringComparison.Ordinal) ||
-            lower.StartsWith("here are the live results i found", StringComparison.Ordinal))
+        var promptTokens = ExtractMeaningfulLowerTokens(userMessage);
+        if (promptTokens.Count == 0)
+            return false;
+
+        foreach (Match match in Regex.Matches(
+                     text,
+                     @"\b[A-Z][a-z0-9']+(?:\s+[A-Z][a-z0-9']+){0,3}\b",
+                     RegexOptions.CultureInvariant))
         {
-            return true;
+            var phrase = match.Value.Trim();
+            if (phrase.Length < 4)
+                continue;
+
+            var phraseTokens = ExtractMeaningfulLowerTokens(phrase);
+            if (phraseTokens.Count == 0)
+                continue;
+
+            if (phraseTokens.All(token => !promptTokens.Contains(token)) &&
+                !IsGenericCapitalizedPhrase(phrase))
+            {
+                return true;
+            }
         }
 
-        return !lower.Contains("season 3", StringComparison.Ordinal) &&
-               !lower.Contains("episode 1", StringComparison.Ordinal) &&
-               !lower.Contains("stargate universe", StringComparison.Ordinal) &&
-               !lower.Contains("cancel", StringComparison.Ordinal) &&
-               !lower.Contains("ended", StringComparison.Ordinal) &&
-               !lower.Contains("no real episode plot", StringComparison.Ordinal) &&
-               !lower.Contains("official", StringComparison.Ordinal);
+        return false;
+    }
+
+    private static bool ContainsMediaInstallmentNonExistenceConclusion(string lowerText)
+    {
+        if (string.IsNullOrWhiteSpace(lowerText))
+            return false;
+
+        return lowerText.Contains("does not have an official", StringComparison.Ordinal) ||
+               lowerText.Contains("doesn't have an official", StringComparison.Ordinal) ||
+               lowerText.Contains("no official", StringComparison.Ordinal) ||
+               lowerText.Contains("does not exist", StringComparison.Ordinal) ||
+               lowerText.Contains("doesn't exist", StringComparison.Ordinal) ||
+               lowerText.Contains("never made", StringComparison.Ordinal) ||
+               lowerText.Contains("not a real episode", StringComparison.Ordinal) ||
+               lowerText.Contains("no real episode plot", StringComparison.Ordinal) ||
+               lowerText.Contains("was canceled", StringComparison.Ordinal) ||
+               lowerText.Contains("was cancelled", StringComparison.Ordinal) ||
+               lowerText.Contains("ended", StringComparison.Ordinal);
+    }
+
+    private static bool MentionsRequestedMediaInstallment(string userMessage, string lowerText)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(lowerText))
+            return false;
+
+        var seasonMatch = Regex.Match(userMessage, @"\bSeason\s+(\d+)\b", RegexOptions.IgnoreCase);
+        var episodeMatch = Regex.Match(userMessage, @"\bEpisode\s+(\d+)\b", RegexOptions.IgnoreCase);
+        var seriesMatch = Regex.Match(
+            userMessage,
+            @"\bSeason\s+\d+\s+of\s+(.+?)(?:\s+about)?[?.!]*$",
+            RegexOptions.IgnoreCase);
+
+        var mentionsSeasonEpisode = (!seasonMatch.Success || lowerText.Contains($"season {seasonMatch.Groups[1].Value}", StringComparison.Ordinal)) &&
+                                    (!episodeMatch.Success || lowerText.Contains($"episode {episodeMatch.Groups[1].Value}", StringComparison.Ordinal));
+
+        if (seriesMatch.Success)
+        {
+            var titleTokens = ExtractMeaningfulLowerTokens(seriesMatch.Groups[1].Value)
+                .Where(token => token is not "season" and not "episode")
+                .ToList();
+
+            if (titleTokens.Count > 0)
+            {
+                var matchedTitleTokens = titleTokens.Count(token => lowerText.Contains(token, StringComparison.Ordinal));
+                return mentionsSeasonEpisode && matchedTitleTokens >= Math.Max(1, Math.Min(2, titleTokens.Count));
+            }
+        }
+
+        return mentionsSeasonEpisode;
+    }
+
+    private static HashSet<string> ExtractMeaningfulLowerTokens(string text)
+    {
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(text))
+            return tokens;
+
+        foreach (Match match in Regex.Matches(text, @"\b[a-zA-Z][a-zA-Z0-9']{2,}\b", RegexOptions.CultureInvariant))
+        {
+            var token = match.Value.ToLowerInvariant();
+            if (token is "what" or "would" or "about" or "should" or "there" or "their" or "walk" or "drive" or "going" or "only")
+                continue;
+
+            tokens.Add(token);
+        }
+
+        return tokens;
+    }
+
+    private static bool IsGenericCapitalizedPhrase(string phrase)
+    {
+        return phrase is "Given" or
+               "Driving" or
+               "Walking" or
+               "Answer" or
+               "Overview" or
+               "Common Points" or
+               "Differences" or
+               "Practical Takeaway";
     }
 
     private static string NormalizeStrictStructuredOutput(string text, string? latestUserMessage)

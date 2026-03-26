@@ -93,6 +93,7 @@ public sealed record QueryBuilderContext
 {
     public string UserCity { get; init; } = "";
     public string UserTimezone { get; init; } = "";
+    public string FollowUpAnchor { get; init; } = "";
     public IReadOnlyList<(string Role, string Content)> RecentMessages { get; init; } = [];
     public string CurrentFilePath { get; init; } = "";
 }

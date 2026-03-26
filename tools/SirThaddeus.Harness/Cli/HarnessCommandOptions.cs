@@ -66,6 +66,7 @@ public sealed record HarnessCommandOptions
     public HarnessStageTarget StageTarget { get; init; } = HarnessStageTarget.All;
     public string StageInput { get; init; } = "";
     public string StageAssistantContext { get; init; } = "";
+    public string StageFollowUpAnchor { get; init; } = "";
     public string StageUserCity { get; init; } = "";
     public bool StageHasRecentFirstPrinciplesRationale { get; init; }
     public bool StageHasRecentSearchResults { get; init; }

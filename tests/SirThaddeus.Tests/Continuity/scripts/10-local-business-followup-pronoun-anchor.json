@@ -1,0 +1,56 @@
+{
+  "id": "10-local-business-followup-pronoun-anchor",
+  "description": "Local business discovery followed by a vague bakery pronoun follow-up resolves to the anchored bakery instead of restarting discovery.",
+  "llm": {
+    "mode": "pipeline",
+    "classification": "search",
+    "entityJson": "{\"name\":\"\",\"type\":\"none\",\"hint\":\"\"}",
+    "queryJson": "{\"query\":\"olympia bakeries\",\"recency\":\"any\"}",
+    "followupQueryJson": "{\"query\":\"Left Bank Pastry Olympia WA\",\"recency\":\"any\"}",
+    "summaryText": "Left Bank Pastry is a downtown Olympia bakery known for pastries and breads."
+  },
+  "mcp": {
+    "mode": "perTool",
+    "fixedValue": "unexpected tool call",
+    "perTool": {
+      "places_discover": {
+        "defaultResponse": "{\"provider\":\"osm_overpass\",\"query\":\"show me bakeries nearby\",\"userLocationHint\":\"Olympia, WA\",\"resolvedLocation\":\"Olympia, Washington, US\",\"center\":{\"label\":\"Olympia, Washington, US\",\"latitude\":47.0414,\"longitude\":-122.8931},\"options\":{\"maxResults\":10,\"radiusMeters\":4000,\"locale\":\"en-US\"},\"results\":[{\"id\":\"node:1\",\"name\":\"Left Bank Pastry\",\"address\":\"108 5th Ave SW, Olympia, WA\",\"category\":\"bakery\",\"latitude\":47.0419,\"longitude\":-122.9011,\"distanceMeters\":220,\"osmUrl\":\"https://www.openstreetmap.org/node/1\",\"tags\":{\"shop\":\"bakery\"}},{\"id\":\"node:2\",\"name\":\"Wagner's European Bakery and Cafe\",\"address\":\"1013 Capitol Way S, Olympia, WA\",\"category\":\"bakery\",\"latitude\":47.0399,\"longitude\":-122.9002,\"distanceMeters\":410,\"osmUrl\":\"https://www.openstreetmap.org/node/2\",\"tags\":{\"shop\":\"bakery\"}}],\"errors\":[],\"cache\":{\"hit\":false,\"ageSeconds\":0}}"
+      },
+      "web_search": {
+        "defaultResponse": "Left Bank Pastry profile\n<!-- SOURCES_JSON -->\n[{\"url\":\"https://leftbankpastry.com\",\"title\":\"Left Bank Pastry - Bakery in Olympia, WA\",\"domain\":\"leftbankpastry.com\",\"snippet\":\"Downtown Olympia bakery with pastries and breads.\"}]"
+      },
+      "browser_navigate": {
+        "defaultResponse": "Left Bank Pastry is a downtown Olympia bakery with pastries, breads, and coffee service."
+      },
+      "places_lookup": {
+        "defaultResponse": "{\"place\":{\"name\":\"Left Bank Pastry\",\"address\":\"108 5th Ave SW, Olympia, WA\",\"rating\":4.7,\"userRatingsTotal\":640,\"openNow\":true}}"
+      }
+    }
+  },
+  "turns": [
+    {
+      "userMessage": "Show me bakeries nearby in Olympia.",
+      "expect": {
+        "success": true,
+        "textContains": ["Left Bank Pastry", "Olympia"],
+        "toolCalls": {
+          "includeAny": ["places_discover", "web_search", "places_lookup"],
+          "exclude": ["weather_geocode"]
+        }
+      }
+    },
+    {
+      "userMessage": "Pull up more info about that bakery.",
+      "expect": {
+        "success": true,
+        "textContains": ["Left Bank Pastry", "Olympia"],
+        "toolCalls": {
+          "includeAny": ["web_search", "browser_navigate", "places_lookup"],
+          "exclude": ["places_discover", "weather_geocode"]
+        },
+        "toolArgsContains": ["Left Bank Pastry"],
+        "toolArgsNotContains": ["that bakery", "bakeries nearby"]
+      }
+    }
+  ]
+}

@@ -23,12 +23,13 @@ Usage:
     harness stage --all --test <id> [options]
 
 Options:
-    --all                          Run every headless suite (run) or all stages (stage)
-    --suite <name>                 Run a suite by directory name under tools/SirThaddeus.Harness/Suites
+    --all                          Run every headless suite (run) or every stage suite (stage)
+    --suite <name>                 Run a suite by directory name under tools/SirThaddeus.Harness/Suites (run) or tools/SirThaddeus.Harness/StageSuites (stage)
     --category <name>              Alias for --suite
     --test <id>                    Run a single test id; requires uniqueness unless paired with --suite
     --input <message>              User message to process through pipeline stages
         --assistant-context <message>  Prior assistant text used to simulate follow-up context for stage preflight
+        --followup-anchor <topic>      Explicit prior topic/entity used to simulate a resolved follow-up target
         --user-city <city>             Override user city for query-building diagnostics
         --has-recent-rationale         Simulate a recent first-principles rationale in routing context
         --has-recent-search-results    Simulate an active search session for follow-up routing
@@ -40,7 +41,7 @@ Options:
   --judge <cursor|none|model>    Judge mode for score enrichment (default: none)
   --judge-timeout-ms <N>         Cursor judge wait timeout in milliseconds (default: 60000)
   --judge-required <true|false>  Hard-fail if judge output missing/invalid (default: true)
-  --suites-root <path>           Override suites root directory
+    --suites-root <path>           Override suites root directory for run or stage mode
   --artifacts-root <path>        Override artifacts root directory
     --run-id <id>                  Inspect a specific harness run id instead of the latest run
   --help                         Show this help
@@ -99,6 +100,10 @@ Options:
         var judgeTimeoutMs = ParseInt(GetValue(values, "judge-timeout-ms"), 60_000, 1, "judge-timeout-ms");
         var judgeRequired = ParseBool(GetValue(values, "judge-required"), defaultValue: true, key: "judge-required");
 
+        var defaultSuitesRoot = command == HarnessCommandKind.Stage
+            ? Path.Combine("tools", "SirThaddeus.Harness", "StageSuites")
+            : Path.Combine("tools", "SirThaddeus.Harness", "Suites");
+
         return new HarnessCommandOptions
         {
             Command = command,
@@ -116,12 +121,13 @@ Options:
             JudgeTimeoutMs = judgeTimeoutMs,
             JudgeRequired = judgeRequired,
             SuitesRoot = GetValue(values, "suites-root")
-                         ?? Path.Combine("tools", "SirThaddeus.Harness", "Suites"),
+                         ?? defaultSuitesRoot,
             ArtifactsRoot = GetValue(values, "artifacts-root")
                             ?? Path.Combine("artifacts", "harness"),
             StageTarget = stageTarget,
             StageInput = GetValue(values, "input") ?? "",
             StageAssistantContext = GetValue(values, "assistant-context") ?? "",
+            StageFollowUpAnchor = GetValue(values, "followup-anchor") ?? "",
             StageUserCity = GetValue(values, "user-city") ?? "",
             StageHasRecentFirstPrinciplesRationale = HasFlag(values, "has-recent-rationale"),
             StageHasRecentSearchResults = HasFlag(values, "has-recent-search-results"),

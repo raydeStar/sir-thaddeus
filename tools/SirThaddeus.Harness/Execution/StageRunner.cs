@@ -5,6 +5,8 @@ using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Harness.Cli;
+using SirThaddeus.Harness.Models;
+using SirThaddeus.Harness.Suites;
 using SirThaddeus.LlmClient;
 using SirThaddeus.RuntimeHost;
 
@@ -23,6 +25,8 @@ namespace SirThaddeus.Harness.Execution;
 /// </summary>
 internal sealed class StageRunner
 {
+    private readonly StageSuiteLoader _suiteLoader = new();
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -31,25 +35,24 @@ internal sealed class StageRunner
     public async Task<int> RunAsync(HarnessCommandOptions options, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(options.StageInput))
-        {
             return await RunAdHocAsync(options, cancellationToken);
-        }
 
-        // Suite-based stage checking (Phase 2B integration point)
-        Console.WriteLine("Suite-based stage testing not yet implemented. Use --input for ad-hoc stage analysis.");
-        return 1;
+        return await RunSuiteAsync(options, cancellationToken);
     }
 
     private async Task<int> RunAdHocAsync(HarnessCommandOptions options, CancellationToken cancellationToken)
     {
         var input = options.StageInput;
         var target = options.StageTarget;
-        var preflightContext = CreateClassifierContext(options);
+        var stageContext = StageContextUtilities.FromOptions(options);
+        var preflightContext = StageContextUtilities.BuildClassifierContext(stageContext);
 
         Console.WriteLine($"Stage command: {target}");
         Console.WriteLine($"Input: \"{input}\"");
         if (!string.IsNullOrWhiteSpace(options.StageAssistantContext))
             Console.WriteLine($"Assistant context: \"{Truncate(options.StageAssistantContext, 120)}\"");
+        if (!string.IsNullOrWhiteSpace(options.StageFollowUpAnchor))
+            Console.WriteLine($"Follow-up anchor: \"{options.StageFollowUpAnchor}\"");
         if (options.StageHasRecentSearchResults || options.StageHasRecentFirstPrinciplesRationale)
         {
             Console.WriteLine(
@@ -126,7 +129,7 @@ internal sealed class StageRunner
         QueryBuilderResult? queryResult = null;
         if (classified is not null)
         {
-            var context = BuildDefaultContext(options, settings);
+            var context = StageContextUtilities.BuildQueryBuilderContext(stageContext, settings.UserCity);
             var queryBuilder = new PipelineQueryBuilder();
 
             sw.Restart();
@@ -170,6 +173,40 @@ internal sealed class StageRunner
         await WriteStageArtifactsAsync(options, trace, input, preflight, cancellationToken);
 
         return 0;
+    }
+
+    private async Task<int> RunSuiteAsync(HarnessCommandOptions options, CancellationToken cancellationToken)
+    {
+        if (options.StageTarget is HarnessStageTarget.Preflight or HarnessStageTarget.Trace)
+        {
+            Console.Error.WriteLine("Suite-based stage validation supports --all, preprocess, classify, or query targets. Use --input for preflight/trace diagnostics.");
+            return 2;
+        }
+
+        var selectedSuites = ResolveSelectedSuites(options);
+        var validator = new StageTestValidator();
+        var allResults = new List<StageTestValidator.StageCheckResult>();
+
+        Console.WriteLine($"Stage command: {options.StageTarget}");
+        Console.WriteLine($"Selection: {DescribeSelection(options, selectedSuites)}");
+        Console.WriteLine($"Stage suites root: {Path.GetFullPath(options.SuitesRoot)}");
+        Console.WriteLine();
+
+        foreach (var suite in selectedSuites)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.WriteLine($"== Stage Suite: {suite.Name} ({suite.Tests.Count} test(s))");
+            var results = await validator.ValidateAsync(suite.Tests, options.StageTarget, cancellationToken);
+            StageTestValidator.PrintResults(results);
+            Console.WriteLine();
+            allResults.AddRange(results);
+        }
+
+        var failed = allResults.Count(r => !r.Passed);
+        var passed = allResults.Count - failed;
+        Console.WriteLine($"Stage suites passed: {passed}");
+        Console.WriteLine($"Stage suites failed: {failed}");
+        return failed == 0 ? 0 : 1;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -316,33 +353,6 @@ internal sealed class StageRunner
         }
     }
 
-    private static QueryBuilderContext BuildDefaultContext(HarnessCommandOptions options, AppSettingsSnapshot settings)
-    {
-        var userCity = !string.IsNullOrWhiteSpace(options.StageUserCity)
-            ? options.StageUserCity
-            : settings.UserCity;
-
-        var recentMessages = new List<(string Role, string Content)>();
-        if (!string.IsNullOrWhiteSpace(options.StageAssistantContext))
-            recentMessages.Add(("assistant", options.StageAssistantContext));
-
-        return new QueryBuilderContext
-        {
-            UserCity = userCity,
-            UserTimezone = TimeZoneInfo.Local.Id,
-            RecentMessages = recentMessages
-        };
-    }
-
-    private static ClassifierContext CreateClassifierContext(HarnessCommandOptions options)
-    {
-        return new ClassifierContext
-        {
-            HasRecentFirstPrinciplesRationale = options.StageHasRecentFirstPrinciplesRationale,
-            HasRecentSearchResults = options.StageHasRecentSearchResults
-        };
-    }
-
     private static AppSettingsSnapshot LoadSettingsSnapshot(HarnessCommandOptions options)
     {
         try
@@ -383,14 +393,17 @@ internal sealed class StageRunner
         var lowerInput = input.Trim().ToLowerInvariant();
         var isFollowUp = SearchModeRouter.IsFollowUpMessage(lowerInput);
         var isReferential = SearchModeRouter.IsReferential(lowerInput);
+        var stageContext = StageContextUtilities.FromOptions(options);
 
         var warnings = new List<string>();
         if ((isFollowUp || isReferential) && !options.StageHasRecentSearchResults)
             warnings.Add("Follow-up language detected without recent search results; production routing may treat this as a fresh query.");
-        if ((isFollowUp || isReferential) && string.IsNullOrWhiteSpace(options.StageAssistantContext))
+        if ((isFollowUp || isReferential) &&
+            string.IsNullOrWhiteSpace(options.StageAssistantContext) &&
+            string.IsNullOrWhiteSpace(options.StageFollowUpAnchor))
             warnings.Add("Follow-up language detected without assistant context; query resolution may drift or stay too vague.");
 
-        var resolvedTopic = TryExtractAssistantTopic(options.StageAssistantContext);
+        var resolvedTopic = StageContextUtilities.ResolveFollowUpAnchor(stageContext);
         if (LooksLikeVagueFollowUp(input) && string.IsNullOrWhiteSpace(resolvedTopic))
             warnings.Add("The prompt is a vague follow-up and no concrete topic could be extracted from assistant context.");
 
@@ -421,9 +434,9 @@ internal sealed class StageRunner
             }
         }
 
-        if (warnings.Count == 0 && !string.IsNullOrWhiteSpace(options.StageAssistantContext))
+        if (warnings.Count == 0 && (!string.IsNullOrWhiteSpace(options.StageAssistantContext) || !string.IsNullOrWhiteSpace(options.StageFollowUpAnchor)))
         {
-            var topicPreview = TryExtractAssistantTopic(options.StageAssistantContext);
+            var topicPreview = StageContextUtilities.ResolveFollowUpAnchor(StageContextUtilities.FromOptions(options));
             if (!string.IsNullOrWhiteSpace(topicPreview) &&
                 queryResult.Queries.All(q => string.IsNullOrWhiteSpace(q.SearchQuery) || !q.SearchQuery.Contains(topicPreview, StringComparison.OrdinalIgnoreCase)))
             {
@@ -437,31 +450,6 @@ internal sealed class StageRunner
     private static IReadOnlyList<string> MergeWarnings(IReadOnlyList<string> first, IReadOnlyList<string> second)
     {
         return first.Concat(second).Distinct(StringComparer.Ordinal).ToList();
-    }
-
-    private static string TryExtractAssistantTopic(string assistantContext)
-    {
-        if (string.IsNullOrWhiteSpace(assistantContext))
-            return "";
-
-        var cleaned = assistantContext.Trim();
-        foreach (var leadIn in new[] { "bottom line:", "here's what i found:", "here is what i found:", "summary:", "in short:", "tl;dr:" })
-        {
-            if (cleaned.StartsWith(leadIn, StringComparison.OrdinalIgnoreCase))
-            {
-                cleaned = cleaned[leadIn.Length..].TrimStart();
-                break;
-            }
-        }
-
-        var sentenceEnd = cleaned.IndexOfAny(['.', '!', '?', '\n']);
-        if (sentenceEnd > 10)
-            cleaned = cleaned[..sentenceEnd].Trim();
-
-        if (cleaned.Length > 80)
-            cleaned = cleaned[..80].Trim();
-
-        return cleaned.Length >= 5 ? cleaned : "";
     }
 
     private static bool LooksLikeVagueFollowUp(string query)
@@ -526,6 +514,63 @@ internal sealed class StageRunner
     {
         if (string.IsNullOrEmpty(text) || text.Length <= max) return text;
         return text[..(max - 3)] + "...";
+    }
+
+    private IReadOnlyList<StageSuite> ResolveSelectedSuites(HarnessCommandOptions options)
+    {
+        var suiteNames = options.RunAllSuites ||
+                         (!string.IsNullOrWhiteSpace(options.TestId) && string.IsNullOrWhiteSpace(options.SuiteName))
+            ? _suiteLoader.ListSuiteNames(options.SuitesRoot)
+            : [options.SuiteName];
+
+        var loadedSuites = suiteNames
+            .Select(name => _suiteLoader.LoadSuite(options.SuitesRoot, name))
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(options.TestId))
+            return loadedSuites;
+
+        var matchedSuites = loadedSuites
+            .Select(suite => new StageSuite
+            {
+                Name = suite.Name,
+                Tests = suite.Tests
+                    .Where(test => string.Equals(test.Id, options.TestId, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+            })
+            .Where(suite => suite.Tests.Count > 0)
+            .ToList();
+
+        if (matchedSuites.Count == 0)
+        {
+            var scope = string.IsNullOrWhiteSpace(options.SuiteName)
+                ? "any stage suite"
+                : $"stage suite '{options.SuiteName}'";
+            throw new InvalidOperationException($"Stage test '{options.TestId}' was not found in {scope}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.SuiteName) && matchedSuites.Count > 1)
+        {
+            var suites = string.Join(", ", matchedSuites.Select(suite => suite.Name));
+            throw new InvalidOperationException(
+                $"Stage test id '{options.TestId}' matched multiple suites ({suites}). Re-run with --suite.");
+        }
+
+        return matchedSuites;
+    }
+
+    private static string DescribeSelection(HarnessCommandOptions options, IReadOnlyList<StageSuite> suites)
+    {
+        if (options.RunAllSuites && string.IsNullOrWhiteSpace(options.TestId))
+            return $"all stage suites ({suites.Count})";
+
+        if (!string.IsNullOrWhiteSpace(options.TestId) && string.IsNullOrWhiteSpace(options.SuiteName))
+            return $"stage test {options.TestId}";
+
+        if (!string.IsNullOrWhiteSpace(options.TestId))
+            return $"stage suite {options.SuiteName}, test {options.TestId}";
+
+        return $"stage suite {options.SuiteName}";
     }
 
     private sealed record AppSettingsSnapshot(SirThaddeus.Config.AppSettings Settings, string UserCity);

@@ -15,6 +15,8 @@ public sealed class CommandLineParserTests
             "tell me more",
             "--assistant-context",
             "Here are 10 bakeries I found nearby in Olympia, WA.",
+            "--followup-anchor",
+            "Left Bank Pastry",
             "--user-city",
             "Olympia, WA",
             "--has-recent-search-results",
@@ -25,9 +27,27 @@ public sealed class CommandLineParserTests
         Assert.Equal(HarnessStageTarget.Preflight, options.StageTarget);
         Assert.Equal("tell me more", options.StageInput);
         Assert.Equal("Here are 10 bakeries I found nearby in Olympia, WA.", options.StageAssistantContext);
+        Assert.Equal("Left Bank Pastry", options.StageFollowUpAnchor);
         Assert.Equal("Olympia, WA", options.StageUserCity);
         Assert.True(options.StageHasRecentSearchResults);
         Assert.True(options.StageHasRecentFirstPrinciplesRationale);
+    }
+
+    [Fact]
+    public void Parse_StageSuiteSelection_UsesStageSuitesDefaultRoot()
+    {
+        var options = CommandLineParser.Parse(
+        [
+            "stage",
+            "query",
+            "--suite",
+            "continuity"
+        ]);
+
+        Assert.Equal(HarnessCommandKind.Stage, options.Command);
+        Assert.Equal(HarnessStageTarget.Query, options.StageTarget);
+        Assert.Equal("continuity", options.SuiteName);
+        Assert.EndsWith(Path.Combine("tools", "SirThaddeus.Harness", "StageSuites"), options.SuitesRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

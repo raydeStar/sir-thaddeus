@@ -1,0 +1,18 @@
+{
+  "id": "local_business_followup_anchor",
+  "name": "Vague local-business follow-up uses explicit anchor in stage suites",
+  "input": "Pull up more info about that bakery.",
+  "context": {
+    "assistant_context": "Here's a bakery I found nearby in Olympia: Wagner's European Bakery and Cafe at 1013 Capitol Way S, Olympia, WA.",
+    "followup_anchor": "Left Bank Pastry",
+    "user_city": "Olympia, WA",
+    "has_recent_search_results": true
+  },
+  "stage_checks": {
+    "query": {
+      "search_query_must_contain": ["Left Bank Pastry"],
+      "search_query_must_not_contain": ["that bakery", "Wagner's European Bakery and Cafe"],
+      "max_query_length": 80
+    }
+  }
+}

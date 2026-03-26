@@ -61,6 +61,7 @@ public sealed class PipelineQueryBuilder : IRequestQueryBuilder
     {
         var rawQuery = intent.Source.NormalizedRequest;
         var cleanQuery = StripFiller(rawQuery);
+        cleanQuery = ResolveFollowUpQuery(cleanQuery, context);
 
         // Inject city context for location-sensitive queries only when
         // the query doesn't already contain a specific place name.
@@ -140,6 +141,22 @@ public sealed class PipelineQueryBuilder : IRequestQueryBuilder
         return cleaned.Trim().TrimEnd('.', '!');
     }
 
+    internal static string ResolveFollowUpQuery(string query, QueryBuilderContext context)
+    {
+        if (!LooksLikeVagueFollowUpQuery(query))
+            return query;
+
+        if (!string.IsNullOrWhiteSpace(context.FollowUpAnchor))
+            return context.FollowUpAnchor.Trim();
+
+        var assistantContext = context.RecentMessages
+            .LastOrDefault(m => m.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
+            .Content;
+
+        var anchor = ExtractAssistantAnchor(assistantContext);
+        return string.IsNullOrWhiteSpace(anchor) ? query : anchor;
+    }
+
     internal static bool IsLocationSensitive(string query)
     {
         var lower = query.ToLowerInvariant();
@@ -163,6 +180,97 @@ public sealed class PipelineQueryBuilder : IRequestQueryBuilder
         // Matches "in <City>" / "for <City>" / "around <City>" / "near <City>" patterns
         // where City starts with an uppercase letter (proper noun heuristic).
         return ExplicitLocationRegex.IsMatch(query);
+    }
+
+    internal static bool LooksLikeVagueFollowUpQuery(string query)
+    {
+        var lower = (query ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (lower is "tell me more" or "more info" or "more information" or "go deeper" or "elaborate")
+            return true;
+
+        var hasFollowUpVerb = lower.Contains("more", StringComparison.Ordinal) ||
+                              lower.Contains("detail", StringComparison.Ordinal) ||
+                              lower.Contains("info", StringComparison.Ordinal) ||
+                              lower.Contains("deeper", StringComparison.Ordinal) ||
+                              lower.Contains("elaborate", StringComparison.Ordinal) ||
+                              lower.Contains("pull up", StringComparison.Ordinal) ||
+                              lower.Contains("bring up", StringComparison.Ordinal);
+
+        var hasVagueReferent = Regex.IsMatch(
+            lower,
+            @"\b(?:that|this|it|one|story|article|topic|place|business|bakery|restaurant|shop|store|cafe|deli|florist)\b",
+            RegexOptions.CultureInvariant);
+
+        return hasFollowUpVerb && hasVagueReferent;
+    }
+
+    internal static string ExtractAssistantAnchor(string assistantContext)
+    {
+        if (string.IsNullOrWhiteSpace(assistantContext))
+            return "";
+
+        var normalized = assistantContext
+            .Replace("**", string.Empty, StringComparison.Ordinal)
+            .Replace("`", string.Empty, StringComparison.Ordinal)
+            .Trim();
+
+        foreach (var rawLine in normalized.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var line = Regex.Replace(rawLine, @"^(?:[-*]\s+|\d+[.)]\s+)", string.Empty);
+
+            var colonIndex = line.IndexOf(':');
+            if (colonIndex >= 0 && colonIndex < line.Length - 1)
+            {
+                var afterColon = TrimAssistantAnchorCandidate(line[(colonIndex + 1)..]);
+                if (LooksLikeConcreteAnchor(afterColon))
+                    return afterColon;
+            }
+
+            var candidate = TrimAssistantAnchorCandidate(line);
+            if (LooksLikeConcreteAnchor(candidate))
+                return candidate;
+        }
+
+        var sentenceEnd = normalized.IndexOfAny(['.', '!', '?', '\n']);
+        var fallback = sentenceEnd > 0 ? normalized[..sentenceEnd].Trim() : normalized;
+        return fallback.Length > MaxSearchQueryLength ? fallback[..MaxSearchQueryLength].Trim() : fallback;
+    }
+
+    private static string TrimAssistantAnchorCandidate(string text)
+    {
+        var candidate = text.Trim();
+        foreach (var separator in new[] { " at ", " - ", " — ", " (", "," })
+        {
+            var index = candidate.IndexOf(separator, StringComparison.OrdinalIgnoreCase);
+            if (index > 0)
+            {
+                candidate = candidate[..index].Trim();
+                break;
+            }
+        }
+
+        return candidate.Trim(' ', '.', '!', '?', '"');
+    }
+
+    private static bool LooksLikeConcreteAnchor(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || candidate.Length < 4)
+            return false;
+
+        if (Regex.IsMatch(candidate, @"^(?:here|here's|summary|bottom line|in short)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return false;
+
+        return Regex.IsMatch(
+                   candidate,
+                   @"^[A-Z][A-Za-z0-9'&.-]+(?:\s+[A-Z][A-Za-z0-9'&.-]+){1,5}$",
+                   RegexOptions.CultureInvariant) ||
+               Regex.IsMatch(
+                   candidate,
+                   @"^[A-Z][A-Za-z0-9'&.-]+(?:\s+[A-Za-z0-9'&.-]+){0,4}\s+(?:Bakery|Pastry|Cafe|Restaurant|Deli|Florist|Shop|Store)\b",
+                   RegexOptions.CultureInvariant);
     }
 
     private static readonly Regex ExplicitLocationRegex = new(

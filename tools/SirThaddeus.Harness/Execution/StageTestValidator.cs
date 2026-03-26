@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using SirThaddeus.Harness.Cli;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
@@ -32,10 +33,12 @@ internal sealed class StageTestValidator
 
     public async Task<IReadOnlyList<StageCheckResult>> ValidateAsync(
         IReadOnlyList<StageTestCase> tests,
-        bool classifyEnabled,
+        HarnessStageTarget target = HarnessStageTarget.All,
         CancellationToken cancellationToken = default)
     {
         var results = new List<StageCheckResult>(tests.Count);
+        var classifyEnabled = target is HarnessStageTarget.All or HarnessStageTarget.Classify or HarnessStageTarget.Query;
+        var defaultUserCity = TryLoadDefaultUserCity();
 
         // Set up shared infrastructure once
         var preprocessor = new RequestPreprocessor();
@@ -62,7 +65,7 @@ internal sealed class StageTestValidator
         foreach (var test in tests)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await ValidateSingleAsync(test, preprocessor, classifier, queryBuilder, cancellationToken);
+            var result = await ValidateSingleAsync(test, target, defaultUserCity, preprocessor, classifier, queryBuilder, cancellationToken);
             results.Add(result);
         }
 
@@ -71,6 +74,8 @@ internal sealed class StageTestValidator
 
     private async Task<StageCheckResult> ValidateSingleAsync(
         StageTestCase test,
+        HarnessStageTarget target,
+        string defaultUserCity,
         IRequestPreprocessor preprocessor,
         IRequestClassifier? classifier,
         PipelineQueryBuilder? queryBuilder,
@@ -84,7 +89,7 @@ internal sealed class StageTestValidator
         var preprocessed = preprocessor.Decompose(test.Input);
         info.Add($"Preprocessor: {preprocessed.Intents.Count} intent(s), multi={preprocessed.IsMultiIntent}");
 
-        if (test.Checks.Preprocess is { } pc)
+        if (target is HarnessStageTarget.All or HarnessStageTarget.Preprocess && test.Checks.Preprocess is { } pc)
         {
             if (pc.ExpectedIntentCount is not null && preprocessed.Intents.Count != pc.ExpectedIntentCount)
             {
@@ -117,45 +122,55 @@ internal sealed class StageTestValidator
 
         // ── Classify checks ──────────────────────────────────────
         ClassifierResult? classified = null;
-        if (test.Checks.Classify is not null && classifier is not null)
+        var shouldRunClassifier = target is HarnessStageTarget.All or HarnessStageTarget.Classify or HarnessStageTarget.Query;
+        var needsClassification = shouldRunClassifier && (test.Checks.Classify is not null || test.Checks.Query is not null);
+
+        if (needsClassification && classifier is not null)
         {
-            classified = await classifier.ClassifyAsync(preprocessed, cancellationToken: cancellationToken);
+            var classifierContext = StageContextUtilities.BuildClassifierContext(test.Context);
+            classified = await classifier.ClassifyAsync(preprocessed, classifierContext, cancellationToken);
             info.Add($"Classifier: {classified.ClassifiedIntents.Count} classified, deterministic={classified.AllDeterministic}");
 
             var cc = test.Checks.Classify;
-
-            foreach (var expected in cc.ExpectedIntents)
+            if (target is HarnessStageTarget.All or HarnessStageTarget.Classify && cc is not null)
             {
-                if (!classified.ClassifiedIntents.Any(ci =>
-                    string.Equals(ci.ResolvedIntent, expected, StringComparison.OrdinalIgnoreCase)))
+                foreach (var expected in cc.ExpectedIntents)
                 {
-                    failures.Add($"Classify: expected intent \"{expected}\" not found");
+                    if (!classified.ClassifiedIntents.Any(ci =>
+                        string.Equals(ci.ResolvedIntent, expected, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        failures.Add($"Classify: expected intent \"{expected}\" not found");
+                    }
                 }
-            }
 
-            foreach (var forbidden in cc.ForbiddenIntents)
-            {
-                if (classified.ClassifiedIntents.Any(ci =>
-                    string.Equals(ci.ResolvedIntent, forbidden, StringComparison.OrdinalIgnoreCase)))
+                foreach (var forbidden in cc.ForbiddenIntents)
                 {
-                    failures.Add($"Classify: forbidden intent \"{forbidden}\" was present");
+                    if (classified.ClassifiedIntents.Any(ci =>
+                        string.Equals(ci.ResolvedIntent, forbidden, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        failures.Add($"Classify: forbidden intent \"{forbidden}\" was present");
+                    }
                 }
-            }
 
-            if (cc.MustBeDeterministic == true && !classified.AllDeterministic)
-            {
-                failures.Add("Classify: expected all-deterministic classification but had LLM-assisted routes");
+                if (cc.MustBeDeterministic == true && !classified.AllDeterministic)
+                {
+                    failures.Add("Classify: expected all-deterministic classification but had LLM-assisted routes");
+                }
             }
         }
-        else if (test.Checks.Classify is not null)
+        else if ((target is HarnessStageTarget.All or HarnessStageTarget.Classify && test.Checks.Classify is not null) ||
+                 (target == HarnessStageTarget.Query && test.Checks.Query is not null))
         {
             info.Add("Classify: skipped (no classifier available)");
         }
 
         // ── Query checks ─────────────────────────────────────────
-        if (test.Checks.Query is not null && classified is not null && queryBuilder is not null)
+        if (target is HarnessStageTarget.All or HarnessStageTarget.Query &&
+            test.Checks.Query is not null &&
+            classified is not null &&
+            queryBuilder is not null)
         {
-            var ctx = BuildDefaultContext();
+            var ctx = BuildDefaultContext(test.Context, defaultUserCity);
             var queryResult = await queryBuilder.BuildAsync(classified, ctx, cancellationToken);
             var allSearchQueries = queryResult.Queries
                 .Where(q => !string.IsNullOrWhiteSpace(q.SearchQuery))
@@ -198,7 +213,7 @@ internal sealed class StageTestValidator
                 }
             }
         }
-        else if (test.Checks.Query is not null)
+        else if (target is HarnessStageTarget.All or HarnessStageTarget.Query && test.Checks.Query is not null)
         {
             info.Add("Query: skipped (no classifier/query builder available)");
         }
@@ -216,21 +231,21 @@ internal sealed class StageTestValidator
         };
     }
 
-    private static QueryBuilderContext BuildDefaultContext()
+    private static QueryBuilderContext BuildDefaultContext(StageExecutionContext context, string defaultUserCity)
+    {
+        return StageContextUtilities.BuildQueryBuilderContext(context, defaultUserCity);
+    }
+
+    private static string TryLoadDefaultUserCity()
     {
         try
         {
             var settings = SirThaddeus.Config.SettingsManager.Load();
-            var location = settings.GetEffectiveUserLocation();
-            return new QueryBuilderContext
-            {
-                UserCity = location.Value,
-                UserTimezone = TimeZoneInfo.Local.Id
-            };
+            return settings.GetEffectiveUserLocation().Value;
         }
         catch
         {
-            return new QueryBuilderContext();
+            return "";
         }
     }
 

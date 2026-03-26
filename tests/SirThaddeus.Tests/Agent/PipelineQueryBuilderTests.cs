@@ -188,6 +188,72 @@ public sealed class PipelineQueryBuilderTests
         Assert.Contains("Rexburg", result.Queries[0].SearchQuery);
     }
 
+    [Fact]
+    public async Task VagueBakeryFollowUp_UsesAssistantContextAnchor()
+    {
+        var classified = BuildSingleClassified(
+            Intents.LookupSearch, PipelineIntentType.WebSearch,
+            "Pull up more info about that bakery.");
+
+        var builder = new PipelineQueryBuilder();
+        var context = new QueryBuilderContext
+        {
+            RecentMessages =
+            [
+                ("assistant", "Here's a bakery I found nearby in Olympia: Left Bank Pastry at 108 5th Ave SW, Olympia, WA.")
+            ]
+        };
+
+        var result = await builder.BuildAsync(classified, context);
+
+        Assert.Contains("Left Bank Pastry", result.Queries[0].SearchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("that bakery", result.Queries[0].SearchQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplicitBakeryFollowUp_KeepsNamedSubject()
+    {
+        var classified = BuildSingleClassified(
+            Intents.LookupSearch, PipelineIntentType.WebSearch,
+            "Pull up more info about Left Bank Pastry.");
+
+        var builder = new PipelineQueryBuilder();
+        var context = new QueryBuilderContext
+        {
+            RecentMessages =
+            [
+                ("assistant", "Here's a bakery I found nearby in Olympia: Wagner's European Bakery and Cafe at 1013 Capitol Way S, Olympia, WA.")
+            ]
+        };
+
+        var result = await builder.BuildAsync(classified, context);
+
+        Assert.Contains("Left Bank Pastry", result.Queries[0].SearchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Wagner", result.Queries[0].SearchQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VagueFollowUp_UsesExplicitAnchorBeforeAssistantParsing()
+    {
+        var classified = BuildSingleClassified(
+            Intents.LookupSearch, PipelineIntentType.WebSearch,
+            "Pull up more info about that bakery.");
+
+        var builder = new PipelineQueryBuilder();
+        var context = new QueryBuilderContext
+        {
+            FollowUpAnchor = "Left Bank Pastry",
+            RecentMessages =
+            [
+                ("assistant", "Here's a bakery I found nearby in Olympia: Wagner's European Bakery and Cafe at 1013 Capitol Way S, Olympia, WA.")
+            ]
+        };
+
+        var result = await builder.BuildAsync(classified, context);
+
+        Assert.Equal("Left Bank Pastry", result.Queries[0].SearchQuery);
+    }
+
     private static ClassifierResult BuildSingleClassified(
         string intent, PipelineIntentType type, string normalizedRequest)
     {

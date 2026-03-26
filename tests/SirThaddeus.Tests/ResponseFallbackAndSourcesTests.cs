@@ -329,30 +329,30 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
-    public void SanitizeFinalResponse_CarWashPrompt_WithLocalBusinessContamination_UsesDeterministicFallback()
+    public void SanitizeFinalResponse_CarWashPrompt_WithConcreteBusinessDetails_UsesDeterministicFallback()
     {
         var result = _processor.SanitizeFinalResponse(
-            "Given that McDonalds at 850 University Blvd is currently open and serves until 11 PM tonight, let us focus on the task at hand: getting to the car wash.",
+            "Given that Burger Barn at 12 Maple Avenue opens at 10 AM, let us focus on the task at hand: getting to the car wash.",
             new List<ToolCallRecord>(),
             "You're going to the car wash and it's only 50 meters away. Should you walk or drive?");
 
         Assert.Contains("Drive", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("car wash", result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("McDonalds", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Burger Barn", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void SanitizeFinalResponse_StargatePrompt_WithOffTopicProjectResults_UsesNonexistentEpisodeFallback()
+    public void SanitizeFinalResponse_StargatePrompt_WithOffTopicSourceList_UsesNonexistentEpisodeFallback()
     {
         var result = _processor.SanitizeFinalResponse(
-            "Here's the strongest evidence I found in the live results:\n- OpenAI's first data center in $500 billion Stargate project is open in Texas.",
+            "Here's the strongest evidence I found in the live results:\n- A franchise retrospective focuses on cast reunions and merchandise rather than any unreleased episode plot.",
             new List<ToolCallRecord>(),
             "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
 
         Assert.Contains("Stargate Universe", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Season 3 Episode 1", result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("OpenAI", result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("data center", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cast reunions", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("merchandise", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

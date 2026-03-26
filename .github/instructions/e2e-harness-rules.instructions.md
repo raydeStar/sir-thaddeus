@@ -1,7 +1,7 @@
 ---
 name: 'E2E Harness Self-Fixing Protocol'
 description: 'Rules for working with the Sir Thaddeus E2E test harness. Governs how to diagnose, fix, and verify failures without gaming the scoring system.'
-applyTo: 'tools/SirThaddeus.Harness/**,packages/agent/**,tests/SirThaddeus.Tests/Integration/**'
+applyTo: 'tools/SirThaddeus.Harness/**,tools/SirThaddeus.Harness/StageSuites/**,packages/agent/**,tests/SirThaddeus.Tests/Integration/**'
 ---
 
 # E2E Harness — Self-Fixing Protocol
@@ -57,6 +57,14 @@ When reading `steps.jsonl`, break the run into explicit stages. For each tool ca
 - what the agent did next because of that result
 
 If there were multiple searches, retries, or fallbacks, document them separately instead of collapsing them into "the agent searched".
+
+## Stage Suites
+
+Use stage suites under `tools/SirThaddeus.Harness/StageSuites/` for fast, deterministic checks of preprocess, classify, and query seams.
+
+- Stage suites are for diagnosis and regression coverage of pipeline behavior, not a replacement for end-to-end harness validation.
+- When testing vague follow-ups with fabricated context, prefer an explicit `followup_anchor` in the stage test `context` block over brittle assistant-text-only parsing.
+- Keep stage suite expectations behavioral and general. Do not encode test-specific shortcuts into product code just because a stage suite is deterministic.
 
 ## Diagnosing the Root Cause
 

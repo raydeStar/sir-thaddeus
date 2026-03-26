@@ -101,6 +101,47 @@ Examples:
 ./dev/harness.ps1 run --suite personality --max-iters 1 --judge none
 ```
 
+## Run stage suites (fast deterministic pipeline checks)
+
+Use stage suites when you want to validate routing/query behavior without a full
+headless conversation loop.
+
+Run every stage suite:
+
+```powershell
+./dev/harness.ps1 stage --all
+```
+
+Run one stage suite:
+
+```powershell
+./dev/harness.ps1 stage --suite continuity
+```
+
+Run one stage test:
+
+```powershell
+./dev/harness.ps1 stage --suite continuity --test local_business_followup_anchor
+```
+
+Target only query checks:
+
+```powershell
+./dev/harness.ps1 stage query --suite continuity --test local_business_followup_anchor
+```
+
+Stage suites live under `tools/SirThaddeus.Harness/StageSuites/` by default.
+They support a `context` block for fabricated state such as:
+
+- `assistant_context`
+- `followup_anchor`
+- `user_city`
+- `has_recent_search_results`
+- `has_recent_rationale`
+
+Use `followup_anchor` for vague follow-up regressions when you need a deterministic
+resolved entity instead of relying only on assistant text parsing.
+
 Recommended policy:
 
 - Keep `--max-iters 1` for PR runs.

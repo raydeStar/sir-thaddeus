@@ -3,6 +3,12 @@ using YamlDotNet.Serialization;
 
 namespace SirThaddeus.Harness.Models;
 
+public sealed record StageSuite
+{
+    public required string Name { get; init; }
+    public List<StageTestCase> Tests { get; init; } = [];
+}
+
 /// <summary>
 /// A stage-level test case that validates individual pipeline stage outputs
 /// without requiring a full E2E run through the headless runtime.
@@ -21,9 +27,36 @@ public sealed record StageTestCase
     [YamlMember(Alias = "input")]
     public string Input { get; init; } = "";
 
+    [JsonPropertyName("context")]
+    [YamlMember(Alias = "context")]
+    public StageExecutionContext Context { get; init; } = new();
+
     [JsonPropertyName("stage_checks")]
     [YamlMember(Alias = "stage_checks")]
     public StageChecks Checks { get; init; } = new();
+}
+
+public sealed record StageExecutionContext
+{
+    [JsonPropertyName("assistant_context")]
+    [YamlMember(Alias = "assistant_context")]
+    public string AssistantContext { get; init; } = "";
+
+    [JsonPropertyName("followup_anchor")]
+    [YamlMember(Alias = "followup_anchor")]
+    public string FollowUpAnchor { get; init; } = "";
+
+    [JsonPropertyName("user_city")]
+    [YamlMember(Alias = "user_city")]
+    public string UserCity { get; init; } = "";
+
+    [JsonPropertyName("has_recent_rationale")]
+    [YamlMember(Alias = "has_recent_rationale")]
+    public bool HasRecentFirstPrinciplesRationale { get; init; }
+
+    [JsonPropertyName("has_recent_search_results")]
+    [YamlMember(Alias = "has_recent_search_results")]
+    public bool HasRecentSearchResults { get; init; }
 }
 
 public sealed record StageChecks
