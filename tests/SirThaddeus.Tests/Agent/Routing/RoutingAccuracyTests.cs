@@ -8,18 +8,16 @@ namespace SirThaddeus.Tests;
 public class RoutingAccuracyTests
 {
     /// <summary>
-    /// After recalibration: a high-confidence LookupFact route (Tier 1)
-    /// runs through Footman, but the Footman's untyped downgrade to Chat
-    /// is blocked because it lacks a valid <see cref="FootmanBlockReason"/>.
-    /// The original LookupFact route proceeds, and web_search is called.
+    /// Low-confidence lookup routes should still consult Footman, but an
+    /// untyped downgrade to Chat must be blocked so the lookup proceeds.
     /// </summary>
     [Fact]
-    public async Task LookupRoute_HighConfidence_FootmanDowngradeBlocked_WithoutTypedReason()
+    public async Task LookupRoute_LowConfidence_FootmanDowngradeBlocked_WithoutTypedReason()
     {
         var router = new FixedRouter(new RouterOutput
         {
             Intent = Intents.LookupFact,
-            Confidence = 0.96,
+            Confidence = 0.40,
             NeedsWeb = true,
             NeedsSearch = true,
             RequiredCapabilities = [ToolCapability.WebSearch]
@@ -36,14 +34,14 @@ public class RoutingAccuracyTests
         });
 
         var webSearchPayload =
-            "1. Database jokes compilation\n" +
+            "1. Ada Lovelace biography\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://example.com/jokes\",\"title\":\"DB Jokes\"}]";
+            "[{\"url\":\"https://example.com/ada\",\"title\":\"Ada Lovelace\"}]";
 
         var llm = new FakeLlmClient((messages, tools) => new LlmResponse
         {
             IsComplete = true,
-            Content = "Why did the database administrator leave his wife? She had one-to-many relationships.",
+            Content = "Ada Lovelace was an early computing pioneer.",
             FinishReason = "stop"
         });
 
@@ -67,10 +65,10 @@ public class RoutingAccuracyTests
             router: router,
             footmanRouter: footman);
 
-        var result = await agent.ProcessAsync("can you tell me a joke about databases?");
+        var result = await agent.ProcessAsync("Who was Ada Lovelace?");
 
-        // Footman still runs (high-confidence Tier 1 without specific
-        // heuristic bypass), but its downgrade is blocked.
+        // Footman still runs for low-confidence Tier 1 lookup routes, but
+        // its downgrade is blocked.
         Assert.True(footman.Called);
         Assert.True(result.Success);
         Assert.NotEmpty(audit.GetByAction("FOOTMAN_DOWNGRADE_BLOCKED"));
@@ -197,6 +195,69 @@ public class RoutingAccuracyTests
             c.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
             c.Tool.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(audit.GetByAction("FOOTMAN_DOWNGRADE_BLOCKED"));
+    }
+
+    [Fact]
+    public async Task Footman_IsBypassed_ForStrongFactLookupSignal()
+    {
+        var router = new FixedRouter(new RouterOutput
+        {
+            Intent = Intents.LookupFact,
+            Confidence = 0.93,
+            NeedsWeb = true,
+            NeedsSearch = true,
+            RequiredCapabilities = [ToolCapability.WebSearch]
+        });
+
+        var footman = new FixedFootmanRouter(new RoutingDecision
+        {
+            NextState = AgentState.Chat,
+            ContextPolicy = ContextPolicy.ChatSessionSnapshot,
+            Confidence = 0.90,
+            Abstain = false,
+            ReasonCode = "test_chat_downgrade"
+        });
+
+        var llm = new FakeLlmClient((messages, tools) => new LlmResponse
+        {
+            IsComplete = true,
+            Content = "Ada Lovelace is widely regarded as an early computer programming pioneer.",
+            FinishReason = "stop"
+        });
+
+        var webSearchPayload =
+            "Ada Lovelace biography\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/ada\",\"title\":\"Ada Lovelace\"}]";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "MemoryRetrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "memory_retrieve" => """{"facts":0,"events":0,"chunks":0,"packText":"","hasContent":false}""",
+                "web_search" or "WebSearch" => webSearchPayload,
+                "browser_navigate" or "BrowserNavigate" => "Ada Lovelace article body.",
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: router,
+            footmanRouter: footman);
+
+        var result = await agent.ProcessAsync("Who was Ada Lovelace?");
+
+        Assert.False(footman.Called,
+            "Footman should be bypassed for high-confidence fact lookups with strong web evidence.");
+        Assert.True(result.Success);
+        Assert.Contains(mcp.Calls, c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

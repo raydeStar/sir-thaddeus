@@ -355,6 +355,68 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }, usageBaseline);
         }
 
+        if (TryBuildDeterministicBenignFallback(userMessage) is { Length: > 0 } deterministicBenignReply &&
+            !IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeSystemCommand(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeBrowseRequest(lowerIncoming))
+        {
+            if (!LooksLikeReasoningFollowUp(lowerIncoming))
+            {
+                _lastFirstPrinciplesRationale = [];
+                _lastFirstPrinciplesAt = default;
+            }
+
+            _history.Add(ChatMessage.User(userMessage));
+            TrimHistory();
+            LogEvent("AGENT_USER_MESSAGE", userMessage);
+
+            if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+            {
+                _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+                _autoMemoryExtractor.FireAndForgetConversationChunk(
+                    userMessage,
+                    _currentConversationId,
+                    personalityTurnTag,
+                    role: "user");
+            }
+
+            var deterministicToolCalls = new List<ToolCallRecord>();
+            var deterministicMemoryTimeout = TimeSpan.FromMilliseconds(
+                Math.Max(MemoryRetrievalTimeout.TotalMilliseconds, 3000));
+            var deterministicMemoryContext = SafeModeEnabled
+                ? new MemoryContextResult()
+                : await GetMemoryContextSafeAsync(
+                    userMessage,
+                    _currentConversationId,
+                    deterministicMemoryTimeout,
+                    cancellationToken);
+
+            if (!SafeModeEnabled && MemoryEnabled && deterministicMemoryContext.Provenance.Success)
+            {
+                deterministicToolCalls.Add(new ToolCallRecord
+                {
+                    ToolName = "MemoryRetrieve",
+                    Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
+                    Result = deterministicMemoryContext.Provenance.Summary,
+                    Success = deterministicMemoryContext.Provenance.Success
+                });
+            }
+
+            LogEvent("AGENT_DETERMINISTIC_BENIGN_FALLBACK",
+                "Answered from deterministic fallback without entering route/tool orchestration.");
+            AppendAssistantMessage(deterministicBenignReply);
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = deterministicBenignReply,
+                Success = true,
+                ToolCallsMade = deterministicToolCalls,
+                LlmRoundTrips = 0
+            }, usageBaseline);
+        }
+
         if (!LooksLikeReasoningFollowUp(lowerIncoming))
         {
             _lastFirstPrinciplesRationale = [];
@@ -736,6 +798,15 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     ? LookupModeHint.Fact
                     : ResolveLookupModeHint(route);
 
+                if (!forceLocalBusinessLookupFromFileIntent &&
+                    lookupModeHint != LookupModeHint.News &&
+                    IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+                {
+                    lookupModeHint = LookupModeHint.News;
+                    LogEvent("LOOKUP_MODE_NEWS_OVERRIDE",
+                        "Forced explicit news request onto the news aggregation path.");
+                }
+
                 if (!string.IsNullOrWhiteSpace(memoryPackText))
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
                 InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
@@ -755,6 +826,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var stripped = Search.SearchOrchestrator.StripOfflineReasoningPrefix(searchResponse.Text);
                 if (!string.Equals(stripped, searchResponse.Text, StringComparison.Ordinal))
                     searchResponse = searchResponse with { Text = stripped };
+
+                var sanitizedSearchText = _postProcessor.SanitizeFinalResponse(
+                    searchResponse.Text,
+                    toolCallsMade,
+                    contextualUserMessage,
+                    searchResponse.AllowToolResultPersonalityPresentation);
+                if (!string.Equals(sanitizedSearchText, searchResponse.Text, StringComparison.Ordinal))
+                    searchResponse = searchResponse with { Text = sanitizedSearchText };
 
                 if (searchResponse.Success)
                     AppendAssistantMessage(searchResponse.Text);

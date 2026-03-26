@@ -83,6 +83,40 @@ public sealed partial class AgentOrchestrator
                lower.Contains("internet", StringComparison.Ordinal);
     }
 
+    private static bool LooksLikeFrustratedTroubleshootingVentPrompt(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (lower.Length == 0 || lower.Contains('?', StringComparison.Ordinal))
+            return false;
+
+        var frustrationCue =
+            lower.Contains("this is so annoying", StringComparison.Ordinal) ||
+            lower.Contains("nothing is working", StringComparison.Ordinal) ||
+            lower.Contains("everything keeps breaking", StringComparison.Ordinal) ||
+            lower.Contains("been at it for hours", StringComparison.Ordinal) ||
+            lower.Contains("so frustrating", StringComparison.Ordinal) ||
+            lower.Contains("i'm frustrated", StringComparison.Ordinal) ||
+            lower.Contains("im frustrated", StringComparison.Ordinal);
+
+        var breakageCue =
+            lower.Contains("working", StringComparison.Ordinal) ||
+            lower.Contains("breaking", StringComparison.Ordinal) ||
+            lower.Contains("broken", StringComparison.Ordinal) ||
+            lower.Contains("error", StringComparison.Ordinal) ||
+            lower.Contains("failing", StringComparison.Ordinal) ||
+            lower.Contains("crashing", StringComparison.Ordinal);
+
+        if (!frustrationCue || !breakageCue)
+            return false;
+
+        return !IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower) &&
+               !IntentFeatureExtractor.LooksLikeWebSearchRequest(lower) &&
+               !IntentFeatureExtractor.LooksLikeScreenRequest(lower) &&
+               !IntentFeatureExtractor.LooksLikeFileRequest(lower) &&
+               !IntentFeatureExtractor.LooksLikeSystemCommand(lower) &&
+               !IntentFeatureExtractor.LooksLikeBrowseRequest(lower);
+    }
+
     private static bool LooksLikeOauthOpenIdPrompt(string userMessage)
     {
         var lower = (userMessage ?? "").ToLowerInvariant();
@@ -98,6 +132,14 @@ public sealed partial class AgentOrchestrator
                "When to use each:\n" +
                "- Use OAuth 2.0 when you only need API access delegation (no sign-in identity requirement in your app).\n" +
                "- Use OIDC when users sign in to your app and you need identity (who the user is) in addition to optional API access.";
+    }
+
+    private static string BuildCalmTroubleshootingTriageAnswer()
+    {
+        return "That sounds frustrating. Pause for a minute and narrow it down to one failing symptom instead of trying to fix everything at once. " +
+               "Start by capturing the exact error message or the precise step that breaks. Then retry one clean path so you can reproduce the same failure consistently. " +
+               "After that, check the most recent change or restart the affected app, service, or device before you change anything else. " +
+               "If you send me the exact error text and what you were trying to do, I can help you work through it step by step.";
     }
 
     private static bool LooksSpeculativeNarrative(string text)

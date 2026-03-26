@@ -298,7 +298,7 @@ public static class DeepDiveWebExtractor
                 continue;
 
             var candidate = NormalizeAddress(match.Value);
-            if (candidate.Length > 0)
+            if (!string.IsNullOrWhiteSpace(candidate))
                 return candidate;
         }
 

@@ -172,7 +172,15 @@ public sealed record LlmSettings
     /// is linguistically necessary for the current query.
     /// </summary>
     [JsonPropertyName("gatekeeperModelId")]
-    public string GatekeeperModelId { get; init; } = "qwen2.5-1.5b-instruct";
+    public string GatekeeperModelId { get; init; } = "qwen3.5-2b";
+
+    /// <summary>
+    /// When true, and the gatekeeper shares the same endpoint as the primary
+    /// model, reuse the primary model id instead of forcing a model swap.
+    /// This avoids LM Studio load/offload churn on single-GPU setups.
+    /// </summary>
+    [JsonPropertyName("reusePrimaryModelForGatekeeperOnSharedEndpoint")]
+    public bool ReusePrimaryModelForGatekeeperOnSharedEndpoint { get; init; } = true;
 
     [JsonPropertyName("maxTokens")]
     public int MaxTokens { get; init; } = 2048;

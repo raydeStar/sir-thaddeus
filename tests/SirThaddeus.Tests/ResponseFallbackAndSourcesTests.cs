@@ -355,6 +355,21 @@ public class BareResponseEnrichmentTests
         Assert.DoesNotContain("merchandise", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedExistenceAnswer_StripsKnowledgeCutoffClause()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "No - an iPhone 99 has never been released, nor is there evidence of one in official records up to my knowledge cutoff.",
+            new List<ToolCallRecord>
+            {
+                new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 1 result(s) returned]", Success = true }
+            },
+            "Does iPhone 99 exist as a released product?");
+
+        Assert.Contains("iPhone 99", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("knowledge cutoff", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("The store closes at 9 PM tonight.", "Is the store open?")]
     [InlineData("Normal assistant fallback.", "What time is it?")]

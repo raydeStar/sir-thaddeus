@@ -76,7 +76,11 @@ public sealed partial class AgentOrchestrator
     {
         string? responseText = null;
 
-        if (LooksLikeDownloadRamMythPrompt(userMessage))
+        if (LooksLikeFrustratedTroubleshootingVentPrompt(userMessage))
+        {
+            responseText = BuildCalmTroubleshootingTriageAnswer();
+        }
+        else if (LooksLikeDownloadRamMythPrompt(userMessage))
         {
             responseText = "You can’t download RAM from the internet. RAM is physical hardware, so the real fixes are: close heavy apps/tabs, disable unnecessary startup apps, and if possible upgrade memory sticks (or use a machine with more RAM). If you want, I can walk through a quick speed-up checklist for your OS.";
         }

@@ -6,7 +6,7 @@ namespace SirThaddeus.Agent;
 internal static partial class OrchestratorMessageHelpers
 {
     private static readonly Regex HighRiskIllicitInstructionRegex = new(
-        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide)\b[\s\S]{0,160}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|bypass\s+(?:a\s+)?lock|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
+        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide|teach\s+me)\b[\s\S]{0,220}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|lockpick(?:s|ing)?|tension\s+wrench|bypass\s+(?:a\s+)?(?:lock|deadbolt)|deadbolt|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     internal static string StripCodeFenceWrapper(string content)
