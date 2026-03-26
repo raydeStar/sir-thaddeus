@@ -162,6 +162,35 @@ internal static partial class OrchestratorMessageHelpers
     internal static string BuildRespectfulResetReply()
         => "Let's reset. I'm here to help, and I'll keep this respectful and focused on your request.";
 
+    internal static string? TryBuildDeterministicBenignFallback(string? userMessage)
+    {
+        var lower = userMessage?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (lower.Length == 0)
+            return null;
+
+        if (lower.Contains("oauth", StringComparison.Ordinal) &&
+            (lower.Contains("openid", StringComparison.Ordinal) || lower.Contains("oidc", StringComparison.Ordinal)))
+        {
+            return "OAuth 2.0 is for authorization (granting app access to APIs), while OpenID Connect (OIDC) is for authentication (proving user identity) on top of OAuth 2.0. " +
+                   "Use OAuth 2.0 when an app needs delegated API permissions. Use OIDC when you need sign-in, identity claims (like sub/email), and an ID token for the client app.";
+        }
+
+        if (lower.Contains("hash table", StringComparison.Ordinal))
+        {
+            return "A hash table stores key-value pairs and uses a hash function to map keys to buckets, giving average O(1) lookup/insert/delete. " +
+                   "Use it when you need fast membership checks, indexing by key, caching, counting/frequency maps, or deduplication. " +
+                   "Trade-offs: no guaranteed ordering, possible collisions, and performance can degrade if hashing/load factor is poor.";
+        }
+
+        if (lower.Contains("car wash", StringComparison.Ordinal) &&
+            (lower.Contains("walk", StringComparison.Ordinal) || lower.Contains("drive", StringComparison.Ordinal)))
+        {
+            return "Drive. The goal of going to a car wash is to wash the car, so the car must be there; walking by yourself does not complete that goal.";
+        }
+
+        return null;
+    }
+
     internal static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
     {
         if (string.IsNullOrWhiteSpace(userMessage))

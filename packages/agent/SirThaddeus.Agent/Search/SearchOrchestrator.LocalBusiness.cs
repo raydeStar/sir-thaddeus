@@ -58,7 +58,7 @@ public sealed partial class SearchOrchestrator
             .ToList();
 
         if (topSources.Count == 0)
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+            return BuildDirectoryLocalBusinessResponse(userMessage, sources, toolCallsMade);
 
         var sb = new StringBuilder();
         sb.AppendLine(topSources.Count == 1
@@ -680,6 +680,14 @@ public sealed partial class SearchOrchestrator
 
             if (supplementalNames.Count > 0)
                 return BuildCleanedLocalBusinessResponse(userMessage, supplementalNames, locationContext, toolCallsMade);
+
+            var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
+                userMessage,
+                toolCallsMade,
+                ct,
+                surfaceConfigMessage: false);
+            if (directPlaceFallback is not null)
+                return directPlaceFallback;
 
             return BuildLocalBusinessDiscoveryResponse(userMessage, sources, toolCallsMade);
         }
@@ -1357,7 +1365,8 @@ public sealed partial class SearchOrchestrator
     private async Task<AgentResponse?> TryBuildLocalBusinessDirectPlaceFallbackAsync(
         string userMessage,
         List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool surfaceConfigMessage = true)
     {
         var location = ResolveLocalBusinessLocationContext(userMessage);
         var label = GetRequestedLocalBusinessLabel(userMessage);
@@ -1404,7 +1413,7 @@ public sealed partial class SearchOrchestrator
         if (enriched.Count == 0)
         {
             var actionableConfigMessage = TryBuildPlacesConfigErrorMessage(toolCallsMade);
-            if (!string.IsNullOrWhiteSpace(actionableConfigMessage))
+            if (surfaceConfigMessage && !string.IsNullOrWhiteSpace(actionableConfigMessage))
             {
                 return new AgentResponse
                 {
@@ -1440,6 +1449,69 @@ public sealed partial class SearchOrchestrator
         Session.RecordLocalBusinessCandidates(label, sourceItems);
 
         return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots: false);
+    }
+
+    private AgentResponse BuildDirectoryLocalBusinessResponse(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
+        var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
+        var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" in {location}";
+
+        var renderedSources = sources
+            .Where(source => !IsJunkBusinessSource(source))
+            .Select(source => new
+            {
+                Title = StripTitleSuffix((source.Title ?? string.Empty).Trim()),
+                source.Domain,
+                source.Snippet
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Title))
+            .DistinctBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(1, LocalBusinessTargetResults))
+            .ToList();
+
+        if (renderedSources.Count == 0)
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Here are the live {businessLabel} results I found{locText}:");
+        sb.AppendLine();
+
+        foreach (var source in renderedSources)
+        {
+            sb.Append("- **");
+            sb.Append(source.Title);
+            sb.Append("**");
+
+            var details = new List<string>();
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+                details.Add(TrimSentence(source.Snippet, 160));
+            if (!string.IsNullOrWhiteSpace(source.Domain))
+                details.Add($"source: {source.Domain}");
+
+            if (details.Count > 0)
+            {
+                sb.Append(" — ");
+                sb.Append(string.Join(" · ", details));
+            }
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine();
+        sb.Append("These came back as directory-style local results rather than single verified storefront pages. ");
+        sb.Append("If you want, give me a neighborhood or major street and I can narrow the deli search further.");
+
+        return new AgentResponse
+        {
+            Text = sb.ToString(),
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
     }
 
     private static string? TryBuildPlacesConfigErrorMessage(IReadOnlyList<ToolCallRecord> toolCallsMade)

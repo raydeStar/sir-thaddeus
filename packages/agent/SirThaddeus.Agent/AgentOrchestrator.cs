@@ -1173,6 +1173,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             if (hasWebToolActivity || likelyLookupIntent)
             {
+                var groundedTimeoutFallback = Search.SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+                    contextualUserMessage,
+                    toolCallsMade);
+                if (!string.IsNullOrWhiteSpace(groundedTimeoutFallback))
+                {
+                    LogEvent("AGENT_CANCELLED_RECOVERED", "Recovered with grounded timeout fallback from retrieved evidence.");
+                    AppendAssistantMessage(groundedTimeoutFallback);
+
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = groundedTimeoutFallback,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    }, usageBaseline);
+                }
+
                 var offlineFallback = await Search.OfflineWebReasoningResponder.BuildAsync(
                     _llm,
                     _systemPrompt,

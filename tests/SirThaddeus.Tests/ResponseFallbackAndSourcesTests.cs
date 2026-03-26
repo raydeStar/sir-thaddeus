@@ -85,6 +85,75 @@ public class SourceCitationFormatterTests
 public class SearchOfflineFallbackTests
 {
     [Fact]
+    public void TryBuildGroundedTimeoutFallback_UsesRetrievedWebEvidence_InsteadOfTimeoutMessage()
+    {
+        var toolCalls = new List<ToolCallRecord>
+        {
+            new()
+            {
+                ToolName = "web_search",
+                Arguments = "{\"query\":\"C# 13 changes\"}",
+                Result =
+                    "1. \"What’s new in C# 13\" — learn.microsoft.com\n" +
+                    "   C# 13 adds params collections, improved lock support, and new escape-sequence features.\n\n" +
+                    "<!-- SOURCES_JSON -->\n" +
+                    "{" +
+                    "\"sources\":[{" +
+                    "\"url\":\"https://learn.microsoft.com/dotnet/csharp/whats-new/csharp-13\"," +
+                    "\"title\":\"What’s new in C# 13\"," +
+                    "\"domain\":\"learn.microsoft.com\"," +
+                    "\"excerpt\":\"C# 13 adds params collections, improved lock support, and new escape-sequence features.\"}" +
+                    "]}",
+                Success = true
+            }
+        };
+
+        var fallback = SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+            "Use web_search to answer what changed in C# 13 and keep it practical.",
+            toolCalls);
+
+        Assert.NotNull(fallback);
+        Assert.Contains("strongest evidence", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("What’s new in C# 13", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Live web lookup is unavailable right now", fallback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryBuildGroundedTimeoutFallback_ForMediaComparison_AnswersTheQuestionDirectly()
+    {
+        var toolCalls = new List<ToolCallRecord>
+        {
+            new()
+            {
+                ToolName = "web_search",
+                Arguments = "{\"query\":\"live-action How to Train Your Dragon word for word\"}",
+                Result =
+                    "1. \"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\" — collider.com\n" +
+                    "   The article highlights story and scene differences between the live-action remake and the original animated film.\n\n" +
+                    "<!-- SOURCES_JSON -->\n" +
+                    "{" +
+                    "\"sources\":[{" +
+                    "\"url\":\"https://collider.com/how-to-train-your-dragon-live-action-differences/\"," +
+                    "\"title\":\"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\"," +
+                    "\"domain\":\"collider.com\"," +
+                    "\"excerpt\":\"The article highlights story and scene differences between the live-action remake and the original animated film.\"}" +
+                    "]}",
+                Success = true
+            }
+        };
+
+        var fallback = SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            toolCalls);
+
+        Assert.NotNull(fallback);
+        Assert.Contains("No", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("original", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("difference", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("strongest evidence I found", fallback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenWebSearchUnavailable_UsesBestEffortReasoning()
     {
         var llm = new StubLlmClient(
@@ -291,6 +360,36 @@ public class ChatPostProcessorReasoningBehaviorTests
 
         Assert.Equal("Walk.", output);
         Assert.DoesNotContain("<think>", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ProcessChatOnlyDraft_UsesBenignRecovery_ForHashTablePrompt_WhenDraftIsOffTopicMath()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "3 + 5 = 8. Want me to calculate the next one?",
+            userMessage: "What is a hash table and when should I use one?",
+            toolCallsMade: []);
+
+        Assert.Contains("hash table", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("key-value", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("respectful", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ProcessChatOnlyDraft_UsesBenignRecovery_ForHashTablePrompt_WhenDraftLeaksToolingEssay()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "I do best on your machine when we tackle a clear question step by step and inspect the local tools carefully.",
+            userMessage: "What is a hash table and when should I use one?",
+            toolCallsMade: []);
+
+        Assert.Contains("hash table", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("key-value", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("favorites", output, StringComparison.OrdinalIgnoreCase);
     }
 }
 

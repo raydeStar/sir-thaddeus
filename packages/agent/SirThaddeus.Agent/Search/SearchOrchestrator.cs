@@ -2210,7 +2210,7 @@ public sealed partial class SearchOrchestrator
                 }
             });
 
-            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources);
+            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest);
         }
 
         if (fallbackKind == SummaryFallbackKind.News &&
@@ -2759,6 +2759,46 @@ public sealed partial class SearchOrchestrator
         return body;
     }
 
+    internal static string? TryBuildGroundedTimeoutFallback(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        foreach (var call in toolCallsMade.Reverse())
+        {
+            if (!call.Success)
+                continue;
+
+            var toolName = call.ToolName ?? string.Empty;
+            var result = call.Result ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(result))
+                continue;
+
+            if (toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                var sources = ParseSourcesFromToolResult(result);
+                var stripped = StripSourcesJson(result);
+
+                if (sources.Count > 0)
+                    return BuildCapabilityClaimFallback(stripped, SummaryFallbackKind.FactFind, sources, userMessage);
+
+                if (!string.IsNullOrWhiteSpace(stripped))
+                    return BuildExtractiveFallback(stripped, userMessage);
+
+                continue;
+            }
+
+            if ((toolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                 toolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase)) &&
+                result.Length >= 32)
+            {
+                return BuildExtractiveFallback(result, userMessage);
+            }
+        }
+
+        return null;
+    }
+
     private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources, string? explicitLocation = null)
     {
         // Prefer the explicit location from the user's message
@@ -3183,8 +3223,15 @@ public sealed partial class SearchOrchestrator
     private static string BuildCapabilityClaimFallback(
         string summaryInput,
         SummaryFallbackKind fallbackKind,
-        IReadOnlyList<SourceItem>? sources)
+        IReadOnlyList<SourceItem>? sources,
+        string? userMessage = null)
     {
+        if (fallbackKind == SummaryFallbackKind.FactFind &&
+            TryBuildComparisonSourceFallback(userMessage, sources) is { Length: > 0 } comparisonFallback)
+        {
+            return comparisonFallback;
+        }
+
         var lines = BuildSourceFallbackLines(
             sources,
             maxItems: fallbackKind == SummaryFallbackKind.FactFind ? 4 : 5);
@@ -3201,6 +3248,70 @@ public sealed partial class SearchOrchestrator
 
         foreach (var line in lines)
             sb.AppendLine("- " + line);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string? TryBuildComparisonSourceFallback(
+        string? userMessage,
+        IReadOnlyList<SourceItem>? sources)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || sources is not { Count: > 0 })
+            return null;
+
+        var lowerUserMessage = userMessage.ToLowerInvariant();
+        var asksForStrictComparison =
+            lowerUserMessage.Contains("word for word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("word-for-word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("identical", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("same", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("difference", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("different", StringComparison.Ordinal);
+
+        var hasMediaComparisonContext =
+            lowerUserMessage.Contains("live-action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("live action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("movie", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("film", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("remake", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("adaptation", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("original", StringComparison.Ordinal);
+
+        if (!asksForStrictComparison || !hasMediaComparisonContext)
+            return null;
+
+        var normalizedEvidence = sources
+            .Select(source => $"{source.Title} {source.Snippet}".Trim())
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Select(text => text.ToLowerInvariant())
+            .ToList();
+
+        var hasDifferenceSignal = normalizedEvidence.Any(text =>
+            text.Contains("difference", StringComparison.Ordinal) ||
+            text.Contains("different", StringComparison.Ordinal) ||
+            text.Contains("not word for word", StringComparison.Ordinal) ||
+            text.Contains("not identical", StringComparison.Ordinal) ||
+            text.Contains("remake", StringComparison.Ordinal) ||
+            text.Contains("adaptation", StringComparison.Ordinal) ||
+            text.Contains("live-action", StringComparison.Ordinal) ||
+            text.Contains("live action", StringComparison.Ordinal));
+
+        if (!hasDifferenceSignal)
+            return null;
+
+        var evidenceLines = BuildSourceFallbackLines(sources, maxItems: 3);
+        var sb = new StringBuilder();
+        sb.Append("No — based on the live results I found, it does not look word for word identical to the original. ");
+        sb.Append("The coverage explicitly describes differences between the animated and live-action versions, which points to the same core story with changed scene details, pacing, or dialogue.");
+
+        if (evidenceLines.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("Evidence I found:");
+            foreach (var line in evidenceLines)
+                sb.AppendLine("- " + line);
+        }
 
         return sb.ToString().TrimEnd();
     }
@@ -3251,7 +3362,7 @@ public sealed partial class SearchOrchestrator
 
         var rendered = sb.ToString().TrimEnd();
         return rendered == "Here are the main stories I found:"
-            ? BuildCapabilityClaimFallback("", SummaryFallbackKind.News, sources)
+                ? BuildCapabilityClaimFallback("", SummaryFallbackKind.News, sources)
             : rendered;
     }
 

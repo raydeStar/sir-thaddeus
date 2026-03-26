@@ -468,9 +468,22 @@ public sealed class ScoringEngine
             result.Contains("error", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        if (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         // "[search: 0 result(s) returned]"
         if (result.Contains("0 result", StringComparison.OrdinalIgnoreCase))
             return true;
+
+        // document_read often returns an opaque summary like
+        // "[Document content: 100 chars, sha256=...]". That does not carry
+        // meaningful tokens for incorporation scoring.
+        if (result.StartsWith("[Document content:", StringComparison.OrdinalIgnoreCase) ||
+            (result.Contains("Document content:", StringComparison.OrdinalIgnoreCase) &&
+             result.Contains("sha256=", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
 
         // Config/infra error text
         if (result.Contains("is not configured", StringComparison.OrdinalIgnoreCase))

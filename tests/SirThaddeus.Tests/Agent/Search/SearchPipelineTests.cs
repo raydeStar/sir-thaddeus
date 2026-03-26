@@ -3083,6 +3083,126 @@ public class LocalBusinessDetectionTests
     }
 
     [Fact]
+    public async Task LocalBusinessDiscovery_SearchResultsWithoutCandidateNames_FallsBackToDirectPlacesLookup()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"best delis hillsboro","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var webSearchResult =
+            "1. \"Best Delis in Hillsboro, OR\" — yelp.com\n" +
+            "   Roundup of deli options in Hillsboro.\n\n" +
+            "2. \"Delis in Hillsboro, OR\" — tripadvisor.com\n" +
+            "   Reviews and photos for delis in Hillsboro.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.yelp.com/search?find_desc=Delis&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Delis in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Roundup of deli options in Hillsboro.\"}," +
+            "{\"url\":\"https://www.tripadvisor.com/Restaurants-g51730-c38-Hillsboro_Oregon.html\",\"title\":\"Delis in Hillsboro, OR\",\"domain\":\"tripadvisor.com\",\"excerpt\":\"Reviews and photos for delis in Hillsboro.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => webSearchResult,
+            "places_lookup" or "PlacesLookup" when args.Contains("delis near Hillsboro, OR", StringComparison.OrdinalIgnoreCase) =>
+                """
+                {
+                  "place": {
+                    "name": "Biscuit Delicatessen",
+                    "address": "171 NE 3rd Ave, Hillsboro, OR",
+                    "rating": 4.6,
+                    "userRatingsTotal": 412,
+                    "openNow": true
+                  }
+                }
+                """,
+            "places_lookup" or "PlacesLookup" => "{\"place\":null,\"sources\":[]}",
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "find me a good deli in Hillsboro, OR",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Biscuit Delicatessen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("delis near Hillsboro, OR", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_SearchResultsWithoutCandidateNames_UsesDirectoryResults_WhenPlacesConfigMissing()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"best delis hillsboro","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var webSearchResult =
+            "1. \"Best Delis in Hillsboro, OR\" — yelp.com\n" +
+            "   Roundup of deli options in Hillsboro.\n\n" +
+            "2. \"Delis in Hillsboro, OR\" — tripadvisor.com\n" +
+            "   Reviews and photos for delis in Hillsboro.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.yelp.com/search?find_desc=Delis&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Delis in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Roundup of deli options in Hillsboro.\"}," +
+            "{\"url\":\"https://www.tripadvisor.com/Restaurants-g51730-c38-Hillsboro_Oregon.html\",\"title\":\"Delis in Hillsboro, OR\",\"domain\":\"tripadvisor.com\",\"excerpt\":\"Reviews and photos for delis in Hillsboro.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => webSearchResult,
+            "places_lookup" or "PlacesLookup" => """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "find me a good deli in Hillsboro, OR",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are the live", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("results I found", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yelp.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("API key", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task LocalBusinessDiscovery_MissingPlacesKey_ReturnsActionableConfigurationMessage()
     {
         var llm = new FakeLlmClient((messages, _) =>

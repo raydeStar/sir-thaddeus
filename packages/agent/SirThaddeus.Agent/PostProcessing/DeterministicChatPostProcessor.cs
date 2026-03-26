@@ -42,6 +42,10 @@ public sealed class DeterministicChatPostProcessor
         {
             // Keep legacy audit action for compatibility with existing tests/dashboards.
             logEvent?.Invoke("AGENT_OFFTOPIC_CALC_REWRITE", "Detected off-topic calculation style response.");
+            var benignFallback = TryBuildDeterministicBenignFallback(userMessage);
+            if (!string.IsNullOrWhiteSpace(benignFallback))
+                return benignFallback;
+
             return "Let's keep it respectful. I'm here to help with a real question when you're ready.";
         }
 
@@ -49,6 +53,10 @@ public sealed class DeterministicChatPostProcessor
         {
             // Keep legacy audit action for compatibility with existing tests/dashboards.
             logEvent?.Invoke("AGENT_ROLE_CONFUSION_REWRITE", "Detected assistant role confusion on non-math turn.");
+            var benignFallback = TryBuildDeterministicBenignFallback(userMessage);
+            if (!string.IsNullOrWhiteSpace(benignFallback))
+                return benignFallback;
+
             return "I'm doing well, thanks for checking in. How can I help you right now?";
         }
 
@@ -79,6 +87,10 @@ public sealed class DeterministicChatPostProcessor
 
         if (LooksLikeToolingLeakEssay(text))
         {
+            var benignFallback = TryBuildDeterministicBenignFallback(userMessage);
+            if (!string.IsNullOrWhiteSpace(benignFallback))
+                return benignFallback;
+
             return "I don't really have favorites, but I do best when we tackle a clear question and solve it step by step.";
         }
 
