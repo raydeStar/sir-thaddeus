@@ -91,6 +91,7 @@ public partial class MainWindow : Window
     private string _voiceStatusLabel = "Ready";
     private string? _lastRuntimeActivityStamp;
     private string? _lastActionDrawerAuditSignature;
+    private TabItem? _lastValidSettingsTabItem;
 
     private TextBox PromptBox => ChatComposer.PromptBox;
     private Button SendButton => ChatComposer.SendButton;
@@ -117,6 +118,8 @@ public partial class MainWindow : Window
 
         SettingsHeaderBar.DataContext = _backendSettings;
         SettingsTabControl.DataContext = _backendSettings;
+        SettingsTabControl.SelectedItem ??= GeneralTabItem;
+        _lastValidSettingsTabItem = GeneralTabItem;
 
         LlmsScrollViewer.DataContext = _backendSettings;
         AudioScrollViewer.DataContext = _backendSettings;
@@ -346,56 +349,56 @@ public partial class MainWindow : Window
         bool appendTranscript)
     {
         var snapshot = _backendSettings.BuildPersistableSnapshot();
+        AppSettings localPersisted;
 
         try
         {
-            if (_runtimeApiClient is not null)
+            SettingsManager.Save(snapshot);
+            localPersisted = SettingsManager.Load();
+
+            if (_runtimeApiClient is null)
             {
-                var persisted = await _runtimeApiClient.SaveSettingsAsync(snapshot, CancellationToken.None);
-                _backendSettings.ApplySavedSnapshot(persisted, connectedStatus);
-                await RefreshSearchStatusAsync();
+                _backendSettings.ApplySavedSnapshot(localPersisted, localStatus);
+                _backendSettings.ResetSearchHealthState(
+                    "Not connected",
+                    localHealthStatus);
                 if (appendTranscript)
                 {
-                    AppendTranscript("[system] " + connectedStatus);
+                    AppendTranscript("[system] " + localStatus);
                 }
 
                 return;
             }
 
-            SettingsManager.Save(snapshot);
-            var localPersisted = SettingsManager.Load();
-            _backendSettings.ApplySavedSnapshot(localPersisted, localStatus);
-            _backendSettings.ResetSearchHealthState(
-                "Not connected",
-                localHealthStatus);
-            if (appendTranscript)
-            {
-                AppendTranscript("[system] " + localStatus);
-            }
-        }
-        catch (Exception ex)
-        {
             try
             {
-                SettingsManager.Save(snapshot);
-                var localPersisted = SettingsManager.Load();
+                var persisted = await _runtimeApiClient.SaveSettingsAsync(localPersisted, CancellationToken.None);
+                SettingsManager.Save(persisted);
+                var syncedPersisted = SettingsManager.Load();
+                _backendSettings.ApplySavedSnapshot(syncedPersisted, connectedStatus);
+                await RefreshSearchStatusAsync();
+                if (appendTranscript)
+                {
+                    AppendTranscript("[system] " + connectedStatus);
+                }
+            }
+            catch (Exception ex)
+            {
                 _backendSettings.ApplySavedSnapshot(localPersisted, syncFailureStatus);
-                _backendSettings.ResetSearchHealthState(
-                    "Unavailable",
-                    syncFailureStatus);
+                _backendSettings.ResetSearchHealthState("Unavailable", syncFailureStatus);
                 if (appendTranscript)
                 {
                     AppendTranscript("[error] Runtime settings sync failed: " + ex.Message);
                     AppendTranscript("[system] " + syncFailureStatus);
                 }
             }
-            catch (Exception saveEx)
+        }
+        catch (Exception ex)
+        {
+            _backendSettings.SetStatus("Settings save failed: " + ex.Message);
+            if (appendTranscript)
             {
-                _backendSettings.SetStatus("Settings save failed: " + saveEx.Message);
-                if (appendTranscript)
-                {
-                    AppendTranscript("[error] Settings save failed: " + saveEx.Message);
-                }
+                AppendTranscript("[error] Settings save failed: " + ex.Message);
             }
         }
     }
@@ -592,6 +595,21 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        if (tabControl.SelectedItem is not TabItem selectedTab ||
+            !selectedTab.IsEnabled ||
+            selectedTab.Classes.Contains("navGroupHeader"))
+        {
+            var fallbackTab = _lastValidSettingsTabItem ?? GeneralTabItem;
+            if (!ReferenceEquals(tabControl.SelectedItem, fallbackTab))
+            {
+                tabControl.SelectedItem = fallbackTab;
+            }
+
+            return;
+        }
+
+        _lastValidSettingsTabItem = selectedTab;
 
         if (ReferenceEquals(tabControl.SelectedItem, LlmsTabItem))
         {

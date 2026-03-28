@@ -90,7 +90,7 @@ public static class RuntimeMcpEnvironmentBuilder
             Math.Clamp(settings.DocumentReader.MaxDefaultChars, 100, 100_000).ToString();
         env["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = settings.DocumentReader.DisableAllFileAccess ? "true" : "false";
         env["ST_DOCUMENT_READER_ALLOWED_ROOTS"] =
-            string.Join(Path.PathSeparator, settings.DocumentReader.AllowedRoots);
+            string.Join(Path.PathSeparator, ResolveDocumentReaderAllowedRoots(settings.DocumentReader));
         env["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] =
             string.Join(",", settings.DocumentReader.AllowedExtensions);
         env["ST_CLIPBOARD_ENABLED"] = settings.Clipboard.Enabled ? "true" : "false";
@@ -156,5 +156,25 @@ public static class RuntimeMcpEnvironmentBuilder
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "SirThaddeus", "weather-places.json");
+    }
+
+    public static IReadOnlyList<string> ResolveDocumentReaderAllowedRoots(DocumentReaderSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (settings.DisableAllFileAccess)
+            return settings.AllowedRoots;
+
+        if (settings.AllowedRoots.Count > 0)
+            return settings.AllowedRoots;
+
+        return [ResolveDocumentReaderTempWorkspaceRoot()];
+    }
+
+    public static string ResolveDocumentReaderTempWorkspaceRoot()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "SirThaddeus", "file-workspace");
+        Directory.CreateDirectory(tempRoot);
+        return tempRoot;
     }
 }

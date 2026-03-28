@@ -733,122 +733,234 @@
           </Grid>
         </Grid>
 
-        <Grid x:Name="SettingsView" IsVisible="False" Background="{StaticResource BaseBrush}">
+        <Grid x:Name="SettingsView" IsVisible="False" Background="{DynamicResource SettingsContentBg}">
           <Grid RowDefinitions="Auto,*" RowSpacing="0">
             <Border x:Name="SettingsHeaderBar"
+                    Classes="settingsShellHeader"
                     x:CompileBindings="False"
-                    Background="{StaticResource CrustBrush}"
-                    Padding="24,12"
-                    BorderBrush="{StaticResource Surface0Brush}"
-                    BorderThickness="0,0,0,1">
-              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
-                <Button Grid.Column="1"
-                        x:Name="ReloadSettingsButton"
-                        Content="Reload"
-                        Classes="actionBtn"
-                        Click="ReloadSettingsButton_Click"/>
-                <Button Grid.Column="2"
-                        x:Name="SaveSettingsButton"
-                        Content="Save"
-                        Classes="sendBtn"
-                        IsEnabled="{Binding IsDirty}"
-                        Click="SaveSettingsButton_Click"/>
+                    Margin="24,14,24,0">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                <StackPanel Spacing="6" Orientation="Horizontal" VerticalAlignment="Center">
+                  <TextBlock Text="Settings" Classes="settingsShellTitle"/>
+                  <Border Classes="settingsStatusPill" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <TextBlock Text="{Binding StatusText}"
+                               FontSize="10"
+                               Foreground="{DynamicResource TextTertiary}"/>
+                  </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                  <Button x:Name="ReloadSettingsButton"
+                          Content="Reload"
+                          Classes="settingsSecondaryButton"
+                          Click="ReloadSettingsButton_Click"/>
+                  <Button x:Name="SaveSettingsButton"
+                          Content="Save"
+                          Classes="settingsPrimaryButton"
+                          IsEnabled="{Binding IsDirty}"
+                          Click="SaveSettingsButton_Click"/>
+                </StackPanel>
               </Grid>
             </Border>
 
-            <TabControl Grid.Row="1" x:Name="SettingsTabControl" Classes="settingsTabs" TabStripPlacement="Left" Padding="0" Background="Transparent" SelectionChanged="SettingsTabControl_SelectionChanged"> 
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="248,*"
+                  ColumnSpacing="18"
+                  Margin="16,12,20,20">
+            <TabControl Grid.Column="0"
+                        x:Name="SettingsTabControl"
+                        Classes="settingsTabs"
+                        TabStripPlacement="Left"
+                        Padding="0"
+                        Background="Transparent"
+                        SelectedIndex="1"
+                        SelectionChanged="SettingsTabControl_SelectionChanged"> 
             
-            <TabItem Header="General">
-              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+            <TabItem Header="SYSTEM" Classes="navGroupHeader" IsEnabled="False"/>
 
-                  <!-- Runtime Connection -->
-                  <StackPanel Spacing="10" x:CompileBindings="False">
-                    <TextBlock Text="RUNTIME" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <TabItem x:Name="GeneralTabItem" Header="General" x:CompileBindings="False">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="32,24,36,32" MaxWidth="760" Spacing="22">
+
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="SYSTEM STATUS" Classes="sectionLabel"/>
+                    <Border Classes="settingsStatusCard">
+                      <StackPanel Spacing="18">
+                        <WrapPanel ItemWidth="220" Orientation="Horizontal">
+                          <Border Classes="settingsMetricTile" Width="220" Margin="0,0,14,14">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Current runtime" Classes="settingsMetricLabel"/>
+                              <TextBlock x:Name="SettingsRuntimeText"
+                                         Text="Runtime: not connected"
+                                         Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="220" Margin="0,0,14,14">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Managed service" Classes="settingsMetricLabel"/>
+                              <TextBlock x:Name="RuntimeLaunchStateText"
+                                         Text="Managed runtime: not running"
+                                         Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="220" Margin="0,0,0,14">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Settings state" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding StatusText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                        </WrapPanel>
+                        <TextBlock Text="Live status before you change anything."
+                                   Classes="hint"/>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="RUNTIME CONNECTION" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Connection target" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Endpoint for the runtime connection."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
                           <TextBox x:Name="RuntimeUrlBox"
                                    Text="http://127.0.0.1:5378"
                                    Classes="chatInput"
                                    FontSize="13"
                                    Padding="12,10"/>
-                          <Button Grid.Column="1" Content="Connect" Classes="actionBtn" Click="ConnectButton_Click"/>
-                        </Grid>
-                        <TextBlock x:Name="SettingsRuntimeText" Text="Runtime: not connected" FontSize="12" Foreground="{StaticResource Overlay0Brush}"/>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <Button x:Name="StartRuntimeButton" Content="Start Local Runtime" Classes="actionBtn" Click="StartRuntimeButton_Click"/>
-                          <Button x:Name="StopRuntimeButton" Content="Stop Managed Runtime" Classes="actionBtn" Click="StopRuntimeButton_Click"/>
+                          <Button Content="Connect to runtime"
+                                  Classes="settingsSecondaryButton"
+                                  HorizontalAlignment="Left"
+                                  Click="ConnectButton_Click"/>
+                          <TextBlock Text="Loopback for local, or a remote address for cross-machine."
+                                     Classes="hint"/>
                         </StackPanel>
-                        <TextBlock x:Name="RuntimeLaunchStateText" Text="Managed runtime: not running" Classes="hint"/>
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
+                      </Border>
 
-                  <!-- Constraints -->
-                  <StackPanel x:Name="ConstraintsPanel" Spacing="10" x:CompileBindings="False">
-                    <TextBlock Text="CONSTRAINTS" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="14" ColumnSpacing="16">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Max tool calls per turn" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding MaxToolCallsPerTurn}" Minimum="1" Maximum="100" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
-
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Max tool calls per session" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxToolCallsPerSession}" Minimum="1" Maximum="10000" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
-
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Max web pulls per turn" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding MaxWebPullsPerTurn}" Minimum="0" Maximum="25" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
-
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Max file ops per minute" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding MaxFileOpsPerMinute}" Minimum="0" Maximum="600" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-
-                  <!-- Interaction -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="INTERACTION" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="10">
-                        <CheckBox x:Name="SendOnEnterCheckBox" Content="Send on Enter (Shift+Enter for newline)" Classes="settingsCheck" Click="SendOnEnterCheckBox_Click"/>
-                        <CheckBox x:Name="AutoSwitchPermissionsCheckBox" Content="Auto-switch to Permissions on approval request" Classes="settingsCheck" Click="AutoSwitchPermissionsCheckBox_Click"/>
-                        <CheckBox x:Name="AutoConnectCheckBox" Content="Auto-connect on startup" Classes="settingsCheck" Click="AutoConnectCheckBox_Click"/>
-                        <CheckBox x:Name="AutoStartRuntimeCheckBox" Content="Auto-start local runtime if unavailable" Classes="settingsCheck" Click="AutoStartRuntimeCheckBox_Click"/>
-                        <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on close" Classes="settingsCheck" Click="MinimizeToTrayCheckBox_Click"/>
-                        <TextBlock x:Name="TraySupportText" Text="Tray support is being detected..." Classes="hint" Margin="0,4,0,0"/>
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
-
-                  <!-- Shortcuts -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="SHORTCUTS" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="10">
-                        <TextBlock Text="Ctrl+1 Chat  &#x2022;  Ctrl+2 Briefing  &#x2022;  Ctrl+3 Settings" FontSize="12" Foreground="{StaticResource Subtext0Brush}"/>
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
-                            <TextBlock Text="Push-to-talk chord" Classes="hint"/>
-                            <TextBox Text="{ReflectionBinding PttChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                            <TextBlock Text="Runtime controls" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Start or stop the managed runtime."
+                                       Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="4">
-                            <TextBlock Text="Interrupt chord" Classes="hint"/>
-                            <TextBox Text="{ReflectionBinding ShutupChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="StartRuntimeButton"
+                                    Content="Start local runtime"
+                                    Classes="actionBtn"
+                                    Click="StartRuntimeButton_Click"/>
+                            <Button x:Name="StopRuntimeButton"
+                                    Content="Stop managed runtime"
+                                    Classes="actionBtn"
+                                    Click="StopRuntimeButton_Click"/>
                           </StackPanel>
-                        </Grid>
-                        <TextBlock Text="Voice and read-aloud are currently Windows-only." Classes="hint" Margin="0,4,0,0"/>
-                      </StackPanel>
-                    </Border>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Control state" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="Manages the local runtime process."
+                                         Classes="settingsMetricMeta"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                   </StackPanel>
 
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="INTERACTION PREFERENCES" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Desktop behavior" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Defaults for sending, auto-connect, and system tray."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <StackPanel Spacing="10">
+                            <CheckBox x:Name="SendOnEnterCheckBox" Content="Send on Enter (Shift+Enter for newline)" Classes="settingsCheck" Click="SendOnEnterCheckBox_Click"/>
+                            <CheckBox x:Name="AutoSwitchPermissionsCheckBox" Content="Auto-switch to Permissions on approval request" Classes="settingsCheck" Click="AutoSwitchPermissionsCheckBox_Click"/>
+                            <CheckBox x:Name="AutoConnectCheckBox" Content="Auto-connect on startup" Classes="settingsCheck" Click="AutoConnectCheckBox_Click"/>
+                            <CheckBox x:Name="AutoStartRuntimeCheckBox" Content="Auto-start local runtime if unavailable" Classes="settingsCheck" Click="AutoStartRuntimeCheckBox_Click"/>
+                            <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on close" Classes="settingsCheck" Click="MinimizeToTrayCheckBox_Click"/>
+                          </StackPanel>
+                          <TextBlock x:Name="TraySupportText"
+                                     Text="Tray support is being detected..."
+                                     Classes="hint"
+                                     Margin="0,2,0,0"/>
+                        </StackPanel>
+                      </Border>
+
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Shortcuts and voice" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Keyboard navigation and voice chord bindings."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <Border Classes="settingsMetricTile">
+                            <TextBlock Text="Ctrl+1 Chat  •  Ctrl+2 Briefing  •  Ctrl+3 Settings"
+                                       Classes="settingsMetricMeta"/>
+                          </Border>
+                          <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Push-to-talk chord" Classes="hint"/>
+                              <TextBox Text="{ReflectionBinding PttChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="4">
+                              <TextBlock Text="Interrupt chord" Classes="hint"/>
+                              <TextBox Text="{ReflectionBinding ShutupChord}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                            </StackPanel>
+                          </Grid>
+                          <TextBlock Text="Voice and read-aloud are currently Windows-only."
+                                     Classes="hint"/>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
+                  </StackPanel>
+
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="ADVANCED" Classes="sectionLabel"/>
+                    <Border x:Name="ConstraintsPanel" Classes="settingsCard" x:CompileBindings="False">
+                      <Expander IsExpanded="False">
+                        <Expander.Header>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Limits and tool budgets" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Guardrails for tool-heavy sessions."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                        </Expander.Header>
+                        <Grid Margin="0,18,0,0"
+                              RowDefinitions="Auto,Auto,Auto,Auto"
+                              ColumnDefinitions="*,Auto"
+                              RowSpacing="14"
+                              ColumnSpacing="16">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Max tool calls per turn" Classes="formLabel"/>
+                          <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding MaxToolCallsPerTurn}" Minimum="1" Maximum="100" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Max tool calls per session" Classes="formLabel"/>
+                          <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxToolCallsPerSession}" Minimum="1" Maximum="10000" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Max web pulls per turn" Classes="formLabel"/>
+                          <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding MaxWebPullsPerTurn}" Minimum="0" Maximum="25" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+
+                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Max file ops per minute" Classes="formLabel"/>
+                          <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding MaxFileOpsPerMinute}" Minimum="0" Maximum="600" HorizontalAlignment="Right" Width="120" FontSize="13" Padding="10,8"/>
+                        </Grid>
+                      </Expander>
+                    </Border>
+                  </StackPanel>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
             <TabItem Header="Location" x:CompileBindings="False">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="680" Spacing="20">
                   <StackPanel Spacing="10">
                     <TextBlock Text="LOCATION" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
@@ -878,90 +990,135 @@
               </ScrollViewer>
             </TabItem>
 
-            <TabItem x:Name="LlmsTabItem" Header="LLMs" x:CompileBindings="False">
+            <TabItem x:Name="LlmsTabItem" Header="Models" x:CompileBindings="False">
               <ScrollViewer x:Name="LlmsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="760" Spacing="22">
 
-                  <!-- Primary Engine -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="PRIMARY ENGINE" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="14">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <TextBlock Text="Presets" FontSize="12" Foreground="{StaticResource Overlay0Brush}" VerticalAlignment="Center"/>
-                          <Button x:Name="LmStudioPresetBtn" Content="LM Studio" Classes="actionBtn" Tag="http://localhost:1234"/>
-                          <Button x:Name="OllamaPresetBtn" Content="Ollama" Classes="actionBtn" Tag="http://localhost:11434"/>
-                          <Button x:Name="OpenAiPresetBtn" Content="OpenAI" Classes="actionBtn" Tag="https://api.openai.com"/>
-                        </StackPanel>
-                        <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="12">
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="PRIMARY MODEL" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Connection presets" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Quick-select a common endpoint, then fine-tune."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <WrapPanel Orientation="Horizontal" ItemHeight="32">
+                            <Button x:Name="LmStudioPresetBtn" Content="LM Studio" Classes="actionBtn" Tag="http://localhost:1234" Margin="0,0,8,8"/>
+                            <Button x:Name="OllamaPresetBtn" Content="Ollama" Classes="actionBtn" Tag="http://localhost:11434" Margin="0,0,8,8"/>
+                            <Button x:Name="OpenAiPresetBtn" Content="OpenAI" Classes="actionBtn" Tag="https://api.openai.com" Margin="0,0,0,8"/>
+                          </WrapPanel>
                           <StackPanel Spacing="4">
                             <TextBlock Text="Base URL" Classes="hint"/>
                             <TextBox Text="{Binding LlmBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
                           </StackPanel>
-                          <StackPanel Grid.Row="1" Spacing="4">
+                          <StackPanel Spacing="4">
                             <TextBlock Text="Model ID" Classes="hint"/>
                             <TextBox Text="{Binding LlmModel}" Classes="chatInput" FontSize="13" Padding="12,10"/>
                           </StackPanel>
-                          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
-                            <Button Content="Refresh Models" Classes="actionBtn" Click="RefreshPrimaryModelsButton_Click"/>
-                            <TextBlock Text="Queries /v1/models on the base URL" Classes="hint" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Model discovery" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Query the endpoint for available models."
+                                       Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <StackPanel Grid.Row="3" Spacing="4">
+                          <Button Content="Refresh models"
+                                  Classes="settingsSecondaryButton"
+                                  HorizontalAlignment="Left"
+                                  Click="RefreshPrimaryModelsButton_Click"/>
+                          <TextBlock Text="Queries /v1/models on the base URL."
+                                     Classes="hint"/>
+                          <StackPanel Spacing="4">
                             <TextBlock Text="Discovered models" Classes="hint"/>
                             <ComboBox ItemsSource="{Binding AvailablePrimaryModels}" SelectedItem="{Binding LlmModel}" HorizontalAlignment="Stretch"/>
                           </StackPanel>
-                        </Grid>
-                      </StackPanel>
-                    </Border>
+                          <Border Classes="settingsMetricTile">
+                            <TextBlock Text="Type the ID directly, or pick from the discovered list."
+                                       Classes="settingsMetricMeta"/>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                   </StackPanel>
 
-                  <!-- Gatekeeper -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="GATEKEEPER" Classes="sectionLabel"/>
-                    <TextBlock Text="Optional smaller model for fast local verification of tools." Classes="hint"/>
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="VERIFICATION MODEL" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Gatekeeper endpoint" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Route verification through a separate, smaller model."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Base URL" Classes="hint"/>
+                            <TextBox Text="{Binding GatekeeperBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Model ID" Classes="hint"/>
+                            <TextBox Text="{Binding GatekeeperModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="Effective fallback" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding EffectiveGatekeeperBaseUrl}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Gatekeeper discovery" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Falls back to the primary endpoint when left blank."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <Button Content="Refresh gatekeeper"
+                                  Classes="settingsSecondaryButton"
+                                  HorizontalAlignment="Left"
+                                  Click="RefreshGatekeeperModelsButton_Click"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Discovered models" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding AvailableGatekeeperModels}" SelectedItem="{Binding GatekeeperModelId}" HorizontalAlignment="Stretch"/>
+                          </StackPanel>
+                          <TextBlock Text="Saves primary-model capacity for conversation."
+                                     Classes="hint"/>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
+                  </StackPanel>
+
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="RESPONSE SHAPING" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
-                      <Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="Base URL" Classes="hint"/>
-                          <TextBox Text="{Binding GatekeeperBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                      <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                        <StackPanel Width="320" Margin="0,0,24,16" Spacing="6">
+                          <TextBlock Text="Max tokens" Classes="settingsCardTitle"/>
+                          <TextBlock Text="Completion ceiling. Raise when long output is clipped." Classes="settingsCardDescription"/>
+                          <NumericUpDown Value="{Binding LlmMaxTokens}" Minimum="1" Maximum="32000" FontSize="13" Padding="10,8" HorizontalAlignment="Left" Width="120"/>
                         </StackPanel>
-                        <StackPanel Grid.Row="1" Spacing="4">
-                          <TextBlock Text="Model ID" Classes="hint"/>
-                          <TextBox Text="{Binding GatekeeperModelId}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                        <StackPanel Width="320" Margin="0,0,0,16" Spacing="6">
+                          <TextBlock Text="Temperature" Classes="settingsCardTitle"/>
+                          <TextBlock Text="Lower values bias toward steadier outputs. Raise it only when you want more variety in phrasing or ideation." Classes="settingsCardDescription"/>
+                          <NumericUpDown Value="{Binding LlmTemperature}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F2" FontSize="13" Padding="10,8" HorizontalAlignment="Left" Width="120"/>
                         </StackPanel>
-                        <TextBlock Grid.Row="2" Text="{Binding EffectiveGatekeeperBaseUrl}" Classes="hint"/>
-                        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10">
-                          <Button Content="Refresh Gatekeeper" Classes="actionBtn" Click="RefreshGatekeeperModelsButton_Click"/>
-                          <TextBlock Text="Falls back to primary URL when blank" Classes="hint" VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <StackPanel Grid.Row="4" Spacing="4">
-                          <TextBlock Text="Discovered models" Classes="hint"/>
-                          <ComboBox ItemsSource="{Binding AvailableGatekeeperModels}" SelectedItem="{Binding GatekeeperModelId}" HorizontalAlignment="Stretch"/>
-                        </StackPanel>
-                      </Grid>
+                      </WrapPanel>
                     </Border>
                   </StackPanel>
-
-                  <!-- Parameters -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="PARAMETERS" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="14" ColumnSpacing="16">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Max tokens" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding LlmMaxTokens}" Minimum="1" Maximum="32000" FontSize="13" Padding="10,8" HorizontalAlignment="Right" Width="120"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Temperature" Classes="formLabel"/>
-                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LlmTemperature}" Minimum="0.0" Maximum="2.0" Increment="0.1" FormatString="F2" FontSize="13" Padding="10,8" HorizontalAlignment="Right" Width="120"/>
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
             <TabItem x:Name="AudioTabItem" Header="Audio &amp; Voice" x:CompileBindings="False">
               <ScrollViewer x:Name="AudioScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="680" Spacing="20">
 
                   <!-- Audio Devices -->
                   <StackPanel Spacing="10">
@@ -1102,9 +1259,11 @@
               </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="WORKSPACE" Classes="navGroupHeader" IsEnabled="False"/>
+
             <TabItem x:Name="MyFilesTabItem" Header="My Files" x:CompileBindings="False">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="680" Spacing="20">
 
                   <!-- File Access -->
                   <StackPanel Spacing="10">
@@ -1116,7 +1275,7 @@
                                   IsChecked="{Binding DisableAllFileAccess}"
                                   Click="DisableAllFileAccessCheckBox_Click"
                                   Classes="settingsCheck"/>
-                        <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. If no folder is listed, file access stays blocked."
+                        <TextBlock Text="Choose which folders MCP file and document tools are allowed to read. Leave this empty to use Sir Thaddeus' temporary workspace instead."
                                    Classes="hint"
                                    TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -1154,203 +1313,265 @@
 
             <TabItem x:Name="SearchTabItem" Header="Search" x:CompileBindings="False">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="760" Spacing="22">
 
-                  <!-- Live Search -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="LIVE SEARCH" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="12">
-                        <CheckBox Content="Enable live web search" IsChecked="{Binding WebSearchEnabled}" Classes="settingsCheck"/>
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="Mode" Classes="hint"/>
-                          <ComboBox ItemsSource="{Binding WebSearchModeOptions}" SelectedItem="{Binding WebSearchMode}" HorizontalAlignment="Stretch"/>
-                        </StackPanel>
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="SEARCH DEFAULTS" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
-                            <TextBlock Text="Timeout (ms)" Classes="hint"/>
-                            <NumericUpDown Value="{Binding WebSearchTimeoutMs}" Minimum="1000" Maximum="120000" Increment="500" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                            <TextBlock Text="Live search behavior" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Enable or tune web searches during normal turns."
+                                       Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="4">
-                            <TextBlock Text="Max results" Classes="hint"/>
-                            <NumericUpDown Value="{Binding WebSearchMaxResults}" Minimum="1" Maximum="20" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                          <CheckBox Content="Enable live web search" IsChecked="{Binding WebSearchEnabled}" Classes="settingsCheck"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Mode" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding WebSearchModeOptions}" SelectedItem="{Binding WebSearchMode}" HorizontalAlignment="Stretch"/>
                           </StackPanel>
-                        </Grid>
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="MCP web permission" Classes="hint"/>
-                          <ComboBox ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch"/>
+                          <WrapPanel ItemWidth="150" Orientation="Horizontal">
+                            <StackPanel Width="150" Margin="0,0,16,8" Spacing="4">
+                              <TextBlock Text="Timeout (ms)" Classes="hint"/>
+                              <NumericUpDown Value="{Binding WebSearchTimeoutMs}" Minimum="1000" Maximum="120000" Increment="500" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                            <StackPanel Width="150" Margin="0,0,0,8" Spacing="4">
+                              <TextBlock Text="Max results" Classes="hint"/>
+                              <NumericUpDown Value="{Binding WebSearchMaxResults}" Minimum="1" Maximum="20" Width="120" FontSize="13" Padding="10,8" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                          </WrapPanel>
                         </StackPanel>
-                      </StackPanel>
-                    </Border>
+                      </Border>
+
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Policy handoff" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Web permission policy applies alongside search settings."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="MCP web permission" Classes="hint"/>
+                            <ComboBox ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch"/>
+                          </StackPanel>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="Effective policy" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchWebPermissionEffective}" Classes="settingsMetricValue"/>
+                              <TextBlock Text="Broader approval defaults live in Permissions."
+                                         Classes="settingsMetricMeta"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                   </StackPanel>
 
-                  <!-- SearXNG -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="SEARXNG" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="12">
-                        <CheckBox Content="Auto-start bundled local SearXNG" IsChecked="{Binding SearxngAutoStart}" Classes="settingsCheck"/>
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="Base URL" Classes="hint"/>
-                          <TextBox Text="{Binding SearxngBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="PROVIDERS" Classes="sectionLabel"/>
+                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Bundled SearXNG" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Local metasearch instance managed by Sir Thaddeus."
+                                       Classes="settingsCardDescription"/>
+                          </StackPanel>
+                          <CheckBox Content="Auto-start bundled local SearXNG" IsChecked="{Binding SearxngAutoStart}" Classes="settingsCheck"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Base URL" Classes="hint"/>
+                            <TextBox Text="{Binding SearxngBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                          </StackPanel>
+                          <WrapPanel ItemWidth="150" Orientation="Horizontal">
+                            <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Status" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchSearxngStatusText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                            <Border Classes="settingsMetricTile" Width="150" Margin="0,0,0,12">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Reachable" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchSearxngReachableText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                            <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,0">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Managed" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchSearxngManagedText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                            <Border Classes="settingsMetricTile" Width="150">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Last launch" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchSearxngLastLaunchStatus}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                          </WrapPanel>
+                          <TextBlock Text="{Binding SearchSearxngMessage}" Classes="hint"/>
                         </StackPanel>
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" RowSpacing="8" ColumnSpacing="16">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="Status" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearxngStatusText}" FontSize="13" FontWeight="SemiBold"/>
+                      </Border>
+
+                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                        <StackPanel Spacing="14">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Hosted search API" Classes="settingsCardTitle"/>
+                            <TextBlock Text="Remote search provider with managed credentials."
+                                       Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Reachable" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearxngReachableText}" FontSize="13"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="API key" Classes="hint"/>
+                            <TextBox Text="{Binding SearchApiKey}" Classes="chatInput" FontSize="13" Padding="12,10"/>
                           </StackPanel>
-                          <StackPanel Grid.Row="1" Spacing="2">
-                            <TextBlock Text="Managed by runtime" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearxngManagedText}" FontSize="13"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Base URL" Classes="hint"/>
+                            <TextBox Text="{Binding SearchApiBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
                           </StackPanel>
-                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Last launch" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearxngLastLaunchStatus}" FontSize="13"/>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Engine" Classes="hint"/>
+                            <TextBox Text="{Binding SearchApiEngine}" Classes="chatInput" FontSize="13" Padding="12,10"/>
                           </StackPanel>
-                        </Grid>
-                        <TextBlock Text="{Binding SearchSearxngMessage}" Classes="hint"/>
-                      </StackPanel>
-                    </Border>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="Hosted provider status" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchSearchApiStatusText}" Classes="settingsMetricValue"/>
+                              <TextBlock Text="{Binding SearchSearchApiMessage}" Classes="settingsMetricMeta"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                   </StackPanel>
 
-                  <!-- Hosted Search API -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="HOSTED SEARCH API" Classes="sectionLabel"/>
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="RUNTIME VISIBILITY" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
-                      <StackPanel Spacing="12">
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="API key" Classes="hint"/>
-                          <TextBox Text="{Binding SearchApiKey}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+                      <StackPanel Spacing="16">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                          <Button x:Name="RefreshSearchStatusButton"
+                                  Content="Refresh search status"
+                                  Classes="settingsSecondaryButton"
+                                  Click="RefreshSearchStatusButton_Click"/>
+                          <TextBlock Text="Refreshes search availability and MCP state."
+                                     Classes="hint"
+                                     VerticalAlignment="Center"/>
                         </StackPanel>
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="Base URL" Classes="hint"/>
-                          <TextBox Text="{Binding SearchApiBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>
+
+                        <WrapPanel ItemWidth="150" Orientation="Horizontal">
+                          <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Effective status" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchStatusText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Live search" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchLiveSearchAvailableText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="MCP status" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchMcpStatusText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="MCP tools" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchMcpToolsAvailableText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile" Width="150" Margin="0,0,12,12">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="Last checked" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchLastCheckedText}" Classes="settingsMetricValue"/>
+                            </StackPanel>
+                          </Border>
+                        </WrapPanel>
+
+                        <Border Classes="settingsMetricTile">
+                          <StackPanel Spacing="6">
+                            <TextBlock Text="MCP server path" Classes="settingsMetricLabel"/>
+                            <TextBlock Text="{Binding SearchMcpServerPath}" Classes="settingsMetricMeta"/>
+                          </StackPanel>
+                        </Border>
+
+                        <StackPanel Spacing="10">
+                          <TextBlock Text="LAST TRACE" Classes="sectionLabel" Margin="0,4,0,0"/>
+                          <WrapPanel ItemWidth="220" Orientation="Horizontal">
+                            <Border Classes="settingsMetricTile" Width="220" Margin="0,0,12,12">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Status" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchLastProviderStatusText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                            <Border Classes="settingsMetricTile" Width="220" Margin="0,0,12,12">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Provider" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchLastProviderText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                            <Border Classes="settingsMetricTile" Width="220" Margin="0,0,0,12">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="Time" Classes="settingsMetricLabel"/>
+                                <TextBlock Text="{Binding SearchLastProviderCheckedText}" Classes="settingsMetricValue"/>
+                              </StackPanel>
+                            </Border>
+                          </WrapPanel>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="Query" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchLastQueryText}" Classes="settingsMetricMeta"/>
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="settingsMetricTile">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="Trace path" Classes="settingsMetricLabel"/>
+                              <TextBlock Text="{Binding SearchLastPathText}" Classes="settingsMetricMeta"/>
+                            </StackPanel>
+                          </Border>
                         </StackPanel>
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="Engine" Classes="hint"/>
-                          <TextBox Text="{Binding SearchApiEngine}" Classes="chatInput" FontSize="13" Padding="12,10"/>
-                        </StackPanel>
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="Status" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearchApiStatusText}" FontSize="13" FontWeight="SemiBold"/>
-                          </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Message" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchSearchApiMessage}" FontSize="13" TextWrapping="Wrap"/>
-                          </StackPanel>
-                        </Grid>
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
 
-                  <!-- Runtime + MCP -->
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="RUNTIME + MCP" Classes="sectionLabel"/>
-                    <Border Classes="settingsCard">
-                      <StackPanel Spacing="12">
-                        <Button x:Name="RefreshSearchStatusButton" Content="Refresh Search Status" Classes="actionBtn" Click="RefreshSearchStatusButton_Click"/>
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="16">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="Effective status" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchStatusText}" FontSize="13" FontWeight="SemiBold"/>
-                          </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Live search" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLiveSearchAvailableText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="1" Spacing="2">
-                            <TextBlock Text="MCP status" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchMcpStatusText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
-                            <TextBlock Text="MCP tools" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchMcpToolsAvailableText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="2" Spacing="2">
-                            <TextBlock Text="Web permission" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchWebPermissionEffective}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Last checked" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastCheckedText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="3" Spacing="2">
-                            <TextBlock Text="MCP server path" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchMcpServerPath}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Overlay0Brush}"/>
-                          </StackPanel>
-                        </Grid>
-
-                        <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.5" Margin="0,4"/>
-
-                        <TextBlock Text="LAST TRACE" Classes="sectionLabel" Margin="0,4,0,0"/>
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="16">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="Status" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastProviderStatusText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Provider" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastProviderText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="1" Spacing="2">
-                            <TextBlock Text="Query" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastQueryText}" FontSize="13" TextWrapping="Wrap"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
-                            <TextBlock Text="Time" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastProviderCheckedText}" FontSize="13"/>
-                          </StackPanel>
-                          <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
-                            <TextBlock Text="Path" Classes="hint"/>
-                            <TextBlock Text="{Binding SearchLastPathText}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Overlay0Brush}"/>
-                          </StackPanel>
-                        </Grid>
                         <TextBlock Text="{Binding SearchStatusMessage}" Classes="hint"/>
                         <TextBlock Text="{Binding SearchMcpMessage}" Classes="hint"/>
                         <TextBlock Text="{Binding SearchLastFailureText}" Classes="hint"/>
                       </StackPanel>
                     </Border>
                   </StackPanel>
-
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="OVERSIGHT" Classes="navGroupHeader" IsEnabled="False"/>
 
             <TabItem x:Name="PermissionsTabItem" Header="Permissions" x:CompileBindings="False">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="48,32,48,32" MaxWidth="680" Spacing="24">
+                <StackPanel Margin="32,24,36,32" MaxWidth="760" Spacing="22">
+
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="LIVE REQUESTS" Classes="sectionLabel"/>
 
                   <!-- ── Permission Request Card ── -->
                   <Border x:Name="PermissionRequestCard"
                           IsVisible="False"
-                          Background="{StaticResource MantleBrush}"
-                          BorderBrush="{StaticResource Surface1Brush}"
-                          BorderThickness="1"
-                          CornerRadius="{StaticResource RadiusLg}"
-                          Padding="24,20">
+                          Classes="settingsStatusCard">
                     <StackPanel Spacing="16">
                       <!-- Header -->
                       <StackPanel Orientation="Horizontal" Spacing="10">
                         <TextBlock Text="&#x1F510;" FontSize="22" VerticalAlignment="Center"/>
                         <TextBlock Text="Permission Required"
                                    FontSize="18" FontWeight="Bold"
-                                   Foreground="{StaticResource TextBrush}"
+                                   Foreground="{DynamicResource TextPrimary}"
                                    VerticalAlignment="Center"/>
                       </StackPanel>
 
                       <!-- Structured fields -->
-                      <Border Background="{StaticResource Surface0Brush}"
-                              CornerRadius="{StaticResource RadiusSm}"
+                      <Border Classes="settingsMetricTile"
                               Padding="16,14">
                         <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*" RowSpacing="8" ColumnSpacing="14">
                           <TextBlock Grid.Row="0" Grid.Column="0" Text="Tool:"
-                                     Foreground="{StaticResource Subtext0Brush}"
+                                     Foreground="{DynamicResource TextTertiary}"
                                      FontWeight="SemiBold" FontSize="13"/>
                           <TextBlock x:Name="PermToolNameText" Grid.Row="0" Grid.Column="1"
                                      Foreground="{StaticResource PeachBrush}"
@@ -1358,24 +1579,24 @@
                                      FontSize="13"/>
 
                           <TextBlock Grid.Row="1" Grid.Column="0" Text="Category:"
-                                     Foreground="{StaticResource Subtext0Brush}"
+                                     Foreground="{DynamicResource TextTertiary}"
                                      FontWeight="SemiBold" FontSize="13"/>
                           <TextBlock x:Name="PermCategoryText" Grid.Row="1" Grid.Column="1"
-                                     Foreground="{StaticResource TextBrush}"
+                                     Foreground="{DynamicResource TextPrimary}"
                                      FontWeight="Bold" FontSize="13"/>
 
                           <TextBlock Grid.Row="2" Grid.Column="0" Text="What it does:"
-                                     Foreground="{StaticResource Subtext0Brush}"
+                                     Foreground="{DynamicResource TextTertiary}"
                                      FontWeight="SemiBold" FontSize="13"/>
                           <TextBlock x:Name="PermDescriptionText" Grid.Row="2" Grid.Column="1"
-                                     Foreground="{StaticResource Subtext1Brush}"
+                                     Foreground="{DynamicResource TextSecondary}"
                                      FontSize="13" TextWrapping="Wrap"/>
 
                           <TextBlock Grid.Row="3" Grid.Column="0" Text="Details:"
-                                     Foreground="{StaticResource Subtext0Brush}"
+                                     Foreground="{DynamicResource TextTertiary}"
                                      FontWeight="SemiBold" FontSize="13"/>
                           <TextBlock x:Name="PermDetailsText" Grid.Row="3" Grid.Column="1"
-                                     Foreground="{StaticResource Subtext1Brush}"
+                                     Foreground="{DynamicResource TextSecondary}"
                                      FontFamily="Cascadia Mono,Consolas,monospace"
                                      FontSize="12" TextWrapping="Wrap"/>
                         </Grid>
@@ -1395,79 +1616,77 @@
                       </Border>
 
                       <!-- Action buttons -->
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Spacing="8">
+                      <WrapPanel Orientation="Horizontal" HorizontalAlignment="Left">
                         <Button x:Name="DenyPermissionButton" Content="Deny"
                                 Classes="denyBtn" IsEnabled="False"
-                                Click="DenyPermissionButton_Click"/>
+                                Click="DenyPermissionButton_Click" Margin="0,0,8,8"/>
                         <Button x:Name="ApprovePermissionButton" Content="Allow once"
                                 Classes="allowOnceBtn" IsEnabled="False"
-                                Click="ApprovePermissionButton_Click"/>
+                                Click="ApprovePermissionButton_Click" Margin="0,0,8,8"/>
                         <Button x:Name="AllowSessionButton" Content="Allow for session"
                                 Classes="allowSessionBtn" IsEnabled="False"
-                                Click="AllowSessionButton_Click"/>
+                                Click="AllowSessionButton_Click" Margin="0,0,8,8"/>
                         <Button x:Name="AllowAlwaysButton" Content="Allow always"
                                 Classes="allowAlwaysBtn" IsEnabled="False"
-                                Click="AllowAlwaysButton_Click"/>
-                      </StackPanel>
+                                Click="AllowAlwaysButton_Click" Margin="0,0,0,8"/>
+                      </WrapPanel>
                     </StackPanel>
                   </Border>
 
                   <!-- ── No Pending (shown when idle) ── -->
                   <Border x:Name="PermissionIdleCard"
                           IsVisible="True"
-                          Background="{StaticResource MantleBrush}"
-                          BorderBrush="{StaticResource Surface0Brush}"
-                          BorderThickness="1"
-                          CornerRadius="{StaticResource RadiusMd}"
-                          Padding="20,16">
+                          Classes="settingsCard">
                     <TextBlock x:Name="PermissionSummaryText"
                                Text="No pending permission requests."
                                FontSize="13"
-                               Foreground="{StaticResource Overlay1Brush}"
+                               Foreground="{DynamicResource TextSecondary}"
                                HorizontalAlignment="Center"/>
                   </Border>
+
+                  </StackPanel>
 
                   <!-- Hidden payload box for data transfer -->
                   <TextBox x:Name="PermissionPayloadBox" IsVisible="False" IsReadOnly="True"/>
 
                   <!-- ── MCP Policies ── -->
                   <StackPanel Spacing="10">
-                    <TextBlock Text="MCP PERMISSION POLICIES" Classes="sectionLabel"/>
-                    <TextBlock Text="Require confirmation before the agent acts in these capability groups." Classes="hint" Margin="0,0,0,4"/>
+                    <TextBlock Text="DEFAULT POLICIES" Classes="sectionLabel"/>
+                    <TextBlock Text="Baseline approval posture for each capability." Classes="hint" Margin="0,0,0,4"/>
                     <Border Classes="settingsCard">
                       <StackPanel Spacing="14">
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="Developer override" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="Developer override" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding DeveloperOverrideOptions}" SelectedItem="{Binding McpDeveloperOverride}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="Screen capture" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="Screen capture" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpScreen}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="File system (read &amp; write)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="File system (read &amp; write)" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpFiles}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="System commands" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="System commands" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpSystem}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="Web navigation &amp; search" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="Web navigation &amp; search" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpWeb}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="Memory (read)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="Memory (read)" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpMemoryRead}" HorizontalAlignment="Stretch"/>
                         </Grid>
                         <Border Height="1" Background="{StaticResource Surface0Brush}" Opacity="0.4"/>
                         <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                          <TextBlock Text="Memory (write)" FontSize="13" Foreground="{StaticResource Subtext1Brush}" VerticalAlignment="Center"/>
+                          <TextBlock Text="Memory (write)" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
                           <ComboBox Grid.Column="1" ItemsSource="{Binding PermissionOptions}" SelectedItem="{Binding McpMemoryWrite}" HorizontalAlignment="Stretch"/>
                         </Grid>
                       </StackPanel>
@@ -1583,6 +1802,8 @@
                 </Border>
               </Grid>
             </TabItem>
+
+            <TabItem Header="PERSONAL" Classes="navGroupHeader" IsEnabled="False"/>
 
             <TabItem x:Name="ProfilesTabItem" Header="Profiles">
               <Grid RowDefinitions="Auto,*,Auto" RowSpacing="0">
@@ -1712,6 +1933,23 @@
               </Grid>
             </TabItem>
             </TabControl>
+
+            <Border Grid.Column="1"
+                    Classes="settingsPaneSurface"
+                    x:CompileBindings="False">
+              <Grid RowDefinitions="Auto,*"
+                    ClipToBounds="True">
+                <Border Classes="settingsPaneHeader">
+                  <TextBlock Text="{Binding SelectedItem.Header, ElementName=SettingsTabControl}"
+                             Classes="settingsPaneTitle"/>
+                </Border>
+                <ContentControl Grid.Row="1"
+                                Content="{Binding SelectedContent, ElementName=SettingsTabControl}"
+                                ContentTemplate="{Binding SelectedContentTemplate, ElementName=SettingsTabControl}"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch"/>
+              </Grid>
+            </Border>
           </Grid>
         </Grid>
       </Grid>
@@ -2044,6 +2282,7 @@
           </ScrollViewer>
         </Grid>
       </Border>
+    </Grid>
     </Grid>
 
     <Border Grid.Row="2" x:Name="InputBar"

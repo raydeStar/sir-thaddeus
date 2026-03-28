@@ -75,4 +75,19 @@
     <Thickness x:Key="CardPadding">16,14</Thickness>
     <Thickness x:Key="SectionSpacing">0,6</Thickness>
 
+    <!-- ── Settings Navigation Tokens ────────────────────────── -->
+    <SolidColorBrush x:Key="SettingsNavBg"          Color="#0D0D12"/>
+    <SolidColorBrush x:Key="SettingsContentBg"       Color="#111118"/>
+    <SolidColorBrush x:Key="SettingsNavItemHoverBg"  Color="#1A1A26"/>
+    <SolidColorBrush x:Key="SettingsNavItemActiveBg" Color="#1E1E2C"/>
+    <SolidColorBrush x:Key="SettingsNavAccent"       Color="#5B8DEF"/>
+    <SolidColorBrush x:Key="SettingsShellBg"         Color="#10151D"/>
+    <SolidColorBrush x:Key="SettingsShellBorder"     Color="#222B37"/>
+    <SolidColorBrush x:Key="SettingsCardBg"          Color="#16161F"/>
+    <SolidColorBrush x:Key="SettingsCardBorder"      Color="#232330"/>
+    <SolidColorBrush x:Key="SettingsStatusCardBg"    Color="#13131B"/>
+    <SolidColorBrush x:Key="SettingsMetricBg"        Color="#111723"/>
+    <SolidColorBrush x:Key="SettingsMetricBorder"    Color="#293242"/>
+    <SolidColorBrush x:Key="SettingsDirtyAccent"     Color="#D4A94E"/>
+
 </ResourceDictionary>
