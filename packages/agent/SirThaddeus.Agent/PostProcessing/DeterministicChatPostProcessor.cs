@@ -1316,12 +1316,14 @@ public sealed class DeterministicChatPostProcessor
 
         var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal)
                              .Replace('\r', '\n');
-        var signature = "\n-- Sir Thaddeus";
-        var signatureIndex = normalized.IndexOf(signature, StringComparison.Ordinal);
-        if (signatureIndex < 0)
+        var signatureMatch = Regex.Match(
+            normalized,
+            @"--\s*Sir\s+Thaddeus\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!signatureMatch.Success)
             return text;
 
-        var afterSignature = signatureIndex + signature.Length;
+        var afterSignature = signatureMatch.Index + signatureMatch.Length;
         if (afterSignature >= normalized.Length)
             return text;
 

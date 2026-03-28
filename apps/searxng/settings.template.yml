@@ -25,7 +25,11 @@ engines:
   - name: google
     disabled: true
   - name: duckduckgo
-    disabled: true
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false
   - name: ahmia
     disabled: true
   - name: torch

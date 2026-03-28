@@ -246,14 +246,20 @@ public sealed partial class AgentOrchestrator
                 "Normalized misrouted lookup intent to LookupNews for an explicit news request.");
         }
 
+        var shouldNormalizeSelfContainedLookupToChat =
+            !webEvidence.ShouldLookup &&
+            footmanDecision?.IsAuthoritative != true &&
+            IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lowerIncoming) &&
+            (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) ||
+             route.Confidence > 0.90);
+
         if (!route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.SystemTask, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.BrowseOnce, StringComparison.OrdinalIgnoreCase) &&
-            !webEvidence.ShouldLookup &&
-            IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lowerIncoming))
+            shouldNormalizeSelfContainedLookupToChat)
         {
             route = DefaultRouter.MakeRoute(
                 Intents.ChatOnly,

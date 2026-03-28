@@ -1,6 +1,7 @@
 using SirThaddeus.Agent.Dialogue;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -50,13 +51,13 @@ public sealed class UtilityIntentHandler : IUtilityIntentHandler
             }
         }
 
-        if (utilityResult is null && request.BuildFromToolPlan is not null)
-            utilityResult = request.BuildFromToolPlan(toolPlan, message);
-
         if (utilityResult is null && request.TryContextFollowUp is not null)
             utilityResult = request.TryContextFollowUp(message) ?? UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
         else
             utilityResult ??= UtilityRouter.TryHandle(message, request.UserLocationHint, request.PreferredUnits);
+
+        if (utilityResult is null && request.BuildFromToolPlan is not null)
+            utilityResult = request.BuildFromToolPlan(toolPlan, message);
 
         if (utilityResult is null &&
             request.TryInferWithLlmAsync is not null &&

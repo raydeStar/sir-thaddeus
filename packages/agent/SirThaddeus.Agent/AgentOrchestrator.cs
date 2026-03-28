@@ -116,16 +116,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
 
-    public int MaxTokensBudget
-    {
-        get => _maxTokensCasual;
-        set
-        {
-            _maxTokensCasual = value > 0 ? value : 512;
-            _maxTokensCasualRetry = Math.Max(_maxTokensCasual, 2048);
-        }
-    }
-
     private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
 
     private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
@@ -165,140 +155,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
-    public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
-    {
-        foreach (var (role, content) in priorMessages)
-        {
-            if (string.IsNullOrWhiteSpace(content)) continue;
-
-            switch (role)
-            {
-                case "user":
-                    _history.Add(ChatMessage.User(content));
-                    break;
-                case "assistant":
-                    _history.Add(ChatMessage.Assistant(content));
-                    break;
-            }
-        }
-
-        TrimHistory();
-    }
-
-    public bool ContextLocked
-    {
-        get => _dialogueStore.Get().ContextLocked;
-        set
-        {
-            var current = _dialogueStore.Get();
-            if (current.ContextLocked == value)
-                return;
-
-            _dialogueStore.Update(current with { ContextLocked = value });
-        }
-    }
-
     private enum ChatIntent
     {
         Casual,
         WebLookup,
         Tooling
-    }
-
-    public AgentOrchestrator(
-        ILlmClient llm,
-        IMcpToolClient mcp,
-        IAuditLogger audit,
-        string systemPrompt,
-        TimeProvider? timeProvider = null,
-        IDialogueStateStore? dialogueStateStore = null,
-        SlotExtract? slotExtract = null,
-        MergeSlots? mergeSlots = null,
-        ValidateSlots? validateSlots = null,
-        IToolPlanner? toolPlanner = null,
-        string geocodeMismatchMode = "fallback_previous",
-        IRouter? router = null,
-        IMemoryContextProvider? memoryContextProvider = null,
-        IToolLoopExecutor? toolLoopExecutor = null,
-        IDeterministicUtilityEngine? deterministicUtilityEngine = null,
-        IGuardrailsCoordinator? guardrailsCoordinator = null,
-        ISelfMemorySummarizer? selfMemorySummarizer = null,
-        ISearchFallbackExecutor? searchFallbackExecutor = null,
-        IContextAnchoringService? contextAnchoringService = null,
-        IUtilityIntentHandler? utilityIntentHandler = null,
-        IConversationSegmenter? conversationSegmenter = null,
-        MiniActionableExtractor? miniActionableExtractor = null,
-        SegmentExecutionCoordinator? segmentExecutionCoordinator = null,
-        UnifiedResponseComposer? unifiedResponseComposer = null,
-        IPersonalityRuntime? personalityRuntime = null,
-        string? activePersonalityId = null,
-        string? personalityProfilesDirectory = null,
-        IFootmanRouter? footmanRouter = null,
-        IAutoMemoryExtractor? autoMemoryExtractor = null,
-        ILlmClient? gatekeeperLlm = null)
-    {
-        _llm = llm ?? throw new ArgumentNullException(nameof(llm));
-        _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
-        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
-        _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _activePersonalityId = NormalizePersonalityId(activePersonalityId);
-        _personalityProfilesDirectory = string.IsNullOrWhiteSpace(personalityProfilesDirectory)
-            ? ResolveDefaultPersonalityProfilesDirectory()
-            : personalityProfilesDirectory.Trim();
-        _personalityRuntime = personalityRuntime ?? new PersonalityRuntime(
-            _activePersonalityId,
-            _personalityProfilesDirectory);
-
-        _searchOrchestrator = new SearchOrchestrator(
-            llm,
-            mcp,
-            audit,
-            _personalityRuntime.BuildSystemPrompt(_systemPrompt))
-        {
-            PreferredUnits = _preferredUnits
-        };
-        _dialogueStore = dialogueStateStore ?? new DialogueStateStore(_timeProvider);
-        _slotExtract = slotExtract ?? new SlotExtract(llm, audit);
-        _mergeSlots = mergeSlots ?? new MergeSlots();
-        _validateSlots = validateSlots ?? new ValidateSlots(new ValidationOptions
-        {
-            GeocodeMismatchMode = geocodeMismatchMode
-        });
-        _toolPlanner = toolPlanner ?? new ToolPlanner();
-        
-        var effectiveGatekeeper = gatekeeperLlm ?? llm;
-        _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
-        _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
-        _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
-            mcp,
-            audit,
-            new SmartIntentClassifier(effectiveGatekeeper, audit),
-            _timeProvider);
-        _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
-        _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
-        _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
-        _postProcessor = new DeterministicChatPostProcessor(() => _personalityRuntime.Snapshot.Profile);
-        _selfMemorySummarizer = selfMemorySummarizer ?? new SelfMemorySummarizer(mcp);
-        _searchFallbackExecutor = searchFallbackExecutor ?? new SearchFallbackExecutor(_searchOrchestrator);
-        _contextAnchoringService = contextAnchoringService ?? new ContextAnchoringService(
-            _dialogueStore,
-            _searchOrchestrator,
-            _timeProvider);
-        _utilityIntentHandler = utilityIntentHandler ?? new UtilityIntentHandler();
-        _conversationSegmenter = conversationSegmenter ?? new ConversationSegmenter();
-        _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
-        _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
-        _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
-        _toolAliasResolver = new Tools.ToolAliasResolver(mcp);
-        _footmanRouter = footmanRouter;
-        _autoMemoryExtractor = autoMemoryExtractor;
-
-        _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
-
-        var personalitySnapshot = _personalityRuntime.Snapshot;
-        EmitPersonalityAuditSnapshot(personalitySnapshot, _activePersonalityId);
     }
 
     public Task<AgentResponse> ProcessAsync(
@@ -355,7 +216,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             }, usageBaseline);
         }
 
-        if (TryBuildDeterministicBenignFallback(userMessage) is { Length: > 0 } deterministicBenignReply &&
+        if (TryBuildEarlyDeterministicBenignFallback(userMessage) is { Length: > 0 } deterministicBenignReply &&
             !IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lowerIncoming) &&
             !IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) &&
             !IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) &&
@@ -405,6 +266,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 });
             }
 
+            var deterministicGuardrailsRationale = BuildDeterministicGuardrailsRationale(userMessage);
+            if (deterministicGuardrailsRationale.Count > 0)
+            {
+                _lastFirstPrinciplesRationale = deterministicGuardrailsRationale.Take(3).ToArray();
+                _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+            }
+
             LogEvent("AGENT_DETERMINISTIC_BENIGN_FALLBACK",
                 "Answered from deterministic fallback without entering route/tool orchestration.");
             AppendAssistantMessage(deterministicBenignReply);
@@ -413,7 +281,9 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 Text = deterministicBenignReply,
                 Success = true,
                 ToolCallsMade = deterministicToolCalls,
-                LlmRoundTrips = 0
+                LlmRoundTrips = 0,
+                GuardrailsUsed = deterministicGuardrailsRationale.Count > 0,
+                GuardrailsRationale = deterministicGuardrailsRationale
             }, usageBaseline);
         }
 
@@ -675,6 +545,33 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 AppendAssistantMessage(firstPrinciplesFollowUp.Text);
                 LogEvent("FIRST_PRINCIPLES_FOLLOWUP", firstPrinciplesFollowUp.Text);
                 return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
+            }
+
+            var classicLogicResult = ClassicReasoningEngine.TryMatch(contextualUserMessage);
+            if (classicLogicResult is not null &&
+                string.Equals(classicLogicResult.Category, "logic", StringComparison.OrdinalIgnoreCase))
+            {
+                var classicLogicText = classicLogicResult.Answer;
+                _lastFirstPrinciplesRationale =
+                [
+                    "Goal: solve the self-contained logic puzzle from the prompt.",
+                    "Constraint: use only the stated facts and avoid tool or web escalation.",
+                    "Decision: return the deterministic solver result directly."
+                ];
+                _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+                AppendAssistantMessage(classicLogicText);
+                LogEvent("CLASSIC_LOGIC_RESPONSE", classicLogicText);
+                LogEvent("AGENT_RESPONSE", classicLogicText);
+
+                return AttachContextSnapshot(new AgentResponse
+                {
+                    Text = classicLogicText,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = roundTrips,
+                    GuardrailsUsed = true,
+                    GuardrailsRationale = _lastFirstPrinciplesRationale
+                }, usageBaseline);
             }
 
             var shouldAllowDeterministicSpecialCase =

@@ -30,14 +30,15 @@ internal static class RouteArbitrationPolicy
         }
 
         if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+            webEvidence.ShouldLookup &&
+            route.Confidence >= 0.88 &&
+            !LooksLikeWeatherSensitiveLookup(lowerIncoming))
         {
             return false;
         }
 
         if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
-            webEvidence.ShouldLookup &&
-            route.Confidence >= 0.88)
+            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
         {
             return false;
         }
@@ -175,4 +176,18 @@ internal static class RouteArbitrationPolicy
         intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeWeatherSensitiveLookup(string lowerIncoming)
+    {
+        if (string.IsNullOrWhiteSpace(lowerIncoming))
+            return false;
+
+        return lowerIncoming.Contains("weather", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("forecast", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("temperature", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("humidity", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("wind", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("rain", StringComparison.Ordinal) ||
+               lowerIncoming.Contains("snow", StringComparison.Ordinal);
+    }
 }

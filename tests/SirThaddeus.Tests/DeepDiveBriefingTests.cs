@@ -249,8 +249,10 @@ Phone: (503) 555-9580
         Assert.True(result.Success);
         Assert.NotNull(result.Briefing);
 
-        // Conflicting hours (9-5 vs 10-6) should trigger low confidence.
-        Assert.Equal("low", result.Briefing!.Hero.Confidence);
+        // Conflicting hours (9-5 vs 10-6) should still yield medium
+        // confidence because data WAS extracted.  Conflict adds a warning
+        // but does not downgrade confidence to low.
+        Assert.Equal("medium", result.Briefing!.Hero.Confidence);
         Assert.Contains(result.Briefing.Cards, c => c.Type == "warnings");
 
         // Even with conflicts, hours should be PRESENT (not placeholder text).
@@ -269,6 +271,56 @@ Phone: (503) 555-9580
         Assert.Contains("Phone:", result.AssistantText!, StringComparison.Ordinal);
         Assert.Contains("Briefing summary:", result.AssistantText!, StringComparison.Ordinal);
         Assert.DoesNotContain("Briefing tab", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeepDiveCoordinator_AssistantLead_IncludesReviewSignal_WhenAvailable()
+    {
+        var briefing = new DeepDiveBriefing
+        {
+            Topic = new DeepDiveTopic
+            {
+                Kind = DeepDiveConstants.KindPlace,
+                Query = "Richard's Deli Hillsboro OR",
+                Timezone = "America/Los_Angeles",
+                Locale = "en-US"
+            },
+            Hero = new DeepDiveHero
+            {
+                Title = "Richard's Deli",
+                Confidence = "medium",
+                StatusLine = "Details from web sources",
+                LastCheckedIso = DateTimeOffset.UtcNow.ToString("O"),
+                Address = "2559 SE Tualatin Valley Hwy, Hillsboro, OR 97123",
+                Phone = "(503) 619-0506"
+            },
+            Cards =
+            [
+                new DeepDiveCard
+                {
+                    Type = "reviews",
+                    Title = "Reviews",
+                    Bullets =
+                    [
+                        "Average rating: 4.6 across 120 ratings.",
+                        "People often praise service quality and staff friendliness.",
+                        "No dominant complaint theme surfaced in sampled snippets."
+                    ],
+                    Sources = [Source("yelp", "https://www.yelp.com/biz/richards-deli-hillsboro")]
+                }
+            ]
+        };
+
+        var method = typeof(DeepDiveCoordinator).GetMethod(
+            "BuildAssistantLead",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.NotNull(method);
+
+        var assistantLead = Assert.IsType<string>(method!.Invoke(null, [briefing]));
+
+        Assert.Contains("Average rating: 4.6 across 120 ratings.", assistantLead, StringComparison.Ordinal);
+        Assert.Contains("People often praise service quality and staff friendliness.", assistantLead, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -391,8 +443,10 @@ Phone: (503) 555-9580
         Assert.True(result.Success);
         Assert.NotNull(result.Briefing);
         Assert.Contains("appears open now", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("5613 SE 82nd Ave", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("13459 NW Cornell Rd", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        // With priority-based source ordering, the Yelp source (review site)
+        // is browsed before the generic business homepage, so the Yelp address
+        // is preferred.
+        Assert.Contains("13459 NW Cornell Rd", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("12090 SW Main St", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
     }
 

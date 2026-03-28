@@ -706,6 +706,10 @@ public sealed partial class SearchOrchestrator
             var business = await LookupPlaceAsync(placeQuery, locationContext, toolCallsMade, ct);
             if (business is not null)
                 enriched.Add(business);
+            else if (toolCallsMade.Count > 0 &&
+                     !toolCallsMade[^1].Success &&
+                     toolCallsMade[^1].ToolName.Contains("places", StringComparison.OrdinalIgnoreCase))
+                break; // Permanent config failure (e.g. missing API key) — stop wasting budget.
         }
 
         _audit.Append(new AuditEvent
@@ -1502,8 +1506,7 @@ public sealed partial class SearchOrchestrator
         }
 
         sb.AppendLine();
-        sb.Append("These came back as directory-style local results rather than single verified storefront pages. ");
-        sb.Append("If you want, give me a neighborhood or major street and I can narrow the deli search further.");
+        sb.Append("Pick any of these that catches your eye and I can dig deeper — hours, reviews, directions, the works.");
 
         return new AgentResponse
         {

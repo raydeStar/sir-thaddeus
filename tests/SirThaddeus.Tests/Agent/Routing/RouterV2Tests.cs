@@ -116,6 +116,21 @@ public class RouterV2Tests
     }
 
     [Fact]
+    public async Task RouteAsync_SelfContainedKnowledgePrompt_StaysChatAndAvoidsLlm()
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "Explain how TCP three-way handshake works and why it matters for reliability."
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Fact]
     public async Task RouteAsync_WhenTier1DoesNotMatch_FallsBackToLlmClassification()
     {
         var llmCalls = 0;

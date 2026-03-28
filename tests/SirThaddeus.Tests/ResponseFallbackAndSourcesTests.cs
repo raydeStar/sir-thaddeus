@@ -370,6 +370,23 @@ public class BareResponseEnrichmentTests
         Assert.DoesNotContain("knowledge cutoff", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedSearchAnswer_TrimsInlineDuplicateAfterSignature()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Here are the main stories I found:\n1. Story one\n2. Story two -- Sir Thaddeus I am Sir Thaddeus, and I don't have access to live search results or real-time internet feeds of my own machine.",
+            new List<ToolCallRecord>
+            {
+                new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 2 result(s) returned]", Success = true }
+            },
+            "Search for a recent technology headline and summarize it in two sentences.");
+
+        Assert.Contains("Here are the main stories I found", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-- Sir Thaddeus", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("don't have access to live search results", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("real-time internet feeds", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("The store closes at 9 PM tonight.", "Is the store open?")]
     [InlineData("Normal assistant fallback.", "What time is it?")]

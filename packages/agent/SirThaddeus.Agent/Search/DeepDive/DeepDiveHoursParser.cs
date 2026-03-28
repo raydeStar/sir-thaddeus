@@ -28,10 +28,15 @@ public static class DeepDiveHoursParser
         @"(?<day>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*[:\-–—]?\s+(?<hours>.+?)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Multiline);
 
-    // Pattern 2: Day ranges — "Mon-Fri: 9am-5pm" or "Monday - Friday 9:00 AM - 5:00 PM"
+    // Pattern 2: Day ranges — "Mon-Fri: 9am-5pm", "Monday - Friday 9:00 AM - 5:00 PM", "Monday through Saturday"
     private static readonly Regex DayRangeRegex = new(
-        @"(?<start>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*[-–—]\s*(?<end>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*[:\-–—]?\s+(?<hours>.+?)$",
+        @"(?<start>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*(?:[-–—]|through|thru)\s*(?<end>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*[:\-–—]?\s+(?<hours>.+?)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Multiline);
+
+    // Pattern 2b: Natural-language hours — "from 10:30 am to 6:00 pm Monday through Saturday"
+    private static readonly Regex NaturalLanguageHoursRegex = new(
+        @"(?:from\s+)?(?<hours>\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to|-|–|—)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*,?\s*(?<start>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*(?:[-–—]|through|thru)\s*(?<end>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Pattern 3: HTML table cell artifacts — "Monday</td><td>8:00 AM - 5:00 PM"
     private static readonly Regex HtmlCellRegex = new(
@@ -74,11 +79,15 @@ public static class DeepDiveHoursParser
                 continue;
 
             // Strip common HTML noise to expose the text
-            var cleaned = StripHtmlTags(chunk);
+            var cleaned = NormalizeTimePeriods(StripHtmlTags(chunk));
             var lines = cleaned
                 .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0);
+
+            // Try natural-language patterns on the full cleaned text
+            // before line-by-line parsing ("from 10:30 am to 6:00 pm Monday through Saturday")
+            TryParseNaturalLanguageHours(cleaned, byDay);
 
             foreach (var line in lines)
             {
@@ -159,7 +168,7 @@ public static class DeepDiveHoursParser
             if (string.IsNullOrWhiteSpace(chunk))
                 continue;
 
-            var text = StripHtmlTags(chunk);
+            var text = NormalizeTimePeriods(StripHtmlTags(chunk));
             text = Regex.Replace(text, @"\s+", " ");
 
             var closesMatch = ClosesAtRegex.Match(text);
@@ -377,6 +386,55 @@ public static class DeepDiveHoursParser
         result = Regex.Replace(result, @"<[^>]+>", " ");
         result = Regex.Replace(result, @"[ \t]+", " ");
         return result;
+    }
+
+    /// <summary>
+    /// Normalizes period-separated time markers to their compact forms:
+    /// "a.m." → "am", "p.m." → "pm". Many real-world sites use the
+    /// period-separated form (AP style).
+    /// </summary>
+    private static string NormalizeTimePeriods(string input)
+    {
+        var result = Regex.Replace(input, @"a\.m\.", "am", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"p\.m\.", "pm", RegexOptions.IgnoreCase);
+        return result;
+    }
+
+    /// <summary>
+    /// Matches natural-language hour statements like
+    /// "from 10:30 am to 6:00 pm Monday through Saturday" or
+    /// "open 10 am to 8 pm, 7 days a week".
+    /// </summary>
+    private static void TryParseNaturalLanguageHours(
+        string text,
+        Dictionary<string, HashSet<string>> byDay)
+    {
+        foreach (Match match in NaturalLanguageHoursRegex.Matches(text))
+        {
+            var hours = match.Groups["hours"].Value.Trim();
+            var startDay = NormalizeDay(match.Groups["start"].Value.Trim());
+            var endDay = NormalizeDay(match.Groups["end"].Value.Trim());
+
+            if (string.IsNullOrWhiteSpace(startDay) || string.IsNullOrWhiteSpace(endDay))
+                continue;
+
+            var canonical = CanonicalizeHours(hours);
+            if (string.IsNullOrWhiteSpace(canonical))
+                continue;
+
+            var allDays = new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+            var startIdx = Array.IndexOf(allDays, startDay);
+            var endIdx = Array.IndexOf(allDays, endDay);
+
+            if (startIdx < 0 || endIdx < 0)
+                continue;
+
+            for (var i = startIdx; ; i = (i + 1) % 7)
+            {
+                AddToDay(byDay, allDays[i], canonical);
+                if (i == endIdx) break;
+            }
+        }
     }
 }
 

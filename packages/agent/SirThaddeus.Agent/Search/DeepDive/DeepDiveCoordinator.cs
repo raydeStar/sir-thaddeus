@@ -19,6 +19,16 @@ public sealed partial class DeepDiveCoordinator
     private const int DefaultMaxToolCalls = 8;
     private const int DefaultMaxOpenedSources = 5;
 
+    // Words that commonly precede state codes but aren't city names.
+    private static readonly HashSet<string> _regionCityStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "and", "for", "are", "but", "not", "you", "all",
+        "can", "had", "her", "his", "was", "one", "our", "out",
+        "has", "its", "how", "did", "get", "let", "say", "she",
+        "too", "use", "way", "who", "new", "now", "old", "see",
+        "open", "hours", "near", "close", "does", "when", "what"
+    };
+
     private readonly IMcpToolClient _mcp;
     private readonly IAuditLogger _audit;
     private readonly DeepDiveBriefingAssembler _assembler;
@@ -138,6 +148,19 @@ public sealed partial class DeepDiveCoordinator
             "details_fetch",
             "Requested place details.");
 
+        // If places_lookup returned a permanent config error (e.g. no Google API
+        // key), refund the tool budget slot so the web fallback runs with full
+        // budget.  One unavoidable probe is acceptable; losing budget is not.
+        if (placesJson is not null &&
+            (placesJson.Contains("API key is not configured", StringComparison.OrdinalIgnoreCase) ||
+             placesJson.Contains("API key not set", StringComparison.OrdinalIgnoreCase) ||
+             placesJson.Contains("provider is not configured", StringComparison.OrdinalIgnoreCase)))
+        {
+            toolCallCount = Math.Max(0, toolCallCount - 1);
+            AddAuditStep(auditSteps, "details_fetch",
+                "Places provider unavailable (config error) — refunded tool budget.");
+        }
+
         if (TryBuildFromPlacesPayload(
             query,
             timezone,
@@ -173,7 +196,7 @@ public sealed partial class DeepDiveCoordinator
             : "";
         var webArgs = JsonSerializer.Serialize(new
         {
-            query = $"{cleanedQuery}{webLocationSuffix} hours address phone",
+            query = $"{cleanedQuery}{webLocationSuffix} hours",
             maxResults = 5,
             recency = "any"
         });
@@ -195,14 +218,66 @@ public sealed partial class DeepDiveCoordinator
             .Take(maxOpenedSources)
             .ToList();
 
-        if (sources.Count == 0 && explicitRegionTokens.Count == 0 && rawSources.Count > 0)
+        if (sources.Count == 0 && rawSources.Count > 0)
         {
             AddAuditStep(auditSteps, "search", "Strict fallback source filter removed all candidates; retrying with broader non-junk web results.");
             sources = rawSources.Take(maxOpenedSources).ToList();
         }
 
-        if (sources.Count == 0)
-            warnings.Add("Fallback search came back with 0 results for the query.");
+        // If the keyword-stuffed query ("X hours address phone") returned
+        // zero usable structured sources, retry with a simpler business-name-
+        // only query.  SearXNG and DuckDuckGo often perform better with
+        // concise queries.
+        if (sources.Count == 0 && toolCallCount < maxToolCalls)
+        {
+            var retryQuery = $"{cleanedQuery}{webLocationSuffix}";
+            var retryArgs = JsonSerializer.Serialize(new
+            {
+                query = retryQuery,
+                maxResults = 5,
+                recency = "any"
+            });
+
+            AddAuditStep(auditSteps, "search", "First web search returned 0 usable sources; retrying with simpler query.");
+
+            var retryResult = await CallToolBoundedAsync(
+                WebSearchTool,
+                WebSearchToolAlt,
+                retryArgs,
+                "search",
+                "Ran simplified web search retry.");
+
+            var retryRawSources = Search.SearchOrchestrator.ParseSourcesFromToolResult(retryResult ?? "")
+                .Where(IsNavigablePlaceFallbackSource)
+                .ToList();
+
+            var retrySources = retryRawSources
+                .Where(source => IsUsefulPlaceFallbackSource(source, cleanedQuery, explicitRegionTokens))
+                .Take(maxOpenedSources)
+                .ToList();
+
+            if (retrySources.Count == 0 && retryRawSources.Count > 0)
+                retrySources = retryRawSources.Take(maxOpenedSources).ToList();
+
+            if (retrySources.Count > 0)
+            {
+                sources = retrySources;
+                rawSources = retryRawSources;
+            }
+
+            // Merge the retry text into webResult so hours/address extraction
+            // has the widest possible text corpus.
+            if (!string.IsNullOrWhiteSpace(retryResult) &&
+                !retryResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            {
+                webResult = webResult + "\n" + retryResult;
+            }
+        }
+
+        // The "0 structured sources" warning is deferred until after raw-text
+        // extraction so we don't surface it when the web search text itself
+        // yielded hours/address/phone data.
+        var zeroStructuredSources = sources.Count == 0;
 
         foreach (var source in sources)
         {
@@ -222,7 +297,15 @@ public sealed partial class DeepDiveCoordinator
         if (sources.Count == 0)
             AddAuditStep(auditSteps, "search", "web_search returned 0 results - skipping generic search-engine browse fallback.");
 
-        foreach (var source in sources.Take(2))
+        // Prioritize sources that are most likely to have parseable structured
+        // hours (review sites, hours aggregators) over random business homepages
+        // that may lack machine-readable hours.
+        var browseSources = sources
+            .OrderByDescending(HoursSourcePriority)
+            .Take(3)
+            .ToList();
+
+        foreach (var source in browseSources)
         {
             var args = JsonSerializer.Serialize(new { url = source.Url });
             var content = await CallToolBoundedAsync(
@@ -248,7 +331,7 @@ public sealed partial class DeepDiveCoordinator
 
         AddAuditStep(auditSteps, "extract", $"Extracted signals from {extractedChunks.Count} text chunks across {sources.Count} sources.");
         var hours = DeepDiveHoursParser.Parse(extractedChunks);
-        var extractionSources = sources.Take(2).ToList();
+        var extractionSources = browseSources;
         var extraction = DeepDiveWebExtractor.Extract(extractedChunks, extractionSources);
 
         var hoursBullets = hours.Bullets.Count > 0
@@ -261,10 +344,17 @@ public sealed partial class DeepDiveCoordinator
             warnings.Add("Different sources disagree on hours - verify directly.");
 
         // Confidence scales with what we actually managed to extract.
+        // Hours conflict means the data may be imprecise, but having data at
+        // all is better than having none.  Reserve LOW for truly empty results.
         var hasUsefulData = hours.HasAnyHours ||
             !string.IsNullOrWhiteSpace(extraction.Address) ||
             !string.IsNullOrWhiteSpace(extraction.Phone) ||
             extraction.Rating.HasValue;
+
+        // Deferred "0 results" warning — only surface when the raw text
+        // extraction also failed to find anything useful.
+        if (zeroStructuredSources && !hasUsefulData)
+            warnings.Add("Fallback search came back with 0 results for the query.");
 
         if (sources.Count == 0 && !hasUsefulData && (explicitRegionTokens.Count > 0 || extractedChunks.Count == 0))
         {
@@ -276,7 +366,7 @@ public sealed partial class DeepDiveCoordinator
             };
         }
 
-        var confidence = hasUsefulData && !hours.HasConflict
+        var confidence = hasUsefulData
             ? DeepDiveConstants.ConfidenceMedium
             : DeepDiveConstants.ConfidenceLow;
 
@@ -589,10 +679,31 @@ public sealed partial class DeepDiveCoordinator
             : cleanedForTitle;
 
         // Build a meaningful status line from what we actually found.
-        var closesText = hoursBullets.Count > 0 && !hoursBullets[0].Contains("could not", StringComparison.OrdinalIgnoreCase)
-            ? $"Today: {hoursBullets[0]}"
-            : "Hours were not found in available sources.";
-            var statusLine = BuildFallbackStatusLine(hoursBullets, confidence);
+        // Try to compute open/closed from extracted hours and current time.
+        var (computedOpen, todayHoursText) = TryComputeOpenStatus(hoursBullets, timezone, now);
+
+        string closesText;
+        string statusLine;
+
+        if (computedOpen.HasValue)
+        {
+            statusLine = computedOpen.Value ? "Open now" : "Closed now";
+            closesText = !string.IsNullOrWhiteSpace(todayHoursText)
+                ? $"Today: {todayHoursText}"
+                : "";
+        }
+        else if (hoursBullets.Count > 0 && !hoursBullets[0].Contains("could not", StringComparison.OrdinalIgnoreCase))
+        {
+            closesText = $"Today: {hoursBullets[0]}";
+            statusLine = BuildFallbackStatusLine(hoursBullets, confidence);
+        }
+        else
+        {
+            // Don't advertise missing hours — just omit the hours line and
+            // let the response focus on what we did find (name, reviews, etc.)
+            closesText = "";
+            statusLine = BuildFallbackStatusLine(hoursBullets, confidence);
+        }
 
         var cards = new List<DeepDiveCard>
         {
@@ -765,6 +876,10 @@ public sealed partial class DeepDiveCoordinator
                 b.StartsWith("Average rating:", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrWhiteSpace(ratingBullet))
                 parts.Add(ratingBullet);
+
+            var reviewSignalBullet = BuildReviewSignalLeadLine(reviewCard.Bullets);
+            if (!string.IsNullOrWhiteSpace(reviewSignalBullet))
+                parts.Add(reviewSignalBullet);
         }
 
         var warningsCard = briefing.Cards.FirstOrDefault(c =>
@@ -778,8 +893,8 @@ public sealed partial class DeepDiveCoordinator
         if (briefing.Hero.Confidence.Equals(DeepDiveConstants.ConfidenceLow, StringComparison.OrdinalIgnoreCase))
         {
             parts.Add(!string.IsNullOrWhiteSpace(normalizedPhone)
-                ? "Current open status is unknown from the available sources. Call the store to confirm current hours."
-                : "Current open status is unknown from the available sources. Check the listed source before visiting.");
+                ? "Verification recommended — call ahead to confirm current hours."
+                : "Verification recommended — check the listed source before visiting.");
         }
 
         if (!string.IsNullOrWhiteSpace(briefing.Hero.Website))
@@ -789,7 +904,7 @@ public sealed partial class DeepDiveCoordinator
         if (!string.IsNullOrWhiteSpace(sourceDomainsLine))
             parts.Add(sourceDomainsLine);
 
-        parts.Add("Briefing summary: hours and review details are based on currently available web sources.");
+        parts.Add($"Briefing summary: hours and review details are based on currently available web sources ({DateTime.Now.Year}).");
 
         return string.Join("\n", parts);
     }
@@ -840,6 +955,140 @@ public sealed partial class DeepDiveCoordinator
             : "Details from web sources";
     }
 
+    /// <summary>
+    /// Determines whether the business is currently open based on
+    /// extracted hours bullets and the given timezone.
+    /// Returns (isOpen, todayHoursText) where isOpen is null when
+    /// the status cannot be determined.
+    /// </summary>
+    internal static (bool? IsOpen, string? TodayHours) TryComputeOpenStatus(
+        IReadOnlyList<string> hoursBullets,
+        string timezone,
+        DateTimeOffset now)
+    {
+        if (hoursBullets.Count == 0)
+            return (null, null);
+
+        TimeZoneInfo? tz = null;
+        if (!string.IsNullOrWhiteSpace(timezone) &&
+            !timezone.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            try { tz = TimeZoneInfo.FindSystemTimeZoneById(timezone); }
+            catch { /* best-effort */ }
+        }
+
+        var localNow = tz is not null
+            ? TimeZoneInfo.ConvertTime(now, tz)
+            : now;
+
+        var todayName = localNow.DayOfWeek switch
+        {
+            DayOfWeek.Monday    => "Monday",
+            DayOfWeek.Tuesday   => "Tuesday",
+            DayOfWeek.Wednesday => "Wednesday",
+            DayOfWeek.Thursday  => "Thursday",
+            DayOfWeek.Friday    => "Friday",
+            DayOfWeek.Saturday  => "Saturday",
+            DayOfWeek.Sunday    => "Sunday",
+            _ => ""
+        };
+
+        // Find today's hours bullet (format: "Monday: 7 AM - 9 PM")
+        string? todayBullet = null;
+        foreach (var bullet in hoursBullets)
+        {
+            if (bullet.StartsWith(todayName + ":", StringComparison.OrdinalIgnoreCase) ||
+                bullet.StartsWith(todayName + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                todayBullet = bullet;
+                break;
+            }
+        }
+
+        if (todayBullet is null)
+        {
+            // If bullets are generic (e.g., "Mon-Fri: 8 AM - 6 PM") without
+            // today's specific day, see if any single bullet has a time range.
+            if (hoursBullets.Count == 1 && !hoursBullets[0].Contains("could not", StringComparison.OrdinalIgnoreCase))
+                todayBullet = hoursBullets[0];
+            else
+                return (null, null);
+        }
+
+        var hoursText = todayBullet.Contains(':')
+            ? todayBullet[(todayBullet.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim()
+            : todayBullet.Trim();
+
+        if (string.IsNullOrWhiteSpace(hoursText))
+            return (null, null);
+
+        // Check special statuses
+        if (hoursText.Contains("Closed", StringComparison.OrdinalIgnoreCase))
+            return (false, hoursText);
+
+        if (hoursText.Contains("Open 24", StringComparison.OrdinalIgnoreCase) ||
+            hoursText.Contains("24 hours", StringComparison.OrdinalIgnoreCase))
+            return (true, hoursText);
+
+        // Parse time range: "7 AM - 9 PM", "8:00 AM - 5:00 PM", "07:00 - 21:00"
+        var timeRange = Regex.Match(hoursText,
+            @"(?<open>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–—to]+\s*(?<close>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
+            RegexOptions.IgnoreCase);
+
+        if (!timeRange.Success)
+            return (null, hoursText);
+
+        var openTime = TryParseTime(timeRange.Groups["open"].Value);
+        var closeTime = TryParseTime(timeRange.Groups["close"].Value);
+
+        if (openTime is null || closeTime is null)
+            return (null, hoursText);
+
+        var currentTimeOfDay = localNow.TimeOfDay;
+        var isOpen = currentTimeOfDay >= openTime.Value && currentTimeOfDay < closeTime.Value;
+
+        return (isOpen, hoursText);
+    }
+
+    /// <summary>
+    /// Parses common time formats: "7 AM", "8:00 PM", "07:00", "9pm", "5:30 am"
+    /// </summary>
+    internal static TimeSpan? TryParseTime(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        raw = raw.Trim();
+        var match = Regex.Match(raw,
+            @"^(?<h>\d{1,2})(?::(?<m>\d{2}))?\s*(?<p>am|pm)?$",
+            RegexOptions.IgnoreCase);
+
+        if (!match.Success)
+            return null;
+
+        var hours = int.Parse(match.Groups["h"].Value);
+        var minutes = match.Groups["m"].Success ? int.Parse(match.Groups["m"].Value) : 0;
+        var period = match.Groups["p"].Value.ToLowerInvariant();
+
+        if (!string.IsNullOrEmpty(period))
+        {
+            if (period == "pm" && hours < 12) hours += 12;
+            if (period == "am" && hours == 12) hours = 0;
+        }
+        else if (hours >= 1 && hours <= 6)
+        {
+            // Ambiguous: "7" could be 7 AM or 7 PM.
+            // In business hours context, small numbers without AM/PM
+            // after a dash are likely PM (e.g., "9 - 5" means 9AM-5PM).
+            // Leave as-is since we can't resolve without more context.
+        }
+
+        if (hours > 23 || minutes > 59)
+            return null;
+
+        return new TimeSpan(hours, minutes, 0);
+    }
+
     private static string BuildSourceDomainsLeadLine(DeepDiveBriefing briefing)
     {
         var domains = briefing.Cards
@@ -875,6 +1124,25 @@ public sealed partial class DeepDiveCoordinator
             lines.Add("The fallback search came back with 0 results for this query.");
 
         return lines;
+    }
+
+    private static string BuildReviewSignalLeadLine(IReadOnlyList<string> bullets)
+    {
+        foreach (var bullet in bullets)
+        {
+            if (string.IsNullOrWhiteSpace(bullet))
+                continue;
+
+            if (bullet.StartsWith("People often praise", StringComparison.OrdinalIgnoreCase) ||
+                bullet.StartsWith("Feedback is mixed", StringComparison.OrdinalIgnoreCase) ||
+                bullet.StartsWith("Common complaints", StringComparison.OrdinalIgnoreCase) ||
+                bullet.StartsWith("No dominant complaint", StringComparison.OrdinalIgnoreCase))
+            {
+                return bullet;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static string NormalizeHeroTitleForLead(string title)
@@ -1160,7 +1428,72 @@ public sealed partial class DeepDiveCoordinator
             return false;
         }
 
+        // App stores, encyclopedia pages, and social aggregators never have
+        // local-business hours or contact data.
+        if (host.Equals("apps.apple.com", StringComparison.Ordinal) ||
+            host.Equals("play.google.com", StringComparison.Ordinal) ||
+            host.Contains("wikipedia.org", StringComparison.Ordinal) ||
+            host.Equals("britannica.com", StringComparison.Ordinal) ||
+            host.Equals("findajob.dwp.gov.uk", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// Assigns a browse priority score to a source based on how likely it is
+    /// to contain structured, parseable business hours.  Review sites and hours
+    /// aggregators reliably expose "Monday: 9 AM - 5 PM" style data; random
+    /// business homepages often do not.
+    /// </summary>
+    internal static int HoursSourcePriority(SourceItem source)
+    {
+        if (string.IsNullOrWhiteSpace(source.Url) ||
+            !Uri.TryCreate(source.Url, UriKind.Absolute, out var uri))
+            return 0;
+
+        var host = uri.Host.Trim().ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal))
+            host = host[4..];
+
+        // Also consider the Domain field — search results carry the canonical
+        // domain which may differ from the actual URL host (e.g. in tests or
+        // behind redirects).
+        var domain = (source.Domain ?? "").Trim().ToLowerInvariant();
+
+        bool HostOrDomainContains(string value)
+            => host.Contains(value, StringComparison.Ordinal) ||
+               domain.Contains(value, StringComparison.Ordinal);
+
+        // Hours aggregators — highest priority
+        if (HostOrDomainContains("storeopeninghours") ||
+            HostOrDomainContains("mystore411") ||
+            HostOrDomainContains("hoursmap") ||
+            HostOrDomainContains("businesshours") ||
+            HostOrDomainContains("openhours") ||
+            HostOrDomainContains("storelocator"))
+            return 3;
+
+        // Business directories / review sites — structured data likely
+        if (HostOrDomainContains("yelp.com") ||
+            HostOrDomainContains("tripadvisor") ||
+            HostOrDomainContains("yellowpages") ||
+            HostOrDomainContains("mapquest") ||
+            HostOrDomainContains("foursquare") ||
+            HostOrDomainContains("bbb.org"))
+            return 2;
+
+        // Snippet mentions hours — likely useful
+        var snippet = source.Snippet ?? "";
+        if (snippet.Contains("hour", StringComparison.OrdinalIgnoreCase) ||
+            snippet.Contains("open", StringComparison.OrdinalIgnoreCase) ||
+            snippet.Contains("am", StringComparison.OrdinalIgnoreCase) &&
+            snippet.Contains("pm", StringComparison.OrdinalIgnoreCase))
+            return 1;
+
+        return 0;
     }
 
     private static bool IsUsefulPlaceFallbackSource(
@@ -1200,6 +1533,15 @@ public sealed partial class DeepDiveCoordinator
             var value = match.Value.Trim();
             if (value.Length == 2)
                 tokens.Add(value.ToLowerInvariant());
+        }
+
+        // Extract city names that precede a 2-letter state code or comma-state
+        // pattern. "Starbucks in Olympia, WA" → "olympia"; "Portland OR" → "portland"
+        foreach (Match match in Regex.Matches(cleanedQuery, @"(\b\w{3,})\s*,?\s*[A-Z]{2}\b"))
+        {
+            var city = match.Groups[1].Value.Trim().ToLowerInvariant();
+            if (city.Length >= 3 && !_regionCityStopWords.Contains(city))
+                tokens.Add(city);
         }
 
         var lowered = cleanedQuery.ToLowerInvariant();
