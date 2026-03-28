@@ -3535,6 +3535,8 @@ public sealed partial class SearchOrchestrator
         normalized = normalized.Replace(" · ", "; ", StringComparison.Ordinal)
             .Replace("•", ";", StringComparison.Ordinal)
             .Replace("…", "...", StringComparison.Ordinal);
+        // Strip browser chrome junk that leaks from scraped pages
+        normalized = Regex.Replace(normalized, @"Skip\s*Navigation", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"^\d+\s+\w+\s+ago\s*\.\.\.\s*", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"^(?:up next|latest|more on this)\s*[:;-]?\s*", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"\s*\.\.\.\s*", "... ");
@@ -3587,14 +3589,29 @@ public sealed partial class SearchOrchestrator
             return true;
 
         var lower = text.ToLowerInvariant();
-        return lower.Contains("latest technology news", StringComparison.Ordinal) ||
-               lower.Contains("today's latest", StringComparison.Ordinal) ||
-               lower.Contains("live updates", StringComparison.Ordinal) ||
-               lower.Contains("top stories", StringComparison.Ordinal) ||
-               lower.Contains("week in review", StringComparison.Ordinal) ||
-               lower.Contains("roundup", StringComparison.Ordinal) ||
-               lower.Contains("what to know", StringComparison.Ordinal) ||
-               lower.Contains("everything to know", StringComparison.Ordinal);
+        if (lower.Contains("latest technology news", StringComparison.Ordinal) ||
+            lower.Contains("today's latest", StringComparison.Ordinal) ||
+            lower.Contains("live updates", StringComparison.Ordinal) ||
+            lower.Contains("live news updates", StringComparison.Ordinal) ||
+            lower.Contains("top stories", StringComparison.Ordinal) ||
+            lower.Contains("top headlines", StringComparison.Ordinal) ||
+            lower.Contains("breaking news", StringComparison.Ordinal) ||
+            lower.Contains("week in review", StringComparison.Ordinal) ||
+            lower.Contains("roundup", StringComparison.Ordinal) ||
+            lower.Contains("what to know", StringComparison.Ordinal) ||
+            lower.Contains("everything to know", StringComparison.Ordinal))
+            return true;
+
+        // CamelCase-joined word runs indicate scraping artifacts from landing pages
+        // e.g. "UpdatesView", "DashboardAllIndia", "NewsTrendsUS"
+        if (Regex.IsMatch(text, @"[a-z][A-Z][a-z]"))
+        {
+            var joinedRuns = Regex.Matches(text, @"[a-z][A-Z]");
+            if (joinedRuns.Count >= 2)
+                return true;
+        }
+
+        return false;
     }
 
     private static List<string> BuildSourceFallbackLines(
@@ -3966,7 +3983,10 @@ public sealed partial class SearchOrchestrator
                lower.Contains("coverage from around the world", StringComparison.Ordinal) ||
                lower.Contains("technology, health, environment, ai", StringComparison.Ordinal) ||
                lower.Contains("top stories", StringComparison.Ordinal) ||
+               lower.Contains("top headlines", StringComparison.Ordinal) ||
                lower.Contains("live updates", StringComparison.Ordinal) ||
+               lower.Contains("live news updates", StringComparison.Ordinal) ||
+               lower.Contains("breaking news", StringComparison.Ordinal) ||
                lower.Contains("week in review", StringComparison.Ordinal) ||
                lower.Contains("today's latest technology news", StringComparison.Ordinal) && !HasConcreteNewsDetail(line);
     }
