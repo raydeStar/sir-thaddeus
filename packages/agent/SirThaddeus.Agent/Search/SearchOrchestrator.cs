@@ -1329,7 +1329,8 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct,
         string? originalUserMessage = null,
-        int? maxResults = null)
+        int? maxResults = null,
+        string? categories = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
         effectiveQuery = InjectLocationForClosestNearestQuery(effectiveQuery, originalUserMessage);
@@ -1342,7 +1343,8 @@ public sealed partial class SearchOrchestrator
         {
             query = effectiveQuery,
             maxResults = maxResults ?? DefaultMaxResults,
-            recency
+            recency,
+            categories = categories ?? "general"
         });
 
         var toolName = WebSearchToolName;

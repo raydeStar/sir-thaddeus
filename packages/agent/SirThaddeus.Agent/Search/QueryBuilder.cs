@@ -607,6 +607,20 @@ public sealed partial class QueryBuilder
             };
         }
 
+        if (mode == SearchMode.NewsAggregate)
+        {
+            var directNews = BuildDirectNewsQuery(userMessage, entity);
+            if (!string.IsNullOrWhiteSpace(directNews))
+            {
+                return new SearchQuery
+                {
+                    Query = directNews,
+                    Recency = "day",
+                    UsedFallback = false
+                };
+            }
+        }
+
         return null;
     }
 
@@ -622,15 +636,8 @@ public sealed partial class QueryBuilder
         if (LooksLikeGenericHeadlineRequest(userMessage))
             return "top headlines";
 
-        var topic = ExtractTopicFromMessage(userMessage);
-        if (string.IsNullOrWhiteSpace(topic))
-            return null;
-
-        topic = CollapseWhitespace(topic).Trim();
-        if (topic.Length > 60)
-            topic = topic[..60].TrimEnd();
-
-        return string.IsNullOrWhiteSpace(topic) ? null : $"{topic} news";
+        // No clear category or entity — fall through to LLM query builder
+        return null;
     }
 
     private static string? BuildDirectFactFindQuery(

@@ -49,9 +49,9 @@ public class IntentClassificationTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
 
-        // Message deliberately avoids triggering LooksLikeWebSearchRequest
-        // heuristic, so we actually test the LLM classifier path.
-        var result = await agent.ProcessAsync("tell me about your favorite historical figure");
+        // Message must NOT trigger Tier-1 deterministic heuristics so the
+        // LLM classifier path is actually exercised.
+        var result = await agent.ProcessAsync("I recall reading about some fascinating Renaissance era discoveries");
 
         Assert.True(result.Success);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
@@ -257,7 +257,10 @@ public class SearchQueryExtractionTests
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
 
             if (sysMsg.Contains("Classify")) return "search";
-            if (sysMsg.Contains("QUERY")) return "quantum computing";  // No pipe, no recency
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return "{\"name\":\"\",\"type\":\"none\",\"hint\":\"\"}";
+            if (sysMsg.Contains("query builder", StringComparison.OrdinalIgnoreCase))
+                return "{\"query\":\"quantum computing\",\"recency\":\"any\"}";
             return "Summary of quantum computing.";
         });
 
@@ -265,7 +268,9 @@ public class SearchQueryExtractionTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("tell me about quantum computing");
+        // Message must NOT trigger Tier-1 deterministic heuristics so
+        // the LLM classifier → search pipeline path is exercised.
+        var result = await agent.ProcessAsync("quantum computing interests me as a field of study");
 
         Assert.True(result.Success);
 

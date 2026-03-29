@@ -26,7 +26,8 @@ public sealed partial class SearchOrchestrator
 
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
-            originalUserMessage: userMessage);
+            originalUserMessage: userMessage,
+            categories: "news");
         toolResult = await TryRecoverLocalNewsResultsAsync(
             userMessage,
             query,
@@ -110,20 +111,29 @@ public sealed partial class SearchOrchestrator
             SearchMode.NewsAggregate, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
 
-        if (!isLocalNews && !isMarketQuoteRequest)
-        {
-            return new AgentResponse
-            {
-                Text = BuildGroundedNewsFallback(sources),
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = 0
-            };
-        }
-
         var summaryInput = BuildSummaryInputFromSources(
             "[Web search results - use these facts to answer the user's question]",
             sources);
+
+        // For general (non-local, non-market) news, fetch the top articles
+        // via browser_navigate so the LLM has real article content instead
+        // of raw search snippets (which are often junk portal landing pages).
+        if (!isLocalNews && !isMarketQuoteRequest)
+        {
+            var resolved = ResolveSourceUrls(sources);
+            var navigable = resolved
+                .Where(s => !IsJunkUrl(s.Url))
+                .Take(MaxFollowUpUrls)
+                .ToList();
+
+            var articleContent = await FetchArticleContentAsync(
+                navigable, toolCallsMade, ct);
+
+            if (!string.IsNullOrWhiteSpace(articleContent))
+            {
+                summaryInput += "\n\n[Full article content — use these details to give a thorough answer]\n" + articleContent;
+            }
+        }
 
         var instruction = isMarketQuoteRequest
             ? CombineMemoryAndInstruction(memoryPackText, FinanceQuoteSummaryInstruction)

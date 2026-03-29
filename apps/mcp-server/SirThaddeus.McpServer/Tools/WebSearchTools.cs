@@ -85,6 +85,7 @@ public static class WebSearchTools
         [Description("The search query")] string query,
         [Description("Number of results to fetch, 1 to 20, default 5")] int maxResults = 5,
         [Description("Recency filter: day, week, month, or any (default)")] string recency = "any",
+        [Description("Search category: general (default) or news")] string categories = "general",
         CancellationToken cancellationToken = default)
     {
         var stubbedError = ToolStubGuard.GetStubbedError("web_search");
@@ -95,15 +96,16 @@ public static class WebSearchTools
             return "Error: Search query is required.";
 
         recency ??= "any";
+        categories = NormalizeCategories(categories);
 
         try
         {
-            var args = new { query, maxResults, recency };
+            var args = new { query, maxResults, recency, categories };
             var cached = await ToolResultCache.GetAsync<string>("web_search", args);
             if (!string.IsNullOrWhiteSpace(cached))
                 return cached;
 
-            var result = await ExecuteSearchAsync(query, maxResults, recency, cancellationToken);
+            var result = await ExecuteSearchAsync(query, maxResults, recency, categories, cancellationToken);
             await ToolResultCache.SetAsync("web_search", args, result, ToolResultCache.ResolveWebSearchTtl());
             return result;
         }
@@ -118,7 +120,7 @@ public static class WebSearchTools
     }
 
     private static async Task<string> ExecuteSearchAsync(
-        string query, int maxResults, string recency, CancellationToken cancellationToken)
+        string query, int maxResults, string recency, string? categories, CancellationToken cancellationToken)
     {
         var configuredDefaultMaxResults = ParseIntEnv("WEBSEARCH_MAX_RESULTS", DefaultMaxResults, 1, 20);
         if (maxResults <= 0)
@@ -148,7 +150,8 @@ public static class WebSearchTools
                 {
                     MaxResults = fetchCount,
                     TimeoutMs = searchTimeoutMs,
-                    Recency = recency
+                    Recency = recency,
+                    Categories = categories
                 },
                 cancellationToken);
 
@@ -783,6 +786,17 @@ public static class WebSearchTools
     /// </summary>
     private static string NormalizeRecency(string raw) =>
         RecencyHelper.Normalize(raw);
+
+    private static string NormalizeCategories(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "general";
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "news" => "news",
+            _ => "general"
+        };
+    }
 
     private static int ParseIntEnv(string key, int fallback, int min, int max)
     {
