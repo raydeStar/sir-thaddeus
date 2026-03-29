@@ -90,6 +90,16 @@ public static class CompletionContractRegistry
                 MinItems = 1
             },
 
+            // Product recommendation lookup
+            [Intents.LookupProduct] = new CompletionContract
+            {
+                Intent = Intents.LookupProduct,
+                Label = "product_lookup",
+                Fields = [Answer, SourceUrl],
+                Evidence = EvidenceRequirement.AtLeastOneUrl,
+                MinItems = 1
+            },
+
             // Deep-dive briefing
             [Intents.LookupDeepDive] = new CompletionContract
             {

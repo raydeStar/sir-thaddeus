@@ -57,6 +57,7 @@ public sealed class GuardrailsCoordinator : IGuardrailsCoordinator
     private static bool IsLookupIntent(string intent) =>
         intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupProduct, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
 

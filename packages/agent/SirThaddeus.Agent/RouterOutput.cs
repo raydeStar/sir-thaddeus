@@ -70,6 +70,7 @@ public static class Intents
     // ── Search ───────────────────────────────────────────────────────
     public const string LookupSearch = "lookup_search";
     public const string LookupFact   = "lookup_fact";
+    public const string LookupProduct = "lookup_product";
     public const string LookupNews   = "lookup_news";
     public const string LookupDeepDive = "lookup_deep_dive";
 

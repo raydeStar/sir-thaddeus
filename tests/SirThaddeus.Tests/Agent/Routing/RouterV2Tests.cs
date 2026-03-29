@@ -56,6 +56,19 @@ public class RouterV2Tests
     }
 
     [Theory]
+    [InlineData("Can you recommend a good Ashwagandha on Amazon.com?")]
+    [InlineData("best wireless earbuds on walmart")]
+    [InlineData("top office chair options on etsy")]
+    public async Task RouteAsync_ProductRecommendationHeuristics_RouteWithoutLlm(string message)
+    {
+        var (router, getLlmCalls) = CreateRouterWithCallCounter();
+        var route = await router.RouteAsync(new RouterRequest { UserMessage = message });
+
+        Assert.Equal(Intents.LookupProduct, route.Intent);
+        Assert.Equal(0, getLlmCalls());
+    }
+
+    [Theory]
     [InlineData("what's on my screen right now?")]
     [InlineData("can you tell me what is on my screen?")]
     [InlineData("ok i want to run a few tests -- can you tell me what is on mys creen right now?")]

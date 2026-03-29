@@ -121,6 +121,15 @@ public static class PolicyGate
             RequiredPermissions = []
         },
 
+        // ── Product recommendation lookup: internal orchestration only ──
+        [Intents.LookupProduct] = new PolicyDecision
+        {
+            AllowedCapabilities = [],
+            ForbiddenCapabilities = [ToolCapability.SystemExecute, ToolCapability.ScreenCapture, ToolCapability.FileWrite, ToolCapability.MemoryWrite],
+            UseToolLoop         = false,
+            RequiredPermissions = []
+        },
+
         // ── News lookup: internal search orchestration only ──────────
         // Keeps news-vs-fact behavior separate from MCP tool exposure.
         [Intents.LookupNews] = new PolicyDecision

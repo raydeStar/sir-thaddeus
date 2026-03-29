@@ -24,6 +24,9 @@ public enum SearchMode
     /// <summary>Multiple sources, story clustering, recency-biased.</summary>
     NewsAggregate,
 
+    /// <summary>Retailer-aware shopping recommendations with candidate hydration.</summary>
+    ProductRecommendation,
+
     /// <summary>Canonical answer, entity-focused, stable references.</summary>
     WebFactFind,
 

@@ -25,6 +25,10 @@ public sealed class UnifiedResponseComposer
         @"\b(?:trouble|rough|stressed|upset|bad day|in trouble)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex LocalNewsLocationRegex = new(
+        @"\blocal\s+news\s+in\s+(?<location>[A-Za-z][A-Za-z\s\.'-]*(?:,\s*[A-Za-z]{2})?)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public string Compose(UnifiedResponseComposeRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -57,9 +61,49 @@ public sealed class UnifiedResponseComposer
             parts.Add(contextualClose);
 
         var composed = string.Join("\n\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        if (string.IsNullOrWhiteSpace(composed))
+            return "I took a look and I'm ready for the next step.";
+
+        composed = EnsureLocalNewsLocationMention(request.OriginalMessage, composed);
+
         return string.IsNullOrWhiteSpace(composed)
             ? "I took a look and I'm ready for the next step."
             : composed.Trim();
+    }
+
+    private static string EnsureLocalNewsLocationMention(string originalMessage, string composed)
+    {
+        if (string.IsNullOrWhiteSpace(originalMessage) || string.IsNullOrWhiteSpace(composed))
+            return composed;
+
+        var locationMatch = LocalNewsLocationRegex.Match(originalMessage);
+        if (!locationMatch.Success)
+            return composed;
+
+        var location = locationMatch.Groups["location"].Value.Trim();
+        if (location.Length == 0)
+            return composed;
+
+        var city = location.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? location;
+
+        if (composed.Contains(location, StringComparison.OrdinalIgnoreCase) ||
+            composed.Contains(city, StringComparison.OrdinalIgnoreCase))
+        {
+            return composed;
+        }
+
+        if (composed.Contains("Here are the main stories", StringComparison.OrdinalIgnoreCase))
+        {
+            return Regex.Replace(
+                composed,
+                "Here are the main stories",
+                $"Here are the main stories for {location}",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100));
+        }
+
+        return composed + $"\n\nLocal news location: {location}.";
     }
 
     private static void AppendResults(List<string> parts, IReadOnlyList<SegmentExecutionResult> results)

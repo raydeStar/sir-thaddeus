@@ -1173,6 +1173,62 @@ public static class IntentFeatureExtractor
                lower.Contains("local", StringComparison.Ordinal);
     }
 
+    public static bool LooksLikeProductRecommendationLookup(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        // Keep local-business recommendations ("best cafe near me") on the
+        // local-business path rather than shopping/product retrieval.
+        if (LooksLikeLocalBusinessDiscovery(lower))
+            return false;
+
+        if (LooksLikeExplicitNewsLookup(lower) || LooksLikeDeepDiveLookup(lower))
+            return false;
+
+        var hasRetailerAnchor =
+            lower.Contains("amazon", StringComparison.Ordinal) ||
+            lower.Contains("walmart", StringComparison.Ordinal) ||
+            lower.Contains("ebay", StringComparison.Ordinal) ||
+            lower.Contains("etsy", StringComparison.Ordinal);
+
+        var hasRecommendationCue =
+            lower.Contains("recommend", StringComparison.Ordinal) ||
+            lower.Contains("recommendation", StringComparison.Ordinal) ||
+            lower.Contains("best ", StringComparison.Ordinal) ||
+            lower.Contains("top ", StringComparison.Ordinal) ||
+            lower.Contains("good ", StringComparison.Ordinal) ||
+            lower.Contains("which should i buy", StringComparison.Ordinal) ||
+            lower.Contains("what should i buy", StringComparison.Ordinal) ||
+            lower.Contains("worth buying", StringComparison.Ordinal);
+
+        var hasComparisonCue =
+            lower.Contains("compare", StringComparison.Ordinal) ||
+            lower.Contains("versus", StringComparison.Ordinal) ||
+            lower.Contains(" vs ", StringComparison.Ordinal) ||
+            lower.Contains("review", StringComparison.Ordinal) ||
+            lower.Contains("reviews", StringComparison.Ordinal);
+
+        var hasProductObject =
+            lower.Contains("product", StringComparison.Ordinal) ||
+            lower.Contains("brand", StringComparison.Ordinal) ||
+            lower.Contains("brands", StringComparison.Ordinal) ||
+            lower.Contains("supplement", StringComparison.Ordinal) ||
+            lower.Contains("vitamin", StringComparison.Ordinal) ||
+            lower.Contains("capsule", StringComparison.Ordinal) ||
+            lower.Contains("tablet", StringComparison.Ordinal) ||
+            lower.Contains("powder", StringComparison.Ordinal) ||
+            lower.Contains("gummy", StringComparison.Ordinal) ||
+            lower.Contains("rating", StringComparison.Ordinal) ||
+            lower.Contains("ratings", StringComparison.Ordinal) ||
+            lower.Contains("price", StringComparison.Ordinal);
+
+        if (hasRetailerAnchor && (hasRecommendationCue || hasComparisonCue || hasProductObject))
+            return true;
+
+        return hasRecommendationCue && hasProductObject;
+    }
+
     public static bool LooksLikeFactLookup(string lower)
     {
         if (string.IsNullOrWhiteSpace(lower))

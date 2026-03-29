@@ -15,6 +15,7 @@ public sealed class DefaultRouter : IRouter
     {
         Casual,
         FactLookup,
+        ProductLookup,
         DeepDive,
         NewsLookup,
         Tooling
@@ -89,6 +90,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower))
             return MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower))
+            return MakeRoute(Intents.LookupProduct, confidence: 0.93, needsWeb: true, needsSearch: true);
+
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return MakeRoute(
                 Intents.LookupFact,
@@ -119,6 +123,7 @@ public sealed class DefaultRouter : IRouter
         {
             ChatIntent.Casual => MakeRoute(Intents.ChatOnly, confidence: 0.8),
             ChatIntent.FactLookup => MakeRoute(Intents.LookupFact, confidence: 0.88, needsWeb: true, needsSearch: true),
+            ChatIntent.ProductLookup => MakeRoute(Intents.LookupProduct, confidence: 0.9, needsWeb: true, needsSearch: true),
             ChatIntent.DeepDive => MakeRoute(Intents.LookupDeepDive, confidence: 0.9, needsWeb: true, needsSearch: true, needsBrowser: true),
             ChatIntent.NewsLookup => MakeRoute(Intents.LookupNews, confidence: 0.88, needsWeb: true, needsSearch: true),
             ChatIntent.Tooling => RefineToolingIntent(lower),
@@ -187,6 +192,9 @@ public sealed class DefaultRouter : IRouter
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return ChatIntent.NewsLookup;
 
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower))
+            return ChatIntent.ProductLookup;
+
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return ChatIntent.FactLookup;
 
@@ -235,6 +243,8 @@ public sealed class DefaultRouter : IRouter
             return ChatIntent.DeepDive;
         if (IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower))
             return ChatIntent.NewsLookup;
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower))
+            return ChatIntent.ProductLookup;
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return ChatIntent.FactLookup;
         if (IntentFeatureExtractor.LooksLikeMemoryWriteRequest(lower))
@@ -290,7 +300,9 @@ public sealed class DefaultRouter : IRouter
             ? ChatIntent.DeepDive
             : IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower)
                 ? ChatIntent.NewsLookup
-                : ChatIntent.FactLookup;
+                : IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower)
+                    ? ChatIntent.ProductLookup
+                    : ChatIntent.FactLookup;
 
     private static double ComputeFactLookupConfidence(string lower)
     {

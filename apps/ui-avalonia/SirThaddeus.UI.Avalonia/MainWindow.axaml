@@ -6,8 +6,8 @@
         x:Class="SirThaddeus.UI.Avalonia.MainWindow"
         Width="1060"
         Height="760"
-        MinWidth="860"
-        MinHeight="620"
+        MinWidth="640"
+        MinHeight="480"
         Title="Sir Thaddeus"
         Icon="avares://SirThaddeus.UI.Avalonia/Assets/Icons/sir-thaddeus.ico"
         Background="{StaticResource BaseBrush}"
@@ -163,7 +163,7 @@
               <Grid x:Name="ChatSurfaceLayout"
                 HorizontalAlignment="Stretch"
                     MaxWidth="860"
-                  MinHeight="500"
+                  MinHeight="200"
                     Margin="24,0,24,0">
                 <StackPanel x:Name="HomeCommandStage"
                             HorizontalAlignment="Center"
@@ -766,7 +766,7 @@
             </Border>
 
             <Grid Grid.Row="1"
-                  ColumnDefinitions="248,*"
+                  ColumnDefinitions="200,*"
                   ColumnSpacing="18"
                   Margin="16,12,20,20">
             <TabControl Grid.Column="0"
@@ -820,8 +820,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="RUNTIME CONNECTION" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Connection target" Classes="settingsCardTitle"/>
@@ -842,7 +842,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Runtime controls" Classes="settingsCardTitle"/>
@@ -873,8 +873,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="INTERACTION PREFERENCES" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Desktop behavior" Classes="settingsCardTitle"/>
@@ -895,7 +895,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Shortcuts and voice" Classes="settingsCardTitle"/>
@@ -996,8 +996,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="PRIMARY MODEL" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Connection presets" Classes="settingsCardTitle"/>
@@ -1020,7 +1020,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Model discovery" Classes="settingsCardTitle"/>
@@ -1048,8 +1048,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="VERIFICATION MODEL" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Gatekeeper endpoint" Classes="settingsCardTitle"/>
@@ -1073,7 +1073,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Gatekeeper discovery" Classes="settingsCardTitle"/>
@@ -1317,8 +1317,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="SEARCH DEFAULTS" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Live search behavior" Classes="settingsCardTitle"/>
@@ -1343,7 +1343,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Policy handoff" Classes="settingsCardTitle"/>
@@ -1369,8 +1369,8 @@
 
                   <StackPanel Spacing="12">
                     <TextBlock Text="PROVIDERS" Classes="sectionLabel"/>
-                    <WrapPanel ItemWidth="360" Orientation="Horizontal">
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,16,16">
+                    <WrapPanel ItemWidth="320" Orientation="Horizontal">
+                      <Border Classes="settingsCard" Margin="0,0,16,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Bundled SearXNG" Classes="settingsCardTitle"/>
@@ -1412,7 +1412,7 @@
                         </StackPanel>
                       </Border>
 
-                      <Border Classes="settingsCard" Width="360" Margin="0,0,0,16">
+                      <Border Classes="settingsCard" Margin="0,0,0,16">
                         <StackPanel Spacing="14">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Hosted search API" Classes="settingsCardTitle"/>
@@ -1957,7 +1957,7 @@
       <!-- ── Progress Drawer (workflow checklist / narration) ── -->
       <Border x:Name="ProgressDrawer"
               Grid.Column="1"
-              Width="292"
+              Width="260"
               IsVisible="False"
               Background="{DynamicResource BackgroundSecondary}"
               BorderBrush="{DynamicResource BorderMuted}"
@@ -2034,7 +2034,7 @@
 
       <Border x:Name="ActionDrawer"
               Grid.Column="1"
-              Width="320"
+              Width="280"
               IsVisible="False"
               Background="{DynamicResource BackgroundPrimary}"
               BorderBrush="{DynamicResource BorderMuted}"

@@ -18,11 +18,38 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
-        var entity = await _entityResolver.ResolveAsync(
-            userMessage, Session, toolCallsMade, ct);
+        var explicitNewsLocation = ExtractExplicitNewsLocation(userMessage);
+        var isExplicitLocalNewsRequest =
+            LocalNewsSignalRegex.IsMatch(userMessage) &&
+            !string.IsNullOrWhiteSpace(explicitNewsLocation);
 
-        var query = await _queryBuilder.BuildAsync(
-            SearchMode.NewsAggregate, userMessage, entity, Session, history, ct);
+        EntityResolver.ResolvedEntity? entity = null;
+        QueryBuilder.SearchQuery query;
+
+        if (isExplicitLocalNewsRequest)
+        {
+            query = new QueryBuilder.SearchQuery
+            {
+                Query = $"{explicitNewsLocation} news",
+                Recency = "day",
+                UsedFallback = true
+            };
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_NEWS_DIRECT_QUERY",
+                Result = query.Query
+            });
+        }
+        else
+        {
+            entity = await _entityResolver.ResolveAsync(
+                userMessage, Session, toolCallsMade, ct);
+
+            query = await _queryBuilder.BuildAsync(
+                SearchMode.NewsAggregate, userMessage, entity, Session, history, ct);
+        }
 
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
@@ -43,7 +70,7 @@ public sealed partial class SearchOrchestrator
 
         var entityLocationName = entity is { Type: "Place" or "place" }
             ? entity.CanonicalName
-            : null;
+            : explicitNewsLocation;
 
         if (string.IsNullOrWhiteSpace(toolResult))
         {
@@ -59,7 +86,6 @@ public sealed partial class SearchOrchestrator
         }
 
         var sources = ParseSourcesFromToolResult(toolResult);
-        var explicitNewsLocation = ExtractExplicitNewsLocation(userMessage);
         var isLocalNews = LocalNewsSignalRegex.IsMatch(userMessage) &&
                           (!string.IsNullOrWhiteSpace(UserLocationHint) ||
                            !string.IsNullOrWhiteSpace(explicitNewsLocation));
@@ -88,7 +114,7 @@ public sealed partial class SearchOrchestrator
                 DateTimeOffset.UtcNow);
 
             var rawNewsSummaryInput = "[Web search results — use these facts to answer the user's question]\n" + stripped;
-            return await SummarizeAndRespond(
+            var rawSummaryResponse = await SummarizeAndRespond(
                 rawNewsSummaryInput,
                 CombineMemoryAndInstruction(memoryPackText, NewsSummaryInstruction),
                 history,
@@ -96,6 +122,17 @@ public sealed partial class SearchOrchestrator
                 SummaryFallbackKind.News,
                 null,
                 ct);
+
+            if (isLocalNews)
+            {
+                var locationLabel = explicitNewsLocation;
+                if (string.IsNullOrWhiteSpace(locationLabel))
+                    locationLabel = UserLocationHint;
+
+                rawSummaryResponse = EnsureLocalNewsLocationMention(rawSummaryResponse, locationLabel);
+            }
+
+            return rawSummaryResponse;
         }
 
         if (isLocalNews)
