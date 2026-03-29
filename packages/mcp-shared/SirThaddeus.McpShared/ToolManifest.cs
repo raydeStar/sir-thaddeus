@@ -626,6 +626,78 @@ public static class ToolManifest
             Limits      = "Single bounded JSON object."
         }
     ];
+
+    // ── Display category metadata ────────────────────────────────────
+
+    /// <summary>
+    /// Human-readable display names for tool categories shown in the
+    /// trust-ledger drawer. Keys are lowercase category strings from
+    /// <see cref="ToolDescriptor.Category"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> CategoryDisplayNames { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["web"]    = "Web searches",
+            ["file"]   = "File operations",
+            ["system"] = "System commands",
+            ["screen"] = "Screen capture",
+            ["memory"] = "Memory",
+            ["meta"]   = "System tools",
+            ["time"]   = "System tools",
+        };
+
+    /// <summary>
+    /// Maps a tool category to a human-readable display name.
+    /// Falls back to the raw category value when not mapped.
+    /// </summary>
+    public static string GetCategoryDisplayName(string category)
+        => CategoryDisplayNames.TryGetValue(category, out var name) ? name : category;
+
+    /// <summary>
+    /// Returns all tools grouped by their <see cref="ToolDescriptor.Category"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<ToolDescriptor>> GetToolsByCategory()
+        => All.GroupBy(t => t.Category, StringComparer.OrdinalIgnoreCase)
+              .ToDictionary(g => g.Key, g => (IReadOnlyList<ToolDescriptor>)g.ToList(),
+                            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Maps permission group names (from McpPermissionsSettings) to the
+    /// tool categories they govern. Used to derive logical MCP connections
+    /// from the existing per-group permission model.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string[]> PermissionGroupToCategories { get; } =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["screen"]      = ["screen"],
+            ["files"]       = ["file"],
+            ["system"]      = ["system"],
+            ["web"]         = ["web"],
+            ["memoryRead"]  = ["memory"],
+            ["memoryWrite"] = ["memory"],
+        };
+
+    /// <summary>
+    /// Human-readable display names for MCP permission groups shown as
+    /// logical connections in the trust-ledger drawer.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ConnectionDisplayNames { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["screen"]      = "Screen Capture",
+            ["files"]       = "File System",
+            ["system"]      = "System Commands",
+            ["web"]         = "Web Access",
+            ["memoryRead"]  = "Memory (Read)",
+            ["memoryWrite"] = "Memory (Write)",
+        };
+
+    /// <summary>
+    /// Returns the human-readable connection display name for a permission group.
+    /// Falls back to the raw group name when not mapped.
+    /// </summary>
+    public static string GetConnectionDisplayName(string permissionGroup)
+        => ConnectionDisplayNames.TryGetValue(permissionGroup, out var name) ? name : permissionGroup;
 }
 
 /// <summary>

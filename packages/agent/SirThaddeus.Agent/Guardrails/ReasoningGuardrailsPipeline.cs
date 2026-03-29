@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Guardrails;
@@ -464,6 +465,26 @@ public sealed class ReasoningGuardrailsPipeline
 
     public GuardrailsPipelineResult? TryRunDeterministicSpecialCase(string userMessage)
     {
+        var classicReasoning = ClassicReasoningEngine.TryMatch(userMessage);
+        if (classicReasoning is not null &&
+            string.Equals(classicReasoning.Category, "logic", StringComparison.OrdinalIgnoreCase))
+        {
+            return new GuardrailsPipelineResult
+            {
+                AnswerText = classicReasoning.Answer,
+                RationaleLines =
+                [
+                    "Detected classic self-contained logic puzzle.",
+                    "Solved with deterministic reasoning rather than model speculation.",
+                    "Returned the computed answer directly without tool or web escalation."
+                ],
+                TriggerRisk = "low",
+                TriggerWhy = "Classic logic puzzle handled by deterministic solver.",
+                TriggerSource = "deterministic_classic_reasoning",
+                LlmRoundTrips = 0
+            };
+        }
+
         if (!TryParseTwoJugPrompt(userMessage, out var jugA, out var jugB, out var target))
             return null;
 

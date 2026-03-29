@@ -423,7 +423,7 @@ public static class FileTools
 
         var allowedRoots = ParseAllowedRootsEnv("ST_DOCUMENT_READER_ALLOWED_ROOTS");
         if (allowedRoots.Count == 0)
-            return "Error: No allowed folders are configured. Add a folder in Settings > Search before using file tools.";
+            return "Error: No allowed folders are configured. Add a folder in Settings > My Files before using file tools.";
 
         return IsPathUnderAnyRoot(fullPath, allowedRoots)
             ? null

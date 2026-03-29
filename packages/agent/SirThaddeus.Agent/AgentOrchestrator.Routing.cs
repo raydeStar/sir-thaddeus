@@ -32,6 +32,7 @@ public sealed partial class AgentOrchestrator
     private async Task<MemoryContextResult> GetMemoryContextSafeAsync(
         string userMessage,
         string? conversationId,
+        TimeSpan? timeoutOverride,
         CancellationToken cancellationToken)
     {
         if (!MemoryEnabled)
@@ -47,7 +48,7 @@ public sealed partial class AgentOrchestrator
                     MemoryEnabled = MemoryEnabled,
                     IsColdGreeting = IsColdGreeting(userMessage),
                     ActiveProfileId = ActiveProfileId,
-                    Timeout = MemoryRetrievalTimeout
+                    Timeout = timeoutOverride ?? MemoryRetrievalTimeout
                 },
                 cancellationToken);
         }
@@ -57,6 +58,12 @@ public sealed partial class AgentOrchestrator
             return new MemoryContextResult();
         }
     }
+
+    private Task<MemoryContextResult> GetMemoryContextSafeAsync(
+        string userMessage,
+        string? conversationId,
+        CancellationToken cancellationToken)
+        => GetMemoryContextSafeAsync(userMessage, conversationId, timeoutOverride: null, cancellationToken);
 
     private static ChatIntent MapRouteToLegacyIntent(RouterOutput route)
     {
@@ -82,6 +89,23 @@ public sealed partial class AgentOrchestrator
             Intents.LookupDeepDive => LookupModeHint.DeepDive,
             _ => LookupModeHint.Auto
         };
+    }
+
+    private static LookupModeHint NormalizeLookupModeHint(
+        LookupModeHint lookupModeHint,
+        string lowerIncoming,
+        Action<string, string> logEvent)
+    {
+        if (lookupModeHint == LookupModeHint.DeepDive &&
+            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+        {
+            logEvent(
+                "LOOKUP_MODE_LOCAL_BUSINESS_OVERRIDE",
+                "Forced generic local-business discovery onto the fact-find pipeline.");
+            return LookupModeHint.Fact;
+        }
+
+        return lookupModeHint;
     }
 
     private static bool IsDeterministicInlineRoute(RouterOutput route) =>
@@ -224,6 +248,43 @@ public sealed partial class AgentOrchestrator
 
         if (footmanDecision is { IsAuthoritative: true })
             ApplyFootmanContextPolicy(footmanDecision.EffectiveContextPolicy);
+
+        if (RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            !route.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupNews,
+                confidence: Math.Max(route.Confidence, 0.93),
+                needsWeb: true,
+                needsSearch: true);
+
+            LogEvent("ROUTER_NEWS_NORMALIZATION",
+                "Normalized misrouted lookup intent to LookupNews for an explicit news request.");
+        }
+
+        var shouldNormalizeSelfContainedLookupToChat =
+            !webEvidence.ShouldLookup &&
+            footmanDecision?.IsAuthoritative != true &&
+            IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lowerIncoming) &&
+            (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) ||
+             route.Confidence > 0.90);
+
+        if (!route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
+            !route.Intent.Equals(Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase) &&
+            !route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase) &&
+            !route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
+            !route.Intent.Equals(Intents.SystemTask, StringComparison.OrdinalIgnoreCase) &&
+            !route.Intent.Equals(Intents.BrowseOnce, StringComparison.OrdinalIgnoreCase) &&
+            shouldNormalizeSelfContainedLookupToChat)
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.ChatOnly,
+                confidence: Math.Max(route.Confidence, 0.80));
+
+            LogEvent("ROUTER_CHAT_NORMALIZATION",
+                "Downgraded misrouted prompt to ChatOnly because it is a self-contained knowledge/reasoning request.");
+        }
 
         // ── Heuristic safety valve: downgrade WebLookup → ChatOnly ───
         // When the deterministic heuristic says "no web lookup needed"

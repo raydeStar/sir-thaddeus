@@ -49,9 +49,9 @@ public class IntentClassificationTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "You are a test assistant.");
 
-        // Message deliberately avoids triggering LooksLikeWebSearchRequest
-        // heuristic, so we actually test the LLM classifier path.
-        var result = await agent.ProcessAsync("tell me about your favorite historical figure");
+        // Message must NOT trigger Tier-1 deterministic heuristics so the
+        // LLM classifier path is actually exercised.
+        var result = await agent.ProcessAsync("I recall reading about some fascinating Renaissance era discoveries");
 
         Assert.True(result.Success);
         Assert.False(string.IsNullOrWhiteSpace(result.Text));
@@ -257,7 +257,10 @@ public class SearchQueryExtractionTests
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
 
             if (sysMsg.Contains("Classify")) return "search";
-            if (sysMsg.Contains("QUERY")) return "quantum computing";  // No pipe, no recency
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+                return "{\"name\":\"\",\"type\":\"none\",\"hint\":\"\"}";
+            if (sysMsg.Contains("query builder", StringComparison.OrdinalIgnoreCase))
+                return "{\"query\":\"quantum computing\",\"recency\":\"any\"}";
             return "Summary of quantum computing.";
         });
 
@@ -265,7 +268,9 @@ public class SearchQueryExtractionTests
         var audit = new TestAuditLogger();
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
-        var result = await agent.ProcessAsync("tell me about quantum computing");
+        // Message must NOT trigger Tier-1 deterministic heuristics so
+        // the LLM classifier → search pipeline path is exercised.
+        var result = await agent.ProcessAsync("quantum computing interests me as a field of study");
 
         Assert.True(result.Success);
 
@@ -504,6 +509,111 @@ public class AgentFlowTests
         Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
         // Query should be useful — contain topic-related terms, not just assistant filler
         Assert.Contains("headlines", webSearch.Args, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WebLookup_LocalBusinessSearch_PreservesExplicitLocationInWebQuery()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"a good deli","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+
+            return new LlmResponse { IsComplete = true, Content = "Summary.", FinishReason = "stop" };
+        });
+
+        var toolResult =
+            "1. Bernie's Deli in Hillsboro.\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            """[{"url":"https://example.com/bernies-deli","title":"Bernie's Deli","domain":"example.com","snippet":"Classic deli sandwiches in Hillsboro, OR."}]""";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+            tool.Contains("search", StringComparison.OrdinalIgnoreCase)
+                ? toolResult
+                : "{}",
+            FakeMcpClient.StandardToolSet);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.True(result.Success);
+
+        var webSearch = mcp.Calls.FirstOrDefault(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
+        Assert.Contains("\"query\":\"a good deli in Hillsboro, OR\"", webSearch.Args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WebLookup_KnownLatestVersionQuestion_UsesPinnedDeterministicAnswer()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+
+            if (sysMsg.Contains("Classify", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "search", FinishReason = "stop" };
+
+            if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":".NET","type":"Framework","hint":"Microsoft developer platform"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"\".NET\" Microsoft .NET framework family","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Answer: As of 2026, .NET 8 is current.\nCommentary: This is intentionally wrong if the deterministic guard fails.",
+                FinishReason = "stop"
+            };
+        });
+
+        var toolResult =
+            "Microsoft .NET overview.\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            """[{"url":"https://dotnet.microsoft.com/","title":".NET documentation","domain":"microsoft.com","snippet":"General .NET platform overview."}]""";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+            tool.Contains("search", StringComparison.OrdinalIgnoreCase)
+                ? toolResult
+                : "{}",
+            FakeMcpClient.StandardToolSet);
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
+
+        var result = await agent.ProcessAsync("What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.");
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.",
+            result.Text);
     }
 
     [Fact]

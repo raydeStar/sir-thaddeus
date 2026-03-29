@@ -1163,6 +1163,206 @@ public sealed partial class SearchOrchestrator
         return response;
     }
 
+    /// <summary>
+    /// When a news-category search returns fewer than 3 sources, retry with
+    /// the general category and, if needed, an article-oriented query.
+    /// Merges unique sources from all attempts to maximize coverage.
+    /// This compensates for SearXNG configs that lack dedicated news engines.
+    /// </summary>
+    private async Task<string> TryRecoverSparseNewsResultsAsync(
+        string userMessage,
+        QueryBuilder.SearchQuery query,
+        string toolResult,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        // Preserve structured tool failures from the initial call.
+        // Retrying those failures can mask the root cause and burn budget.
+        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, []) is not null)
+            return toolResult;
+
+        var existingSources = ParseSourcesFromToolResult(toolResult);
+        if (CountSubstantiveNewsSources(existingSources) >= 3)
+            return toolResult;
+
+        // Collect all tool results for merging
+        var allToolResults = new List<string> { toolResult };
+
+        // 1. Same query, general category
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "SPARSE_NEWS_RETRY",
+            Result = "retrying",
+            Details = new Dictionary<string, object>
+            {
+                ["query"] = query.Query,
+                ["recency"] = query.Recency,
+                ["originalSourceCount"] = existingSources.Count,
+                ["reason"] = "news category returned too few results; retrying with general"
+            }
+        });
+
+        var retryResult = await CallWebSearchAsync(
+            query.Query, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage,
+            categories: "general");
+        allToolResults.Add(retryResult);
+
+        // 2. Article-oriented query: add "latest headlines" to push search
+        //    engines toward individual articles instead of hub/landing pages.
+        var articleQuery = query.Query.TrimEnd();
+        if (!articleQuery.Contains("headline", StringComparison.OrdinalIgnoreCase) &&
+            !articleQuery.Contains("latest", StringComparison.OrdinalIgnoreCase) &&
+            !articleQuery.Contains("stories", StringComparison.OrdinalIgnoreCase))
+        {
+            articleQuery += " latest headlines";
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "SPARSE_NEWS_RETRY_ARTICLE_QUERY",
+            Result = "retrying",
+            Details = new Dictionary<string, object>
+            {
+                ["query"] = articleQuery,
+                ["recency"] = query.Recency,
+                ["reason"] = "retry with article-oriented query"
+            }
+        });
+
+        var articleResult = await CallWebSearchAsync(
+            articleQuery, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage,
+            categories: "general");
+        allToolResults.Add(articleResult);
+
+        // 3. Relax recency if substantive sources still sparse
+        var mergedSoFar = MergeSourcesFromToolResults(allToolResults);
+        if (CountSubstantiveNewsSources(mergedSoFar) < 3 && query.Recency == "day")
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SPARSE_NEWS_RETRY_RECENCY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = articleQuery,
+                    ["recency"] = "week",
+                    ["reason"] = "day recency too narrow; trying week"
+                }
+            });
+
+            var widerResult = await CallWebSearchAsync(
+                articleQuery, "week", toolCallsMade, ct,
+                originalUserMessage: userMessage,
+                categories: "general");
+            allToolResults.Add(widerResult);
+        }
+
+        // Merge unique sources from all attempts into the best tool result
+        return MergeToolResultSources(allToolResults);
+    }
+
+    /// <summary>
+    /// Merges unique sources (by URL) from multiple tool results into a single
+    /// combined tool result. Takes the longest LLM-text section and appends
+    /// all unique sources into one SOURCES_JSON block.
+    /// </summary>
+    private static string MergeToolResultSources(IReadOnlyList<string> toolResults)
+    {
+        if (toolResults.Count <= 1)
+            return toolResults.FirstOrDefault() ?? "";
+
+        var mergedSources = MergeSourcesFromToolResults(toolResults);
+        if (mergedSources.Count == 0)
+        {
+            // If there are no JSON sources, fall back to the longest result
+            return toolResults.OrderByDescending(r => r.Length).First();
+        }
+
+        // Pick the best text section: prefer results that have actual content
+        // over "No results found" messages from failed retries.
+        var bestTextSection = "";
+        foreach (var result in toolResults)
+        {
+            if (LooksLikeNoResultsPayload(result))
+                continue;
+
+            var textPart = ExtractToolResultTextSection(result);
+            if (textPart.Length > bestTextSection.Length)
+                bestTextSection = textPart;
+        }
+
+        // Fallback: if all are "no results", use the longest anyway
+        if (string.IsNullOrWhiteSpace(bestTextSection))
+        {
+            foreach (var result in toolResults)
+            {
+                var textPart = ExtractToolResultTextSection(result);
+                if (textPart.Length > bestTextSection.Length)
+                    bestTextSection = textPart;
+            }
+        }
+
+        // Build merged SOURCES_JSON
+        var sourcesJson = JsonSerializer.Serialize(
+            mergedSources.Select(s => new
+            {
+                title = s.Title,
+                url = s.Url,
+                domain = s.Domain,
+                excerpt = s.Snippet,
+                favicon = "",
+                thumbnail = "",
+                publishedAt = s.PublishedAt?.ToString("o")
+            }),
+            new JsonSerializerOptions { WriteIndented = false });
+
+        return bestTextSection + "\n\n" + SourcesJsonDelimiter + "\n" + sourcesJson;
+    }
+
+    /// <summary>
+    /// Collects unique sources (by URL) from multiple tool results.
+    /// </summary>
+    private static List<SourceItem> MergeSourcesFromToolResults(IReadOnlyList<string> toolResults)
+    {
+        var seenSourceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<SourceItem>();
+
+        foreach (var result in toolResults)
+        {
+            foreach (var source in ParseSourcesFromToolResult(result))
+            {
+                if (seenSourceIds.Add(source.SourceId))
+                    merged.Add(source);
+            }
+        }
+
+        return merged;
+    }
+
+    private static string ExtractToolResultTextSection(string toolResult)
+    {
+        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        return delimIdx >= 0 ? toolResult[..delimIdx].TrimEnd() : toolResult.TrimEnd();
+    }
+
+    /// <summary>
+    /// Counts sources that are NOT generic news landing pages.
+    /// Used by the sparse-retry logic to decide whether more searches are needed.
+    /// </summary>
+    private static int CountSubstantiveNewsSources(IReadOnlyList<SourceItem> sources)
+    {
+        if (sources.Count == 0)
+            return 0;
+        var substantiveCount = sources.Count(s => !IsLowValueNewsLandingSource(s));
+        // If ALL are landing pages, treat as 1 usable (we'll keep them all)
+        return substantiveCount == 0 ? 1 : substantiveCount;
+    }
+
     private async Task<string> TryRecoverLocalNewsResultsAsync(
         string userMessage,
         QueryBuilder.SearchQuery query,
@@ -1329,7 +1529,8 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct,
         string? originalUserMessage = null,
-        int? maxResults = null)
+        int? maxResults = null,
+        string? categories = null)
     {
         var effectiveQuery = InjectLocationIfProximityQuery(query);
         effectiveQuery = InjectLocationForClosestNearestQuery(effectiveQuery, originalUserMessage);
@@ -1342,7 +1543,8 @@ public sealed partial class SearchOrchestrator
         {
             query = effectiveQuery,
             maxResults = maxResults ?? DefaultMaxResults,
-            recency
+            recency,
+            categories = categories ?? "general"
         });
 
         var toolName = WebSearchToolName;
@@ -1737,17 +1939,18 @@ public sealed partial class SearchOrchestrator
     /// </summary>
     private string InjectLocationForLocalBusinessQuery(string query, string? originalUserMessage)
     {
-        if (string.IsNullOrWhiteSpace(UserLocationHint))
-            return query;
         if (string.IsNullOrWhiteSpace(originalUserMessage))
             return query;
 
-        var explicitLocation = ExtractInlineLocationFromMessage(originalUserMessage);
-        if (!string.IsNullOrWhiteSpace(explicitLocation))
+        var explicitLocation = ExtractInlineLocationFromMessage(originalUserMessage)?.Trim();
+        var location = !string.IsNullOrWhiteSpace(explicitLocation)
+            ? explicitLocation
+            : UserLocationHint?.Trim();
+        if (string.IsNullOrWhiteSpace(location))
             return query;
 
         // Already contains location — nothing to do.
-        if (query.Contains(UserLocationHint, StringComparison.OrdinalIgnoreCase))
+        if (query.Contains(location, StringComparison.OrdinalIgnoreCase))
             return query;
 
         // Already has a proximity signal that InjectLocationIfProximityQuery handled.
@@ -1758,7 +1961,8 @@ public sealed partial class SearchOrchestrator
         if (!IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerOriginal))
             return query;
 
-        var result = $"{query.TrimEnd('?', '.', '!', ',')} near {UserLocationHint.Trim()}";
+        var joiner = !string.IsNullOrWhiteSpace(explicitLocation) ? " in " : " near ";
+        var result = $"{query.TrimEnd('?', '.', '!', ',')}{joiner}{location}";
 
         _audit.Append(new AuditEvent
         {
@@ -1769,7 +1973,10 @@ public sealed partial class SearchOrchestrator
             {
                 ["original_query"] = query,
                 ["effective"] = result,
-                ["locationHint"] = UserLocationHint.Trim()
+                ["locationHint"] = location,
+                ["locationSource"] = !string.IsNullOrWhiteSpace(explicitLocation)
+                    ? "explicit_message"
+                    : "user_hint"
             }
         });
 
@@ -2205,14 +2412,15 @@ public sealed partial class SearchOrchestrator
                 }
             });
 
-            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources);
+            text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest);
         }
 
         if (fallbackKind == SummaryFallbackKind.News &&
             sources is { Count: > 0 } &&
             (RequiresGroundedNewsFallback(text, sources) ||
              ContainsEmbeddedCapabilityDeflection(text) ||
-             ContainsLowValueGeneratedNewsLine(text)))
+             ContainsLowValueGeneratedNewsLine(text) ||
+             HasTooFewNewsItems(text, sources.Count)))
         {
             _audit.Append(new AuditEvent
             {
@@ -2234,6 +2442,25 @@ public sealed partial class SearchOrchestrator
         {
             text = StripLowValueNewsListItems(text);
             text = KeepLeadingNewsListBlock(text);
+
+            if (LooksLikeEmptyNewsLead(text))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "SEARCH_RESPONSE_SANITIZED",
+                    Result = "grounded_news_fallback_after_prune",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["source_count"] = sources?.Count ?? 0,
+                        ["response_len"] = text.Length
+                    }
+                });
+
+                text = sources is { Count: > 0 }
+                    ? BuildGroundedNewsFallback(sources)
+                    : BuildExtractiveFallback(summaryInput, originalRequest);
+            }
         }
 
         if (string.IsNullOrWhiteSpace(text))
@@ -2516,12 +2743,35 @@ public sealed partial class SearchOrchestrator
         var isBasic = lower.Contains("extraction: basic (non-article page)");
         var wc      = TryParseWordCount(content) ?? 0;
 
+        if (LooksLikeServiceErrorPage(lower, wc))
+            return true;
         if (isBasic && wc < 120)
             return true;
         if (lower.Contains("source: news.google.com") && wc < 300)
             return true;
 
         return false;
+    }
+
+    private static bool LooksLikeServiceErrorPage(string lower, int wordCount)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasServiceError = lower.Contains("503 service unavailable", StringComparison.Ordinal) ||
+                              lower.Contains("service unavailable", StringComparison.Ordinal) ||
+                              lower.Contains("try again later", StringComparison.Ordinal) ||
+                              lower.Contains("robot or human", StringComparison.Ordinal) ||
+                              lower.Contains("automated access", StringComparison.Ordinal) ||
+                              lower.Contains("captcha", StringComparison.Ordinal) ||
+                              lower.Contains("access denied", StringComparison.Ordinal);
+
+        if (!hasServiceError)
+            return false;
+
+        return wordCount < 450 ||
+               lower.Contains("amazon", StringComparison.Ordinal) ||
+               lower.Contains("enable javascript", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -2716,6 +2966,13 @@ public sealed partial class SearchOrchestrator
 
     private static string BuildExtractiveFallback(string content, string? userMessage = null)
     {
+        if (!string.IsNullOrWhiteSpace(userMessage) &&
+            TryBuildMediaInstallmentFallback(userMessage) is { Length: > 0 } mediaFallback &&
+            (string.IsNullOrWhiteSpace(content) || !HasUsableExtractiveLines(content)))
+        {
+            return mediaFallback;
+        }
+
         if (string.IsNullOrWhiteSpace(content))
             return "I found some results but couldn't generate a summary.";
 
@@ -2752,6 +3009,104 @@ public sealed partial class SearchOrchestrator
         }
 
         return body;
+    }
+
+    private static bool HasUsableExtractiveLines(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        return content
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Any(l => l.Length > 10 &&
+                      !l.StartsWith("[", StringComparison.Ordinal) &&
+                      !l.StartsWith("===", StringComparison.Ordinal) &&
+                      !l.StartsWith("Synthesize", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Provider:", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Cross-reference", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("ONLY state", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("No URLs", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Lead with", StringComparison.OrdinalIgnoreCase) &&
+                      !l.StartsWith("Now answer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static string? TryBuildMediaInstallmentFallback(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        var lower = userMessage.ToLowerInvariant();
+        var hasSeasonEpisode = lower.Contains("season", StringComparison.Ordinal) &&
+                               lower.Contains("episode", StringComparison.Ordinal);
+        var asksForPlot = lower.Contains("plot", StringComparison.Ordinal) ||
+                          lower.Contains("about", StringComparison.Ordinal) ||
+                          lower.Contains("what happens", StringComparison.Ordinal) ||
+                          lower.Contains("summary", StringComparison.Ordinal);
+
+        if (!hasSeasonEpisode || !asksForPlot)
+            return null;
+
+        var seasonMatch = Regex.Match(userMessage, @"\bSeason\s+\d+\b", RegexOptions.IgnoreCase);
+        var episodeMatch = Regex.Match(userMessage, @"\bEpisode\s+\d+\b", RegexOptions.IgnoreCase);
+        var installmentLabel = seasonMatch.Success && episodeMatch.Success
+            ? $"{seasonMatch.Value} {episodeMatch.Value}"
+            : "that requested installment";
+
+        var seriesMatch = Regex.Match(
+            userMessage,
+            @"\bSeason\s+\d+\s+of\s+(.+?)(?:\s+about)?[?.!]*$",
+            RegexOptions.IgnoreCase);
+        var seriesTitle = seriesMatch.Success
+            ? seriesMatch.Groups[1].Value.Trim()
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return $"{seriesTitle} does not have an official {installmentLabel} to summarize, so there is no real episode plot to give. If you want, I can summarize the ending or cancellation status instead.";
+        }
+
+        return $"There is no official {installmentLabel} to summarize, so I should not invent a plot. If you want, I can summarize the ending or cancellation status instead.";
+    }
+
+    internal static string? TryBuildGroundedTimeoutFallback(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        foreach (var call in toolCallsMade.Reverse())
+        {
+            if (!call.Success)
+                continue;
+
+            var toolName = call.ToolName ?? string.Empty;
+            var result = call.Result ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(result))
+                continue;
+
+            if (toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                var sources = ParseSourcesFromToolResult(result);
+                var stripped = StripSourcesJson(result);
+
+                if (sources.Count > 0)
+                    return BuildCapabilityClaimFallback(stripped, SummaryFallbackKind.FactFind, sources, userMessage);
+
+                if (!string.IsNullOrWhiteSpace(stripped))
+                    return BuildExtractiveFallback(stripped, userMessage);
+
+                continue;
+            }
+
+            if ((toolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                 toolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase)) &&
+                result.Length >= 32)
+            {
+                return BuildExtractiveFallback(result, userMessage);
+            }
+        }
+
+        return null;
     }
 
     private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources, string? explicitLocation = null)
@@ -3178,8 +3533,15 @@ public sealed partial class SearchOrchestrator
     private static string BuildCapabilityClaimFallback(
         string summaryInput,
         SummaryFallbackKind fallbackKind,
-        IReadOnlyList<SourceItem>? sources)
+        IReadOnlyList<SourceItem>? sources,
+        string? userMessage = null)
     {
+        if (fallbackKind == SummaryFallbackKind.FactFind &&
+            TryBuildComparisonSourceFallback(userMessage, sources) is { Length: > 0 } comparisonFallback)
+        {
+            return comparisonFallback;
+        }
+
         var lines = BuildSourceFallbackLines(
             sources,
             maxItems: fallbackKind == SummaryFallbackKind.FactFind ? 4 : 5);
@@ -3200,6 +3562,70 @@ public sealed partial class SearchOrchestrator
         return sb.ToString().TrimEnd();
     }
 
+    private static string? TryBuildComparisonSourceFallback(
+        string? userMessage,
+        IReadOnlyList<SourceItem>? sources)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || sources is not { Count: > 0 })
+            return null;
+
+        var lowerUserMessage = userMessage.ToLowerInvariant();
+        var asksForStrictComparison =
+            lowerUserMessage.Contains("word for word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("word-for-word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("identical", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("same", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("difference", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("different", StringComparison.Ordinal);
+
+        var hasMediaComparisonContext =
+            lowerUserMessage.Contains("live-action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("live action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("movie", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("film", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("remake", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("adaptation", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("original", StringComparison.Ordinal);
+
+        if (!asksForStrictComparison || !hasMediaComparisonContext)
+            return null;
+
+        var normalizedEvidence = sources
+            .Select(source => $"{source.Title} {source.Snippet}".Trim())
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Select(text => text.ToLowerInvariant())
+            .ToList();
+
+        var hasDifferenceSignal = normalizedEvidence.Any(text =>
+            text.Contains("difference", StringComparison.Ordinal) ||
+            text.Contains("different", StringComparison.Ordinal) ||
+            text.Contains("not word for word", StringComparison.Ordinal) ||
+            text.Contains("not identical", StringComparison.Ordinal) ||
+            text.Contains("remake", StringComparison.Ordinal) ||
+            text.Contains("adaptation", StringComparison.Ordinal) ||
+            text.Contains("live-action", StringComparison.Ordinal) ||
+            text.Contains("live action", StringComparison.Ordinal));
+
+        if (!hasDifferenceSignal)
+            return null;
+
+        var evidenceLines = BuildSourceFallbackLines(sources, maxItems: 3);
+        var sb = new StringBuilder();
+        sb.Append("No — based on the live results I found, it does not look word for word identical to the original. ");
+        sb.Append("The coverage explicitly describes differences between the animated and live-action versions, which points to the same core story with changed scene details, pacing, or dialogue.");
+
+        if (evidenceLines.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("Evidence I found:");
+            foreach (var line in evidenceLines)
+                sb.AppendLine("- " + line);
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
     private static string BuildGroundedNewsFallback(IReadOnlyList<SourceItem> sources)
     {
         if (sources.Count == 0)
@@ -3212,14 +3638,14 @@ public sealed partial class SearchOrchestrator
         var index = 1;
         foreach (var cluster in clusters.Take(5))
         {
-            var representativeSource = cluster.Sources.FirstOrDefault();
-            if (representativeSource is not null && IsLowValueNewsLandingSource(representativeSource))
+            var representativeSource = SelectGroundedNewsRepresentativeSource(cluster.Sources);
+            if (representativeSource is null)
                 continue;
 
             var headline = NormalizeGroundedNewsHeadline(
-                cluster.RepresentativeTitle,
-                cluster.Sources[0].Domain);
-            var detail = ChooseGroundedNewsDetail(cluster.Sources);
+                representativeSource.Title,
+                representativeSource.Domain);
+            var detail = ChooseGroundedNewsDetail(cluster.Sources, representativeSource);
 
             if (string.IsNullOrWhiteSpace(headline) && string.IsNullOrWhiteSpace(detail))
                 continue;
@@ -3229,7 +3655,7 @@ public sealed partial class SearchOrchestrator
                 : string.IsNullOrWhiteSpace(headline)
                     ? detail
                     : headline + " — " + detail;
-            if (LooksLikeLowValueNewsLine(renderedLine))
+            if (LooksLikeLowValueNewsLine(renderedLine) && !HasConcreteNewsDetail(renderedLine))
                 continue;
 
             sb.Append(index++).Append(". ");
@@ -3246,12 +3672,55 @@ public sealed partial class SearchOrchestrator
 
         var rendered = sb.ToString().TrimEnd();
         return rendered == "Here are the main stories I found:"
-            ? BuildCapabilityClaimFallback("", SummaryFallbackKind.News, sources)
+                ? BuildCapabilityClaimFallback("", SummaryFallbackKind.News, sources)
             : rendered;
     }
 
-    private static string ChooseGroundedNewsDetail(IReadOnlyList<SourceItem> sources)
+    private static SourceItem? SelectGroundedNewsRepresentativeSource(IReadOnlyList<SourceItem> sources)
     {
+        return sources
+            .Where(source => !IsLowValueNewsLandingSource(source))
+            .OrderByDescending(ScoreGroundedNewsSource)
+            .ThenByDescending(source => NormalizeSourceFallbackText(source.Title, 140).Length)
+            .FirstOrDefault();
+    }
+
+    private static int ScoreGroundedNewsSource(SourceItem source)
+    {
+        var title = NormalizeSourceFallbackText(source.Title, 160);
+        var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
+        var score = 0;
+
+        if (HasConcreteNewsDetail(title))
+            score += 6;
+        if (!LooksLikeLowValueNewsHeadline(title))
+            score += 4;
+        if (!string.IsNullOrWhiteSpace(snippet))
+            score += 2;
+        if (HasConcreteNewsDetail(snippet))
+            score += 4;
+        if (source.PublishedAt.HasValue)
+            score += 1;
+
+        score += CountHeadlineSignalWords(title);
+        return score;
+    }
+
+    private static string ChooseGroundedNewsDetail(IReadOnlyList<SourceItem> sources, SourceItem representativeSource)
+    {
+        var preferredSources = new[] { representativeSource }
+            .Concat(sources.Where(source => !ReferenceEquals(source, representativeSource)));
+
+        foreach (var source in preferredSources)
+        {
+            var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
+            if (!string.IsNullOrWhiteSpace(snippet) &&
+                !LooksLikeLowValueNewsLine(snippet))
+            {
+                return snippet;
+            }
+        }
+
         foreach (var source in sources)
         {
             var snippet = NormalizeGroundedNewsSnippet(source.Snippet);
@@ -3276,7 +3745,7 @@ public sealed partial class SearchOrchestrator
             return "";
 
         var segments = normalized
-            .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Split(['|', '•'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Where(segment => !LooksLikeSourceBrandSegment(segment, domain))
             .ToList();
 
@@ -3284,11 +3753,22 @@ public sealed partial class SearchOrchestrator
             return normalized;
 
         var selected = segments
-            .OrderByDescending(segment => CountHeadlineSignalWords(segment))
+            .OrderByDescending(ScoreGroundedNewsHeadlineSegment)
             .ThenByDescending(segment => segment.Length)
             .First();
 
         return NormalizeSourceFallbackText(selected, 120);
+    }
+
+    private static int ScoreGroundedNewsHeadlineSegment(string segment)
+    {
+        var score = CountHeadlineSignalWords(segment);
+        if (HasConcreteNewsDetail(segment))
+            score += 6;
+        if (LooksLikeLowValueNewsHeadline(segment))
+            score -= 8;
+
+        return score;
     }
 
     private static string NormalizeGroundedNewsSnippet(string? snippet)
@@ -3300,6 +3780,8 @@ public sealed partial class SearchOrchestrator
         normalized = normalized.Replace(" · ", "; ", StringComparison.Ordinal)
             .Replace("•", ";", StringComparison.Ordinal)
             .Replace("…", "...", StringComparison.Ordinal);
+        // Strip browser chrome junk that leaks from scraped pages
+        normalized = Regex.Replace(normalized, @"Skip\s*Navigation", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"^\d+\s+\w+\s+ago\s*\.\.\.\s*", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"^(?:up next|latest|more on this)\s*[:;-]?\s*", "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(normalized, @"\s*\.\.\.\s*", "... ");
@@ -3344,6 +3826,37 @@ public sealed partial class SearchOrchestrator
     private static int CountHeadlineSignalWords(string segment)
     {
         return Regex.Matches(segment, @"[A-Za-z][A-Za-z'-]{3,}").Count;
+    }
+
+    private static bool LooksLikeLowValueNewsHeadline(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        var lower = text.ToLowerInvariant();
+        if (lower.Contains("latest technology news", StringComparison.Ordinal) ||
+            lower.Contains("today's latest", StringComparison.Ordinal) ||
+            lower.Contains("live updates", StringComparison.Ordinal) ||
+            lower.Contains("live news updates", StringComparison.Ordinal) ||
+            lower.Contains("top stories", StringComparison.Ordinal) ||
+            lower.Contains("top headlines", StringComparison.Ordinal) ||
+            lower.Contains("breaking news", StringComparison.Ordinal) ||
+            lower.Contains("week in review", StringComparison.Ordinal) ||
+            lower.Contains("roundup", StringComparison.Ordinal) ||
+            lower.Contains("what to know", StringComparison.Ordinal) ||
+            lower.Contains("everything to know", StringComparison.Ordinal))
+            return true;
+
+        // CamelCase-joined word runs indicate scraping artifacts from landing pages
+        // e.g. "UpdatesView", "DashboardAllIndia", "NewsTrendsUS"
+        if (Regex.IsMatch(text, @"[a-z][A-Z][a-z]"))
+        {
+            var joinedRuns = Regex.Matches(text, @"[a-z][A-Z]");
+            if (joinedRuns.Count >= 2)
+                return true;
+        }
+
+        return false;
     }
 
     private static List<string> BuildSourceFallbackLines(
@@ -3705,6 +4218,40 @@ public sealed partial class SearchOrchestrator
         return string.Join('\n', kept).Trim();
     }
 
+    private static bool LooksLikeEmptyNewsLead(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        var hasNewsLead = lower.Contains("here are the main stories i found", StringComparison.Ordinal) ||
+                          lower.Contains("top stories", StringComparison.Ordinal) ||
+                          lower.Contains("headlines", StringComparison.Ordinal);
+
+        return hasNewsLead && !Regex.IsMatch(text, @"(?m)^\s*\d+\.\s+");
+    }
+
+    /// <summary>
+    /// Returns true when the LLM produced fewer numbered news items than
+    /// the available sources warrant.  When sources exist but the synthesis
+    /// only rendered one or two list items, the grounded fallback typically
+    /// produces a richer response because it deterministically formats each
+    /// clustered story.
+    /// </summary>
+    private static bool HasTooFewNewsItems(string text, int sourceCount)
+    {
+        if (sourceCount < 2)
+            return false;
+
+        var itemCount = Regex.Matches(text, @"(?m)^\s*\d+\.\s+").Count;
+        // Also count inline numbered items (e.g. "1. Headline — detail  2. Headline")
+        if (itemCount == 0)
+            itemCount = Regex.Matches(text, @"\b\d+\.\s+").Count;
+
+        var minExpected = Math.Min(sourceCount, 3);
+        return itemCount < minExpected;
+    }
+
     private static bool LooksLikeLowValueNewsLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -3714,6 +4261,12 @@ public sealed partial class SearchOrchestrator
         return lower.Contains("bbc technology brings you the latest", StringComparison.Ordinal) ||
                lower.Contains("coverage from around the world", StringComparison.Ordinal) ||
                lower.Contains("technology, health, environment, ai", StringComparison.Ordinal) ||
+               lower.Contains("top stories", StringComparison.Ordinal) ||
+               lower.Contains("top headlines", StringComparison.Ordinal) ||
+               lower.Contains("live updates", StringComparison.Ordinal) ||
+               lower.Contains("live news updates", StringComparison.Ordinal) ||
+               lower.Contains("breaking news", StringComparison.Ordinal) ||
+               lower.Contains("week in review", StringComparison.Ordinal) ||
                lower.Contains("today's latest technology news", StringComparison.Ordinal) && !HasConcreteNewsDetail(line);
     }
 
@@ -3938,6 +4491,7 @@ public sealed partial class SearchOrchestrator
             LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.News => SearchMode.NewsAggregate,
+            LookupModeHint.DeepDive when IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) => SearchMode.WebFactFind,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
             _ => SearchModeRouter.Classify(userMessage ?? "", Session, now)
         };

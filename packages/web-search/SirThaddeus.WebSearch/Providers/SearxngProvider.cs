@@ -56,6 +56,9 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
             if (timeRange is not null)
                 url += $"&time_range={timeRange}";
 
+            if (!string.IsNullOrWhiteSpace(options.Categories))
+                url += $"&categories={Uri.EscapeDataString(options.Categories)}";
+
             var parsed = await RetryHelper.ExecuteAsync(async () =>
             {
                 var response = await _http.GetAsync(url, cts.Token);

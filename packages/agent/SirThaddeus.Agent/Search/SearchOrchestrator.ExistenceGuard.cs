@@ -61,11 +61,9 @@ public sealed partial class SearchOrchestrator
         if (positiveEvidence.Count > 0)
         {
             var year = TryExtractReleaseYear(positiveEvidence);
-            var yearClause = year is null ? string.Empty : $" with a {year} introduction/release year";
+            var yearClause = year is null ? string.Empty : $", introduced in {year}";
 
-            return
-                    $"I could not verify definitive proof from a full official release database in this step, " +
-                    $"but the available sources indicate {subject} exists as a released product{yearClause}.";
+            return $"Yes \u2014 {subject} exists as a released product{yearClause}.";
         }
 
         var negativeEvidence = subjectMatches

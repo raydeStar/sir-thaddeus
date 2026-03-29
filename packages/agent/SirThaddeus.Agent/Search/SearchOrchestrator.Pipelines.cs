@@ -26,13 +26,20 @@ public sealed partial class SearchOrchestrator
 
         var toolResult = await CallWebSearchAsync(
             query.Query, query.Recency, toolCallsMade, ct,
-            originalUserMessage: userMessage);
+            originalUserMessage: userMessage,
+            categories: "news");
         toolResult = await TryRecoverLocalNewsResultsAsync(
             userMessage,
             query,
             toolResult,
             toolCallsMade,
             ct);
+
+        // When the news category returns too few sources, retry with general
+        // category.  SearXNG may lack dedicated news engines, so "general"
+        // often yields more relevant hits for the same query+recency.
+        toolResult = await TryRecoverSparseNewsResultsAsync(
+            userMessage, query, toolResult, toolCallsMade, ct);
 
         var entityLocationName = entity is { Type: "Place" or "place" }
             ? entity.CanonicalName
@@ -110,20 +117,29 @@ public sealed partial class SearchOrchestrator
             SearchMode.NewsAggregate, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
 
-        if (!isLocalNews && !isMarketQuoteRequest)
-        {
-            return new AgentResponse
-            {
-                Text = BuildGroundedNewsFallback(sources),
-                Success = true,
-                ToolCallsMade = toolCallsMade,
-                LlmRoundTrips = 0
-            };
-        }
-
         var summaryInput = BuildSummaryInputFromSources(
             "[Web search results - use these facts to answer the user's question]",
             sources);
+
+        // For general (non-local, non-market) news, fetch the top articles
+        // via browser_navigate so the LLM has real article content instead
+        // of raw search snippets (which are often junk portal landing pages).
+        if (!isLocalNews && !isMarketQuoteRequest)
+        {
+            var resolved = ResolveSourceUrls(sources);
+            var navigable = resolved
+                .Where(s => !IsJunkUrl(s.Url))
+                .Take(MaxFollowUpUrls)
+                .ToList();
+
+            var articleContent = await FetchArticleContentAsync(
+                navigable, toolCallsMade, ct);
+
+            if (!string.IsNullOrWhiteSpace(articleContent))
+            {
+                summaryInput += "\n\n[Full article content — use these details to give a thorough answer]\n" + articleContent;
+            }
+        }
 
         var instruction = isMarketQuoteRequest
             ? CombineMemoryAndInstruction(memoryPackText, FinanceQuoteSummaryInstruction)
@@ -427,6 +443,32 @@ public sealed partial class SearchOrchestrator
             ct);
         if (releasedProductExistence is not null)
             return releasedProductExistence;
+
+        var knownLatestVersionAnswer = OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(
+            userMessage ?? string.Empty,
+            memoryPackText);
+        if (!string.IsNullOrWhiteSpace(knownLatestVersionAnswer))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "KNOWN_LATEST_VERSION_ANSWER",
+                Result = "deterministic",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? string.Empty, 120),
+                    ["source_count"] = sources.Count
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = knownLatestVersionAnswer,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
 
         var existenceGuarded = TryBuildExistenceGuardedResponse(
             userMessage ?? "",

@@ -2,12 +2,30 @@ namespace SirThaddeus.Harness.Cli;
 
 public enum HarnessCommandKind
 {
-    Run
+    Run,
+    Stage,
+    Inspect
+}
+
+public enum HarnessInspectTarget
+{
+    LatestRun,
+    LatestFailure
 }
 
 public enum HarnessExecutionMode
 {
     Headless
+}
+
+public enum HarnessStageTarget
+{
+    All,
+    Preprocess,
+    Preflight,
+    Classify,
+    Query,
+    Trace
 }
 
 public enum HarnessJudgeMode
@@ -43,6 +61,19 @@ public sealed record HarnessCommandOptions
 
     public string ArtifactsRoot { get; init; } =
         Path.Combine("artifacts", "harness");
+
+    // ── Stage command options ─────────────────────────────────────
+    public HarnessStageTarget StageTarget { get; init; } = HarnessStageTarget.All;
+    public string StageInput { get; init; } = "";
+    public string StageAssistantContext { get; init; } = "";
+    public string StageFollowUpAnchor { get; init; } = "";
+    public string StageUserCity { get; init; } = "";
+    public bool StageHasRecentFirstPrinciplesRationale { get; init; }
+    public bool StageHasRecentSearchResults { get; init; }
+
+    // ── Inspect command options ───────────────────────────────────
+    public HarnessInspectTarget InspectTarget { get; init; } = HarnessInspectTarget.LatestFailure;
+    public string InspectRunId { get; init; } = "";
 }
 
 public sealed class CommandLineException : Exception

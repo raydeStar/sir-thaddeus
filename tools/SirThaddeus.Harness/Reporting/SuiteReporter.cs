@@ -170,6 +170,7 @@ public static class SuiteReporter
                 passed = r.Passed,
                 hard_pass = r.Score.HardPass,
                 attempts = r.Attempts,
+                artifact_directory = r.ArtifactDirectory,
                 final_response = r.FinalResponse,
                 breakdown = new
                 {
@@ -194,6 +195,74 @@ public static class SuiteReporter
             Directory.CreateDirectory(dir);
 
         File.WriteAllText(outputPath, JsonSerializer.Serialize(payload, JsonOptions));
+    }
+
+    public static void WriteMarkdownSummary(
+        IReadOnlyList<TestResult> results,
+        ReportContext context,
+        string outputPath)
+    {
+        var passCount = results.Count(r => r.Passed);
+        var failCount = results.Count - passCount;
+        var avgScore = results.Count > 0 ? results.Average(r => r.Score.FinalScore) : 0;
+
+        var builder = new StringBuilder();
+        builder.AppendLine("# Harness Run Summary");
+        builder.AppendLine();
+        builder.AppendLine($"- Run ID: {context.RunId}");
+        builder.AppendLine($"- Model: {context.ModelName ?? ""}");
+        builder.AppendLine($"- Judge: {context.JudgeMode ?? "none"}");
+        builder.AppendLine($"- Duration: {(context.DurationSeconds.HasValue ? $"{context.DurationSeconds.Value:F1}s" : "-")}");
+        builder.AppendLine($"- Artifacts: {context.ArtifactsRoot ?? ""}");
+        builder.AppendLine();
+        builder.AppendLine("## Totals");
+        builder.AppendLine();
+        builder.AppendLine($"- Tests run: {results.Count}");
+        builder.AppendLine($"- Passed: {passCount}");
+        builder.AppendLine($"- Failed: {failCount}");
+        builder.AppendLine($"- Average score: {avgScore:F2}");
+        builder.AppendLine();
+        builder.AppendLine("## Results");
+        builder.AppendLine();
+        builder.AppendLine("| Status | Suite | Test | Score | Min | Attempts | Artifact |");
+        builder.AppendLine("|---|---|---|---:|---:|---:|---|");
+
+        foreach (var result in results)
+        {
+            builder.AppendLine(
+                $"| {(result.Passed ? "PASS" : "FAIL")} | {EscapePipe(result.SuiteName)} | {EscapePipe(result.TestId)} | {result.Score.FinalScore:F2} | {result.MinScore:F2} | {result.Attempts} | {EscapePipe(result.ArtifactDirectory ?? "")} |");
+        }
+
+        var failed = results.Where(r => !r.Passed).ToList();
+        if (failed.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Failed Tests");
+            builder.AppendLine();
+
+            foreach (var test in failed)
+            {
+                builder.AppendLine($"### {test.SuiteName}/{test.TestId}");
+                builder.AppendLine();
+                builder.AppendLine($"- Score: {test.Score.FinalScore:F2}");
+                builder.AppendLine($"- Hard pass: {test.Score.HardPass}");
+                builder.AppendLine($"- Artifact: {test.ArtifactDirectory}");
+                if (test.Score.HardFailures.Count > 0)
+                    builder.AppendLine($"- Hard failures: {string.Join("; ", test.Score.HardFailures)}");
+                if (test.Score.JudgeReasons.Count > 0)
+                    builder.AppendLine($"- Judge reasons: {string.Join("; ", test.Score.JudgeReasons)}");
+                var preview = BuildInlineResponsePreview(test.FinalResponse, 220);
+                if (!string.IsNullOrWhiteSpace(preview))
+                    builder.AppendLine($"- Response preview: {preview}");
+                builder.AppendLine();
+            }
+        }
+
+        var dir = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        File.WriteAllText(outputPath, builder.ToString());
     }
 
     // ── Per-test line ──────────────────────────────────────────
@@ -299,6 +368,8 @@ public static class SuiteReporter
 
         return lines.Take(5).ToList();
     }
+
+    private static string EscapePipe(string value) => value.Replace("|", "\\|");
 
     // ── Score breakdown for failed tests ──────────────────────
 

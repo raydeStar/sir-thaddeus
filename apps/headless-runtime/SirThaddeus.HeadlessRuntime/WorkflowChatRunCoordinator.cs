@@ -5,9 +5,12 @@ using SirThaddeus.Agent.Workflow;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using System.Text.Json;
 
 internal sealed class WorkflowChatRunCoordinator
 {
+    private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
+
     private readonly Func<AppSettings> _getSettings;
     private readonly Func<AppSettings, AgentOrchestrator> _buildOrchestrator;
     private readonly IAuditLogger _audit;
@@ -224,7 +227,9 @@ internal sealed class WorkflowChatRunCoordinator
                 completionReason.ToString(),
                 selectedConfidence?.Band,
                 workflowState.LastRetryGateDecision?.IsAllowed,
-                workflowState.LastRetryGateDecision?.ReasonCode));
+                workflowState.LastRetryGateDecision?.ReasonCode,
+                ExtractAssistantSourceCards(selectedResponse),
+                selectedResponse.SuppressSourceCardsUi));
 
         if (workflowState.Envelope.ShowChecklist)
         {
@@ -356,6 +361,115 @@ internal sealed class WorkflowChatRunCoordinator
         if (lower.Contains("memory") || lower.Contains("recall") || lower.Contains("remember"))
             return 0.62;
         return 0.70;
+    }
+
+    private static IReadOnlyList<AssistantSourceCardPayload> ExtractAssistantSourceCards(AgentResponse response)
+    {
+        if (response.SuppressSourceCardsUi || response.ToolCallsMade.Count == 0)
+        {
+            return [];
+        }
+
+        var cards = new List<AssistantSourceCardPayload>();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = response.ToolCallsMade.Count - 1; i >= 0; i--)
+        {
+            var toolCall = response.ToolCallsMade[i];
+            if (!toolCall.Success || string.IsNullOrWhiteSpace(toolCall.Result))
+            {
+                continue;
+            }
+
+            foreach (var card in ParseAssistantSourceCards(toolCall.Result))
+            {
+                if (!seenUrls.Add(card.Url))
+                {
+                    continue;
+                }
+
+                cards.Add(card);
+                if (cards.Count >= 8)
+                {
+                    return cards;
+                }
+            }
+        }
+
+        return cards;
+    }
+
+    private static IReadOnlyList<AssistantSourceCardPayload> ParseAssistantSourceCards(string toolResult)
+    {
+        var cards = new List<AssistantSourceCardPayload>();
+        if (string.IsNullOrWhiteSpace(toolResult))
+        {
+            return cards;
+        }
+
+        var delimiterIndex = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        if (delimiterIndex < 0)
+        {
+            return cards;
+        }
+
+        var json = toolResult[(delimiterIndex + SourcesJsonDelimiter.Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return cards;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            JsonElement itemsElement;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = doc.RootElement;
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                     doc.RootElement.TryGetProperty("sources", out var sourcesElement) &&
+                     sourcesElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsElement = sourcesElement;
+            }
+            else
+            {
+                return cards;
+            }
+
+            foreach (var item in itemsElement.EnumerateArray())
+            {
+                var url = TryReadString(item, "url");
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                cards.Add(new AssistantSourceCardPayload(
+                    TryReadString(item, "title") ?? string.Empty,
+                    url,
+                    TryReadString(item, "domain") ?? string.Empty,
+                    TryReadString(item, "excerpt") ?? string.Empty,
+                    TryReadString(item, "favicon") ?? string.Empty,
+                    TryReadString(item, "thumbnail") ?? string.Empty,
+                    TryReadString(item, "publishedAt")));
+            }
+        }
+        catch
+        {
+            // Source cards are best-effort only.
+        }
+
+        return cards;
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) &&
+               property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
     }
 
     private static string BuildRetryPrompt(string originalPrompt, string firstAnswer, PlannedAction? retryAction)

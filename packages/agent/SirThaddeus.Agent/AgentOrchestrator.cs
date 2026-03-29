@@ -116,16 +116,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const int MaxTokensTooling        = 1024;
     private const int MaxTokensUtilityRouting = 120;
 
-    public int MaxTokensBudget
-    {
-        get => _maxTokensCasual;
-        set
-        {
-            _maxTokensCasual = value > 0 ? value : 512;
-            _maxTokensCasualRetry = Math.Max(_maxTokensCasual, 2048);
-        }
-    }
-
     private const string LogicPuzzleDecompositionModeSuffix = OrchestratorPrompts.LogicPuzzleDecompositionModeSuffix;
 
     private static readonly TimeSpan MemoryRetrievalTimeout = TimeSpan.FromMilliseconds(1500);
@@ -165,140 +155,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
-    public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
-    {
-        foreach (var (role, content) in priorMessages)
-        {
-            if (string.IsNullOrWhiteSpace(content)) continue;
-
-            switch (role)
-            {
-                case "user":
-                    _history.Add(ChatMessage.User(content));
-                    break;
-                case "assistant":
-                    _history.Add(ChatMessage.Assistant(content));
-                    break;
-            }
-        }
-
-        TrimHistory();
-    }
-
-    public bool ContextLocked
-    {
-        get => _dialogueStore.Get().ContextLocked;
-        set
-        {
-            var current = _dialogueStore.Get();
-            if (current.ContextLocked == value)
-                return;
-
-            _dialogueStore.Update(current with { ContextLocked = value });
-        }
-    }
-
     private enum ChatIntent
     {
         Casual,
         WebLookup,
         Tooling
-    }
-
-    public AgentOrchestrator(
-        ILlmClient llm,
-        IMcpToolClient mcp,
-        IAuditLogger audit,
-        string systemPrompt,
-        TimeProvider? timeProvider = null,
-        IDialogueStateStore? dialogueStateStore = null,
-        SlotExtract? slotExtract = null,
-        MergeSlots? mergeSlots = null,
-        ValidateSlots? validateSlots = null,
-        IToolPlanner? toolPlanner = null,
-        string geocodeMismatchMode = "fallback_previous",
-        IRouter? router = null,
-        IMemoryContextProvider? memoryContextProvider = null,
-        IToolLoopExecutor? toolLoopExecutor = null,
-        IDeterministicUtilityEngine? deterministicUtilityEngine = null,
-        IGuardrailsCoordinator? guardrailsCoordinator = null,
-        ISelfMemorySummarizer? selfMemorySummarizer = null,
-        ISearchFallbackExecutor? searchFallbackExecutor = null,
-        IContextAnchoringService? contextAnchoringService = null,
-        IUtilityIntentHandler? utilityIntentHandler = null,
-        IConversationSegmenter? conversationSegmenter = null,
-        MiniActionableExtractor? miniActionableExtractor = null,
-        SegmentExecutionCoordinator? segmentExecutionCoordinator = null,
-        UnifiedResponseComposer? unifiedResponseComposer = null,
-        IPersonalityRuntime? personalityRuntime = null,
-        string? activePersonalityId = null,
-        string? personalityProfilesDirectory = null,
-        IFootmanRouter? footmanRouter = null,
-        IAutoMemoryExtractor? autoMemoryExtractor = null,
-        ILlmClient? gatekeeperLlm = null)
-    {
-        _llm = llm ?? throw new ArgumentNullException(nameof(llm));
-        _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
-        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
-        _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _activePersonalityId = NormalizePersonalityId(activePersonalityId);
-        _personalityProfilesDirectory = string.IsNullOrWhiteSpace(personalityProfilesDirectory)
-            ? ResolveDefaultPersonalityProfilesDirectory()
-            : personalityProfilesDirectory.Trim();
-        _personalityRuntime = personalityRuntime ?? new PersonalityRuntime(
-            _activePersonalityId,
-            _personalityProfilesDirectory);
-
-        _searchOrchestrator = new SearchOrchestrator(
-            llm,
-            mcp,
-            audit,
-            _personalityRuntime.BuildSystemPrompt(_systemPrompt))
-        {
-            PreferredUnits = _preferredUnits
-        };
-        _dialogueStore = dialogueStateStore ?? new DialogueStateStore(_timeProvider);
-        _slotExtract = slotExtract ?? new SlotExtract(llm, audit);
-        _mergeSlots = mergeSlots ?? new MergeSlots();
-        _validateSlots = validateSlots ?? new ValidateSlots(new ValidationOptions
-        {
-            GeocodeMismatchMode = geocodeMismatchMode
-        });
-        _toolPlanner = toolPlanner ?? new ToolPlanner();
-        
-        var effectiveGatekeeper = gatekeeperLlm ?? llm;
-        _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
-        _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
-        _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
-        _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
-            mcp,
-            audit,
-            new SmartIntentClassifier(effectiveGatekeeper, audit),
-            _timeProvider);
-        _toolLoopExecutor = toolLoopExecutor ?? new ToolLoopExecutor(llm, mcp);
-        _guardrailsCoordinator = guardrailsCoordinator ?? new GuardrailsCoordinator(_reasoningGuardrailsPipeline);
-        _toolDefinitionBuilder = new ToolDefinitionBuilder(mcp);
-        _postProcessor = new DeterministicChatPostProcessor(() => _personalityRuntime.Snapshot.Profile);
-        _selfMemorySummarizer = selfMemorySummarizer ?? new SelfMemorySummarizer(mcp);
-        _searchFallbackExecutor = searchFallbackExecutor ?? new SearchFallbackExecutor(_searchOrchestrator);
-        _contextAnchoringService = contextAnchoringService ?? new ContextAnchoringService(
-            _dialogueStore,
-            _searchOrchestrator,
-            _timeProvider);
-        _utilityIntentHandler = utilityIntentHandler ?? new UtilityIntentHandler();
-        _conversationSegmenter = conversationSegmenter ?? new ConversationSegmenter();
-        _miniActionableExtractor = miniActionableExtractor ?? new MiniActionableExtractor(_llm);
-        _segmentExecutionCoordinator = segmentExecutionCoordinator ?? new SegmentExecutionCoordinator();
-        _unifiedResponseComposer = unifiedResponseComposer ?? new UnifiedResponseComposer();
-        _toolAliasResolver = new Tools.ToolAliasResolver(mcp);
-        _footmanRouter = footmanRouter;
-        _autoMemoryExtractor = autoMemoryExtractor;
-
-        _history.Add(ChatMessage.System(BuildEffectiveSystemPrompt()));
-
-        var personalitySnapshot = _personalityRuntime.Snapshot;
-        EmitPersonalityAuditSnapshot(personalitySnapshot, _activePersonalityId);
     }
 
     public Task<AgentResponse> ProcessAsync(
@@ -317,6 +178,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             return AttachContextSnapshot(AgentResponse.FromError("Empty message."), usageBaseline);
 
         (_mcp as AuditedMcpToolClient)?.NotifyNewTurn();
+        if (!string.IsNullOrWhiteSpace(conversationId))
+            (_mcp as AuditedMcpToolClient)?.UpdateSessionId(conversationId);
 
         _turnSequence++;
         var personalityTurnTag = $"turn-{_turnSequence:000000}";
@@ -350,6 +213,77 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 Success = true,
                 ToolCallsMade = [],
                 LlmRoundTrips = 0
+            }, usageBaseline);
+        }
+
+        if (TryBuildEarlyDeterministicBenignFallback(userMessage) is { Length: > 0 } deterministicBenignReply &&
+            !IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeWebSearchRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeScreenRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeFileRequest(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeSystemCommand(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeBrowseRequest(lowerIncoming))
+        {
+            if (!LooksLikeReasoningFollowUp(lowerIncoming))
+            {
+                _lastFirstPrinciplesRationale = [];
+                _lastFirstPrinciplesAt = default;
+            }
+
+            _history.Add(ChatMessage.User(userMessage));
+            TrimHistory();
+            LogEvent("AGENT_USER_MESSAGE", userMessage);
+
+            if (MemoryEnabled && _autoMemoryExtractor != null && !SafeModeEnabled)
+            {
+                _autoMemoryExtractor.FireAndForgetExtraction(userMessage, ActiveProfileId, personalityTurnTag);
+                _autoMemoryExtractor.FireAndForgetConversationChunk(
+                    userMessage,
+                    _currentConversationId,
+                    personalityTurnTag,
+                    role: "user");
+            }
+
+            var deterministicToolCalls = new List<ToolCallRecord>();
+            var deterministicMemoryTimeout = TimeSpan.FromMilliseconds(
+                Math.Max(MemoryRetrievalTimeout.TotalMilliseconds, 3000));
+            var deterministicMemoryContext = SafeModeEnabled
+                ? new MemoryContextResult()
+                : await GetMemoryContextSafeAsync(
+                    userMessage,
+                    _currentConversationId,
+                    deterministicMemoryTimeout,
+                    cancellationToken);
+
+            if (!SafeModeEnabled && MemoryEnabled && deterministicMemoryContext.Provenance.Success)
+            {
+                deterministicToolCalls.Add(new ToolCallRecord
+                {
+                    ToolName = "MemoryRetrieve",
+                    Arguments = $"{{\"query\":\"{Truncate(userMessage, 80)}\"}}",
+                    Result = deterministicMemoryContext.Provenance.Summary,
+                    Success = deterministicMemoryContext.Provenance.Success
+                });
+            }
+
+            var deterministicGuardrailsRationale = BuildDeterministicGuardrailsRationale(userMessage);
+            if (deterministicGuardrailsRationale.Count > 0)
+            {
+                _lastFirstPrinciplesRationale = deterministicGuardrailsRationale.Take(3).ToArray();
+                _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+            }
+
+            LogEvent("AGENT_DETERMINISTIC_BENIGN_FALLBACK",
+                "Answered from deterministic fallback without entering route/tool orchestration.");
+            AppendAssistantMessage(deterministicBenignReply);
+            return AttachContextSnapshot(new AgentResponse
+            {
+                Text = deterministicBenignReply,
+                Success = true,
+                ToolCallsMade = deterministicToolCalls,
+                LlmRoundTrips = 0,
+                GuardrailsUsed = deterministicGuardrailsRationale.Count > 0,
+                GuardrailsRationale = deterministicGuardrailsRationale
             }, usageBaseline);
         }
 
@@ -613,6 +547,33 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 return AttachContextSnapshot(firstPrinciplesFollowUp, usageBaseline);
             }
 
+            var classicLogicResult = ClassicReasoningEngine.TryMatch(contextualUserMessage);
+            if (classicLogicResult is not null &&
+                string.Equals(classicLogicResult.Category, "logic", StringComparison.OrdinalIgnoreCase))
+            {
+                var classicLogicText = classicLogicResult.Answer;
+                _lastFirstPrinciplesRationale =
+                [
+                    "Goal: solve the self-contained logic puzzle from the prompt.",
+                    "Constraint: use only the stated facts and avoid tool or web escalation.",
+                    "Decision: return the deterministic solver result directly."
+                ];
+                _lastFirstPrinciplesAt = _timeProvider.GetUtcNow();
+                AppendAssistantMessage(classicLogicText);
+                LogEvent("CLASSIC_LOGIC_RESPONSE", classicLogicText);
+                LogEvent("AGENT_RESPONSE", classicLogicText);
+
+                return AttachContextSnapshot(new AgentResponse
+                {
+                    Text = classicLogicText,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = roundTrips,
+                    GuardrailsUsed = true,
+                    GuardrailsRationale = _lastFirstPrinciplesRationale
+                }, usageBaseline);
+            }
+
             var shouldAllowDeterministicSpecialCase =
                 !(route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent));
 
@@ -733,6 +694,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var lookupModeHint = forceLocalBusinessLookupFromFileIntent
                     ? LookupModeHint.Fact
                     : ResolveLookupModeHint(route);
+                lookupModeHint = NormalizeLookupModeHint(lookupModeHint, lowerIncoming, LogEvent);
+
+                if (!forceLocalBusinessLookupFromFileIntent &&
+                    lookupModeHint != LookupModeHint.News &&
+                    IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming))
+                {
+                    lookupModeHint = LookupModeHint.News;
+                    LogEvent("LOOKUP_MODE_NEWS_OVERRIDE",
+                        "Forced explicit news request onto the news aggregation path.");
+                }
 
                 if (!string.IsNullOrWhiteSpace(memoryPackText))
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
@@ -753,6 +724,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var stripped = Search.SearchOrchestrator.StripOfflineReasoningPrefix(searchResponse.Text);
                 if (!string.Equals(stripped, searchResponse.Text, StringComparison.Ordinal))
                     searchResponse = searchResponse with { Text = stripped };
+
+                var sanitizedSearchText = _postProcessor.SanitizeFinalResponse(
+                    searchResponse.Text,
+                    toolCallsMade,
+                    contextualUserMessage,
+                    searchResponse.AllowToolResultPersonalityPresentation);
+                if (!string.Equals(sanitizedSearchText, searchResponse.Text, StringComparison.Ordinal))
+                    searchResponse = searchResponse with { Text = sanitizedSearchText };
 
                 if (searchResponse.Success)
                     AppendAssistantMessage(searchResponse.Text);
@@ -1171,6 +1150,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             if (hasWebToolActivity || likelyLookupIntent)
             {
+                var groundedTimeoutFallback = Search.SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+                    contextualUserMessage,
+                    toolCallsMade);
+                if (!string.IsNullOrWhiteSpace(groundedTimeoutFallback))
+                {
+                    LogEvent("AGENT_CANCELLED_RECOVERED", "Recovered with grounded timeout fallback from retrieved evidence.");
+                    AppendAssistantMessage(groundedTimeoutFallback);
+
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = groundedTimeoutFallback,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    }, usageBaseline);
+                }
+
                 var offlineFallback = await Search.OfflineWebReasoningResponder.BuildAsync(
                     _llm,
                     _systemPrompt,

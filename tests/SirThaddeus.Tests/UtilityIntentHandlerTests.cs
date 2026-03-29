@@ -1,12 +1,13 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Dialogue;
 
 namespace SirThaddeus.Tests;
 
 public sealed class UtilityIntentHandlerTests
 {
     [Fact]
-    public async Task TryHandleAsync_ChatOnly_DoesNotInvokeLlmUtilityInference()
+    public async Task TryHandleAsync_ChatOnly_SelfCapabilityPrompt_UsesDeterministicAnswer()
     {
         var handler = new UtilityIntentHandler();
         var inferCalled = false;
@@ -27,7 +28,8 @@ public sealed class UtilityIntentHandlerTests
         });
 
         Assert.False(inferCalled);
-        Assert.Null(response);
+        Assert.NotNull(response);
+        Assert.Contains("turning messy questions into something clear and usable", response!.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -86,5 +88,57 @@ public sealed class UtilityIntentHandlerTests
         Assert.Contains("45 tools", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Single(toolCalls);
         Assert.Equal("tool_ping", toolCalls[0].ToolName);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_DirectUtilityParse_WinsOverStaleToolPlan()
+    {
+        var handler = new UtilityIntentHandler();
+        var toolCalls = new List<ToolCallRecord>();
+        var weatherExecuted = false;
+
+        var response = await handler.TryHandleAsync(new UtilityIntentExecutionRequest
+        {
+            UserMessage = "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?",
+            Route = new RouterOutput { Intent = Intents.ChatOnly },
+            ToolPlan = new ToolPlanDecision
+            {
+                Category = "weather",
+                PlannerMessage = "weather in currentLocation",
+                ToolCalls =
+                [
+                    new PlannedToolCall
+                    {
+                        ToolName = "weather_geocode",
+                        ArgumentsJson = "{\"place\":\"currentLocation\",\"maxResults\":3}"
+                    }
+                ]
+            },
+            BuildFromToolPlan = (plan, _) => new UtilityRouter.UtilityResult
+            {
+                Category = plan.Category,
+                Answer = "[weather lookup for: currentLocation]",
+                McpToolName = "weather_geocode",
+                McpToolArgs = "{\"place\":\"currentLocation\",\"maxResults\":3}"
+            },
+            ToolCallsMade = toolCalls,
+            ExecuteWeatherAsync = (_, _, _, _, _, _) =>
+            {
+                weatherExecuted = true;
+                return Task.FromResult(new AgentResponse
+                {
+                    Text = "weather",
+                    Success = true,
+                    ToolCallsMade = toolCalls,
+                    LlmRoundTrips = 0
+                });
+            }
+        });
+
+        Assert.NotNull(response);
+        Assert.False(weatherExecuted);
+        Assert.Empty(toolCalls);
+        Assert.Contains("switch", response!.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2/3", response.Text, StringComparison.OrdinalIgnoreCase);
     }
 }

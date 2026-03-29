@@ -231,6 +231,22 @@ internal static partial class OfflineWebReasoningResponder
                         "Please try again shortly, or rephrase for more specific results.";
     }
 
+    internal static string? TryBuildKnownLatestVersionAnswer(string userMessage, string memoryPackText = "")
+    {
+        if (!LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
+            return null;
+
+        if (!string.Equals(subject, ".NET", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(yearHint, "2025", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var name = ExtractPreferredName(memoryPackText);
+        var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
+        return BuildLatestVersionFallback(userMessage, greeting, subject, yearHint);
+    }
+
             private static bool ShouldIncludeOutageFraming(string userMessage, string failureReason)
             {
                 if (string.IsNullOrWhiteSpace(failureReason))
@@ -301,9 +317,9 @@ internal static partial class OfflineWebReasoningResponder
         if (string.Equals(subject, ".NET", StringComparison.OrdinalIgnoreCase))
         {
             if (strictTwoLine)
-                return "Answer: As of 2025, .NET 9 is the latest stable major release.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.";
+                return "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.";
 
-            return $"{greeting}For .NET, as of 2025 the latest stable major release is .NET 9. " +
+            return $"{greeting}For .NET, the latest stable major release as of 2025 is .NET 9. " +
                    "Use the newest .NET 9.x patch level for production stability and security.";
         }
 

@@ -58,7 +58,7 @@ public sealed partial class SearchOrchestrator
             .ToList();
 
         if (topSources.Count == 0)
-            return BuildNoResultsResponse(userMessage, toolCallsMade);
+            return BuildDirectoryLocalBusinessResponse(userMessage, sources, toolCallsMade);
 
         var sb = new StringBuilder();
         sb.AppendLine(topSources.Count == 1
@@ -681,6 +681,14 @@ public sealed partial class SearchOrchestrator
             if (supplementalNames.Count > 0)
                 return BuildCleanedLocalBusinessResponse(userMessage, supplementalNames, locationContext, toolCallsMade);
 
+            var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
+                userMessage,
+                toolCallsMade,
+                ct,
+                surfaceConfigMessage: false);
+            if (directPlaceFallback is not null)
+                return directPlaceFallback;
+
             return BuildLocalBusinessDiscoveryResponse(userMessage, sources, toolCallsMade);
         }
 
@@ -698,6 +706,10 @@ public sealed partial class SearchOrchestrator
             var business = await LookupPlaceAsync(placeQuery, locationContext, toolCallsMade, ct);
             if (business is not null)
                 enriched.Add(business);
+            else if (toolCallsMade.Count > 0 &&
+                     !toolCallsMade[^1].Success &&
+                     toolCallsMade[^1].ToolName.Contains("places", StringComparison.OrdinalIgnoreCase))
+                break; // Permanent config failure (e.g. missing API key) — stop wasting budget.
         }
 
         _audit.Append(new AuditEvent
@@ -909,6 +921,12 @@ public sealed partial class SearchOrchestrator
             return null;
         if (IsGenericNonBusinessName(name))
             return null;
+        if (LooksLikeDiscussionOrQuestionTitle(name))
+            return null;
+        if (LooksLikeLocationOnlyBusinessCandidate(name, userMessage))
+            return null;
+        if (LooksLikeChainDepartmentCandidate(name, userMessage))
+            return null;
 
         // Skip if the name starts with "r/" (Reddit subreddit).
         if (name.StartsWith("r/", StringComparison.Ordinal))
@@ -929,6 +947,88 @@ public sealed partial class SearchOrchestrator
             return null;
 
         return name;
+    }
+
+    private static bool LooksLikeDiscussionOrQuestionTitle(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        if (name.Contains('?', StringComparison.Ordinal))
+            return true;
+
+        return Regex.IsMatch(
+            name,
+            @"^(?:help!?|does\s+anyone\s+know|anyone\s+know|looking\s+for|where\s+can\s+i|can\s+you\s+recommend|recommend\s+me)\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool LooksLikeLocationOnlyBusinessCandidate(string name, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage)?.Trim();
+        if (string.IsNullOrWhiteSpace(explicitLocation))
+            return false;
+
+        var normalizedName = Regex.Replace(name, @"\s+", " ").Trim().TrimEnd('.', ',', '!', '?');
+        var normalizedLocation = Regex.Replace(explicitLocation, @"\s+", " ").Trim().TrimEnd('.', ',', '!', '?');
+        if (normalizedName.Equals(normalizedLocation, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var city = normalizedLocation.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return !string.IsNullOrWhiteSpace(city) &&
+               normalizedName.Equals(city, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeChainDepartmentCandidate(string name, string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var lower = name.ToLowerInvariant();
+        var explicitBrand = ExtractBrandKeyword((userMessage ?? string.Empty).ToLowerInvariant());
+        if (!string.IsNullOrWhiteSpace(explicitBrand) &&
+            lower.Contains(explicitBrand, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var hasDepartmentPromoLanguage =
+            lower.Contains("store #", StringComparison.Ordinal) ||
+            lower.Contains("party tray", StringComparison.Ordinal) ||
+            lower.Contains("party trays", StringComparison.Ordinal) ||
+            lower.Contains("charcuterie", StringComparison.Ordinal) ||
+            lower.Contains("gourmet cheese", StringComparison.Ordinal) ||
+            lower.Contains("grab & go", StringComparison.Ordinal) ||
+            lower.Contains("sandwiches & wraps", StringComparison.Ordinal);
+
+        ReadOnlySpan<string> chainBrands =
+        [
+            "walmart", "sam's club", "sams club", "costco", "target",
+            "kroger", "safeway", "albertsons", "fred meyer", "winco"
+        ];
+
+        var mentionsChainBrand = false;
+        foreach (var brand in chainBrands)
+        {
+            if (lower.Contains(brand, StringComparison.Ordinal))
+            {
+                mentionsChainBrand = true;
+                break;
+            }
+        }
+
+        if (!mentionsChainBrand && !hasDepartmentPromoLanguage)
+            return false;
+
+        var requestedKeywords = GetLocalBusinessMatchKeywords(userMessage ?? string.Empty);
+        var mentionsRequestedCategory = requestedKeywords.Count == 0 ||
+            requestedKeywords.Any(keyword => lower.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+
+        return mentionsRequestedCategory;
     }
 
     private async Task<string?> FetchSingleUrlAsync(
@@ -968,7 +1068,7 @@ public sealed partial class SearchOrchestrator
         {
             ToolName  = resolvedToolName,
             Arguments = args,
-            Result    = content!.Length > 200 ? content[..200] + "…" : content,
+            Result    = content!.Length > 1200 ? content[..1200] + "…" : content,
             Success   = true
         });
 
@@ -1111,6 +1211,7 @@ public sealed partial class SearchOrchestrator
                 var inlineName = CleanExtractedBusinessName(m.Groups[1].Value);
                 if (inlineName.Length >= 3 && inlineName.Length <= 60
                     && !IsGenericNonBusinessName(inlineName)
+                    && !LooksLikeChainDepartmentCandidate(inlineName, userMessage)
                     && !seen.Contains(inlineName))
                 {
                     seen.Add(inlineName);
@@ -1164,6 +1265,8 @@ public sealed partial class SearchOrchestrator
                 if (name.Length < 3 || name.Length > 60)
                     continue;
                 if (IsGenericNonBusinessName(name))
+                    continue;
+                if (LooksLikeChainDepartmentCandidate(name, userMessage))
                     continue;
                 if (seen.Contains(name))
                     continue;
@@ -1319,7 +1422,8 @@ public sealed partial class SearchOrchestrator
     private async Task<AgentResponse?> TryBuildLocalBusinessDirectPlaceFallbackAsync(
         string userMessage,
         List<ToolCallRecord> toolCallsMade,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool surfaceConfigMessage = true)
     {
         var location = ResolveLocalBusinessLocationContext(userMessage);
         var label = GetRequestedLocalBusinessLabel(userMessage);
@@ -1366,7 +1470,7 @@ public sealed partial class SearchOrchestrator
         if (enriched.Count == 0)
         {
             var actionableConfigMessage = TryBuildPlacesConfigErrorMessage(toolCallsMade);
-            if (!string.IsNullOrWhiteSpace(actionableConfigMessage))
+            if (surfaceConfigMessage && !string.IsNullOrWhiteSpace(actionableConfigMessage))
             {
                 return new AgentResponse
                 {
@@ -1402,6 +1506,68 @@ public sealed partial class SearchOrchestrator
         Session.RecordLocalBusinessCandidates(label, sourceItems);
 
         return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots: false);
+    }
+
+    private AgentResponse BuildDirectoryLocalBusinessResponse(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
+        var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
+        var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" in {location}";
+
+        var renderedSources = sources
+            .Where(source => !IsJunkBusinessSource(source))
+            .Select(source => new
+            {
+                Title = StripTitleSuffix((source.Title ?? string.Empty).Trim()),
+                source.Domain,
+                source.Snippet
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Title))
+            .DistinctBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(1, LocalBusinessTargetResults))
+            .ToList();
+
+        if (renderedSources.Count == 0)
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Here are the live {businessLabel} results I found{locText}:");
+        sb.AppendLine();
+
+        foreach (var source in renderedSources)
+        {
+            sb.Append("- **");
+            sb.Append(source.Title);
+            sb.Append("**");
+
+            var details = new List<string>();
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+                details.Add(TrimSentence(source.Snippet, 160));
+            if (!string.IsNullOrWhiteSpace(source.Domain))
+                details.Add($"source: {source.Domain}");
+
+            if (details.Count > 0)
+            {
+                sb.Append(" — ");
+                sb.Append(string.Join(" · ", details));
+            }
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine();
+        sb.Append("Pick any of these that catches your eye and I can dig deeper — hours, reviews, directions, the works.");
+
+        return new AgentResponse
+        {
+            Text = sb.ToString(),
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
     }
 
     private static string? TryBuildPlacesConfigErrorMessage(IReadOnlyList<ToolCallRecord> toolCallsMade)

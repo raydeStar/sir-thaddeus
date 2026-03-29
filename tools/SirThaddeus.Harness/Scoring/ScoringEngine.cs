@@ -136,6 +136,10 @@ public sealed class ScoringEngine
             var localBusinessFallbackMatch = DetectLocalBusinessFallbackNonAnswer(response.Text ?? "");
             if (localBusinessFallbackMatch is not null)
                 failures.Add($"Response is a local-business fallback non-answer, not a grounded recommendation: {localBusinessFallbackMatch}");
+
+            var webGroundingFallbackMatch = DetectWebGroundingNonAnswer(test, response.Text ?? "");
+            if (webGroundingFallbackMatch is not null)
+                failures.Add($"Response is a web-grounding fallback non-answer, not a grounded web answer: {webGroundingFallbackMatch}");
         }
 
         return failures;
@@ -213,7 +217,43 @@ public sealed class ScoringEngine
         [
             "could not retrieve live local business results",
             "try naming one specific place",
-            "i can check its current hours"
+            "i can check its current hours",
+            "directory-style local results rather than single verified storefront pages",
+            "give me a neighborhood or major street"
+        ];
+
+        foreach (var pattern in nonAnswerPatterns)
+        {
+            if (lower.Contains(pattern, StringComparison.Ordinal))
+                return pattern;
+        }
+
+        return null;
+    }
+
+    private static string? DetectWebGroundingNonAnswer(
+        HarnessTestCase test,
+        string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return null;
+
+        var lower = responseText.ToLowerInvariant();
+        var usesWebOrPlaces = test.AllowedTools
+            .Select(NormalizeToolName)
+            .Any(tool => tool is "websearch" or "browsernavigate" or "placeslookup");
+        if (!usesWebOrPlaces)
+            return null;
+
+        ReadOnlySpan<string> nonAnswerPatterns =
+        [
+            "fallback search came back with 0 results",
+            "i couldn't verify live hours, reviews, or contact details",
+            "hours were not found in available sources",
+            "current open status is unknown from the available sources",
+            "directory-style local results rather than single verified storefront pages",
+            "try a more specific business name",
+            "search providers are responding"
         ];
 
         foreach (var pattern in nonAnswerPatterns)
@@ -377,6 +417,7 @@ public sealed class ScoringEngine
         var deflectionPatterns = new[]
         {
             "i cannot verify",
+            "could not verify",
             "i'm unable to",
             "i don't have access",
             "web search returned no results",
@@ -467,9 +508,22 @@ public sealed class ScoringEngine
             result.Contains("error", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        if (result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         // "[search: 0 result(s) returned]"
         if (result.Contains("0 result", StringComparison.OrdinalIgnoreCase))
             return true;
+
+        // document_read often returns an opaque summary like
+        // "[Document content: 100 chars, sha256=...]". That does not carry
+        // meaningful tokens for incorporation scoring.
+        if (result.StartsWith("[Document content:", StringComparison.OrdinalIgnoreCase) ||
+            (result.Contains("Document content:", StringComparison.OrdinalIgnoreCase) &&
+             result.Contains("sha256=", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
 
         // Config/infra error text
         if (result.Contains("is not configured", StringComparison.OrdinalIgnoreCase))
@@ -521,7 +575,8 @@ public sealed class ScoringEngine
             "might", "possibly", "perhaps", "i think",
             "it's possible", "could be", "may have", "not sure",
             "i believe", "it seems", "appears to", "likely",
-            "if available", "when possible", "depending on"
+            "if available", "when possible", "depending on",
+            "indicate", "available sources indicate"
         };
 
         var hedgeCount = sentences.Count(s =>

@@ -110,6 +110,20 @@ public class AuditedMcpToolClientTests
         Assert.Equal("granted", end.Details!["permission"]);
     }
 
+    [Fact]
+    public async Task CallToolAsync_RecordsPolicyAlwaysPermissionSource_WhenGatePreauthorizesByPolicy()
+    {
+        var inner = new FakeMcpClient("ok");
+        var audit = new TestAuditLogger();
+        var gate = new FixedAuditModeGate(ToolPermissionResult.NotRequired(ToolPermissionAuditMode.PolicyAlways));
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+
+        await sut.CallToolAsync("web_search", "{\"query\":\"sir thaddeus\"}");
+
+        var end = audit.Events.Last(e => e.Action == "MCP_TOOL_CALL_END");
+        Assert.Equal("policy_always", end.Details!["permission"]);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Redaction — ScreenCapture
     // ─────────────────────────────────────────────────────────────────
@@ -276,6 +290,17 @@ public class AuditedMcpToolClientTests
         public Task<ToolPermissionResult> CheckAsync(
             string toolName, string argumentsJson, CancellationToken ct)
             => Task.FromResult(ToolPermissionResult.Grant(_tokenId));
+    }
+
+    private sealed class FixedAuditModeGate : IToolPermissionGate
+    {
+        private readonly ToolPermissionResult _result;
+
+        public FixedAuditModeGate(ToolPermissionResult result) => _result = result;
+
+        public Task<ToolPermissionResult> CheckAsync(
+            string toolName, string argumentsJson, CancellationToken ct)
+            => Task.FromResult(_result);
     }
 
     /// <summary>Reused FakeMcpClient from orchestrator tests.</summary>

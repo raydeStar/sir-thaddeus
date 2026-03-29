@@ -1,7 +1,7 @@
 ---
 name: 'E2E Harness Self-Fixing Protocol'
 description: 'Rules for working with the Sir Thaddeus E2E test harness. Governs how to diagnose, fix, and verify failures without gaming the scoring system.'
-applyTo: 'tools/SirThaddeus.Harness/**,packages/agent/**,tests/SirThaddeus.Tests/Integration/**'
+applyTo: 'tools/SirThaddeus.Harness/**,tools/SirThaddeus.Harness/StageSuites/**,packages/agent/**,tests/SirThaddeus.Tests/Integration/**'
 ---
 
 # E2E Harness — Self-Fixing Protocol
@@ -47,6 +47,25 @@ When diagnosing a failure, read these files in this order:
 3. `steps.jsonl` — did the agent call tools? did it use the results?
 4. `input.json` — what was the agent actually asked?
 
+If `score.json` says `PASS` but `final.txt` is clearly weak, hedged, incorrect, or unsupported, continue diagnosis. Treat the run as suspicious until the discrepancy is explained.
+
+When reading `steps.jsonl`, break the run into explicit stages. For each tool call, note:
+
+- the exact query or arguments
+- what came back
+- whether the result was relevant
+- what the agent did next because of that result
+
+If there were multiple searches, retries, or fallbacks, document them separately instead of collapsing them into "the agent searched".
+
+## Stage Suites
+
+Use stage suites under `tools/SirThaddeus.Harness/StageSuites/` for fast, deterministic checks of preprocess, classify, and query seams.
+
+- Stage suites are for diagnosis and regression coverage of pipeline behavior, not a replacement for end-to-end harness validation.
+- When testing vague follow-ups with fabricated context, prefer an explicit `followup_anchor` in the stage test `context` block over brittle assistant-text-only parsing.
+- Keep stage suite expectations behavioral and general. Do not encode test-specific shortcuts into product code just because a stage suite is deterministic.
+
 ## Diagnosing the Root Cause
 
 Before writing any code, identify which layer failed:
@@ -61,6 +80,7 @@ Before writing any code, identify which layer failed:
 ## What You Must Do
 
 - Read failure artifacts to understand what actually went wrong.
+- Break multi-step traces into numbered stages so the break point is explicit.
 - Fix the problem in the source logic: routing, synthesis, tool selection, prompts, fallback handling.
 - Ensure your fix works for ANY similar input, not just the specific test case.
 - Include a derivation trace explaining: what failed, the root cause, why your fix solves it generally.
@@ -105,6 +125,7 @@ Every fix must include this in the commit message or PR description:
 
 ### What Failed
 [test_id] scored [X]/10. List the penalties from score.json.
+If the score and the answer disagree, say so explicitly and quote the relevant part of `final.txt`.
 
 ### Root Cause
 Explain the actual bug or logic gap. Reference specific files and methods.

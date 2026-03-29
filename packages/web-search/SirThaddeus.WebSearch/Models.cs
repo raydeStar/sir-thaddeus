@@ -91,4 +91,10 @@ public sealed record WebSearchOptions
     /// ignore this field.
     /// </summary>
     public string Recency { get; init; } = "any";
+
+    /// <summary>
+    /// SearXNG search categories (e.g. "news", "general").
+    /// Null or empty uses the provider default.
+    /// </summary>
+    public string? Categories { get; init; }
 }

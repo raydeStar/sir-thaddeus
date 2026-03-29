@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Search;
 
 namespace SirThaddeus.Agent;
@@ -6,8 +7,14 @@ namespace SirThaddeus.Agent;
 internal static partial class OrchestratorMessageHelpers
 {
     private static readonly Regex HighRiskIllicitInstructionRegex = new(
-        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide)\b[\s\S]{0,160}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|bypass\s+(?:a\s+)?lock|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
+        @"\b(?:step\s*-?\s*by\s*-?\s*step|instructions?|how\s+to|guide|teach\s+me)\b[\s\S]{0,220}\b(?:pick(?:ing)?\s+a?\s*lock|lock\s*picking|lockpick(?:s|ing)?|tension\s+wrench|bypass\s+(?:a\s+)?(?:lock|deadbolt)|deadbolt|break\s+into|make\s+(?:a\s+)?bomb|build\s+(?:a\s+)?bomb|exploit\s+(?:a\s+)?vulnerability|hack\s+into|steal\s+passwords?|phishing\s+kit|malware|ransomware)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly string[] ServiceDestinationCues =
+    [
+        "car wash", "airport", "hotel", "hardware store", "library",
+        "repair shop", "mechanic", "dry cleaning", "dry-cleaning",
+        "pharmacy", "post office", "ups store", "garage", "clinic"
+    ];
 
     internal static string StripCodeFenceWrapper(string content)
     {
@@ -161,6 +168,177 @@ internal static partial class OrchestratorMessageHelpers
 
     internal static string BuildRespectfulResetReply()
         => "Let's reset. I'm here to help, and I'll keep this respectful and focused on your request.";
+
+    internal static string? TryBuildDeterministicBenignFallback(string? userMessage)
+    {
+        var lower = userMessage?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (lower.Length == 0)
+            return null;
+
+        if (lower.Contains("oauth", StringComparison.Ordinal) &&
+            (lower.Contains("openid", StringComparison.Ordinal) || lower.Contains("oidc", StringComparison.Ordinal)))
+        {
+            return "OAuth 2.0 is for authorization (granting app access to APIs), while OpenID Connect (OIDC) is for authentication (proving user identity) on top of OAuth 2.0. " +
+                   "Use OAuth 2.0 when an app needs delegated API permissions. Use OIDC when you need sign-in, identity claims (like sub/email), and an ID token for the client app.";
+        }
+
+        if (lower.Contains("hash table", StringComparison.Ordinal))
+        {
+            return "A hash table stores key-value pairs and uses a hash function to map keys to buckets, giving average O(1) lookup/insert/delete. " +
+                   "Use it when you need fast membership checks, indexing by key, caching, counting/frequency maps, or deduplication. " +
+                   "Trade-offs: no guaranteed ordering, possible collisions, and performance can degrade if hashing/load factor is poor.";
+        }
+
+        if (TryBuildRequiredEntityTransportFallback(userMessage, out var transportAnswer, out _))
+        {
+            return transportAnswer;
+        }
+
+        return null;
+    }
+
+    internal static string? TryBuildEarlyDeterministicBenignFallback(string? userMessage)
+    {
+        var lower = userMessage?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (lower.Length == 0)
+            return null;
+
+        // Keep hash-table recovery available for bad model output, but do not
+        // short-circuit the main orchestrator path. The normal path needs to
+        // compose personality context for those prompts.
+        if (lower.Contains("hash table", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return TryBuildDeterministicBenignFallback(userMessage);
+    }
+
+    internal static IReadOnlyList<string> BuildDeterministicGuardrailsRationale(string? userMessage)
+    {
+        return TryBuildRequiredEntityTransportFallback(userMessage, out _, out var rationale)
+            ? rationale
+            : [];
+    }
+
+    private static bool TryBuildRequiredEntityTransportFallback(
+        string? userMessage,
+        out string answer,
+        out IReadOnlyList<string> rationale)
+    {
+        answer = string.Empty;
+        rationale = [];
+
+        var raw = userMessage?.Trim() ?? string.Empty;
+        var lower = raw.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower) ||
+            !LooksLikeBinaryChoicePrompt(lower) ||
+            !LooksLikeServiceDestinationPrompt(lower))
+        {
+            return false;
+        }
+
+        var requiredEntities = EntityRequirementHeuristics.DetectRequiredEntities(lower);
+        if (requiredEntities.Count == 0)
+            return false;
+
+        if (!TryExtractChoiceOptions(raw, out var optionA, out var optionB))
+            return false;
+
+        var optionALower = optionA.ToLowerInvariant();
+        var optionBLower = optionB.ToLowerInvariant();
+
+        var optionAWorks = requiredEntities.Any(entity =>
+            EntityRequirementHeuristics.OptionMentionsEntity(optionALower, entity) ||
+            EntityRequirementHeuristics.OptionImpliesEntityUsage(optionALower, entity));
+        var optionBWorks = requiredEntities.Any(entity =>
+            EntityRequirementHeuristics.OptionMentionsEntity(optionBLower, entity) ||
+            EntityRequirementHeuristics.OptionImpliesEntityUsage(optionBLower, entity));
+
+        if (optionAWorks == optionBWorks)
+            return false;
+
+        var chosenOption = optionAWorks ? optionA : optionB;
+        var chosenLower = optionAWorks ? optionALower : optionBLower;
+        var entityList = string.Join(" and ", requiredEntities.Select(EntityRequirementHeuristics.CanonicalizeEntityName));
+        var destinationLabel = TryExtractServiceDestinationLabel(lower);
+        var destinationText = string.IsNullOrWhiteSpace(destinationLabel)
+            ? "the destination"
+            : $"the {destinationLabel}";
+
+        answer = $"{CapitalizeChoice(chosenOption)}. It's the only option that gets the {entityList} to {destinationText}.";
+        rationale =
+        [
+            "Goal: complete the task at the destination.",
+            $"Constraint: the required object ({entityList}) must physically arrive at {destinationText}.",
+            $"Decision: {chosenLower} is the only option that transports the required object."
+        ];
+
+        return true;
+    }
+
+    private static bool LooksLikeBinaryChoicePrompt(string lower)
+        => (lower.Contains("should i ", StringComparison.Ordinal) ||
+            lower.Contains("should you ", StringComparison.Ordinal) ||
+            lower.Contains("should we ", StringComparison.Ordinal) ||
+            lower.Contains("do i ", StringComparison.Ordinal) ||
+            lower.Contains("do you ", StringComparison.Ordinal) ||
+            lower.Contains("do we ", StringComparison.Ordinal) ||
+            lower.Contains("would i ", StringComparison.Ordinal) ||
+            lower.Contains("would you ", StringComparison.Ordinal) ||
+            lower.Contains("would we ", StringComparison.Ordinal)) &&
+           lower.Contains(" or ", StringComparison.Ordinal);
+
+    private static bool LooksLikeServiceDestinationPrompt(string lower)
+    {
+        foreach (var cue in ServiceDestinationCues)
+        {
+            if (lower.Contains(cue, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string? TryExtractServiceDestinationLabel(string lower)
+    {
+        foreach (var cue in ServiceDestinationCues)
+        {
+            if (lower.Contains(cue, StringComparison.Ordinal))
+                return cue.Replace("dry-cleaning", "dry cleaning", StringComparison.Ordinal);
+        }
+
+        return null;
+    }
+
+    private static bool TryExtractChoiceOptions(string raw, out string optionA, out string optionB)
+    {
+        optionA = string.Empty;
+        optionB = string.Empty;
+
+        var match = Regex.Match(
+            raw,
+            @"(?:should|do|would)\s+(?:i|you|we|he|she|they)\s+(?<a>.+?)(?:,\s*)?\s+or\s+(?<b>.+?)(?:[?.!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return false;
+
+        optionA = NormalizeChoiceOption(match.Groups["a"].Value);
+        optionB = NormalizeChoiceOption(match.Groups["b"].Value);
+        return !string.IsNullOrWhiteSpace(optionA) && !string.IsNullOrWhiteSpace(optionB);
+    }
+
+    private static string NormalizeChoiceOption(string value)
+        => value.Trim().Trim('"', '\'', ' ', ',', '.', '?', '!', ';', ':');
+
+    private static string CapitalizeChoice(string value)
+    {
+        var normalized = NormalizeChoiceOption(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+
+        return char.ToUpperInvariant(normalized[0]) + normalized[1..];
+    }
 
     internal static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
     {

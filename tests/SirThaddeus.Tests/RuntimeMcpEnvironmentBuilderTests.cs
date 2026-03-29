@@ -41,6 +41,25 @@ public sealed class RuntimeMcpEnvironmentBuilderTests
         Assert.Equal(@"C:\temp\custom-audit.jsonl", env["ST_AUDIT_PATH"]);
     }
 
+    [Fact]
+    public void Build_UsesTempWorkspaceWhenFileAccessEnabledWithoutConfiguredRoots()
+    {
+        var env = RuntimeMcpEnvironmentBuilder.Build(new AppSettings
+        {
+            DocumentReader = new DocumentReaderSettings
+            {
+                DisableAllFileAccess = false,
+                AllowedRoots = []
+            }
+        });
+
+        var tempRoot = env["ST_DOCUMENT_READER_ALLOWED_ROOTS"];
+
+        Assert.False(string.IsNullOrWhiteSpace(tempRoot));
+        Assert.Contains(Path.Combine("SirThaddeus", "file-workspace"), tempRoot, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Directory.Exists(tempRoot));
+    }
+
     private sealed class EnvironmentVariableScope : IDisposable
     {
         private readonly Dictionary<string, string?> _priorValues = new(StringComparer.OrdinalIgnoreCase);

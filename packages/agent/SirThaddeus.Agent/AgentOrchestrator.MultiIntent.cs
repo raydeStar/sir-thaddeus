@@ -8,6 +8,10 @@ namespace SirThaddeus.Agent;
 
 public sealed partial class AgentOrchestrator
 {
+    private static readonly Regex PresentationOnlySegmentRegex = new(
+        @"^(?:each\s+(?:bullet|item|entry|result|response|answer)\s+should\b|the\s+(?:bullet|response|answer)\s+should\b|(?:respond|answer|format|return|present)\b.*\b(?:bullet|bullets|sentence|sentences|table|json|markdown)\b|(?:in|use)\s+(?:one|two|2)\s+sentences?\b|bullet\s+points?\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static bool IsMultiIntentBypassActive() => MultiIntentBypassDepth.Value > 0;
 
     private static IDisposable EnterMultiIntentBypassScope() => new MultiIntentBypassScope();
@@ -45,13 +49,18 @@ public sealed partial class AgentOrchestrator
         if (!segmentation.HasActionable)
             return null; // Explicit no-actionable fast path
 
+        var presentationOnlySegments = segmentation.Segments
+            .Where(s => s.IsActionable && IsPresentationOnlySegment(s.Text))
+            .Select(s => s.SegmentId)
+            .ToHashSet(StringComparer.Ordinal);
+
         var actionableSegments = segmentation.Segments
-            .Where(s => s.IsActionable)
+            .Where(s => s.IsActionable && !presentationOnlySegments.Contains(s.SegmentId))
             .OrderBy(s => s.Order)
             .ToList();
 
         var nonActionableContext = segmentation.Segments
-            .Where(s => !s.IsActionable)
+            .Where(s => !s.IsActionable || presentationOnlySegments.Contains(s.SegmentId))
             .Select(s => s.Text.Trim())
             .Where(s => s.Length > 0)
             .ToList();
@@ -263,5 +272,15 @@ public sealed partial class AgentOrchestrator
                Regex.IsMatch(lower, @"\banyway\b", RegexOptions.CultureInvariant) ||
                Regex.IsMatch(lower, @"\b(?:bye|goodbye|gotta go|see ya)\b", RegexOptions.CultureInvariant) ||
                Regex.IsMatch(lower, @"\b(?:rough day|in trouble)\b", RegexOptions.CultureInvariant);
+    }
+    private static bool IsPresentationOnlySegment(string text)
+    {
+        var lower = (text ?? string.Empty).Trim().ToLowerInvariant();
+        if (lower.Length == 0 || lower.Contains('?', StringComparison.Ordinal))
+            return false;
+
+        return PresentationOnlySegmentRegex.IsMatch(lower) ||
+               lower.Contains("one sentence of context", StringComparison.Ordinal) ||
+               lower.Contains("why it matters", StringComparison.Ordinal);
     }
 }

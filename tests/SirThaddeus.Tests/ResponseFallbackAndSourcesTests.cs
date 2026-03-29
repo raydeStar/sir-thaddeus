@@ -85,6 +85,89 @@ public class SourceCitationFormatterTests
 public class SearchOfflineFallbackTests
 {
     [Fact]
+    public void TryBuildGroundedTimeoutFallback_UsesRetrievedWebEvidence_InsteadOfTimeoutMessage()
+    {
+        var toolCalls = new List<ToolCallRecord>
+        {
+            new()
+            {
+                ToolName = "web_search",
+                Arguments = "{\"query\":\"C# 13 changes\"}",
+                Result =
+                    "1. \"What’s new in C# 13\" — learn.microsoft.com\n" +
+                    "   C# 13 adds params collections, improved lock support, and new escape-sequence features.\n\n" +
+                    "<!-- SOURCES_JSON -->\n" +
+                    "{" +
+                    "\"sources\":[{" +
+                    "\"url\":\"https://learn.microsoft.com/dotnet/csharp/whats-new/csharp-13\"," +
+                    "\"title\":\"What’s new in C# 13\"," +
+                    "\"domain\":\"learn.microsoft.com\"," +
+                    "\"excerpt\":\"C# 13 adds params collections, improved lock support, and new escape-sequence features.\"}" +
+                    "]}",
+                Success = true
+            }
+        };
+
+        var fallback = SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+            "Use web_search to answer what changed in C# 13 and keep it practical.",
+            toolCalls);
+
+        Assert.NotNull(fallback);
+        Assert.Contains("strongest evidence", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("What’s new in C# 13", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Live web lookup is unavailable right now", fallback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryBuildGroundedTimeoutFallback_ForMediaComparison_AnswersTheQuestionDirectly()
+    {
+        var toolCalls = new List<ToolCallRecord>
+        {
+            new()
+            {
+                ToolName = "web_search",
+                Arguments = "{\"query\":\"live-action How to Train Your Dragon word for word\"}",
+                Result =
+                    "1. \"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\" — collider.com\n" +
+                    "   The article highlights story and scene differences between the live-action remake and the original animated film.\n\n" +
+                    "<!-- SOURCES_JSON -->\n" +
+                    "{" +
+                    "\"sources\":[{" +
+                    "\"url\":\"https://collider.com/how-to-train-your-dragon-live-action-differences/\"," +
+                    "\"title\":\"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\"," +
+                    "\"domain\":\"collider.com\"," +
+                    "\"excerpt\":\"The article highlights story and scene differences between the live-action remake and the original animated film.\"}" +
+                    "]}",
+                Success = true
+            }
+        };
+
+        var fallback = SearchOrchestrator.TryBuildGroundedTimeoutFallback(
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            toolCalls);
+
+        Assert.NotNull(fallback);
+        Assert.Contains("No", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("original", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("difference", fallback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("strongest evidence I found", fallback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryBuildMediaInstallmentFallback_ForMissingSeasonEpisode_ReturnsNonInventedPlotFallback()
+    {
+        var response = SearchOrchestrator.TryBuildMediaInstallmentFallback(
+            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.NotNull(response);
+        Assert.Contains("Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not have an official", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no real episode plot", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("couldn't generate a clean summary", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenWebSearchUnavailable_UsesBestEffortReasoning()
     {
         var llm = new StubLlmClient(
@@ -143,7 +226,7 @@ public class SearchOfflineFallbackTests
             call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
     }
 
-    private sealed class StubLlmClient(string responseText) : ILlmClient
+    private sealed class StubLlmClient(string responseText, string finishReason = "stop") : ILlmClient
     {
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
@@ -153,7 +236,7 @@ public class SearchOfflineFallbackTests
             {
                 IsComplete = true,
                 Content = responseText,
-                FinishReason = "stop"
+                FinishReason = finishReason
             });
 
         public Task<LlmResponse> ChatAsync(
@@ -245,6 +328,254 @@ public class BareResponseEnrichmentTests
         Assert.True(result.Length > bareAnswer.Length + 5);
     }
 
+    [Fact]
+    public void SanitizeFinalResponse_CarWashPrompt_WithConcreteBusinessDetails_UsesDeterministicFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Given that Burger Barn at 12 Maple Avenue opens at 10 AM, let us focus on the task at hand: getting to the car wash.",
+            new List<ToolCallRecord>(),
+            "You're going to the car wash and it's only 50 meters away. Should you walk or drive?");
+
+        Assert.Contains("Drive", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("car wash", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Burger Barn", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_StargatePrompt_WithOffTopicSourceList_UsesNonexistentEpisodeFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Here's the strongest evidence I found in the live results:\n- A franchise retrospective focuses on cast reunions and merchandise rather than any unreleased episode plot.",
+            new List<ToolCallRecord>(),
+            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.Contains("Stargate Universe", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 3 Episode 1", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cast reunions", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("merchandise", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedExistenceAnswer_StripsKnowledgeCutoffClause()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "No - an iPhone 99 has never been released, nor is there evidence of one in official records up to my knowledge cutoff.",
+            new List<ToolCallRecord>
+            {
+                new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 1 result(s) returned]", Success = true }
+            },
+            "Does iPhone 99 exist as a released product?");
+
+        Assert.Contains("iPhone 99", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("knowledge cutoff", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedSearchAnswer_TrimsInlineDuplicateAfterSignature()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Here are the main stories I found:\n1. Story one\n2. Story two -- Sir Thaddeus I am Sir Thaddeus, and I don't have access to live search results or real-time internet feeds of my own machine.",
+            new List<ToolCallRecord>
+            {
+                new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 2 result(s) returned]", Success = true }
+            },
+            "Search for a recent technology headline and summarize it in two sentences.");
+
+        Assert.Contains("Here are the main stories I found", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-- Sir Thaddeus", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("don't have access to live search results", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("real-time internet feeds", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_EmptyNewsLead_UsesNewsQueryForHonestFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Thanks for the message. Here are the main stories I found:",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"Boise, Idaho news\",\"maxResults\":5,\"recency\":\"day\",\"categories\":\"news\"}",
+                    Result = "[search: 4 result(s) returned]",
+                    Success = true
+                }
+            },
+            "Hey whats up, how are you today? Can you pull up the local news in Boise, ID? Anyway, gotta go, bye!");
+
+        Assert.Contains("Boise, Idaho", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("local news", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Here are the main stories I found:", result.Trim(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_RebuildsShortlistFromToolResults()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result =
+                        "1. \"Bernie's Deli\" — example.com\n" +
+                        "   Classic deli sandwiches in Hillsboro, OR.\n\n" +
+                        "2. \"Isabella's Deli\" — example.org\n" +
+                        "   Neighborhood deli in Hillsboro, OR.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "{" +
+                        "\"sources\":[" +
+                        "{\"url\":\"https://example.com/bernies-deli\",\"title\":\"Bernie's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Classic deli sandwiches in Hillsboro, OR.\"}," +
+                        "{\"url\":\"https://example.org/isabellas-deli\",\"title\":\"Isabella's Deli\",\"domain\":\"example.org\",\"excerpt\":\"Neighborhood deli in Hillsboro, OR.\"}" +
+                        "]}",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Bernie's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Verification recommended", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Briefing summary", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_ExcludesChainDepartmentCandidates()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: example.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result =
+                        "1. \"Isabella's Deli\" — example.com\n" +
+                        "   Neighborhood deli in Hillsboro, OR.\n\n" +
+                        "2. \"Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590\" — walmart.com\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "{" +
+                        "\"sources\":[" +
+                        "{\"url\":\"https://example.com/isabellas-deli\",\"title\":\"Isabella's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Neighborhood deli in Hillsboro, OR.\"}," +
+                        "{\"url\":\"https://www.walmart.com/store/2590\",\"title\":\"Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590\",\"domain\":\"walmart.com\",\"excerpt\":\"Store department page\"}" +
+                        "]}",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Walmart Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersPlacesLookupSeed_OverDirectoryNoise()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.restaurantji.com/or/hillsboro/deli/\"}",
+                    Result = "[browser: title: \"best delis near hillsboro, or - 2026 restaurantji\", content returned]\nDede's Deli\nDandy's Deli",
+                    Success = true
+                },
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Isabella's Deli Hillsboro, OR\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"Hillsboro, OR\",\"maxReviewSnippets\":1}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                },
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Best Delis near Hillsboro, OR - 2025 Restaurantji\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"\",\"maxReviewSnippets\":3}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dandy's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesPlacesLookupSeed_EvenWhenPromptSignalIsVague()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Isabella's Deli Hillsboro, OR\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"Hillsboro, OR\",\"maxReviewSnippets\":1}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good one in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesRawPlacesLookupPayload_WhenArgumentsAreMalformed()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "query=Isabella\\u0027s Deli Hillsboro, OR",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good one in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersEarlyNonDirectoryBrowserSeed()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: chamberofcommerce.com, restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.chamberofcommerce.com/business-directory/oregon/hillsboro/food-dining/restaurant/deli/\"}",
+                    Result = "[browser: (no title), content returned]\nIsabella's Deli\nNeighborhood deli in Hillsboro, OR.",
+                    Success = true
+                },
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.restaurantji.com/or/hillsboro/deli/\"}",
+                    Result = "[browser: title: \"best delis near hillsboro, or - 2026 restaurantji\", content returned]\nDede's Deli\nDandy's Deli",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("The store closes at 9 PM tonight.", "Is the store open?")]
     [InlineData("Normal assistant fallback.", "What time is it?")]
@@ -291,6 +622,36 @@ public class ChatPostProcessorReasoningBehaviorTests
 
         Assert.Equal("Walk.", output);
         Assert.DoesNotContain("<think>", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ProcessChatOnlyDraft_UsesBenignRecovery_ForHashTablePrompt_WhenDraftIsOffTopicMath()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "3 + 5 = 8. Want me to calculate the next one?",
+            userMessage: "What is a hash table and when should I use one?",
+            toolCallsMade: []);
+
+        Assert.Contains("hash table", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("key-value", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("respectful", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ProcessChatOnlyDraft_UsesBenignRecovery_ForHashTablePrompt_WhenDraftLeaksToolingEssay()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "I do best on your machine when we tackle a clear question step by step and inspect the local tools carefully.",
+            userMessage: "What is a hash table and when should I use one?",
+            toolCallsMade: []);
+
+        Assert.Contains("hash table", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("key-value", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("favorites", output, StringComparison.OrdinalIgnoreCase);
     }
 }
 

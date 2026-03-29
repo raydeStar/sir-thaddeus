@@ -6,6 +6,8 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.Platform.Storage;
+using FluentIcons.Avalonia;
+using FluentIcons.Common;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
@@ -80,7 +82,26 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<PersonalityListItemViewModel> _personalityItems = [];
 
     private readonly ObservableCollection<ChatSessionItem> _chatHistory = [];
+    private readonly ObservableCollection<SuggestionChipItem> _suggestionChips = [];
+    private readonly ObservableCollection<RuntimeStatusItem> _runtimeStatusItems = [];
+    private readonly ObservableCollection<RecentActivityItem> _recentActivityItems = [];
+    private readonly Dictionary<string, PendingPermissionAuditContext> _pendingPermissionAudit = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ViewModels.ActivityDrawerViewModel _activityDrawerVm = new();
     private ChatSessionItem _currentSession;
+    private string _voiceStatusLabel = "Ready";
+    private string? _lastRuntimeActivityStamp;
+    private string? _lastActionDrawerAuditSignature;
+    private TabItem? _lastValidSettingsTabItem;
+
+    private TextBox PromptBox => ChatComposer.PromptBox;
+    private Button SendButton => ChatComposer.SendButton;
+    private Button StopButton => ChatComposer.StopButton;
+    private Button PttHoldButton => ChatComposer.PttHoldButton;
+    private Button AttachFileButton => ChatComposer.AttachFileButton;
+    private Button RemoveAttachmentButton => ChatComposer.RemoveAttachmentButton;
+    private Border AttachmentChip => ChatComposer.AttachmentChip;
+    private TextBlock AttachmentNameText => ChatComposer.AttachmentNameText;
+    private TextBlock AttachmentMetaText => ChatComposer.AttachmentMetaText;
 
     private readonly ToggleButton[] _viewTabs;
     private readonly Control[] _viewPanels;
@@ -97,6 +118,8 @@ public partial class MainWindow : Window
 
         SettingsHeaderBar.DataContext = _backendSettings;
         SettingsTabControl.DataContext = _backendSettings;
+        SettingsTabControl.SelectedItem ??= GeneralTabItem;
+        _lastValidSettingsTabItem = GeneralTabItem;
 
         LlmsScrollViewer.DataContext = _backendSettings;
         AudioScrollViewer.DataContext = _backendSettings;
@@ -112,7 +135,18 @@ public partial class MainWindow : Window
         _chatHistory.Add(_currentSession);
         ChatHistoryList.ItemsSource = _chatHistory;
         ChatMessagesList.ItemsSource = _currentSession.Messages;
+        SuggestionChipsPanel.ItemsSource = _suggestionChips;
+        RuntimeStatusStrip.ItemsSource = _runtimeStatusItems;
+        CategoryList.ItemsSource = _activityDrawerVm.Categories;
+        ConnectionList.ItemsSource = _activityDrawerVm.Connections;
+        InitializeSuggestionChips();
         WorkflowChecklistList.ItemsSource = _workflowChecklistItems;
+
+        AttachFileButton.Click += AttachFileButton_Click;
+        RemoveAttachmentButton.Click += RemoveAttachmentButton_Click;
+        SendButton.Click += SendButton_Click;
+        StopButton.Click += StopButton_Click;
+        PromptBox.TextChanged += PromptBox_TextChanged;
         PromptBox.AddHandler(KeyDownEvent, PromptBox_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         LmStudioPresetBtn.Click += LlmPreset_Click;
@@ -128,6 +162,7 @@ public partial class MainWindow : Window
         InitializeBriefingUi();
         InitializePushToTalkUi();
         UpdateAttachmentUi();
+        UpdateLandingEmptyStateVisibility();
         UpdateConversationTitle();
 
         if (!OperatingSystem.IsWindows())
@@ -140,6 +175,7 @@ public partial class MainWindow : Window
         UpdateComposerState();
         UpdateChatActionState();
         UpdateHeaderConnectionControls();
+        UpdateRuntimeStatusStrip();
         SetActiveView(ChatTabButton);
 
         Opened += OnOpened;
@@ -313,56 +349,56 @@ public partial class MainWindow : Window
         bool appendTranscript)
     {
         var snapshot = _backendSettings.BuildPersistableSnapshot();
+        AppSettings localPersisted;
 
         try
         {
-            if (_runtimeApiClient is not null)
+            SettingsManager.Save(snapshot);
+            localPersisted = SettingsManager.Load();
+
+            if (_runtimeApiClient is null)
             {
-                var persisted = await _runtimeApiClient.SaveSettingsAsync(snapshot, CancellationToken.None);
-                _backendSettings.ApplySavedSnapshot(persisted, connectedStatus);
-                await RefreshSearchStatusAsync();
+                _backendSettings.ApplySavedSnapshot(localPersisted, localStatus);
+                _backendSettings.ResetSearchHealthState(
+                    "Not connected",
+                    localHealthStatus);
                 if (appendTranscript)
                 {
-                    AppendTranscript("[system] " + connectedStatus);
+                    AppendTranscript("[system] " + localStatus);
                 }
 
                 return;
             }
 
-            SettingsManager.Save(snapshot);
-            var localPersisted = SettingsManager.Load();
-            _backendSettings.ApplySavedSnapshot(localPersisted, localStatus);
-            _backendSettings.ResetSearchHealthState(
-                "Not connected",
-                localHealthStatus);
-            if (appendTranscript)
-            {
-                AppendTranscript("[system] " + localStatus);
-            }
-        }
-        catch (Exception ex)
-        {
             try
             {
-                SettingsManager.Save(snapshot);
-                var localPersisted = SettingsManager.Load();
+                var persisted = await _runtimeApiClient.SaveSettingsAsync(localPersisted, CancellationToken.None);
+                SettingsManager.Save(persisted);
+                var syncedPersisted = SettingsManager.Load();
+                _backendSettings.ApplySavedSnapshot(syncedPersisted, connectedStatus);
+                await RefreshSearchStatusAsync();
+                if (appendTranscript)
+                {
+                    AppendTranscript("[system] " + connectedStatus);
+                }
+            }
+            catch (Exception ex)
+            {
                 _backendSettings.ApplySavedSnapshot(localPersisted, syncFailureStatus);
-                _backendSettings.ResetSearchHealthState(
-                    "Unavailable",
-                    syncFailureStatus);
+                _backendSettings.ResetSearchHealthState("Unavailable", syncFailureStatus);
                 if (appendTranscript)
                 {
                     AppendTranscript("[error] Runtime settings sync failed: " + ex.Message);
                     AppendTranscript("[system] " + syncFailureStatus);
                 }
             }
-            catch (Exception saveEx)
+        }
+        catch (Exception ex)
+        {
+            _backendSettings.SetStatus("Settings save failed: " + ex.Message);
+            if (appendTranscript)
             {
-                _backendSettings.SetStatus("Settings save failed: " + saveEx.Message);
-                if (appendTranscript)
-                {
-                    AppendTranscript("[error] Settings save failed: " + saveEx.Message);
-                }
+                AppendTranscript("[error] Settings save failed: " + ex.Message);
             }
         }
     }
@@ -550,6 +586,7 @@ public partial class MainWindow : Window
         }
 
         InputBar.IsVisible = ChatTabButton.IsChecked == true || BriefingTabButton.IsChecked == true;
+        UpdateLandingEmptyStateVisibility();
     }
 
     private void SettingsTabControl_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -558,6 +595,21 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        if (tabControl.SelectedItem is not TabItem selectedTab ||
+            !selectedTab.IsEnabled ||
+            selectedTab.Classes.Contains("navGroupHeader"))
+        {
+            var fallbackTab = _lastValidSettingsTabItem ?? GeneralTabItem;
+            if (!ReferenceEquals(tabControl.SelectedItem, fallbackTab))
+            {
+                tabControl.SelectedItem = fallbackTab;
+            }
+
+            return;
+        }
+
+        _lastValidSettingsTabItem = selectedTab;
 
         if (ReferenceEquals(tabControl.SelectedItem, LlmsTabItem))
         {
@@ -752,7 +804,7 @@ public partial class MainWindow : Window
 
         _currentSession = session;
         ChatMessagesList.ItemsSource = _currentSession.Messages;
-        EmptyHero.IsVisible = _currentSession.Messages.Count == 0;
+        UpdateLandingEmptyStateVisibility();
         SyncLastMessageCacheFromCurrentSession();
         UpdateChatActionState();
         UpdateComposerState();
@@ -772,7 +824,7 @@ public partial class MainWindow : Window
         ChatHistoryList.SelectedItem = _currentSession;
 
         ChatMessagesList.ItemsSource = _currentSession.Messages;
-        EmptyHero.IsVisible = true;
+        UpdateLandingEmptyStateVisibility();
         SyncLastMessageCacheFromCurrentSession();
         UpdateChatActionState();
         UpdateComposerState();
@@ -850,8 +902,13 @@ public partial class MainWindow : Window
         _chatHistory.Insert(0, _currentSession);
         ChatHistoryList.SelectedItem = _currentSession;
 
+        // Reset the trust-ledger drawer for the new session.
+        _activityDrawerVm.Clear();
+        SessionSummaryText.Text = _activityDrawerVm.SessionSummaryText;
+        SessionTimeRangeText.Text = "";
+
         ChatMessagesList.ItemsSource = _currentSession.Messages;
-        EmptyHero.IsVisible = true;
+        UpdateLandingEmptyStateVisibility();
 
         PromptBox.Text = string.Empty;
         ResetPermissionRequestUi();
@@ -919,7 +976,7 @@ public partial class MainWindow : Window
         UpdateComposerState();
         try
         {
-            // Don't clear PromptBox yet – SubmitPromptAsync will clear it on
+            // Don't clear PromptBox yet Ã¢â‚¬â€œ SubmitPromptAsync will clear it on
             // success, or leave the text visible as a pending prompt when offline.
             await SubmitPromptAsync(prompt, voiceInitiated: false);
         }
@@ -946,7 +1003,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Connection confirmed – clear any pending prompt and the input box.
+        // Connection confirmed Ã¢â‚¬â€œ clear any pending prompt and the input box.
         _pendingUserPrompt = null;
         PromptBox.Text = string.Empty;
 
@@ -1214,7 +1271,7 @@ public partial class MainWindow : Window
             await _microphoneCaptureService.StartCaptureAsync(CancellationToken.None);
             _pttCaptureActive = true;
             MarkPushToTalkCaptureStarted(source);
-            // Button state CSS class already shows listening — no chat card needed.
+            // Button state CSS class already shows listening Ã¢â‚¬â€ no chat card needed.
         }
         catch (Exception ex)
         {
@@ -1375,8 +1432,14 @@ public partial class MainWindow : Window
 
     private void ActionOpenAuditTabButton_Click(object? sender, RoutedEventArgs e)
     {
+        OpenFullAuditFromActionDrawer();
+    }
+
+    private void OpenFullAuditFromActionDrawer()
+    {
         SetActiveView(SettingsTabButton);
         SettingsTabControl.SelectedItem = AuditTabItem;
+        ToggleActionDrawer(false);
     }
 
     private async Task RefreshActionDrawerAsync()
@@ -1384,23 +1447,38 @@ public partial class MainWindow : Window
         UpdateActionDrawerSummary();
 
         if (_runtimeApiClient is null)
-        {
-            ActionAuditPreviewList.ItemsSource = new[] { "Not connected to runtime." };
             return;
-        }
 
         try
         {
-            var entries = await _runtimeApiClient.GetAuditAsync(CancellationToken.None);
-            ActionAuditPreviewList.ItemsSource = entries
-                .TakeLast(15)
-                .Reverse()
-                .Select(e => $"{e.TimestampUtc:HH:mm:ss} {e.Category}: {e.Message}")
-                .ToArray();
+            var summary = await _runtimeApiClient.GetActivitySummaryAsync(
+                _currentSession.ConversationId, CancellationToken.None);
+
+            if (summary is not null)
+            {
+                _activityDrawerVm.UpdateFromResponse(summary);
+                SessionSummaryText.Text = _activityDrawerVm.SessionSummaryText;
+                SessionTimeRangeText.Text = _activityDrawerVm.SessionTimeRange;
+            }
         }
-        catch (Exception ex)
+        catch
         {
-            ActionAuditPreviewList.ItemsSource = new[] { "Audit preview failed: " + ex.Message };
+            // Keep existing drawer state when runtime is unavailable.
+        }
+    }
+
+    private void CategoryExpandButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string categoryKey)
+        {
+            foreach (var cat in _activityDrawerVm.Categories)
+            {
+                if (string.Equals(cat.CategoryKey, categoryKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    cat.IsExpanded = !cat.IsExpanded;
+                    break;
+                }
+            }
         }
     }
 
@@ -1528,10 +1606,7 @@ public partial class MainWindow : Window
 
     private void AppendTranscript(string line)
     {
-        if (EmptyHero.IsVisible)
-        {
-            EmptyHero.IsVisible = false;
-        }
+        var wasEmpty = _currentSession.Messages.Count == 0;
 
         if (line.StartsWith("[user] "))
         {
@@ -1562,6 +1637,11 @@ public partial class MainWindow : Window
             _currentSession.AddMessage("system", line);
         }
 
+        if (wasEmpty && _currentSession.Messages.Count > 0)
+        {
+            UpdateLandingEmptyStateVisibility();
+        }
+
         BumpSessionToTop(_currentSession);
         SyncLastMessageCacheFromCurrentSession();
         UpdateChatActionState();
@@ -1577,40 +1657,61 @@ public partial class MainWindow : Window
         var trimmed = string.IsNullOrWhiteSpace(state) ? "Hold" : state.Trim();
 
         // Choose icon + CSS class based on state
-        string icon;
+        Symbol iconSymbol;
         string? cssClass;
+        string brushKey;
         switch (trimmed)
         {
             case "Listening...":
-                icon = "🎙";
+                _voiceStatusLabel = "Listening";
+                iconSymbol = Symbol.Mic;
                 cssClass = "pttListening";
+                brushKey = "AccentPrimary";
                 break;
             case "Processing...":
             case "Transcribing...":
-                icon = "⏳";
+                _voiceStatusLabel = "Working";
+                iconSymbol = Symbol.Scan;
                 cssClass = "pttProcessing";
+                brushKey = "TextSecondary";
                 break;
             case "Speaking":
-                icon = "🔊";
+                _voiceStatusLabel = "Speaking";
+                iconSymbol = Symbol.SpeakerSettings;
                 cssClass = "pttSpeaking";
+                brushKey = "TextSecondary";
                 break;
             case "Responding...":
-                icon = "💬";
+                _voiceStatusLabel = "Responding";
+                iconSymbol = Symbol.Send;
                 cssClass = "pttResponding";
+                brushKey = "AccentPrimary";
                 break;
             default: // "Hold" and fallback
-                icon = "🎙";
+                _voiceStatusLabel = PttHoldButton.IsEnabled ? "Ready" : "Unavailable";
+                iconSymbol = Symbol.Mic;
                 cssClass = null;
+                brushKey = PttHoldButton.IsEnabled ? "TextSecondary" : "TextTertiary";
                 break;
         }
 
-        PttHoldButton.Content = $"{icon}  {trimmed}";
+        PttHoldButton.Content = new SymbolIcon
+        {
+            Symbol = iconSymbol,
+            FontSize = 20,
+            Foreground = ResolveThemeBrush(brushKey, Brushes.LightGray)
+        };
+        ToolTip.SetTip(PttHoldButton, string.Equals(trimmed, "Hold", StringComparison.Ordinal)
+            ? "Hold to talk"
+            : trimmed);
 
         // Toggle CSS classes instead of setting local Background/Foreground values
         foreach (var cls in PttStateClasses)
         {
             PttHoldButton.Classes.Set(cls, cls == cssClass);
         }
+
+        UpdateRuntimeStatusStrip();
     }
 
     private bool IsVoiceResponseActive()
@@ -1780,7 +1881,8 @@ public partial class MainWindow : Window
 
     private void UpdateConversationTitle()
     {
-        ConversationTitleText.Text = "Conversation";
+        ConversationTitleText.Text = string.Empty;
+        ConversationTitleText.IsVisible = false;
     }
 
     private void StartEventStream(string runId)
@@ -1802,10 +1904,15 @@ public partial class MainWindow : Window
         {
             await foreach (var envelope in _runtimeApiClient.StreamRunEventsAsync(runId, cancellationToken))
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
                 await Dispatcher.UIThread.InvokeAsync(() => HandleEvent(envelope));
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
         catch (Exception ex)
@@ -1868,7 +1975,12 @@ public partial class MainWindow : Window
                     AppendTranscript($"[assistant] {completed.FinalText}");
                 }
 
-                _lastAssistantSources = BuildAssistantSourceList(_lastAssistantMessage ?? string.Empty, completed?.Briefing);
+                var assistantSourceCards = completed?.SuppressSourceCardsUi == true
+                    ? Array.Empty<ChatSourceCardItem>()
+                    : CreateAssistantSourceCards(completed?.SourceCards);
+                _lastAssistantSources = assistantSourceCards.Count > 0
+                    ? assistantSourceCards.Select(card => card.Url).ToArray()
+                    : BuildAssistantSourceList(_lastAssistantMessage ?? string.Empty, completed?.Briefing);
                 if (completed?.Briefing is not null)
                 {
                     DisplayBriefing(completed.Briefing, recordHistory: true, activateTab: true);
@@ -1907,6 +2019,8 @@ public partial class MainWindow : Window
                         {
                             lastMsg.RetryPrompt = _lastUserPrompt;
                         }
+
+                        lastMsg.SetSourceCards(assistantSourceCards);
                     }
                 }
 
@@ -1939,6 +2053,11 @@ public partial class MainWindow : Window
                 _activeRunId = null;
                 UpdateComposerState();
 
+                if (ActionDrawer.IsVisible)
+                {
+                    _ = RefreshActionDrawerAsync();
+                }
+
                 if (_workflowChecklistItems.Count == 0)
                 {
                     _ = AutoCollapseProgressDrawerAsync();
@@ -1965,15 +2084,32 @@ public partial class MainWindow : Window
                 _activeRunId = null;
                 HideProgressDrawer();
                 UpdateComposerState();
+                if (ActionDrawer.IsVisible)
+                {
+                    _ = RefreshActionDrawerAsync();
+                }
                 break;
             case RuntimeEventTypes.ToolRequested:
                 var request = ReadPayload<ToolRequestedPayload>(envelope.Payload);
                 if (request is not null)
                 {
                     _pendingPermissionRequestId = request.RequestId;
+                    _pendingPermissionAudit[request.RequestId] = new PendingPermissionAuditContext(
+                        request.ToolName,
+                        SummarizeToolRequest(request.ToolName, request.Reason, request.ArgumentsJson),
+                        request.ArgumentsJson,
+                        envelope.TimestampUtc.LocalDateTime.ToString("g"));
                     _toolCallsInCurrentRun.Add(request.ToolName);
                     UpdateWorkflowToolStrip();
                     ShowPermissionRequest(request);
+                    AddRecentActivity(
+                        GetToolActivityIcon(request.ToolName),
+                        $"{FormatToolDisplayName(request.ToolName)} requested",
+                        SummarizeToolRequest(request.ToolName, request.Reason, request.ArgumentsJson),
+                        "Awaiting approval",
+                        "Explicit approval required",
+                        BuildToolRequestAuditPreview(request),
+                        request.ToolName);
                     // Don't clutter chat with individual permission messages.
                     // A consolidated tool activity summary is emitted at RunCompleted.
 
@@ -1989,6 +2125,19 @@ public partial class MainWindow : Window
                 var decision = ReadPayload<ToolDecisionPayload>(envelope.Payload);
                 _pendingPermissionRequestId = null;
                 ResetPermissionRequestUi();
+                if (decision is not null)
+                {
+                    _pendingPermissionAudit.TryGetValue(decision.RequestId, out var pendingAudit);
+                    AddRecentActivity(
+                        GetToolActivityIcon(decision.ToolName),
+                        $"{FormatToolDisplayName(decision.ToolName)} {(decision.Approved ? "approved" : "denied")}",
+                        pendingAudit?.Purpose ?? $"{FormatToolDisplayName(decision.ToolName)} permission request resolved.",
+                        decision.Approved ? "Authorized" : "Denied",
+                        pendingAudit?.DecisionSummary ?? (decision.Approved ? "Explicit approval recorded" : "Denied by operator"),
+                        BuildToolDecisionAuditPreview(decision, pendingAudit),
+                        decision.ToolName);
+                    _pendingPermissionAudit.Remove(decision.RequestId);
+                }
                 // Suppressed: individual approval/denial messages no longer clutter chat.
                 break;
             case RuntimeEventTypes.NarrationUpdated:
@@ -2014,12 +2163,12 @@ public partial class MainWindow : Window
                         {
                             var stateIcon = item.State switch
                             {
-                                "Completed"  => "\u2713",  // ✓
-                                "InProgress" => "\u25CF",  // ●
-                                "Failed"     => "\u2717",  // ✗
-                                "Blocked"    => "\u2014",  // —
-                                "Skipped"    => "\u203A",  // ›
-                                _            => "\u25CB"   // ○
+                                "Completed"  => "\u2713",  // Ã¢Å“â€œ
+                                "InProgress" => "\u25CF",  // Ã¢â€”Â
+                                "Failed"     => "\u2717",  // Ã¢Å“â€”
+                                "Blocked"    => "\u2014",  // Ã¢â‚¬â€
+                                "Skipped"    => "\u203A",  // Ã¢â‚¬Âº
+                                _            => "\u25CB"   // Ã¢â€”â€¹
                             };
                             var titleText = (item.Title ?? "").Trim();
                             var noteText = (item.StatusNote ?? "").Trim();
@@ -2074,11 +2223,11 @@ public partial class MainWindow : Window
                         var reason = progressEvent.Metadata?.TryGetValue("reason", out var r) == true ? r : null;
                         var skipLabel = reason switch
                         {
-                            "confidence_not_retry" => "Confidence is sufficient — no retry needed.",
-                            "retry_budget_exhausted" => "Retry budget exhausted — finalizing with current evidence.",
-                            "tool_budget_exhausted" => "Tool budget exhausted — finalizing with current evidence.",
-                            "time_budget_exhausted" => "Time budget exhausted — finalizing with current evidence.",
-                            _ => "Retry skipped — finalizing with current evidence."
+                            "confidence_not_retry" => "Confidence is sufficient Ã¢â‚¬â€ no retry needed.",
+                            "retry_budget_exhausted" => "Retry budget exhausted Ã¢â‚¬â€ finalizing with current evidence.",
+                            "tool_budget_exhausted" => "Tool budget exhausted Ã¢â‚¬â€ finalizing with current evidence.",
+                            "time_budget_exhausted" => "Time budget exhausted Ã¢â‚¬â€ finalizing with current evidence.",
+                            _ => "Retry skipped Ã¢â‚¬â€ finalizing with current evidence."
                         };
 
                         WorkflowNarrationText.Text = skipLabel;
@@ -2092,10 +2241,10 @@ public partial class MainWindow : Window
                         {
                             var label = complexity switch
                             {
-                                "Trivial" => "Simple request — answering directly.",
-                                "SimpleLookup" => "Gathering information…",
-                                "MultiStepResearch" => "Multi-step research — building checklist…",
-                                _ => "Processing request…"
+                                "Trivial" => "Simple request Ã¢â‚¬â€ answering directly.",
+                                "SimpleLookup" => "Gathering informationÃ¢â‚¬Â¦",
+                                "MultiStepResearch" => "Multi-step research Ã¢â‚¬â€ building checklistÃ¢â‚¬Â¦",
+                                _ => "Processing requestÃ¢â‚¬Â¦"
                             };
                             WorkflowNarrationText.Text = label;
                             ShowProgressDrawer();
@@ -2191,13 +2340,13 @@ public partial class MainWindow : Window
     {
         var parts = new System.Collections.Generic.List<string>();
         if (_toolCallsInCurrentRun.Count > 0)
-            parts.Add($"Tools: {_toolCallsInCurrentRun.Count}");
+            parts.Add($"{_toolCallsInCurrentRun.Count} tool{(_toolCallsInCurrentRun.Count == 1 ? string.Empty : "s")}");
         if (_workflowRetryCount > 0)
-            parts.Add($"Retries: {_workflowRetryCount}");
+            parts.Add($"{_workflowRetryCount} retr{(_workflowRetryCount == 1 ? "y" : "ies")}");
         if (!string.IsNullOrWhiteSpace(_workflowConfidenceBand) &&
             !string.Equals(_workflowConfidenceBand, "n/a", StringComparison.OrdinalIgnoreCase))
-            parts.Add($"Confidence: {_workflowConfidenceBand}");
-        WorkflowToolStripText.Text = parts.Count > 0 ? string.Join("  \u00B7  ", parts) : string.Empty;
+            parts.Add($"Confidence {_workflowConfidenceBand}");
+        WorkflowToolStripText.Text = parts.Count > 0 ? string.Join(" | ", parts) : string.Empty;
     }
 
     private static string FormatCompletionReasonForDisplay(string? reason)
@@ -2225,10 +2374,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        var requestId = _pendingPermissionRequestId;
+        if (_pendingPermissionAudit.TryGetValue(requestId, out var auditContext))
+        {
+            auditContext.DecisionSummary = DescribePermissionDecision(approved, rememberForSession, persistAsAlways);
+        }
+
         try
         {
             var applied = await _runtimeApiClient.SubmitPermissionDecisionAsync(
-                _pendingPermissionRequestId,
+                requestId,
                 approved,
                 rememberForSession,
                 persistAsAlways,
@@ -2238,6 +2393,11 @@ public partial class MainWindow : Window
             // The consolidated tool summary is added to the assistant message at RunCompleted.
             if (!applied)
             {
+                if (_pendingPermissionAudit.TryGetValue(requestId, out var pendingContext))
+                {
+                    pendingContext.DecisionSummary = null;
+                }
+
                 AppendTranscript("[system] Permission decision rejected by runtime.");
             }
 
@@ -2373,7 +2533,6 @@ public partial class MainWindow : Window
                     "Runtime connected. Open Search or click Refresh Search Status to inspect live web-search and MCP health.");
             }
 
-            UpdateHeaderConnectionControls();
             UpdateActionDrawerSummary();
             UpdateComposerState();
 
@@ -2484,7 +2643,65 @@ public partial class MainWindow : Window
         ActionConnectionStateText.Text = ConnectionStatusText.Text;
         ActionConnectionStateText.Foreground = statusBrush;
         ActionConnectionDot.Background = statusBrush;
-        ActionRuntimeStateText.Text = SettingsRuntimeText.Text + " | " + RuntimeLaunchStateText.Text;
+
+        var isConnected = string.Equals(ConnectionStatusText.Text, "Connected", StringComparison.OrdinalIgnoreCase);
+        var runtimeScope = _runtimeBaseUri?.IsLoopback == true ? "Local runtime" : "Remote runtime";
+        var version = ExtractRuntimeVersion(SettingsRuntimeText.Text);
+        var summaryParts = new System.Collections.Generic.List<string>
+        {
+            isConnected ? runtimeScope + " ready" : runtimeScope + " unavailable"
+        };
+
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            summaryParts.Add(version);
+        }
+
+        ActionRuntimeSummaryText.Text = string.Join(" | ", summaryParts);
+        ActionRuntimeStateText.Text = SimplifyRuntimeLaunchState(RuntimeLaunchStateText.Text, isConnected);
+        ActionRuntimeEndpointText.Text = BuildRuntimeEndpointDetail();
+    }
+
+    private static string? ExtractRuntimeVersion(string? runtimeText)
+    {
+        if (string.IsNullOrWhiteSpace(runtimeText))
+        {
+            return null;
+        }
+
+        var openIndex = runtimeText.LastIndexOf('(');
+        var closeIndex = runtimeText.LastIndexOf(')');
+        if (openIndex >= 0 && closeIndex > openIndex)
+        {
+            return runtimeText[(openIndex + 1)..closeIndex].Trim();
+        }
+
+        return null;
+    }
+
+    private static string SimplifyRuntimeLaunchState(string? launchStateText, bool isConnected)
+    {
+        if (string.IsNullOrWhiteSpace(launchStateText))
+        {
+            return isConnected ? "Ready for requests" : "Waiting for runtime";
+        }
+
+        return launchStateText
+            .Replace("Managed runtime: ", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("runtime", "service", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string BuildRuntimeEndpointDetail()
+    {
+        var endpoint = _runtimeBaseUri?.ToString().TrimEnd('/')
+            ?? RuntimeUrlBox.Text?.Trim();
+
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            return "No endpoint configured";
+        }
+
+        return endpoint;
     }
 
     private static T? ReadPayload<T>(object payload)
@@ -2770,6 +2987,38 @@ public partial class MainWindow : Window
         AppendTranscript("[system] Copied last assistant message.");
     }
 
+    private async void ActionCopyEndpointButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var endpoint = BuildRuntimeEndpointDetail();
+        if (string.IsNullOrWhiteSpace(endpoint) || string.Equals(endpoint, "No endpoint configured", StringComparison.Ordinal))
+        {
+            AppendTranscript("[system] No runtime endpoint to copy.");
+            return;
+        }
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+        {
+            AppendTranscript("[error] Clipboard is unavailable on this platform.");
+            return;
+        }
+
+        await clipboard.SetTextAsync(endpoint);
+        AppendTranscript("[system] Copied runtime endpoint.");
+    }
+
+    private void ActionRuntimeDetailsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var isExpanded = !ActionRuntimeDetailsPanel.IsVisible;
+        ActionRuntimeDetailsPanel.IsVisible = isExpanded;
+        ActionRuntimeDetailsChevron.Symbol = isExpanded ? Symbol.ChevronUp : Symbol.ChevronDown;
+    }
+
+    private void ActionRawPayloadButton_Click(object? sender, RoutedEventArgs e)
+    {
+        // Legacy handler — raw payload panel removed in trust-ledger redesign.
+    }
+
     private void RetryLastPromptButton_Click(object? sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_lastUserPrompt))
@@ -2832,7 +3081,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Automatically speaks the assistant response after a voice-initiated run completes.
-    /// Fire-and-forget from RunCompleted — mirrors the WPF VoiceSessionOrchestrator auto-TTS.
+    /// Fire-and-forget from RunCompleted Ã¢â‚¬â€ mirrors the WPF VoiceSessionOrchestrator auto-TTS.
     /// </summary>
     private async Task AutoSpeakResponseAsync(string text)
     {
@@ -2874,6 +3123,15 @@ public partial class MainWindow : Window
 
 private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_lastAssistantSources.Count == 0)
+        {
+            var lastAssistant = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant" && !m.IsPending);
+            if (lastAssistant is not null && lastAssistant.SourceCards.Count > 0)
+            {
+                _lastAssistantSources = lastAssistant.SourceCards.Select(card => card.Url).ToArray();
+            }
+        }
+
         if (_lastAssistantSources.Count == 0 && !string.IsNullOrWhiteSpace(_lastAssistantMessage))
         {
             _lastAssistantSources = ExtractUrls(_lastAssistantMessage);
@@ -2893,7 +3151,7 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
     }
 
-    // ── Per-message context/flyout menu handlers ─────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Per-message context/flyout menu handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     /// <summary>Resolves the ChatMessageItem from a MenuItem in either a ContextMenu or MenuFlyout.</summary>
     private static ChatMessageItem? ResolveMessageFromMenuItem(object? sender)
@@ -2986,7 +3244,13 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         }
     }
 
-    // ── Audit log file / folder handlers ─────────────────────────────
+    private void AssistantSourceCardOpenButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var url = (sender as Button)?.Tag as string;
+        OpenExternalUrl(url);
+    }
+
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Audit log file / folder handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     private void OpenAuditLogFile_Click(object? sender, RoutedEventArgs e)
     {
@@ -3127,19 +3391,71 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         foreach (var token in tokens)
         {
             var trimmed = token.Trim(',', '.', ';', ')', ']', '}', '>');
-            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-                !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (!urls.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out _))
             {
                 urls.Add(trimmed);
             }
         }
 
         return urls;
+    }
+
+    private static IReadOnlyList<ChatSourceCardItem> CreateAssistantSourceCards(
+        IReadOnlyList<AssistantSourceCardPayload>? sourceCards)
+    {
+        if (sourceCards is null || sourceCards.Count == 0)
+        {
+            return [];
+        }
+
+        var cards = new List<ChatSourceCardItem>(sourceCards.Count);
+        foreach (var card in sourceCards)
+        {
+            if (string.IsNullOrWhiteSpace(card.Url))
+            {
+                continue;
+            }
+
+            var item = new ChatSourceCardItem
+            {
+                Title = string.IsNullOrWhiteSpace(card.Title) ? card.Url : card.Title.Trim(),
+                Url = card.Url,
+                Domain = NormalizeSourceCardDomain(card.Domain, card.Url),
+                Excerpt = Truncate(card.Excerpt?.Trim() ?? string.Empty, 220),
+                PublishedLabel = FormatSourceCardPublishedLabel(card.PublishedAt),
+                ThumbnailUrl = card.Thumbnail?.Trim() ?? string.Empty,
+                FaviconBase64 = card.Favicon?.Trim() ?? string.Empty
+            };
+
+            item.BeginLoadImages();
+            cards.Add(item);
+        }
+
+        return cards;
+    }
+
+    private static string NormalizeSourceCardDomain(string? domain, string? url)
+    {
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            return domain.Trim();
+        }
+
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            ? uri.Host
+            : string.Empty;
+    }
+
+    private static string FormatSourceCardPublishedLabel(string? publishedAt)
+    {
+        if (string.IsNullOrWhiteSpace(publishedAt))
+        {
+            return string.Empty;
+        }
+
+        return DateTimeOffset.TryParse(publishedAt, out var parsed)
+            ? parsed.LocalDateTime.ToString("MMM d, h:mm tt")
+            : string.Empty;
     }
 
     private static string Truncate(string text, int maxLength)
@@ -3167,6 +3483,29 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
         SendButton_Click(sender, new RoutedEventArgs());
     }
 
+    private void SuggestionChipButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_submitInProgress || sender is not Button { DataContext: SuggestionChipItem chip })
+        {
+            return;
+        }
+
+        if (chip.ActionKind == SuggestionActionKind.OpenAuditTrail)
+        {
+            SetActiveView(SettingsTabButton);
+            SettingsTabControl.SelectedItem = AuditTabItem;
+            _ = RefreshAuditAsync();
+            AddRecentActivity(Symbol.History, "Audit trail opened", "Switched to the audit tab for inspection.", "Opened", "Audit: read-only records");
+            return;
+        }
+
+        PromptBox.Text = chip.PromptText;
+        PromptBox.CaretIndex = PromptBox.Text.Length;
+        PromptBox.Focus();
+        AddRecentActivity(chip.IconSymbol, chip.Label, "Command prepared in the composer.", "Prepared", "Awaiting explicit approval for external actions", chip.PromptText);
+        UpdateComposerState();
+    }
+
     private bool ShouldSendPromptOnKeyDown(KeyEventArgs e)
     {
         if (!_uiSettings.SendOnEnter)
@@ -3188,10 +3527,20 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     {
         var hasPrompt = !string.IsNullOrWhiteSpace(PromptBox.Text);
         var runActive = !string.IsNullOrWhiteSpace(_activeRunId);
+        var stopAllActive = runActive || IsVoiceResponseActive() || _voiceStatusLabel is "Listening" or "Responding" or "Working";
         SendButton.IsEnabled = hasPrompt && !runActive && !_submitInProgress;
         SendButton.IsVisible = !runActive;
+        SendButton.Opacity = hasPrompt ? 1.0 : 0.92;
+        SendButton.Background = hasPrompt
+            ? (IBrush?)this.FindResource("AccentPrimary") ?? Brushes.DodgerBlue
+            : (IBrush?)this.FindResource("BackgroundTertiary") ?? Brushes.DimGray;
+        SendButton.Foreground = hasPrompt
+            ? Brushes.White
+            : (IBrush?)this.FindResource("TextSecondary") ?? Brushes.Gray;
         StopButton.IsEnabled = runActive;
         StopButton.IsVisible = runActive;
+        StopAllButton.Opacity = stopAllActive ? 1.0 : 0.38;
+        UpdateRuntimeStatusStrip();
     }
 
     private void UpdateChatActionState()
@@ -3202,16 +3551,638 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
     private void SyncLastMessageCacheFromCurrentSession()
     {
         _lastUserPrompt = _currentSession.Messages.LastOrDefault(m => m.Role == "user")?.Content;
-        _lastAssistantMessage = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant" && !m.IsPending)?.Content;
-        _lastAssistantSources = string.IsNullOrWhiteSpace(_lastAssistantMessage)
-            ? Array.Empty<string>()
-            : ExtractUrls(_lastAssistantMessage);
+        var lastAssistant = _currentSession.Messages.LastOrDefault(m => m.Role == "assistant" && !m.IsPending);
+        _lastAssistantMessage = lastAssistant?.Content;
+        _lastAssistantSources = lastAssistant is not null && lastAssistant.SourceCards.Count > 0
+            ? lastAssistant.SourceCards.Select(card => card.Url).ToArray()
+            : string.IsNullOrWhiteSpace(_lastAssistantMessage)
+                ? Array.Empty<string>()
+                : ExtractUrls(_lastAssistantMessage);
     }
 
     private void UpdateHeaderConnectionControls()
     {
-        ConnectButton.IsVisible = _runtimeApiClient is null;
+        ConnectButton.IsVisible = false;
         ConnectButton.IsEnabled = !_isConnecting;
+
+        var connected = _runtimeApiClient is not null;
+        ConnectionStatusDot.Fill = connected
+            ? (IBrush?)this.FindResource("Success") ?? Brushes.LightGreen
+            : (IBrush?)this.FindResource("TextTertiary") ?? Brushes.Gray;
+
+        ToolTip.SetTip(ConnectionStatusButton, connected ? "Connected" : "Disconnected");
+        UpdateRuntimeStatusStrip();
+    }
+
+    private void UpdateLandingEmptyStateVisibility()
+    {
+        var showEmptyState = _currentSession.Messages.Count == 0;
+        var activeConversation = !showEmptyState && ChatTabButton.IsChecked == true;
+        ChatScroller.VerticalScrollBarVisibility = showEmptyState ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto;
+        HomeCommandStage.IsVisible = showEmptyState;
+        RuntimeStatusStrip.IsVisible = showEmptyState;
+        EmptyHero.IsVisible = showEmptyState;
+        SuggestionChipsPanel.IsVisible = showEmptyState;
+        ChatMessagesList.IsVisible = !showEmptyState;
+        ChatSurfaceLayout.MaxWidth = showEmptyState ? 860 : 1120;
+        ChatSurfaceLayout.Margin = showEmptyState ? new Thickness(24, 0, 24, 0) : new Thickness(32, 18, 32, 0);
+        HomeCommandStage.Margin = showEmptyState ? new Thickness(0, -24, 0, 40) : new Thickness(0);
+        ChatMessagesList.Margin = showEmptyState ? new Thickness(0, 20, 0, 36) : new Thickness(0, 24, 0, 30);
+        InputBarLayout.MaxWidth = showEmptyState ? 760 : 1120;
+        InputBar.Padding = showEmptyState ? new Thickness(24, 8, 24, 20) : new Thickness(28, 12, 28, 16);
+        ConnectionStatusText.IsVisible = activeConversation;
+        ConversationTitleText.IsVisible = false;
+        ChatComposer.SetLayoutMode(activeConversation: !showEmptyState);
+    }
+
+    private void InitializeSuggestionChips()
+    {
+        _suggestionChips.Clear();
+        _suggestionChips.Add(new SuggestionChipItem(Symbol.Screenshot, "Summarize this screen", "Summarize the current screen and call out what matters.", SuggestionActionKind.FillPrompt));
+        _suggestionChips.Add(new SuggestionChipItem(Symbol.SearchInfo, "Inspect current page", "Inspect the current page and tell me what stands out.", SuggestionActionKind.FillPrompt));
+        _suggestionChips.Add(new SuggestionChipItem(Symbol.FolderOpen, "Review file or folder", "Review this file or folder and call out the important findings.", SuggestionActionKind.FillPrompt));
+    }
+
+    private void UpdateRuntimeStatusStrip()
+    {
+        if (RuntimeStatusStrip is null)
+        {
+            return;
+        }
+
+        var runtimeValue = _isConnecting
+            ? "Starting"
+            : !string.IsNullOrWhiteSpace(_activeRunId)
+                ? "Busy"
+                : _runtimeApiClient is not null
+                    ? "Ready"
+                    : "Offline";
+
+        var runtimeBrush = runtimeValue switch
+        {
+            "Ready" => ResolveThemeBrush("Success", Brushes.LightGreen),
+            "Busy" => ResolveThemeBrush("AccentPrimary", Brushes.DodgerBlue),
+            "Starting" => ResolveThemeBrush("AccentPrimary", Brushes.DodgerBlue),
+            _ => ResolveThemeBrush("TextTertiary", Brushes.Gray)
+        };
+
+        var modelConnected = _runtimeApiClient is not null;
+
+        _runtimeStatusItems.Clear();
+        _runtimeStatusItems.Add(new RuntimeStatusItem(Symbol.WindowShield, "Runtime", runtimeValue, runtimeBrush));
+        _runtimeStatusItems.Add(new RuntimeStatusItem(Symbol.Shield, "Permissions", "Explicit approval", ResolveThemeBrush("TextSecondary", Brushes.LightGray)));
+        _runtimeStatusItems.Add(new RuntimeStatusItem(Symbol.History, "Audit", "Active", ResolveThemeBrush("TextSecondary", Brushes.LightGray)));
+
+        var runtimeStamp = $"{runtimeValue}|{(modelConnected ? "connected" : "offline")}|{_voiceStatusLabel}";
+        if (!string.Equals(_lastRuntimeActivityStamp, runtimeStamp, StringComparison.Ordinal))
+        {
+            _lastRuntimeActivityStamp = runtimeStamp;
+        }
+    }
+
+    private void InitializeRecentActivity()
+    {
+        _recentActivityItems.Clear();
+        var runtimeTitle = _runtimeApiClient is not null ? "Runtime connected" : "Runtime awaiting connection";
+        var runtimeDetail = _runtimeApiClient is not null
+            ? "Local runtime is available for inspect, review, and command tasks."
+            : "Start or connect a local runtime to enable inspection and action flows.";
+
+        AddRecentActivity(Symbol.WindowShield, runtimeTitle, runtimeDetail, _runtimeApiClient is not null ? "Ready" : "Waiting", "Runtime connection scope");
+        AddRecentActivity(Symbol.Shield, "Approval policy ready", "File, shell, and external actions require explicit confirmation.", "Enforced", "Explicit approval required");
+        AddRecentActivity(Symbol.History, "Audit trail available", "Permissions, file reads, and runtime events remain inspectable.", "Inspectable", "Audit: read-only records");
+    }
+
+    private void AddRecentActivity(
+        Symbol iconSymbol,
+        string actionName,
+        string purpose,
+        string resultStatus = "Recorded",
+        string approvalScope = "Not applicable",
+        string? rawPayloadPreview = null,
+        string? toolLabel = null)
+    {
+        _recentActivityItems.Insert(0, new RecentActivityItem(
+            iconSymbol,
+            actionName,
+            toolLabel ?? actionName,
+            purpose,
+            DateTime.Now.ToString("g"),
+            resultStatus,
+            approvalScope,
+            rawPayloadPreview ?? "No raw payload captured for this action.",
+            ResolveThemeBrush("TextSecondary", Brushes.LightGray)));
+
+        while (_recentActivityItems.Count > 3)
+        {
+            _recentActivityItems.RemoveAt(_recentActivityItems.Count - 1);
+        }
+    }
+
+    private async Task SyncRecentActivityFromAuditAsync()
+    {
+        if (_runtimeApiClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var entries = await _runtimeApiClient.GetAuditAsync(CancellationToken.None);
+            var auditItems = entries
+                .Select(TryCreateRecentActivityFromAudit)
+                .Where(item => item is not null)
+                .Select(item => item!)
+                .OrderByDescending(item => item.TimestampUtc)
+                .Take(3)
+                .ToList();
+
+            if (auditItems.Count == 0)
+            {
+                return;
+            }
+
+            var signature = string.Join("|", auditItems.Select(item => item.Signature));
+            if (string.Equals(_lastActionDrawerAuditSignature, signature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastActionDrawerAuditSignature = signature;
+            _recentActivityItems.Clear();
+            foreach (var auditItem in auditItems)
+            {
+                _recentActivityItems.Add(auditItem.Activity);
+            }
+        }
+        catch
+        {
+            // Keep the existing drawer state when audit retrieval is unavailable.
+        }
+    }
+
+    private AuditActivitySnapshot? TryCreateRecentActivityFromAudit(AuditEntryDto entry)
+    {
+        if (!string.Equals(entry.Category, "MCP_TOOL_CALL_END", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!TryParseJsonDocument(entry.MetadataJson, out var metadataDocument))
+        {
+            return null;
+        }
+
+        using (metadataDocument)
+        {
+            var metadata = metadataDocument.RootElement;
+            var sessionId = ReadJsonPropertyAsString(metadata, "session_id");
+            if (!string.Equals(sessionId, _currentSession.ConversationId, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var toolName = ReadJsonPropertyAsString(metadata, "tool_name_canonical")
+                ?? ReadJsonPropertyAsString(metadata, "tool_name_requested")
+                ?? "tool";
+            var inputSummary = ReadJsonPropertyAsString(metadata, "input_summary");
+            var outputSummary = ReadJsonPropertyAsString(metadata, "output_summary");
+            var permission = ReadJsonPropertyAsString(metadata, "permission");
+            var requestId = ReadJsonPropertyAsString(metadata, "request_id") ?? entry.Id;
+            var durationMs = ReadJsonPropertyAsString(metadata, "duration_ms");
+            var result = ExtractAuditResult(entry.Message);
+            var approvalScope = FormatAuditPermission(permission);
+            var activity = new RecentActivityItem(
+                GetToolActivityIcon(toolName),
+                $"{FormatToolDisplayName(toolName)} {DescribeAuditResult(result)}",
+                toolName,
+                SummarizeAuditInput(toolName, inputSummary),
+                entry.TimestampUtc.LocalDateTime.ToString("g"),
+                FormatAuditStatus(result),
+                approvalScope,
+                BuildAuditPayloadPreview(entry, toolName, requestId, result, approvalScope, inputSummary, outputSummary, durationMs),
+                ResolveThemeBrush("TextSecondary", Brushes.LightGray));
+
+            return new AuditActivitySnapshot(
+                activity,
+                entry.TimestampUtc,
+                $"{requestId}|{entry.TimestampUtc.ToUnixTimeMilliseconds()}");
+        }
+    }
+
+    private static string BuildToolRequestAuditPreview(ToolRequestedPayload request)
+    {
+        var details = FormatPermissionDetails(request.ToolName, request.Reason, request.ArgumentsJson);
+        return $"Tool: {request.ToolName}\nPermission request: {request.RequestId}\nStatus: awaiting operator approval\nPurpose: {details}\nArguments:\n{PrettyPrintJsonIfPossible(request.ArgumentsJson)}";
+    }
+
+    private static string BuildToolDecisionAuditPreview(ToolDecisionPayload decision, PendingPermissionAuditContext? context)
+    {
+        var builder = new StringBuilder();
+        builder.Append("Tool: ").Append(decision.ToolName).AppendLine();
+        builder.Append("Permission request: ").Append(decision.RequestId).AppendLine();
+        builder.Append("Decision: ").AppendLine(decision.Approved ? "approved" : "denied");
+
+        if (!string.IsNullOrWhiteSpace(context?.DecisionSummary))
+        {
+            builder.Append("Authorization mode: ").AppendLine(context.DecisionSummary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context?.Purpose))
+        {
+            builder.Append("Purpose: ").AppendLine(context.Purpose);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context?.ArgumentsJson))
+        {
+            builder.Append("Arguments:").AppendLine();
+            builder.Append(PrettyPrintJsonIfPossible(context.ArgumentsJson));
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string DescribePermissionDecision(bool approved, bool rememberForSession, bool persistAsAlways)
+    {
+        if (!approved)
+        {
+            return "Denied by operator";
+        }
+
+        if (persistAsAlways)
+        {
+            return "Always allow saved";
+        }
+
+        if (rememberForSession)
+        {
+            return "Allowed for this session";
+        }
+
+        return "Approved once";
+    }
+
+    private static string SummarizeToolRequest(string? toolName, string? reason, string? argumentsJson)
+    {
+        var argumentSummary = SummarizeToolArguments(toolName, argumentsJson);
+        if (!string.IsNullOrWhiteSpace(argumentSummary))
+        {
+            return argumentSummary;
+        }
+
+        return FormatPermissionDetails(toolName, reason, argumentsJson);
+    }
+
+    private static string SummarizeAuditInput(string? toolName, string? inputSummary)
+    {
+        if (string.IsNullOrWhiteSpace(inputSummary))
+        {
+            return $"{FormatToolDisplayName(toolName)} completed without a captured input summary.";
+        }
+
+        var argumentSummary = SummarizeToolArguments(toolName, inputSummary);
+        return string.IsNullOrWhiteSpace(argumentSummary)
+            ? TruncateSingleLine(inputSummary, 180)
+            : argumentSummary;
+    }
+
+    private static string SummarizeToolArguments(string? toolName, string? argumentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson) || !TryParseJsonDocument(argumentsJson, out var document))
+        {
+            return string.Empty;
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return TruncateSingleLine(argumentsJson, 180);
+            }
+
+            var normalizedTool = NormalizeToolName(toolName);
+            return normalizedTool switch
+            {
+                "web_search" => BuildSearchSummary(root),
+                "browser_navigate" => BuildUrlSummary(root, "Navigate"),
+                _ => BuildGenericArgumentSummary(root)
+            };
+        }
+    }
+
+    private static string BuildSearchSummary(JsonElement root)
+    {
+        var query = ReadJsonPropertyAsString(root, "query")
+            ?? ReadJsonPropertyAsString(root, "q")
+            ?? ReadJsonPropertyAsString(root, "searchQuery");
+        var recency = ReadJsonPropertyAsString(root, "recency");
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return BuildGenericArgumentSummary(root);
+        }
+
+        return string.IsNullOrWhiteSpace(recency)
+            ? $"Query: {query}"
+            : $"Query: {query} | Recency: {recency}";
+    }
+
+    private static string BuildUrlSummary(JsonElement root, string label)
+    {
+        var url = ReadJsonPropertyAsString(root, "url")
+            ?? ReadJsonPropertyAsString(root, "uri")
+            ?? ReadJsonPropertyAsString(root, "address");
+
+        return string.IsNullOrWhiteSpace(url)
+            ? BuildGenericArgumentSummary(root)
+            : $"{label}: {url}";
+    }
+
+    private static string BuildGenericArgumentSummary(JsonElement root)
+    {
+        foreach (var name in new[] { "query", "prompt", "path", "filePath", "url", "uri", "command", "text" })
+        {
+            var value = ReadJsonPropertyAsString(root, name);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return $"{ToTitleLabel(name)}: {value}";
+            }
+        }
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+            {
+                return $"{ToTitleLabel(property.Name)}: {ReadJsonElementAsString(property.Value)}";
+            }
+        }
+
+        return TruncateSingleLine(root.GetRawText(), 180);
+    }
+
+    private static string BuildAuditPayloadPreview(
+        AuditEntryDto entry,
+        string toolName,
+        string requestId,
+        string result,
+        string approvalScope,
+        string? inputSummary,
+        string? outputSummary,
+        string? durationMs)
+    {
+        var builder = new StringBuilder();
+        builder.Append("Audit event: ").Append(entry.Category).AppendLine();
+        builder.Append("Tool: ").Append(toolName).AppendLine();
+        builder.Append("Request id: ").Append(requestId).AppendLine();
+        builder.Append("Result: ").Append(result).AppendLine();
+        builder.Append("Authorization: ").Append(approvalScope).AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(durationMs))
+        {
+            builder.Append("Duration: ").Append(durationMs).AppendLine(" ms");
+        }
+
+        if (!string.IsNullOrWhiteSpace(inputSummary))
+        {
+            builder.Append("Input: ").AppendLine(inputSummary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(outputSummary))
+        {
+            builder.Append("Output summary: ").AppendLine(TruncateSingleLine(outputSummary, 240));
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string FormatAuditPermission(string? permission)
+    {
+        return permission?.ToLowerInvariant() switch
+        {
+            "granted" => "Explicit approval recorded",
+            "denied" => "Denied by operator",
+            "policy_always" => "Always-allow policy",
+            "session_grant" => "Allowed for this session",
+            "tool_exempt" => "Exempt tool; no prompt required",
+            "not_required" => "No prompt required",
+            _ => "Audit permission status unavailable"
+        };
+    }
+
+    private static string FormatAuditStatus(string result)
+    {
+        return result.ToLowerInvariant() switch
+        {
+            "ok" => "Completed",
+            "blocked" => "Blocked",
+            "error" => "Error",
+            "cancelled" => "Cancelled",
+            _ => ToTitleLabel(result)
+        };
+    }
+
+    private static string DescribeAuditResult(string result)
+    {
+        return result.ToLowerInvariant() switch
+        {
+            "ok" => "completed",
+            "blocked" => "blocked",
+            "error" => "failed",
+            "cancelled" => "cancelled",
+            _ => "updated"
+        };
+    }
+
+    private static string ExtractAuditResult(string message)
+    {
+        var openParen = message.LastIndexOf('(');
+        var closeParen = message.LastIndexOf(')');
+        if (openParen >= 0 && closeParen > openParen)
+        {
+            return message[(openParen + 1)..closeParen];
+        }
+
+        return "ok";
+    }
+
+    private static Symbol GetToolActivityIcon(string? toolName)
+    {
+        return NormalizeToolName(toolName) switch
+        {
+            "web_search" => Symbol.SearchInfo,
+            "browser_navigate" => Symbol.Open,
+            "file_read" or "file_write" or "file_list" => Symbol.FolderOpen,
+            _ => Symbol.Scan
+        };
+    }
+
+    private static string FormatToolDisplayName(string? toolName)
+    {
+        var normalized = NormalizeToolName(toolName);
+        return normalized switch
+        {
+            "web_search" => "Web search",
+            "browser_navigate" => "Browser navigation",
+            _ => ToTitleLabel(normalized.Replace("_", " "))
+        };
+    }
+
+    private static string NormalizeToolName(string? toolName)
+    {
+        return string.IsNullOrWhiteSpace(toolName)
+            ? "tool"
+            : toolName.Trim().ToLowerInvariant();
+    }
+
+    private static string PrettyPrintJsonIfPossible(string text)
+    {
+        if (!TryParseJsonDocument(text, out var document))
+        {
+            return text;
+        }
+
+        using (document)
+        {
+            return JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+    }
+
+    private static bool TryParseJsonDocument(string? text, out JsonDocument document)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            document = null!;
+            return false;
+        }
+
+        try
+        {
+            document = JsonDocument.Parse(text);
+            return true;
+        }
+        catch (JsonException)
+        {
+            document = null!;
+            return false;
+        }
+    }
+
+    private static string? ReadJsonPropertyAsString(JsonElement root, string propertyName)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadJsonElementAsString(property.Value);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadJsonElementAsString(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => null,
+            _ => value.GetRawText()
+        };
+    }
+
+    private static string ToTitleLabel(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var parts = value
+            .Split([' ', '_', '-'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant());
+        return string.Join(" ", parts);
+    }
+
+    private static string TruncateSingleLine(string text, int maxLength)
+    {
+        var normalized = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..(maxLength - 3)] + "...";
+    }
+
+    private IBrush ResolveThemeBrush(string key, IBrush fallback)
+    {
+        return (IBrush?)this.FindResource(key) ?? fallback;
+    }
+
+    private sealed class SuggestionChipItem(Symbol iconSymbol, string label, string promptText, SuggestionActionKind actionKind)
+    {
+        public Symbol IconSymbol { get; } = iconSymbol;
+        public string Label { get; } = label;
+        public string PromptText { get; } = promptText;
+        public SuggestionActionKind ActionKind { get; } = actionKind;
+    }
+
+    private enum SuggestionActionKind
+    {
+        FillPrompt,
+        OpenAuditTrail
+    }
+
+    private sealed class RuntimeStatusItem(Symbol iconSymbol, string label, string value, IBrush accentBrush)
+    {
+        public Symbol IconSymbol { get; } = iconSymbol;
+        public string Label { get; } = label;
+        public string Value { get; } = value;
+        public IBrush AccentBrush { get; } = accentBrush;
+    }
+
+    private sealed class RecentActivityItem(
+        Symbol iconSymbol,
+        string actionName,
+        string toolLabel,
+        string purpose,
+        string timestampLabel,
+        string resultStatus,
+        string approvalScope,
+        string rawPayloadPreview,
+        IBrush accentBrush)
+    {
+        public Symbol IconSymbol { get; } = iconSymbol;
+        public string ActionName { get; } = actionName;
+        public string ToolLabel { get; } = toolLabel;
+        public string Purpose { get; } = purpose;
+        public string TimestampLabel { get; } = timestampLabel;
+        public string TimeLabel { get; } = timestampLabel;
+        public string ResultStatus { get; } = resultStatus;
+        public string ApprovalScope { get; } = approvalScope;
+        public string RawPayloadPreview { get; } = rawPayloadPreview;
+        public IBrush AccentBrush { get; } = accentBrush;
+    }
+
+    private sealed class PendingPermissionAuditContext(string toolName, string purpose, string argumentsJson, string requestedAtLabel)
+    {
+        public string ToolName { get; } = toolName;
+        public string Purpose { get; } = purpose;
+        public string ArgumentsJson { get; } = argumentsJson;
+        public string RequestedAtLabel { get; } = requestedAtLabel;
+        public string? DecisionSummary { get; set; }
+    }
+
+    private sealed class AuditActivitySnapshot(RecentActivityItem activity, DateTimeOffset timestampUtc, string signature)
+    {
+        public RecentActivityItem Activity { get; } = activity;
+        public DateTimeOffset TimestampUtc { get; } = timestampUtc;
+        public string Signature { get; } = signature;
     }
     private sealed class MemoryFactRowViewModel
     {
@@ -3547,10 +4518,10 @@ private void ShowSourcesButton_Click(object? sender, RoutedEventArgs e)
             text = MarkdownItalicAsteriskRegex.Replace(text, "$1");
             text = MarkdownItalicUnderscoreRegex.Replace(text, "$1");
 
-            // `inline code` — just remove the backticks
+            // `inline code` Ã¢â‚¬â€ just remove the backticks
             text = MarkdownInlineCodeRegex.Replace(text, "$1");
 
-            // ### Headings — strip leading hashes
+            // ### Headings Ã¢â‚¬â€ strip leading hashes
             text = MarkdownHeadingRegex.Replace(text, "");
         }
         catch (RegexMatchTimeoutException)

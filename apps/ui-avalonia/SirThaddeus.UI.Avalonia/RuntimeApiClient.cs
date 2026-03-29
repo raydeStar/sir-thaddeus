@@ -406,6 +406,38 @@ internal sealed class RuntimeApiClient
         response.EnsureSuccessStatusCode();
     }
 
+    // ── Activity Summary ─────────────────────────────────────────────
+
+    public async Task<ActivitySummaryResponse?> GetActivitySummaryAsync(
+        string? sessionId,
+        CancellationToken cancellationToken)
+    {
+        var path = "/api/activity/summary";
+        if (!string.IsNullOrEmpty(sessionId))
+            path += $"?sessionId={Uri.EscapeDataString(sessionId)}";
+
+        return await _httpClient.GetFromJsonAsync<ActivitySummaryResponse>(
+            path, JsonOptions, cancellationToken);
+    }
+
+    public async Task<ConnectionApprovalChangeResponse?> ChangeConnectionApprovalAsync(
+        string connectionId,
+        string newApprovalState,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"/api/activity/connections/{Uri.EscapeDataString(connectionId)}/approval",
+            new ConnectionApprovalChangeRequest(connectionId, newApprovalState),
+            JsonOptions,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        return await response.Content.ReadFromJsonAsync<ConnectionApprovalChangeResponse>(
+            JsonOptions, cancellationToken);
+    }
+
     private static async Task<T> ReadRequiredJsonAsync<T>(
         HttpResponseMessage response,
         string errorMessage,

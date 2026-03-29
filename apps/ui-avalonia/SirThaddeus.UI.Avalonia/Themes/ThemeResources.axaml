@@ -20,6 +20,22 @@
     <SolidColorBrush x:Key="Subtext1Brush" Color="#C9D1D9"/>
     <SolidColorBrush x:Key="TextBrush"     Color="#E6EDF3"/>
 
+     <!-- ── Landing Redesign Tokens (Dark) ───────────────────────── -->
+     <SolidColorBrush x:Key="BackgroundPrimary" Color="#0F0F14"/>
+     <SolidColorBrush x:Key="BackgroundSecondary" Color="#1A1A24"/>
+     <SolidColorBrush x:Key="BackgroundTertiary" Color="#252532"/>
+
+     <SolidColorBrush x:Key="TextPrimary" Color="#EAEAF0"/>
+     <SolidColorBrush x:Key="TextSecondary" Color="#9999AA"/>
+     <SolidColorBrush x:Key="TextTertiary" Color="#666677"/>
+
+     <SolidColorBrush x:Key="AccentPrimary" Color="#5B8DEF"/>
+     <SolidColorBrush x:Key="AccentHover" Color="#7AA5FF"/>
+
+     <SolidColorBrush x:Key="BorderMuted" Color="#2A2A3A"/>
+     <SolidColorBrush x:Key="Danger" Color="#EF4444"/>
+     <SolidColorBrush x:Key="Success" Color="#22C55E"/>
+
     <!-- ── Accent Palette ────────────────────────────────────────── -->
     <SolidColorBrush x:Key="BlueBrush"     Color="#2B8AFF"/>
     <SolidColorBrush x:Key="SapphireBrush" Color="#58A6FF"/>
@@ -58,5 +74,20 @@
     <!-- ── Spacing / Thickness helpers ──────────────────────────── -->
     <Thickness x:Key="CardPadding">16,14</Thickness>
     <Thickness x:Key="SectionSpacing">0,6</Thickness>
+
+    <!-- ── Settings Navigation Tokens ────────────────────────── -->
+    <SolidColorBrush x:Key="SettingsNavBg"          Color="#0D0D12"/>
+    <SolidColorBrush x:Key="SettingsContentBg"       Color="#111118"/>
+    <SolidColorBrush x:Key="SettingsNavItemHoverBg"  Color="#1A1A26"/>
+    <SolidColorBrush x:Key="SettingsNavItemActiveBg" Color="#1E1E2C"/>
+    <SolidColorBrush x:Key="SettingsNavAccent"       Color="#5B8DEF"/>
+    <SolidColorBrush x:Key="SettingsShellBg"         Color="#10151D"/>
+    <SolidColorBrush x:Key="SettingsShellBorder"     Color="#222B37"/>
+    <SolidColorBrush x:Key="SettingsCardBg"          Color="#16161F"/>
+    <SolidColorBrush x:Key="SettingsCardBorder"      Color="#232330"/>
+    <SolidColorBrush x:Key="SettingsStatusCardBg"    Color="#13131B"/>
+    <SolidColorBrush x:Key="SettingsMetricBg"        Color="#111723"/>
+    <SolidColorBrush x:Key="SettingsMetricBorder"    Color="#293242"/>
+    <SolidColorBrush x:Key="SettingsDirtyAccent"     Color="#D4A94E"/>
 
 </ResourceDictionary>

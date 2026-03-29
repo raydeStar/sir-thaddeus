@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Search;
@@ -607,7 +608,66 @@ public sealed partial class QueryBuilder
             };
         }
 
+        if (mode == SearchMode.NewsAggregate)
+        {
+            var directNews = BuildDirectNewsQuery(userMessage, entity);
+            if (!string.IsNullOrWhiteSpace(directNews))
+            {
+                return new SearchQuery
+                {
+                    Query = directNews,
+                    Recency = "day",
+                    UsedFallback = false
+                };
+            }
+        }
+
+        if (mode == SearchMode.WebFactFind &&
+            ShouldUseDirectFactFindQuery(userMessage, entity))
+        {
+            var directFactFind = BuildDirectFactFindQuery(userMessage, entity, session);
+            if (!string.IsNullOrWhiteSpace(directFactFind))
+            {
+                return new SearchQuery
+                {
+                    Query = directFactFind,
+                    Recency = ResolveRecency(mode, userMessage, "any"),
+                    UsedFallback = false
+                };
+            }
+        }
+
         return null;
+    }
+
+    private static bool ShouldUseDirectFactFindQuery(
+        string userMessage,
+        EntityResolver.ResolvedEntity? entity)
+    {
+        var lower = (userMessage ?? string.Empty).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (IntentFeatureExtractor.HasLocalBusinessProximitySignals(lower))
+            return true;
+
+        if (LooksLikeMediaComparisonQuery(lower))
+            return true;
+
+        if (LooksLikeProductRecommendationQuery(lower))
+            return true;
+
+        if (entity is null)
+            return false;
+
+        return lower.Contains("review", StringComparison.Ordinal) ||
+               lower.Contains("reviews", StringComparison.Ordinal) ||
+               lower.Contains("hours", StringComparison.Ordinal) ||
+               lower.Contains("open", StringComparison.Ordinal) ||
+               lower.Contains("close", StringComparison.Ordinal) ||
+               lower.Contains("update", StringComparison.Ordinal) ||
+               lower.Contains("updates", StringComparison.Ordinal) ||
+               lower.Contains("developments", StringComparison.Ordinal);
     }
 
     private static string? BuildDirectNewsQuery(string userMessage, EntityResolver.ResolvedEntity? entity)
@@ -622,15 +682,8 @@ public sealed partial class QueryBuilder
         if (LooksLikeGenericHeadlineRequest(userMessage))
             return "top headlines";
 
-        var topic = ExtractTopicFromMessage(userMessage);
-        if (string.IsNullOrWhiteSpace(topic))
-            return null;
-
-        topic = CollapseWhitespace(topic).Trim();
-        if (topic.Length > 60)
-            topic = topic[..60].TrimEnd();
-
-        return string.IsNullOrWhiteSpace(topic) ? null : $"{topic} news";
+        // No clear category or entity — fall through to LLM query builder
+        return null;
     }
 
     private static string? BuildDirectFactFindQuery(
@@ -653,7 +706,28 @@ public sealed partial class QueryBuilder
 
         var lower = (userMessage ?? string.Empty).ToLowerInvariant();
         string query;
-        if (lower.Contains("update", StringComparison.Ordinal) ||
+        if (LooksLikeMediaComparisonQuery(lower))
+        {
+            var comparisonSubject = NormalizeComparisonSubject(subject, entity);
+            var comparisonSuffix = lower.Contains("live-action", StringComparison.Ordinal) ||
+                                   lower.Contains("live action", StringComparison.Ordinal)
+                ? "live action differences original movie"
+                : "differences original adaptation";
+            query = $"{comparisonSubject} {comparisonSuffix}";
+        }
+        else if (LooksLikeProductRecommendationQuery(lower))
+        {
+            var productSubject = NormalizeProductSubject(subject, entity);
+            var productNoun = NeedsSupplementNoun(productSubject, lower)
+                ? "supplement"
+                : "product";
+            var prefix = lower.Contains("best ", StringComparison.Ordinal) ||
+                         lower.Contains("recommend", StringComparison.Ordinal)
+                ? "best "
+                : string.Empty;
+            query = $"{prefix}{productSubject} {productNoun} reviews";
+        }
+        else if (lower.Contains("update", StringComparison.Ordinal) ||
             lower.Contains("updates", StringComparison.Ordinal) ||
             lower.Contains("developments", StringComparison.Ordinal) ||
             lower.Contains("what's new", StringComparison.Ordinal) ||
@@ -682,6 +756,99 @@ public sealed partial class QueryBuilder
             query = query[..80].TrimEnd();
 
         return query;
+    }
+
+    private static bool LooksLikeMediaComparisonQuery(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("word for word", StringComparison.Ordinal) ||
+               lower.Contains("like the original", StringComparison.Ordinal) ||
+               lower.Contains("same as the original", StringComparison.Ordinal) ||
+               lower.Contains("compare", StringComparison.Ordinal) ||
+               lower.Contains("compared", StringComparison.Ordinal) ||
+               lower.Contains("difference", StringComparison.Ordinal) ||
+               lower.Contains("differences", StringComparison.Ordinal) ||
+               lower.Contains("live-action", StringComparison.Ordinal) ||
+               lower.Contains("live action", StringComparison.Ordinal) ||
+               lower.Contains("remake", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeProductRecommendationQuery(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasRecommendationCue = lower.Contains("recommend", StringComparison.Ordinal) ||
+                                   lower.Contains("best ", StringComparison.Ordinal) ||
+                                   lower.Contains("good ", StringComparison.Ordinal) ||
+                                   lower.Contains("reviews", StringComparison.Ordinal) ||
+                                   lower.Contains("review", StringComparison.Ordinal);
+
+        if (!hasRecommendationCue)
+            return false;
+
+        return lower.Contains("amazon", StringComparison.Ordinal) ||
+               lower.Contains("supplement", StringComparison.Ordinal) ||
+               lower.Contains("vitamin", StringComparison.Ordinal) ||
+               lower.Contains("brand", StringComparison.Ordinal) ||
+               lower.Contains("product", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeComparisonSubject(
+        string subject,
+        EntityResolver.ResolvedEntity? entity)
+    {
+        var preferred = entity?.CanonicalName;
+        if (!string.IsNullOrWhiteSpace(preferred))
+            return CollapseWhitespace(preferred).Trim();
+
+        return CollapseWhitespace(subject).Trim();
+    }
+
+    private static string NormalizeProductSubject(
+        string subject,
+        EntityResolver.ResolvedEntity? entity)
+    {
+        var preferred = entity?.CanonicalName;
+        var candidate = string.IsNullOrWhiteSpace(preferred) ? subject : preferred;
+
+        candidate = Regex.Replace(
+            candidate,
+            @"\b(?:on|at)\s+(?:amazon(?:\.com)?|ebay|etsy|walmart(?:\.com)?)\b.*$",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        candidate = Regex.Replace(
+            candidate,
+            @"^(?:a|an|the)\s+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        candidate = Regex.Replace(
+            candidate,
+            @"^(?:good|best)\s+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+
+        candidate = CollapseWhitespace(candidate).Trim();
+        return string.IsNullOrWhiteSpace(candidate)
+            ? CollapseWhitespace(subject).Trim()
+            : candidate;
+    }
+
+    private static bool NeedsSupplementNoun(string subject, string lower)
+    {
+        if (subject.Contains("supplement", StringComparison.OrdinalIgnoreCase) ||
+            subject.Contains("vitamin", StringComparison.OrdinalIgnoreCase) ||
+            subject.Contains("capsule", StringComparison.OrdinalIgnoreCase) ||
+            subject.Contains("gummy", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return lower.Contains("supplement", StringComparison.Ordinal) ||
+               lower.Contains("vitamin", StringComparison.Ordinal) ||
+               lower.Contains("amazon", StringComparison.Ordinal);
     }
 
     private static string? ExtractNewsCategory(string userMessage)

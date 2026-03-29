@@ -50,6 +50,10 @@ public static class DeepDiveWebExtractor
         @",\s*[\w\s.]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex SourceTitleCityAtStreetRegex = new(
+        @"\bin\s+(?<city>[A-Za-z][A-Za-z .'-]+),\s*(?<state>[A-Z]{2})\s+at\s+(?<street>\d{1,6}\s+[\w.'#&/\-\s]+?(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Cir|Circle|Hwy|Highway))\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Scans multiple text chunks (snippets, page content) and returns
     /// the best signal for each field. First match wins for single-value
@@ -71,7 +75,7 @@ public static class DeepDiveWebExtractor
         if (sourceItems is { Count: > 0 })
         {
             businessName = InferBusinessNameFromSources(sourceItems);
-            address = InferAddressFromSources(sourceItems);
+            address = InferAddressFromSources([sourceItems[0]]);
         }
 
         foreach (var chunk in textChunks)
@@ -121,6 +125,9 @@ public static class DeepDiveWebExtractor
             // Collect review-like sentences (short, sentiment-bearing)
             CollectReviewSnippets(chunk, reviewSnippets);
         }
+
+        if (string.IsNullOrWhiteSpace(address) && sourceItems is { Count: > 0 })
+            address = InferAddressFromSources(sourceItems);
 
         return new WebExtractionResult
         {
@@ -252,35 +259,107 @@ public static class DeepDiveWebExtractor
                 continue;
 
             var title = source.Title.Trim();
-            var normalized = title;
 
+            var cityAtStreetMatch = SourceTitleCityAtStreetRegex.Match(title);
+            if (cityAtStreetMatch.Success)
+            {
+                var city = NormalizeSingleLine(cityAtStreetMatch.Groups["city"].Value);
+                var state = NormalizeSingleLine(cityAtStreetMatch.Groups["state"].Value)?.ToUpperInvariant();
+                var street = NormalizeSingleLine(cityAtStreetMatch.Groups["street"].Value);
+                var cityAtStreetCandidate = NormalizeAddress($"{street}, {city}, {state}");
+                if (!string.IsNullOrWhiteSpace(cityAtStreetCandidate))
+                    return cityAtStreetCandidate;
+            }
+
+            // Check ALL segments of the title, not just the first.
+            // Many pages put the address after a separator:
+            // "Walmart Portland Supercenter - 4200 SE 82nd Ave, Portland, OR 97266"
             var separators = new[] { " | ", " :: ", " — ", " – ", " - " };
+            var segments = new List<string> { title };
             foreach (var sep in separators)
             {
-                var idx = normalized.IndexOf(sep, StringComparison.Ordinal);
-                if (idx > 0)
+                if (title.Contains(sep, StringComparison.Ordinal))
                 {
-                    normalized = normalized[..idx].Trim();
+                    segments.AddRange(title.Split([sep], StringSplitOptions.RemoveEmptyEntries)
+                        .Select(s => s.Trim()));
                     break;
                 }
             }
 
-            var firstComma = normalized.IndexOf(',');
-            if (firstComma >= 0 && firstComma + 1 < normalized.Length)
-                normalized = normalized[(firstComma + 1)..].Trim();
+            foreach (var segment in segments)
+            {
+                // Try strict on the raw segment first (before comma stripping)
+                var strictRaw = Regex.Match(
+                    segment,
+                    @"\d{1,6}\s+[^,]+(?:,\s*[^,]+){1,2},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (strictRaw.Success)
+                {
+                    var candidate = NormalizeAddress(strictRaw.Value);
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                        return candidate;
+                }
 
-            normalized = Regex.Replace(normalized, @",\s*us$", "", RegexOptions.IgnoreCase).Trim();
+                var normalized = segment;
 
-            var match = Regex.Match(
-                normalized,
-                @"\d{1,6}\s+[^,]+(?:,\s*[^,]+){1,2},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            if (!match.Success)
-                continue;
+                var firstComma = normalized.IndexOf(',');
+                if (firstComma >= 0 && firstComma + 1 < normalized.Length)
+                    normalized = normalized[(firstComma + 1)..].Trim();
 
-            var candidate = NormalizeAddress(match.Value);
-            if (candidate.Length > 0)
-                return candidate;
+                normalized = Regex.Replace(normalized, @",\s*us$", "", RegexOptions.IgnoreCase).Trim();
+
+                // Strict: street, city, ST ZIP
+                var match = Regex.Match(
+                    normalized,
+                    @"\d{1,6}\s+[^,]+(?:,\s*[^,]+){1,2},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (match.Success)
+                {
+                    var candidate = NormalizeAddress(match.Value);
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                        return candidate;
+                }
+
+                // Relaxed: street, city, ST (no zip required)
+                var relaxed = Regex.Match(
+                    normalized,
+                    @"\d{1,6}\s+[\w\s.'#&/\-]+?(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway)\.?\s*,\s*[\w\s.]+,\s*[A-Z]{2}\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (relaxed.Success)
+                {
+                    var candidate = NormalizeAddress(relaxed.Value);
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                        return candidate;
+                }
+            }
+
+            // Street-only fallback: extract just the street address (e.g. "4200 SE 82nd Ave")
+            // when no full address with city/state/zip was found above.
+            foreach (var segment in segments)
+            {
+                var streetOnly = Regex.Match(
+                    segment,
+                    @"\d{1,6}\s+[\w\s.'#&/\-]+?\b(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway)\.?\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (streetOnly.Success)
+                {
+                    var candidate = NormalizeAddress(streetOnly.Value);
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                        return candidate;
+                }
+            }
+
+            // Also try the snippet — search snippets often contain addresses.
+            if (!string.IsNullOrWhiteSpace(source.Snippet))
+            {
+                var snippetMatch = AddressRegex.Match(source.Snippet);
+                if (snippetMatch.Success)
+                {
+                    var candidate = NormalizeAddress(snippetMatch.Value);
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                        return candidate;
+                }
+            }
         }
 
         return null;

@@ -143,28 +143,8 @@ public sealed partial class AgentOrchestrator
         var userText = messages.LastOrDefault(m => m.Role == "user")?.Content?.Trim() ?? string.Empty;
         var lower = userText.ToLowerInvariant();
 
-        string content;
-        if (lower.Contains("oauth", StringComparison.Ordinal) &&
-            (lower.Contains("openid", StringComparison.Ordinal) || lower.Contains("oidc", StringComparison.Ordinal)))
-        {
-            content = "OAuth 2.0 is for authorization (granting app access to APIs), while OpenID Connect (OIDC) is for authentication (proving user identity) on top of OAuth 2.0. " +
-                      "Use OAuth 2.0 when an app needs delegated API permissions. Use OIDC when you need sign-in, identity claims (like sub/email), and an ID token for the client app.";
-        }
-        else if (lower.Contains("hash table", StringComparison.Ordinal))
-        {
-            content = "A hash table stores key-value pairs and uses a hash function to map keys to buckets, giving average O(1) lookup/insert/delete. " +
-                      "Use it when you need fast membership checks, indexing by key, caching, counting/frequency maps, or deduplication. " +
-                      "Trade-offs: no guaranteed ordering, possible collisions, and performance can degrade if hashing/load factor is poor.";
-        }
-        else if (lower.Contains("car wash", StringComparison.Ordinal) &&
-                 (lower.Contains("walk", StringComparison.Ordinal) || lower.Contains("drive", StringComparison.Ordinal)))
-        {
-            content = "Drive. The goal of going to a car wash is to wash the car, so the car must be there; walking by yourself does not complete that goal.";
-        }
-        else
-        {
-            content = "I can't reach the configured local language model endpoint right now. I can still help with direct tools and deterministic tasks, or we can retry once the model endpoint is reachable.";
-        }
+        var content = TryBuildDeterministicBenignFallback(userText) ??
+                      "I can't reach the configured local language model endpoint right now. I can still help with direct tools and deterministic tasks, or we can retry once the model endpoint is reachable.";
 
         return new LlmResponse
         {

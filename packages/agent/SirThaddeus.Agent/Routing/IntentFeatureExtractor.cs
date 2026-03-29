@@ -548,6 +548,67 @@ public static class IntentFeatureExtractor
     public static bool LooksLikeWebSearchRequest(string lower)
         => GetWebLookupHeuristicEvidence(lower).ShouldLookup;
 
+    public static bool LooksLikeSelfContainedKnowledgeOrReasoningPrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (TryGetExplicitToolInvocationIntent(lower) is not null ||
+            LooksLikeScreenRequest(lower) ||
+            LooksLikeFileRequest(lower) ||
+            LooksLikeSystemCommand(lower) ||
+            LooksLikeBrowseRequest(lower) ||
+            LooksLikeMemoryWriteRequest(lower) ||
+            LooksLikeExplicitNewsLookup(lower) ||
+            LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeLocalBusinessDiscovery(lower) ||
+            LooksLikeFactLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
+
+        if (LooksLikeLogicPuzzlePrompt(lower))
+            return true;
+
+        var startsWithKnowledgeCue =
+            lower.StartsWith("explain ", StringComparison.Ordinal) ||
+            lower.StartsWith("describe ", StringComparison.Ordinal) ||
+            lower.StartsWith("teach me ", StringComparison.Ordinal) ||
+            lower.StartsWith("tell me about ", StringComparison.Ordinal) ||
+            lower.StartsWith("what is ", StringComparison.Ordinal) ||
+            lower.StartsWith("what's ", StringComparison.Ordinal) ||
+            lower.StartsWith("whats ", StringComparison.Ordinal) ||
+            lower.StartsWith("how does ", StringComparison.Ordinal) ||
+            lower.StartsWith("how do ", StringComparison.Ordinal) ||
+            lower.StartsWith("why does ", StringComparison.Ordinal) ||
+            lower.StartsWith("why is ", StringComparison.Ordinal);
+
+        if (!startsWithKnowledgeCue)
+            return false;
+
+        var hasCurrentEventsCue =
+            lower.Contains("today", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("recent", StringComparison.Ordinal) ||
+            lower.Contains("right now", StringComparison.Ordinal) ||
+            lower.Contains("currently", StringComparison.Ordinal) ||
+            lower.Contains("this week", StringComparison.Ordinal) ||
+            lower.Contains("this month", StringComparison.Ordinal);
+
+        if (hasCurrentEventsCue)
+            return false;
+
+        var hasLocalBusinessCue =
+            lower.Contains(" hours", StringComparison.Ordinal) ||
+            lower.Contains(" open", StringComparison.Ordinal) ||
+            lower.Contains(" close", StringComparison.Ordinal) ||
+            lower.Contains("near me", StringComparison.Ordinal) ||
+            lower.Contains("nearby", StringComparison.Ordinal);
+
+        return !hasLocalBusinessCue;
+    }
+
     public static WebLookupHeuristicEvidence GetWebLookupHeuristicEvidence(string lower)
     {
         if (LooksLikeConversationalCheckIn(lower))

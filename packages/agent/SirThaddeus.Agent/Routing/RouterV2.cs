@@ -77,6 +77,12 @@ public sealed class RouterV2 : IRouter
             return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
         }
 
+        if (IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lower) &&
+            !looksLikeCurrentInfoLookup)
+        {
+            return DefaultRouter.MakeRoute(Intents.ChatOnly, confidence: 0.96);
+        }
+
         if (IntentFeatureExtractor.LooksLikeSelfContainedReasoningPrompt(lower) &&
             !IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower) &&
             !IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) &&

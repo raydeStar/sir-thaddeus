@@ -249,8 +249,10 @@ Phone: (503) 555-9580
         Assert.True(result.Success);
         Assert.NotNull(result.Briefing);
 
-        // Conflicting hours (9-5 vs 10-6) should trigger low confidence.
-        Assert.Equal("low", result.Briefing!.Hero.Confidence);
+        // Conflicting hours (9-5 vs 10-6) should still yield medium
+        // confidence because data WAS extracted.  Conflict adds a warning
+        // but does not downgrade confidence to low.
+        Assert.Equal("medium", result.Briefing!.Hero.Confidence);
         Assert.Contains(result.Briefing.Cards, c => c.Type == "warnings");
 
         // Even with conflicts, hours should be PRESENT (not placeholder text).
@@ -269,6 +271,56 @@ Phone: (503) 555-9580
         Assert.Contains("Phone:", result.AssistantText!, StringComparison.Ordinal);
         Assert.Contains("Briefing summary:", result.AssistantText!, StringComparison.Ordinal);
         Assert.DoesNotContain("Briefing tab", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeepDiveCoordinator_AssistantLead_IncludesReviewSignal_WhenAvailable()
+    {
+        var briefing = new DeepDiveBriefing
+        {
+            Topic = new DeepDiveTopic
+            {
+                Kind = DeepDiveConstants.KindPlace,
+                Query = "Richard's Deli Hillsboro OR",
+                Timezone = "America/Los_Angeles",
+                Locale = "en-US"
+            },
+            Hero = new DeepDiveHero
+            {
+                Title = "Richard's Deli",
+                Confidence = "medium",
+                StatusLine = "Details from web sources",
+                LastCheckedIso = DateTimeOffset.UtcNow.ToString("O"),
+                Address = "2559 SE Tualatin Valley Hwy, Hillsboro, OR 97123",
+                Phone = "(503) 619-0506"
+            },
+            Cards =
+            [
+                new DeepDiveCard
+                {
+                    Type = "reviews",
+                    Title = "Reviews",
+                    Bullets =
+                    [
+                        "Average rating: 4.6 across 120 ratings.",
+                        "People often praise service quality and staff friendliness.",
+                        "No dominant complaint theme surfaced in sampled snippets."
+                    ],
+                    Sources = [Source("yelp", "https://www.yelp.com/biz/richards-deli-hillsboro")]
+                }
+            ]
+        };
+
+        var method = typeof(DeepDiveCoordinator).GetMethod(
+            "BuildAssistantLead",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.NotNull(method);
+
+        var assistantLead = Assert.IsType<string>(method!.Invoke(null, [briefing]));
+
+        Assert.Contains("Average rating: 4.6 across 120 ratings.", assistantLead, StringComparison.Ordinal);
+        Assert.Contains("People often praise service quality and staff friendliness.", assistantLead, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -329,6 +381,73 @@ Phone: (503) 555-9580
         Assert.True(response.Success);
         Assert.NotNull(response.DeepDiveBriefing);
         Assert.Equal("Portland Floral", response.DeepDiveBriefing!.Hero.Title);
+        Assert.Contains("appears open now", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeepDiveCoordinator_WebFallback_PrefersBrowsedSourceAddressInAssistantLead()
+    {
+        var webResult = """
+1. \"Fast food in Portland, OR at 5613 SE 82nd Ave | McDonald's\" - McDonalds
+2. \"McDonald's - 13459 NW Cornell Rd, Portland, OR 97229\" - Yelp
+3. \"McDonald's - 12090 SW Main St, Portland, OR 97223\" - MapQuest
+
+<!-- SOURCES_JSON -->
+{"sources":[{"title":"Fast food in Portland, OR at 5613 SE 82nd Ave | McDonald's","url":"https://www.mcdonalds.example/5613","domain":"mcdonalds.com","excerpt":"Monday: Open 24 hours"},{"title":"McDonald's - 13459 NW Cornell Rd, Portland, OR 97229","url":"https://www.yelp.example/mcdonalds-portland-6","domain":"yelp.com","excerpt":"Yelp listing for Portland location"},{"title":"McDonald's - 12090 SW Main St, Portland, OR 97223","url":"https://www.mapquest.example/mcdonalds","domain":"mapquest.com","excerpt":"Map listing"}]}
+""";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return """{"provider":"google_places","query":"demo","error":"key missing","place":null,"sources":[]}""";
+            }
+
+            if (tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return webResult;
+            }
+
+            if (tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Contains("mcdonalds.example/5613", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "McDonald's\nToday: Monday: Open 24 hours\nPhone: (503) 555-1111";
+                }
+
+                if (args.Contains("yelp.example/mcdonalds-portland-6", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "McDonald's\n13459 NW Cornell Rd, Portland, OR 97229\nPhone: (503) 643-9455\nOpen now";
+                }
+
+                return "Map listing";
+            }
+
+            return "{}";
+        });
+
+        var coordinator = new DeepDiveCoordinator(mcp, new TestAuditLogger());
+        var toolCalls = new List<ToolCallRecord>();
+
+        var result = await coordinator.BuildPlaceBriefingAsync(
+            query: "Is McDonalds in Portland OR open right now?",
+            timezone: "America/Los_Angeles",
+            locale: "en-US",
+            userLocationHint: "Portland, OR",
+            toolCallsMade: toolCalls,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Briefing);
+        Assert.Contains("appears open now", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        // With priority-based source ordering, the Yelp source (review site)
+        // is browsed before the generic business homepage, so the Yelp address
+        // is preferred.
+        Assert.Contains("13459 NW Cornell Rd", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("12090 SW Main St", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SourceRef Source(string name, string url) => new()

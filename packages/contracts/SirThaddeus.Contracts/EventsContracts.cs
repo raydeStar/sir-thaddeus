@@ -35,6 +35,15 @@ public sealed record ToolDecisionPayload(
     string ToolName,
     bool Approved);
 
+public sealed record AssistantSourceCardPayload(
+    string Title,
+    string Url,
+    string Domain,
+    string Excerpt = "",
+    string Favicon = "",
+    string Thumbnail = "",
+    string? PublishedAt = null);
+
 public sealed record RunCompletedPayload(
     string FinalText,
     int ToolLoopIterations,
@@ -43,7 +52,9 @@ public sealed record RunCompletedPayload(
     string? CompletionReason = null,
     string? ConfidenceBand = null,
     bool? RetryGateAllowed = null,
-    string? RetryGateReason = null);
+    string? RetryGateReason = null,
+    IReadOnlyList<AssistantSourceCardPayload>? SourceCards = null,
+    bool SuppressSourceCardsUi = false);
 
 public sealed record RunFailedPayload(
     string Error,

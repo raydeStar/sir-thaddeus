@@ -1,7 +1,13 @@
 using System;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 
 namespace SirThaddeus.UI.Avalonia.ViewModels;
 
@@ -14,6 +20,146 @@ public sealed class WorkflowChecklistItemViewModel
     public string StateIcon { get; init; } = "\u25CB";  // ○
     public string Title { get; init; } = string.Empty;
     public string StatusNote { get; init; } = string.Empty;
+}
+
+public sealed class ChatSourceCardItem : INotifyPropertyChanged
+{
+    private static readonly HttpClient ImageHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(4)
+    };
+
+    private Bitmap? _thumbnailImage;
+    private Bitmap? _faviconImage;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public string Title { get; init; } = string.Empty;
+    public string Url { get; init; } = string.Empty;
+    public string Domain { get; init; } = string.Empty;
+    public string Excerpt { get; init; } = string.Empty;
+    public string PublishedLabel { get; init; } = string.Empty;
+    public string ThumbnailUrl { get; init; } = string.Empty;
+    public string FaviconBase64 { get; init; } = string.Empty;
+
+    public Bitmap? ThumbnailImage
+    {
+        get => _thumbnailImage;
+        private set
+        {
+            _thumbnailImage = value;
+            OnPropertyChanged(nameof(ThumbnailImage));
+            OnPropertyChanged(nameof(HasThumbnailImage));
+        }
+    }
+
+    public Bitmap? FaviconImage
+    {
+        get => _faviconImage;
+        private set
+        {
+            _faviconImage = value;
+            OnPropertyChanged(nameof(FaviconImage));
+            OnPropertyChanged(nameof(HasFaviconImage));
+        }
+    }
+
+    public bool HasThumbnailImage => _thumbnailImage is not null;
+    public bool HasFaviconImage => _faviconImage is not null;
+    public bool HasExcerpt => !string.IsNullOrWhiteSpace(Excerpt);
+    public bool HasMetaLine => !string.IsNullOrWhiteSpace(MetaLine);
+    public string DomainInitial => string.IsNullOrWhiteSpace(Domain)
+        ? "•"
+        : Domain.Trim()[0].ToString().ToUpperInvariant();
+
+    public string MetaLine
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Domain))
+            {
+                return PublishedLabel;
+            }
+
+            if (string.IsNullOrWhiteSpace(PublishedLabel))
+            {
+                return Domain;
+            }
+
+            return Domain + " | " + PublishedLabel;
+        }
+    }
+
+    public void BeginLoadImages()
+    {
+        _ = LoadImagesAsync();
+    }
+
+    private async Task LoadImagesAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(FaviconBase64))
+        {
+            var favicon = TryDecodeBitmap(FaviconBase64);
+            if (favicon is not null)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => FaviconImage = favicon);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(ThumbnailUrl))
+        {
+            return;
+        }
+
+        var thumbnail = await TryDownloadBitmapAsync(ThumbnailUrl);
+        if (thumbnail is not null)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => ThumbnailImage = thumbnail);
+        }
+    }
+
+    private static Bitmap? TryDecodeBitmap(string encoded)
+    {
+        try
+        {
+            var normalized = encoded.Trim();
+            var commaIndex = normalized.IndexOf(',');
+            if (normalized.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && commaIndex >= 0)
+            {
+                normalized = normalized[(commaIndex + 1)..];
+            }
+
+            var bytes = Convert.FromBase64String(normalized);
+            using var stream = new MemoryStream(bytes);
+            return new Bitmap(stream);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<Bitmap?> TryDownloadBitmapAsync(string url)
+    {
+        try
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                uri.Scheme is not ("http" or "https"))
+            {
+                return null;
+            }
+
+            var bytes = await ImageHttpClient.GetByteArrayAsync(uri);
+            using var stream = new MemoryStream(bytes);
+            return new Bitmap(stream);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 public class ChatMessageItem : INotifyPropertyChanged
@@ -38,7 +184,14 @@ public class ChatMessageItem : INotifyPropertyChanged
     private DateTimeOffset _timestamp = DateTimeOffset.Now;
     private bool _isPending;
 
+    public ChatMessageItem()
+    {
+        SourceCards.CollectionChanged += SourceCards_CollectionChanged;
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public ObservableCollection<ChatSourceCardItem> SourceCards { get; } = [];
 
     public string Role
     {
@@ -104,6 +257,8 @@ public class ChatMessageItem : INotifyPropertyChanged
     /// <summary>True when this message has a tool summary footer to display.</summary>
     public bool HasToolSummary => !string.IsNullOrWhiteSpace(_toolSummary);
 
+    public bool HasSourceCards => SourceCards.Count > 0;
+
     /// <summary>
     /// Original user prompt associated with this assistant response (for Retry).
     /// </summary>
@@ -130,6 +285,15 @@ public class ChatMessageItem : INotifyPropertyChanged
         OnPropertyChanged(nameof(Content));
     }
 
+    public void SetSourceCards(System.Collections.Generic.IEnumerable<ChatSourceCardItem> cards)
+    {
+        SourceCards.Clear();
+        foreach (var card in cards)
+        {
+            SourceCards.Add(card);
+        }
+    }
+
     public bool IsUser => Role == "user";
     public bool IsAssistant => Role == "assistant";
     public bool IsSystem => Role == "system";
@@ -147,14 +311,19 @@ public class ChatMessageItem : INotifyPropertyChanged
     /// <summary>Uppercase role tag for the message header.</summary>
     public string RoleLabel => Role switch
     {
-        "user" => "COMMAND",
-        "assistant" => "RESULT",
-        "tool" => "TOOL ACTIVITY",
-        "status" => "STATUS",
+        "user" => "",
+        "assistant" => "",
+        "tool" => "tool",
+        "status" => "status",
         _ => ""
     };
 
     public string TimeDisplay => _timestamp.ToString(Use24HourTime ? "HH:mm" : "t");
+
+    private void SourceCards_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasSourceCards));
+    }
 
     private void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

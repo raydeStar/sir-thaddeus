@@ -130,4 +130,26 @@ public class IntentFeatureExtractorTests
 
         Assert.Equal(expectedIntent, result);
     }
+
+    [Fact]
+    public void LooksLikeSelfContainedKnowledgeOrReasoningPrompt_TcpExplanation_ReturnsTrue()
+    {
+        var lower = "Explain how TCP three-way handshake works and why it matters for reliability."
+            .ToLowerInvariant();
+
+        var result = IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lower);
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void LooksLikeSelfContainedKnowledgeOrReasoningPrompt_ExplicitNewsRequest_ReturnsFalse()
+    {
+        var lower = "Give me the top 5 technology news stories right now."
+            .ToLowerInvariant();
+
+        var result = IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lower);
+
+        Assert.False(result);
+    }
 }

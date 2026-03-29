@@ -47,13 +47,16 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
 
         if (policy == "always" || group == "meta")
         {
-            return Task.FromResult(ToolPermissionResult.NotRequired());
+            return Task.FromResult(ToolPermissionResult.NotRequired(
+                policy == "always"
+                    ? ToolPermissionAuditMode.PolicyAlways
+                    : ToolPermissionAuditMode.ToolExempt));
         }
 
         if (!ToolGroupPolicy.PerCallOnlyGroups.Contains(group) &&
             _sessionGrants.TryGetValue(group, out var granted) && granted)
         {
-            return Task.FromResult(ToolPermissionResult.NotRequired());
+            return Task.FromResult(ToolPermissionResult.NotRequired(ToolPermissionAuditMode.SessionGrant));
         }
 
         return WaitForDecisionAsync(canonical, group, argumentsJson, ct);
@@ -117,7 +120,7 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
 
         Resolved?.Invoke(runId, new ToolDecisionPayload(requestId, canonicalToolName, approved));
         return approved
-            ? ToolPermissionResult.Grant()
+            ? ToolPermissionResult.Grant(auditMode: ToolPermissionAuditMode.ExplicitApproval)
             : ToolPermissionResult.Deny("Denied by user");
     }
 }

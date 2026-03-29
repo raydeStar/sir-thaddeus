@@ -27,13 +27,49 @@ public static class RuntimeLlmOptionsFactory
             ? settings.Llm.BaseUrl
             : settings.Llm.GatekeeperBaseUrl;
 
+        var gatekeeperModel = ShouldReusePrimaryModelForGatekeeper(settings, gatekeeperUrl)
+            ? settings.Llm.Model
+            : settings.Llm.GatekeeperModelId;
+
         return new LlmClientOptions
         {
             BaseUrl = gatekeeperUrl,
-            Model = settings.Llm.GatekeeperModelId,
+            Model = gatekeeperModel,
             MaxTokens = 5,
             ContextWindowTokens = 2048,
             Temperature = 0.0
         };
+    }
+
+    internal static bool ShouldReusePrimaryModelForGatekeeper(AppSettings settings, string gatekeeperUrl)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!settings.Llm.ReusePrimaryModelForGatekeeperOnSharedEndpoint)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(settings.Llm.Model) || string.IsNullOrWhiteSpace(settings.Llm.GatekeeperModelId))
+            return false;
+
+        if (string.Equals(settings.Llm.Model, settings.Llm.GatekeeperModelId, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return UriHostsMatch(settings.Llm.BaseUrl, gatekeeperUrl);
+    }
+
+    private static bool UriHostsMatch(string left, string right)
+    {
+        if (!Uri.TryCreate(left, UriKind.Absolute, out var leftUri) ||
+            !Uri.TryCreate(right, UriKind.Absolute, out var rightUri))
+        {
+            return string.Equals(
+                (left ?? string.Empty).Trim().TrimEnd('/'),
+                (right ?? string.Empty).Trim().TrimEnd('/'),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(leftUri.Scheme, rightUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(leftUri.Host, rightUri.Host, StringComparison.OrdinalIgnoreCase) &&
+               leftUri.Port == rightUri.Port;
     }
 }

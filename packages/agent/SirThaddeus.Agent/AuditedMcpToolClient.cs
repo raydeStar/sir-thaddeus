@@ -42,7 +42,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
     private readonly IMcpToolClient     _inner;
     private readonly IAuditLogger       _audit;
     private readonly IToolPermissionGate _gate;
-    private readonly string             _sessionId;
+    private string                       _sessionId;
     private readonly Func<RuntimeControlState> _getRuntimeControls;
     private readonly object _budgetGate = new();
     private long _sessionToolCalls;
@@ -68,6 +68,15 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         _gate      = gate      ?? throw new ArgumentNullException(nameof(gate));
         _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
         _getRuntimeControls = runtimeControls ?? (() => new RuntimeControlState());
+    }
+
+    /// <summary>
+    /// Updates the session ID used for audit correlation so that tool call
+    /// events match the UI-visible conversation/session identifier.
+    /// </summary>
+    public void UpdateSessionId(string sessionId)
+    {
+        _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
     }
 
     /// <inheritdoc />
@@ -158,7 +167,7 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         {
             var reason = permission.DenialReason ?? "Denied by user";
             LogEnd(requestId, canonical, "blocked",
-                permission.PermissionRequired ? "denied" : "not_required",
+                FormatPermissionStatus(permission),
                 null, 0, reason);
             return $"Error: Tool call blocked — {reason}";
         }
@@ -399,11 +408,13 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
     }
 
     private static string FormatPermissionStatus(ToolPermissionResult p) =>
-        p switch
+        p.AuditMode switch
         {
-            { PermissionRequired: false }              => "not_required",
-            { Granted: true, TokenId: not null }       => "granted",
-            { Granted: true }                          => "granted",
-            _                                          => "denied"
+            ToolPermissionAuditMode.ExplicitApproval => "granted",
+            ToolPermissionAuditMode.PolicyAlways => "policy_always",
+            ToolPermissionAuditMode.SessionGrant => "session_grant",
+            ToolPermissionAuditMode.ToolExempt => "tool_exempt",
+            ToolPermissionAuditMode.NotRequired => "not_required",
+            _ => "denied"
         };
 }
