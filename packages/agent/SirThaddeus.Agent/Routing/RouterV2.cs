@@ -114,6 +114,9 @@ public sealed class RouterV2 : IRouter
         if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower))
             return DefaultRouter.MakeRoute(Intents.LookupFact, confidence: 0.93, needsWeb: true, needsSearch: true);
 
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower))
+            return DefaultRouter.MakeRoute(Intents.LookupProduct, confidence: 0.93, needsWeb: true, needsSearch: true);
+
         if (IntentFeatureExtractor.LooksLikeFactLookup(lower))
             return DefaultRouter.MakeRoute(
                 Intents.LookupFact,

@@ -383,6 +383,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
         var shouldPromoteToLookup =
             IntentFeatureExtractor.LooksLikeFactLookup(lowerIncoming) ||
+            IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lowerIncoming) ||
             IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lowerIncoming) ||
             lowerIncoming.Contains("news", StringComparison.Ordinal) ||
             hasFollowUpLookupSignal ||
@@ -395,13 +396,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             promotableNonLookupIntent &&
             shouldPromoteToLookup)
         {
+            var promotedIntent = IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lowerIncoming)
+                ? Intents.LookupProduct
+                : Intents.LookupFact;
+
             route = DefaultRouter.MakeRoute(
-                Intents.LookupFact,
+                promotedIntent,
                 confidence: Math.Max(route.Confidence, webEvidence.Confidence),
                 needsWeb: true,
                 needsSearch: true);
             LogEvent("ROUTER_LOOKUP_PROMOTION",
-                $"promoted_from={routeResolution.Route.Intent}, reason=fact_news_followup_signal");
+                $"promoted_from={routeResolution.Route.Intent}, promoted_to={promotedIntent}, reason=fact_news_product_followup_signal");
         }
 
         var policy = PolicyGate.Evaluate(route, PanicModeEnabled, SafeModeEnabled);
@@ -1109,15 +1114,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     .ToList();
             }
 
-            if (route.Intent.Equals(Intents.GeneralTool, StringComparison.OrdinalIgnoreCase) &&
-                !tools.Any(t => t.Function.Name.Equals("tool_list_capabilities", StringComparison.OrdinalIgnoreCase)))
-            {
-                var metaTool = allTools.FirstOrDefault(t =>
-                    t.Function.Name.Equals("tool_list_capabilities", StringComparison.OrdinalIgnoreCase));
-
-                if (metaTool is not null && !string.IsNullOrWhiteSpace(metaTool.Function.Name))
-                    tools = [.. tools, metaTool];
-            }
+            tools = ApplyCapabilityManifestToolPolicy(tools, allTools, route, lowerIncoming);
 
             LogEvent("AGENT_TOOLS_POLICY_FILTERED",
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +

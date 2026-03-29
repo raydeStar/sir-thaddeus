@@ -37,6 +37,13 @@ internal static class RouteArbitrationPolicy
             return false;
         }
 
+        if (route.Intent.Equals(Intents.LookupProduct, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lowerIncoming) &&
+            webEvidence.ShouldLookup)
+        {
+            return false;
+        }
+
         if (route.Intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) &&
             IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
         {
@@ -113,6 +120,13 @@ internal static class RouteArbitrationPolicy
             return true;
         }
 
+        if (baseRoute.Intent.Equals(Intents.LookupProduct, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lowerIncoming) &&
+            webEvidence.ShouldLookup)
+        {
+            return true;
+        }
+
         if (baseRoute.Intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase))
             return true;
 
@@ -138,6 +152,9 @@ internal static class RouteArbitrationPolicy
 
         if (IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
             return Intents.LookupFact;
+
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lowerIncoming))
+            return Intents.LookupProduct;
 
         if (webEvidence.ShouldLookup)
             return Intents.LookupFact;
@@ -174,6 +191,7 @@ internal static class RouteArbitrationPolicy
     public static bool IsLookupIntent(string intent) =>
         intent.Equals(Intents.LookupSearch, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupFact, StringComparison.OrdinalIgnoreCase) ||
+        intent.Equals(Intents.LookupProduct, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase) ||
         intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase);
 

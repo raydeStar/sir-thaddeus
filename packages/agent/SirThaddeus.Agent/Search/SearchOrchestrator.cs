@@ -33,7 +33,8 @@ public enum LookupModeHint
     Auto = 0,
     Fact = 1,
     News = 2,
-    DeepDive = 3
+    DeepDive = 3,
+    Product = 4
 }
 
 public sealed partial class SearchOrchestrator
@@ -366,6 +367,7 @@ public sealed partial class SearchOrchestrator
             {
                 SearchMode.FollowUp      => await ExecuteFollowUpAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.NewsAggregate  => await ExecuteNewsAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
+                SearchMode.ProductRecommendation => await ExecuteProductRecommendationAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.WebFactFind    => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct),
                 SearchMode.DeepDiveBriefing => await ExecuteDeepDiveBriefingAsync(userMessage, toolCallsMade, ct),
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
@@ -4490,10 +4492,13 @@ public sealed partial class SearchOrchestrator
         {
             LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
+            LookupModeHint.Product => SearchMode.ProductRecommendation,
             LookupModeHint.News => SearchMode.NewsAggregate,
             LookupModeHint.DeepDive when IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) => SearchMode.WebFactFind,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
-            _ => SearchModeRouter.Classify(userMessage ?? "", Session, now)
+            _ => IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower)
+                ? SearchMode.ProductRecommendation
+                : SearchModeRouter.Classify(userMessage ?? "", Session, now)
         };
     }
 
@@ -4502,6 +4507,12 @@ public sealed partial class SearchOrchestrator
         return mode switch
         {
             SearchMode.WebFactFind => response with
+            {
+                AllowToolResultPersonalityPresentation = true,
+                SuppressSourceCardsUi = true,
+                SuppressToolActivityUi = true
+            },
+            SearchMode.ProductRecommendation => response with
             {
                 AllowToolResultPersonalityPresentation = true,
                 SuppressSourceCardsUi = true,

@@ -169,6 +169,28 @@ public class RouterTests
     }
 
     [Theory]
+    [InlineData("Can you recommend a good Ashwagandha on Amazon.com?")]
+    [InlineData("best noise cancelling headphones on walmart")]
+    [InlineData("compare top budget monitors on ebay")]
+    public async Task RouteAsync_ProductRecommendationQueries_RouteToLookupProduct(string message)
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse { IsComplete = true, Content = "chat", FinishReason = "stop" });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = message,
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.LookupProduct, route.Intent);
+        Assert.True(route.NeedsWeb);
+        Assert.True(route.NeedsSearch);
+    }
+
+    [Theory]
     [InlineData("deep dive on portland floral hours and reviews")]
     [InlineData("what time does Portland Floral open and close?")]
     [InlineData("tell me when this place opens and closes with reviews")]

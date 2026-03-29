@@ -73,6 +73,7 @@ public sealed partial class AgentOrchestrator
             Intents.UtilityDeterministic => ChatIntent.Casual,
             Intents.MemoryRead    => ChatIntent.Casual,
             Intents.LookupFact    => ChatIntent.WebLookup,
+            Intents.LookupProduct => ChatIntent.WebLookup,
             Intents.LookupNews    => ChatIntent.WebLookup,
             Intents.LookupDeepDive => ChatIntent.WebLookup,
             Intents.LookupSearch  => ChatIntent.WebLookup,
@@ -85,6 +86,7 @@ public sealed partial class AgentOrchestrator
         return route.Intent switch
         {
             Intents.LookupFact => LookupModeHint.Fact,
+            Intents.LookupProduct => LookupModeHint.Product,
             Intents.LookupNews => LookupModeHint.News,
             Intents.LookupDeepDive => LookupModeHint.DeepDive,
             _ => LookupModeHint.Auto
@@ -314,6 +316,11 @@ public sealed partial class AgentOrchestrator
                     needsWeb: true,
                     needsSearch: true,
                     needsBrowser: true),
+                Intents.LookupProduct => DefaultRouter.MakeRoute(
+                    Intents.LookupProduct,
+                    confidence: Math.Clamp(Math.Max(0.90, webEvidence.Confidence), 0.90, 0.96),
+                    needsWeb: true,
+                    needsSearch: true),
                 Intents.LookupNews => DefaultRouter.MakeRoute(
                     Intents.LookupNews,
                     confidence: 0.93,

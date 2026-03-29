@@ -98,6 +98,8 @@ public sealed partial class AgentOrchestrator
             }
         }
 
+            actionableSegments = ExpandCompoundWeatherNewsSegments(actionableSegments);
+
         if (actionableSegments.Count == 0)
             return null;
 
@@ -152,6 +154,86 @@ public sealed partial class AgentOrchestrator
             DeepDiveBriefing = briefing,
             AllowToolResultPersonalityPresentation = allowToolResultPersonalityPresentation
         };
+    }
+
+    private static List<ConversationSegment> ExpandCompoundWeatherNewsSegments(
+        IReadOnlyList<ConversationSegment> actionableSegments)
+    {
+        if (actionableSegments.Count == 0)
+            return [];
+
+        var expanded = new List<ConversationSegment>(actionableSegments.Count + 1);
+        var order = 0;
+
+        foreach (var segment in actionableSegments.OrderBy(s => s.Order))
+        {
+            if (TrySplitWeatherAndNewsSegment(segment, out var splitSegments))
+            {
+                foreach (var split in splitSegments)
+                {
+                    expanded.Add(split with { Order = order++ });
+                }
+
+                continue;
+            }
+
+            expanded.Add(segment with { Order = order++ });
+        }
+
+        return expanded;
+    }
+
+    private static bool TrySplitWeatherAndNewsSegment(
+        ConversationSegment segment,
+        out IReadOnlyList<ConversationSegment> splitSegments)
+    {
+        splitSegments = [];
+
+        var text = (segment.Text ?? string.Empty).Trim();
+        if (text.Length < 8)
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        if (!lower.Contains("weather", StringComparison.Ordinal) ||
+            !lower.Contains("news", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var andIndex = lower.IndexOf(" and ", StringComparison.Ordinal);
+        if (andIndex <= 0)
+            return false;
+
+        var left = text[..andIndex].Trim().Trim(',', ';');
+        var right = text[(andIndex + " and ".Length)..].Trim().Trim(',', ';');
+
+        if (left.Length < 4 || right.Length < 4)
+            return false;
+
+        if (!left.Contains("weather", StringComparison.OrdinalIgnoreCase) ||
+            !right.Contains("news", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        splitSegments =
+        [
+            segment with
+            {
+                SegmentId = $"{segment.SegmentId}-weather",
+                Text = left,
+                EndIndex = Math.Max(segment.StartIndex + left.Length, segment.StartIndex)
+            },
+            segment with
+            {
+                SegmentId = $"{segment.SegmentId}-news",
+                Text = right,
+                StartIndex = Math.Max(segment.StartIndex + andIndex + " and ".Length, segment.StartIndex),
+                EndIndex = segment.EndIndex
+            }
+        ];
+
+        return true;
     }
 
     private async Task<ConversationSegmentation.SegmentExecutionResult> ExecuteActionableSegmentAsync(

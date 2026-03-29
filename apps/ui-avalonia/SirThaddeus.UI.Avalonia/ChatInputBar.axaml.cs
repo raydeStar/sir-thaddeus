@@ -24,7 +24,7 @@ public partial class ChatInputBar : UserControl
     {
         ComposerShell.CornerRadius = activeConversation ? new CornerRadius(22) : new CornerRadius(26);
         ComposerShell.Padding = activeConversation ? new Thickness(12, 10) : new Thickness(10, 10);
-        ComposerShell.MinWidth = activeConversation ? 720 : 600;
+        ComposerShell.MinWidth = activeConversation ? 420 : 360;
         ComposerShell.MinHeight = activeConversation ? 60 : 0;
         PromptBox.MinHeight = activeConversation ? 48 : 48;
         PromptBox.Padding = activeConversation ? new Thickness(0, 12, 0, 12) : new Thickness(0, 12, 0, 12);

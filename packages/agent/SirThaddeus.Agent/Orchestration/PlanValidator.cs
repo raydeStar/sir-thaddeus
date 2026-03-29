@@ -95,6 +95,6 @@ public sealed class PlanValidator : IPlanValidator
         // by the legacy v1 path and by the LLM classifier when no specific intent
         // is clear. Blocking non-read-only tools for GeneralTool would break
         // memory writes, file tasks, etc. on the v1 path.
-        return intent is "LookupFact" or "LookupNews" or "LookupDeepDive" or "ChatOnly";
+        return intent is "LookupFact" or "LookupProduct" or "LookupNews" or "LookupDeepDive" or "ChatOnly";
     }
 }

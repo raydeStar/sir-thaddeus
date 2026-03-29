@@ -163,7 +163,7 @@ public sealed class ShallowMemoryTests
     [InlineData("Look at my screen right now", false)]
     public void LooksLikeGreeting_ClassifiesCorrectly(string input, bool expected)
     {
-        var method = typeof(Agent.AgentOrchestrator)
+        var method = typeof(SirThaddeus.Agent.AgentOrchestrator)
             .GetMethod("LooksLikeGreeting",
                 System.Reflection.BindingFlags.NonPublic
                 | System.Reflection.BindingFlags.Static);
