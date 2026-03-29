@@ -672,6 +672,70 @@ public class QueryBuilderFallbackTests
         Assert.Equal("the stock market today",
             QueryBuilder.ExtractTopicFromMessage("Well. I wanted to check the stock market today. can you check on the news there?"));
     }
+
+    [Fact]
+    public async Task FactFind_DirectQuery_RewritesMediaComparisonPrompt()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var entity = new EntityResolver.ResolvedEntity
+        {
+            CanonicalName = "How to Train Your Dragon",
+            Type = "Media"
+        };
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            entity,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Contains("How to Train Your Dragon", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("difference", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("word for word", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
+    public async Task FactFind_DirectQuery_BroadensMarketplaceRecommendationPrompt()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var entity = new EntityResolver.ResolvedEntity
+        {
+            CanonicalName = "Ashwagandha",
+            Type = "Product"
+        };
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "Can you recommend a good Ashwagandha on Amazon.com?",
+            entity,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Contains("Ashwagandha", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Amazon", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.UsedFallback);
+    }
 }
 
 #endregion
@@ -1023,6 +1087,57 @@ public class SearchOrchestratorModeHintTests
 
         Assert.True(followUp.Success);
         Assert.NotNull(followUp.DeepDiveBriefing);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeepDiveHint_RoutesGenericLocalBusinessDiscovery_ToFactFind()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Here are a few deli options in Hillsboro, OR.",
+                FinishReason = "stop"
+            };
+        });
+
+        var searchResult =
+            "1. \"Bernie's Deli\" — example.com\n" +
+            "   Classic deli sandwiches in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/bernies-deli\",\"title\":\"Bernie's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Classic deli sandwiches in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant."), ChatMessage.User("Can you find me a good deli in Hillsboro, OR?")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.DeepDive,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.DeepDiveBriefing);
+
+        var webSearchCall = mcp.Calls.FirstOrDefault(c =>
+            c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+            c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+
+        Assert.False(string.IsNullOrWhiteSpace(webSearchCall.Tool));
+        Assert.Contains("deli", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -1808,7 +1923,7 @@ public class SearchPipelineGoldenTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Contains("Here are local headlines.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Rexburg, ID budget update", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(mcp.Calls, call =>
             call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
             call.Args.Contains("rexburg, id local news", StringComparison.OrdinalIgnoreCase));
@@ -1894,6 +2009,86 @@ public class SearchPipelineGoldenTests
         Assert.Contains("Olympia school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(audit.GetByAction("SEARCH_RESPONSE_SANITIZED"), evt =>
             evt.Result == "unsupported_capability_claim");
+    }
+
+    [Fact]
+    public async Task News_LowValueListPruning_RebuildsGroundedFallback()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"local news in Boise, ID","recency":"day"}""",
+            summaryText:
+                "Thanks for the message. Here are the main stories I found:\n" +
+                "1. Top stories\n" +
+                "2. Live updates");
+
+        var payload =
+            "1. Boise school board approves budget after heated meeting\n" +
+            "2. Ada County opens new shelter beds ahead of cold snap\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/boise-budget\",\"title\":\"Boise school board approves budget after heated meeting\",\"domain\":\"example.com\",\"excerpt\":\"Trustees approved the next district budget after a lengthy public comment period in Boise.\"}," +
+            "{\"url\":\"https://example.com/ada-shelter\",\"title\":\"Ada County opens new shelter beds ahead of cold snap\",\"domain\":\"example.com\",\"excerpt\":\"County officials opened additional shelter beds this week as temperatures drop in Boise.\"}]";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Boise, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you pull up the local news in Boise, ID?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Boise school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("1. Top stories", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("SEARCH_RESPONSE_SANITIZED"), evt =>
+            evt.Result == "grounded_news_fallback_after_prune");
+    }
+
+    [Fact]
+    public async Task News_EmptyIntroWithoutStructuredSources_UsesExtractiveFallback()
+    {
+        var llm = MakePipelineLlm(
+            entityJson: """{"name":"","type":"none","hint":""}""",
+            queryJson: """{"query":"Boise, Idaho news","recency":"day"}""",
+            summaryText: "Thanks for the message. Here are the main stories I found:");
+
+        var payload =
+            "1. Boise school board approves budget after heated meeting\n" +
+            "2. Ada County opens new shelter beds ahead of cold snap\n";
+
+        var audit = new TestAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            new FakeMcpClient(payload),
+            audit,
+            "Test assistant.")
+        {
+            UserLocationHint = "Boise, ID"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Hey whats up, how are you today? Can you pull up the local news in Boise, ID? Anyway, gotta go, bye!",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.News,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Boise", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Boise school board approves budget", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(audit.GetByAction("SEARCH_RESPONSE_SANITIZED"), evt =>
+            evt.Result == "grounded_news_fallback_after_prune");
     }
 
     [Fact]
@@ -2114,7 +2309,7 @@ public class SearchPipelineGoldenTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        var trace = Assert.Single(audit.GetByAction("WEB_SEARCH_PROVIDER_TRACE"));
+        var trace = audit.GetByAction("WEB_SEARCH_PROVIDER_TRACE").First();
         var pathSummary = Assert.IsType<string>(trace.Details!["path_summary"]);
         Assert.Contains("SearxNG:probe=unavailable", pathSummary, StringComparison.Ordinal);
         Assert.Equal("GoogleNews", Assert.IsType<string>(trace.Details["provider"]));
@@ -3787,5 +3982,30 @@ public class LocalBusinessNameExtractionTests
         Assert.Contains("San Francisco Street Bakery", names);
         Assert.DoesNotContain("Local Bakery Locations in Olympia, Washington", names);
         Assert.DoesNotContain("Grocery Hours", names);
+    }
+
+    [Fact]
+    public void ChainDepartmentTitle_RejectedForGenericLocalBusinessDiscovery()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590",
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void ExtractBusinessNames_FiltersChainDepartmentEntries()
+    {
+        var article = """
+            1. Isabella's Deli
+            2. Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590
+            """;
+
+        var names = SearchOrchestrator.ExtractBusinessNamesFromArticles(
+            [article], "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", names);
+        Assert.DoesNotContain(names, name => name.Contains("Walmart", StringComparison.OrdinalIgnoreCase));
     }
 }

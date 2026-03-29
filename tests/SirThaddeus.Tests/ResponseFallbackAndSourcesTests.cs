@@ -387,6 +387,195 @@ public class BareResponseEnrichmentTests
         Assert.DoesNotContain("real-time internet feeds", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void SanitizeFinalResponse_EmptyNewsLead_UsesNewsQueryForHonestFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "Thanks for the message. Here are the main stories I found:",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"Boise, Idaho news\",\"maxResults\":5,\"recency\":\"day\",\"categories\":\"news\"}",
+                    Result = "[search: 4 result(s) returned]",
+                    Success = true
+                }
+            },
+            "Hey whats up, how are you today? Can you pull up the local news in Boise, ID? Anyway, gotta go, bye!");
+
+        Assert.Contains("Boise, Idaho", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("local news", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Here are the main stories I found:", result.Trim(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_RebuildsShortlistFromToolResults()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result =
+                        "1. \"Bernie's Deli\" — example.com\n" +
+                        "   Classic deli sandwiches in Hillsboro, OR.\n\n" +
+                        "2. \"Isabella's Deli\" — example.org\n" +
+                        "   Neighborhood deli in Hillsboro, OR.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "{" +
+                        "\"sources\":[" +
+                        "{\"url\":\"https://example.com/bernies-deli\",\"title\":\"Bernie's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Classic deli sandwiches in Hillsboro, OR.\"}," +
+                        "{\"url\":\"https://example.org/isabellas-deli\",\"title\":\"Isabella's Deli\",\"domain\":\"example.org\",\"excerpt\":\"Neighborhood deli in Hillsboro, OR.\"}" +
+                        "]}",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Bernie's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Verification recommended", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Briefing summary", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_ExcludesChainDepartmentCandidates()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: example.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result =
+                        "1. \"Isabella's Deli\" — example.com\n" +
+                        "   Neighborhood deli in Hillsboro, OR.\n\n" +
+                        "2. \"Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590\" — walmart.com\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "{" +
+                        "\"sources\":[" +
+                        "{\"url\":\"https://example.com/isabellas-deli\",\"title\":\"Isabella's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Neighborhood deli in Hillsboro, OR.\"}," +
+                        "{\"url\":\"https://www.walmart.com/store/2590\",\"title\":\"Walmart Deli in Hillsboro, OR | Grab & Go Sandwiches & Wraps, Party Trays, Charcuterie & Gourmet Cheese | Store #2590\",\"domain\":\"walmart.com\",\"excerpt\":\"Store department page\"}" +
+                        "]}",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Walmart Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersPlacesLookupSeed_OverDirectoryNoise()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.restaurantji.com/or/hillsboro/deli/\"}",
+                    Result = "[browser: title: \"best delis near hillsboro, or - 2026 restaurantji\", content returned]\nDede's Deli\nDandy's Deli",
+                    Success = true
+                },
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Isabella's Deli Hillsboro, OR\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"Hillsboro, OR\",\"maxReviewSnippets\":1}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                },
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Best Delis near Hillsboro, OR - 2025 Restaurantji\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"\",\"maxReviewSnippets\":3}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dandy's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesPlacesLookupSeed_EvenWhenPromptSignalIsVague()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Isabella's Deli Hillsboro, OR\",\"timezone\":\"America/Los_Angeles\",\"locale\":\"en-US\",\"userLocationHint\":\"Hillsboro, OR\",\"maxReviewSnippets\":1}",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good one in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesRawPlacesLookupPayload_WhenArgumentsAreMalformed()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "query=Isabella\\u0027s Deli Hillsboro, OR",
+                    Result = "[Places provider unavailable]",
+                    Success = false
+                }
+            },
+            "Can you find me a good one in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersEarlyNonDirectoryBrowserSeed()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: chamberofcommerce.com, restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.chamberofcommerce.com/business-directory/oregon/hillsboro/food-dining/restaurant/deli/\"}",
+                    Result = "[browser: (no title), content returned]\nIsabella's Deli\nNeighborhood deli in Hillsboro, OR.",
+                    Success = true
+                },
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://www.restaurantji.com/or/hillsboro/deli/\"}",
+                    Result = "[browser: title: \"best delis near hillsboro, or - 2026 restaurantji\", content returned]\nDede's Deli\nDandy's Deli",
+                    Success = true
+                }
+            },
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("The store closes at 9 PM tonight.", "Is the store open?")]
     [InlineData("Normal assistant fallback.", "What time is it?")]

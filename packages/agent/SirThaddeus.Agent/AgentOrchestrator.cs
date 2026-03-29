@@ -694,6 +694,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 var lookupModeHint = forceLocalBusinessLookupFromFileIntent
                     ? LookupModeHint.Fact
                     : ResolveLookupModeHint(route);
+                lookupModeHint = NormalizeLookupModeHint(lookupModeHint, lowerIncoming, LogEvent);
 
                 if (!forceLocalBusinessLookupFromFileIntent &&
                     lookupModeHint != LookupModeHint.News &&

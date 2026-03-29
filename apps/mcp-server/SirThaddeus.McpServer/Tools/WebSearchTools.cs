@@ -239,6 +239,19 @@ public static class WebSearchTools
             ? dedupedResults
             : VetResultsByQuery(query, dedupedResults, extractions, urlsToRead);
 
+        if (!LooksLikeNewsQuery(query) && vettedResults.Count == 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"No results found for \"{query}\".");
+            sb.AppendLine($"Provider: {searchResult.Provider}");
+            sb.AppendLine("The retrieved pages were off-topic or unusable for this question.");
+            sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
+            sb.AppendLine();
+            sb.AppendLine(SourcesDelimiter);
+            sb.AppendLine(SerializeSourcesPayload(Array.Empty<object>(), searchDiagnostics));
+            return sb.ToString();
+        }
+
         // ── Phase 3: Format output (text for LLM + JSON for UI) ──────
         return FormatResults(
             query,
@@ -323,6 +336,7 @@ public static class WebSearchTools
         List<ContentExtractor.ExtractionResult> extractions,
         List<string> originalUrls)
     {
+        var queryLower = query.ToLowerInvariant();
         var tokens = ExtractQueryTokens(query);
         if (tokens.Count == 0 || results.Count == 0)
             return results.ToList();
@@ -341,6 +355,7 @@ public static class WebSearchTools
         var minTokenMatches = tokens.Count >= 4 ? 2 : 1;
         var minAnchorMatches = anchorTokens.Count >= 2 ? 2 : 1;
         var requiresMoonToken = tokens.Contains("moon");
+        var filteredForQuality = 0;
 
         var vetted = new List<SearchResult>();
         foreach (var r in results)
@@ -348,6 +363,12 @@ public static class WebSearchTools
             var relevanceText = BuildRelevanceText(r, extractionMap);
             if (string.IsNullOrWhiteSpace(relevanceText))
                 continue;
+
+            if (LooksLikeLowValueResult(queryLower, r, relevanceText))
+            {
+                filteredForQuality++;
+                continue;
+            }
 
             var text = relevanceText.ToLowerInvariant();
             var tokenMatches = tokens.Count(t => text.Contains(t, StringComparison.Ordinal));
@@ -365,6 +386,9 @@ public static class WebSearchTools
         // worse than returning nothing (obituaries for a florist query).
         if (vetted.Count == 0)
         {
+            if (filteredForQuality >= results.Count)
+                return [];
+
             var anyPartialMatch = results.Any(r =>
             {
                 var text = BuildRelevanceText(r, extractionMap).ToLowerInvariant();
@@ -377,6 +401,85 @@ public static class WebSearchTools
         }
 
         return vetted;
+    }
+
+    private static bool LooksLikeLowValueResult(
+        string queryLower,
+        SearchResult result,
+        string relevanceText)
+    {
+        var combined = string.Join(
+            ' ',
+            new[]
+            {
+                result.Title,
+                result.Snippet,
+                relevanceText,
+                result.Url,
+                result.Source
+            }.Where(part => !string.IsNullOrWhiteSpace(part))).ToLowerInvariant();
+
+        if (LooksLikeMarketplaceErrorPage(combined))
+            return true;
+
+        if (LooksLikeMediaComparisonIntent(queryLower) &&
+            LooksLikePuzzleOrPrintablePage(combined))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeMediaComparisonIntent(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("word for word", StringComparison.Ordinal) ||
+               lower.Contains("like the original", StringComparison.Ordinal) ||
+               lower.Contains("same as the original", StringComparison.Ordinal) ||
+               lower.Contains("difference", StringComparison.Ordinal) ||
+               lower.Contains("differences", StringComparison.Ordinal) ||
+               lower.Contains("compare", StringComparison.Ordinal) ||
+               lower.Contains("compared", StringComparison.Ordinal) ||
+               lower.Contains("remake", StringComparison.Ordinal) ||
+               lower.Contains("live action", StringComparison.Ordinal) ||
+               lower.Contains("live-action", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikePuzzleOrPrintablePage(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return lower.Contains("word search", StringComparison.Ordinal) ||
+               lower.Contains("crossword", StringComparison.Ordinal) ||
+               lower.Contains("printable", StringComparison.Ordinal) ||
+               lower.Contains("worksheet", StringComparison.Ordinal) ||
+               lower.Contains("coloring page", StringComparison.Ordinal) ||
+               lower.Contains("puzzle", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeMarketplaceErrorPage(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var looksLikeMarketplace = lower.Contains("amazon", StringComparison.Ordinal) ||
+                                   lower.Contains("walmart", StringComparison.Ordinal) ||
+                                   lower.Contains("ebay", StringComparison.Ordinal) ||
+                                   lower.Contains("etsy", StringComparison.Ordinal);
+        if (!looksLikeMarketplace)
+            return false;
+
+        return lower.Contains("503 service unavailable", StringComparison.Ordinal) ||
+               lower.Contains("service unavailable", StringComparison.Ordinal) ||
+               lower.Contains("robot or human", StringComparison.Ordinal) ||
+               lower.Contains("automated access", StringComparison.Ordinal) ||
+               lower.Contains("captcha", StringComparison.Ordinal) ||
+               lower.Contains("access denied", StringComparison.Ordinal) ||
+               lower.Contains("try again later", StringComparison.Ordinal);
     }
 
     private static string BuildRelevanceText(
@@ -484,9 +587,14 @@ public static class WebSearchTools
             var r = results[i];
             var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && IsUsefulExtraction(ext, strictNewsMode);
 
-            // For news briefings, skip non-article/homepage results entirely.
+            // For news briefings, skip non-article/homepage results only when
+            // we already have enough well-extracted items. Otherwise keep
+            // title+snippet items so the LLM has enough stories to work with.
             if (strictNewsMode && !hasExtraction)
-                continue;
+            {
+                if (included >= 3 || string.IsNullOrWhiteSpace(r.Title))
+                    continue;
+            }
 
             var title = !string.IsNullOrWhiteSpace(r.Title)
                 ? r.Title
@@ -508,7 +616,7 @@ public static class WebSearchTools
                 if (!string.IsNullOrWhiteSpace(excerpt))
                     sb.AppendLine($"   {excerpt}");
             }
-            else if (!strictNewsMode && !string.IsNullOrWhiteSpace(r.Snippet))
+            else if (!string.IsNullOrWhiteSpace(r.Snippet))
             {
                 var excerpt = CleanExcerpt(r.Snippet);
                 if (!string.IsNullOrWhiteSpace(excerpt))

@@ -91,6 +91,23 @@ public sealed partial class AgentOrchestrator
         };
     }
 
+    private static LookupModeHint NormalizeLookupModeHint(
+        LookupModeHint lookupModeHint,
+        string lowerIncoming,
+        Action<string, string> logEvent)
+    {
+        if (lookupModeHint == LookupModeHint.DeepDive &&
+            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+        {
+            logEvent(
+                "LOOKUP_MODE_LOCAL_BUSINESS_OVERRIDE",
+                "Forced generic local-business discovery onto the fact-find pipeline.");
+            return LookupModeHint.Fact;
+        }
+
+        return lookupModeHint;
+    }
+
     private static bool IsDeterministicInlineRoute(RouterOutput route) =>
         string.Equals(route.Intent, Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase);
 

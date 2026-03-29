@@ -1163,6 +1163,206 @@ public sealed partial class SearchOrchestrator
         return response;
     }
 
+    /// <summary>
+    /// When a news-category search returns fewer than 3 sources, retry with
+    /// the general category and, if needed, an article-oriented query.
+    /// Merges unique sources from all attempts to maximize coverage.
+    /// This compensates for SearXNG configs that lack dedicated news engines.
+    /// </summary>
+    private async Task<string> TryRecoverSparseNewsResultsAsync(
+        string userMessage,
+        QueryBuilder.SearchQuery query,
+        string toolResult,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        // Preserve structured tool failures from the initial call.
+        // Retrying those failures can mask the root cause and burn budget.
+        if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, []) is not null)
+            return toolResult;
+
+        var existingSources = ParseSourcesFromToolResult(toolResult);
+        if (CountSubstantiveNewsSources(existingSources) >= 3)
+            return toolResult;
+
+        // Collect all tool results for merging
+        var allToolResults = new List<string> { toolResult };
+
+        // 1. Same query, general category
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "SPARSE_NEWS_RETRY",
+            Result = "retrying",
+            Details = new Dictionary<string, object>
+            {
+                ["query"] = query.Query,
+                ["recency"] = query.Recency,
+                ["originalSourceCount"] = existingSources.Count,
+                ["reason"] = "news category returned too few results; retrying with general"
+            }
+        });
+
+        var retryResult = await CallWebSearchAsync(
+            query.Query, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage,
+            categories: "general");
+        allToolResults.Add(retryResult);
+
+        // 2. Article-oriented query: add "latest headlines" to push search
+        //    engines toward individual articles instead of hub/landing pages.
+        var articleQuery = query.Query.TrimEnd();
+        if (!articleQuery.Contains("headline", StringComparison.OrdinalIgnoreCase) &&
+            !articleQuery.Contains("latest", StringComparison.OrdinalIgnoreCase) &&
+            !articleQuery.Contains("stories", StringComparison.OrdinalIgnoreCase))
+        {
+            articleQuery += " latest headlines";
+        }
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "SPARSE_NEWS_RETRY_ARTICLE_QUERY",
+            Result = "retrying",
+            Details = new Dictionary<string, object>
+            {
+                ["query"] = articleQuery,
+                ["recency"] = query.Recency,
+                ["reason"] = "retry with article-oriented query"
+            }
+        });
+
+        var articleResult = await CallWebSearchAsync(
+            articleQuery, query.Recency, toolCallsMade, ct,
+            originalUserMessage: userMessage,
+            categories: "general");
+        allToolResults.Add(articleResult);
+
+        // 3. Relax recency if substantive sources still sparse
+        var mergedSoFar = MergeSourcesFromToolResults(allToolResults);
+        if (CountSubstantiveNewsSources(mergedSoFar) < 3 && query.Recency == "day")
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SPARSE_NEWS_RETRY_RECENCY",
+                Result = "retrying",
+                Details = new Dictionary<string, object>
+                {
+                    ["query"] = articleQuery,
+                    ["recency"] = "week",
+                    ["reason"] = "day recency too narrow; trying week"
+                }
+            });
+
+            var widerResult = await CallWebSearchAsync(
+                articleQuery, "week", toolCallsMade, ct,
+                originalUserMessage: userMessage,
+                categories: "general");
+            allToolResults.Add(widerResult);
+        }
+
+        // Merge unique sources from all attempts into the best tool result
+        return MergeToolResultSources(allToolResults);
+    }
+
+    /// <summary>
+    /// Merges unique sources (by URL) from multiple tool results into a single
+    /// combined tool result. Takes the longest LLM-text section and appends
+    /// all unique sources into one SOURCES_JSON block.
+    /// </summary>
+    private static string MergeToolResultSources(IReadOnlyList<string> toolResults)
+    {
+        if (toolResults.Count <= 1)
+            return toolResults.FirstOrDefault() ?? "";
+
+        var mergedSources = MergeSourcesFromToolResults(toolResults);
+        if (mergedSources.Count == 0)
+        {
+            // If there are no JSON sources, fall back to the longest result
+            return toolResults.OrderByDescending(r => r.Length).First();
+        }
+
+        // Pick the best text section: prefer results that have actual content
+        // over "No results found" messages from failed retries.
+        var bestTextSection = "";
+        foreach (var result in toolResults)
+        {
+            if (LooksLikeNoResultsPayload(result))
+                continue;
+
+            var textPart = ExtractToolResultTextSection(result);
+            if (textPart.Length > bestTextSection.Length)
+                bestTextSection = textPart;
+        }
+
+        // Fallback: if all are "no results", use the longest anyway
+        if (string.IsNullOrWhiteSpace(bestTextSection))
+        {
+            foreach (var result in toolResults)
+            {
+                var textPart = ExtractToolResultTextSection(result);
+                if (textPart.Length > bestTextSection.Length)
+                    bestTextSection = textPart;
+            }
+        }
+
+        // Build merged SOURCES_JSON
+        var sourcesJson = JsonSerializer.Serialize(
+            mergedSources.Select(s => new
+            {
+                title = s.Title,
+                url = s.Url,
+                domain = s.Domain,
+                excerpt = s.Snippet,
+                favicon = "",
+                thumbnail = "",
+                publishedAt = s.PublishedAt?.ToString("o")
+            }),
+            new JsonSerializerOptions { WriteIndented = false });
+
+        return bestTextSection + "\n\n" + SourcesJsonDelimiter + "\n" + sourcesJson;
+    }
+
+    /// <summary>
+    /// Collects unique sources (by URL) from multiple tool results.
+    /// </summary>
+    private static List<SourceItem> MergeSourcesFromToolResults(IReadOnlyList<string> toolResults)
+    {
+        var seenSourceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<SourceItem>();
+
+        foreach (var result in toolResults)
+        {
+            foreach (var source in ParseSourcesFromToolResult(result))
+            {
+                if (seenSourceIds.Add(source.SourceId))
+                    merged.Add(source);
+            }
+        }
+
+        return merged;
+    }
+
+    private static string ExtractToolResultTextSection(string toolResult)
+    {
+        var delimIdx = toolResult.IndexOf(SourcesJsonDelimiter, StringComparison.Ordinal);
+        return delimIdx >= 0 ? toolResult[..delimIdx].TrimEnd() : toolResult.TrimEnd();
+    }
+
+    /// <summary>
+    /// Counts sources that are NOT generic news landing pages.
+    /// Used by the sparse-retry logic to decide whether more searches are needed.
+    /// </summary>
+    private static int CountSubstantiveNewsSources(IReadOnlyList<SourceItem> sources)
+    {
+        if (sources.Count == 0)
+            return 0;
+        var substantiveCount = sources.Count(s => !IsLowValueNewsLandingSource(s));
+        // If ALL are landing pages, treat as 1 usable (we'll keep them all)
+        return substantiveCount == 0 ? 1 : substantiveCount;
+    }
+
     private async Task<string> TryRecoverLocalNewsResultsAsync(
         string userMessage,
         QueryBuilder.SearchQuery query,
@@ -2219,7 +2419,8 @@ public sealed partial class SearchOrchestrator
             sources is { Count: > 0 } &&
             (RequiresGroundedNewsFallback(text, sources) ||
              ContainsEmbeddedCapabilityDeflection(text) ||
-             ContainsLowValueGeneratedNewsLine(text)))
+             ContainsLowValueGeneratedNewsLine(text) ||
+             HasTooFewNewsItems(text, sources.Count)))
         {
             _audit.Append(new AuditEvent
             {
@@ -2241,6 +2442,25 @@ public sealed partial class SearchOrchestrator
         {
             text = StripLowValueNewsListItems(text);
             text = KeepLeadingNewsListBlock(text);
+
+            if (LooksLikeEmptyNewsLead(text))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "SEARCH_RESPONSE_SANITIZED",
+                    Result = "grounded_news_fallback_after_prune",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["source_count"] = sources?.Count ?? 0,
+                        ["response_len"] = text.Length
+                    }
+                });
+
+                text = sources is { Count: > 0 }
+                    ? BuildGroundedNewsFallback(sources)
+                    : BuildExtractiveFallback(summaryInput, originalRequest);
+            }
         }
 
         if (string.IsNullOrWhiteSpace(text))
@@ -2523,12 +2743,35 @@ public sealed partial class SearchOrchestrator
         var isBasic = lower.Contains("extraction: basic (non-article page)");
         var wc      = TryParseWordCount(content) ?? 0;
 
+        if (LooksLikeServiceErrorPage(lower, wc))
+            return true;
         if (isBasic && wc < 120)
             return true;
         if (lower.Contains("source: news.google.com") && wc < 300)
             return true;
 
         return false;
+    }
+
+    private static bool LooksLikeServiceErrorPage(string lower, int wordCount)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        var hasServiceError = lower.Contains("503 service unavailable", StringComparison.Ordinal) ||
+                              lower.Contains("service unavailable", StringComparison.Ordinal) ||
+                              lower.Contains("try again later", StringComparison.Ordinal) ||
+                              lower.Contains("robot or human", StringComparison.Ordinal) ||
+                              lower.Contains("automated access", StringComparison.Ordinal) ||
+                              lower.Contains("captcha", StringComparison.Ordinal) ||
+                              lower.Contains("access denied", StringComparison.Ordinal);
+
+        if (!hasServiceError)
+            return false;
+
+        return wordCount < 450 ||
+               lower.Contains("amazon", StringComparison.Ordinal) ||
+               lower.Contains("enable javascript", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -3412,7 +3655,7 @@ public sealed partial class SearchOrchestrator
                 : string.IsNullOrWhiteSpace(headline)
                     ? detail
                     : headline + " — " + detail;
-            if (LooksLikeLowValueNewsLine(renderedLine))
+            if (LooksLikeLowValueNewsLine(renderedLine) && !HasConcreteNewsDetail(renderedLine))
                 continue;
 
             sb.Append(index++).Append(". ");
@@ -3975,6 +4218,40 @@ public sealed partial class SearchOrchestrator
         return string.Join('\n', kept).Trim();
     }
 
+    private static bool LooksLikeEmptyNewsLead(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        var hasNewsLead = lower.Contains("here are the main stories i found", StringComparison.Ordinal) ||
+                          lower.Contains("top stories", StringComparison.Ordinal) ||
+                          lower.Contains("headlines", StringComparison.Ordinal);
+
+        return hasNewsLead && !Regex.IsMatch(text, @"(?m)^\s*\d+\.\s+");
+    }
+
+    /// <summary>
+    /// Returns true when the LLM produced fewer numbered news items than
+    /// the available sources warrant.  When sources exist but the synthesis
+    /// only rendered one or two list items, the grounded fallback typically
+    /// produces a richer response because it deterministically formats each
+    /// clustered story.
+    /// </summary>
+    private static bool HasTooFewNewsItems(string text, int sourceCount)
+    {
+        if (sourceCount < 2)
+            return false;
+
+        var itemCount = Regex.Matches(text, @"(?m)^\s*\d+\.\s+").Count;
+        // Also count inline numbered items (e.g. "1. Headline — detail  2. Headline")
+        if (itemCount == 0)
+            itemCount = Regex.Matches(text, @"\b\d+\.\s+").Count;
+
+        var minExpected = Math.Min(sourceCount, 3);
+        return itemCount < minExpected;
+    }
+
     private static bool LooksLikeLowValueNewsLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -4214,6 +4491,7 @@ public sealed partial class SearchOrchestrator
             LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.News => SearchMode.NewsAggregate,
+            LookupModeHint.DeepDive when IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) => SearchMode.WebFactFind,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
             _ => SearchModeRouter.Classify(userMessage ?? "", Session, now)
         };

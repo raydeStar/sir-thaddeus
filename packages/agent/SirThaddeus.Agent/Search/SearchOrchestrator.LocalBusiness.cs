@@ -925,6 +925,8 @@ public sealed partial class SearchOrchestrator
             return null;
         if (LooksLikeLocationOnlyBusinessCandidate(name, userMessage))
             return null;
+        if (LooksLikeChainDepartmentCandidate(name, userMessage))
+            return null;
 
         // Skip if the name starts with "r/" (Reddit subreddit).
         if (name.StartsWith("r/", StringComparison.Ordinal))
@@ -981,6 +983,54 @@ public sealed partial class SearchOrchestrator
                normalizedName.Equals(city, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool LooksLikeChainDepartmentCandidate(string name, string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var lower = name.ToLowerInvariant();
+        var explicitBrand = ExtractBrandKeyword((userMessage ?? string.Empty).ToLowerInvariant());
+        if (!string.IsNullOrWhiteSpace(explicitBrand) &&
+            lower.Contains(explicitBrand, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var hasDepartmentPromoLanguage =
+            lower.Contains("store #", StringComparison.Ordinal) ||
+            lower.Contains("party tray", StringComparison.Ordinal) ||
+            lower.Contains("party trays", StringComparison.Ordinal) ||
+            lower.Contains("charcuterie", StringComparison.Ordinal) ||
+            lower.Contains("gourmet cheese", StringComparison.Ordinal) ||
+            lower.Contains("grab & go", StringComparison.Ordinal) ||
+            lower.Contains("sandwiches & wraps", StringComparison.Ordinal);
+
+        ReadOnlySpan<string> chainBrands =
+        [
+            "walmart", "sam's club", "sams club", "costco", "target",
+            "kroger", "safeway", "albertsons", "fred meyer", "winco"
+        ];
+
+        var mentionsChainBrand = false;
+        foreach (var brand in chainBrands)
+        {
+            if (lower.Contains(brand, StringComparison.Ordinal))
+            {
+                mentionsChainBrand = true;
+                break;
+            }
+        }
+
+        if (!mentionsChainBrand && !hasDepartmentPromoLanguage)
+            return false;
+
+        var requestedKeywords = GetLocalBusinessMatchKeywords(userMessage ?? string.Empty);
+        var mentionsRequestedCategory = requestedKeywords.Count == 0 ||
+            requestedKeywords.Any(keyword => lower.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+
+        return mentionsRequestedCategory;
+    }
+
     private async Task<string?> FetchSingleUrlAsync(
         string url,
         List<ToolCallRecord> toolCallsMade,
@@ -1018,7 +1068,7 @@ public sealed partial class SearchOrchestrator
         {
             ToolName  = resolvedToolName,
             Arguments = args,
-            Result    = content!.Length > 200 ? content[..200] + "…" : content,
+            Result    = content!.Length > 1200 ? content[..1200] + "…" : content,
             Success   = true
         });
 
@@ -1161,6 +1211,7 @@ public sealed partial class SearchOrchestrator
                 var inlineName = CleanExtractedBusinessName(m.Groups[1].Value);
                 if (inlineName.Length >= 3 && inlineName.Length <= 60
                     && !IsGenericNonBusinessName(inlineName)
+                    && !LooksLikeChainDepartmentCandidate(inlineName, userMessage)
                     && !seen.Contains(inlineName))
                 {
                     seen.Add(inlineName);
@@ -1214,6 +1265,8 @@ public sealed partial class SearchOrchestrator
                 if (name.Length < 3 || name.Length > 60)
                     continue;
                 if (IsGenericNonBusinessName(name))
+                    continue;
+                if (LooksLikeChainDepartmentCandidate(name, userMessage))
                     continue;
                 if (seen.Contains(name))
                     continue;

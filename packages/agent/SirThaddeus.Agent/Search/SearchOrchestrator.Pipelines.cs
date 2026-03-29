@@ -35,6 +35,12 @@ public sealed partial class SearchOrchestrator
             toolCallsMade,
             ct);
 
+        // When the news category returns too few sources, retry with general
+        // category.  SearXNG may lack dedicated news engines, so "general"
+        // often yields more relevant hits for the same query+recency.
+        toolResult = await TryRecoverSparseNewsResultsAsync(
+            userMessage, query, toolResult, toolCallsMade, ct);
+
         var entityLocationName = entity is { Type: "Place" or "place" }
             ? entity.CanonicalName
             : null;
