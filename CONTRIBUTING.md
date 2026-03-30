@@ -15,9 +15,10 @@ This project is local-first, permissioned, and safety-oriented. Please keep chan
 
 Prerequisites:
 
-- Windows
 - .NET SDK (see repo tooling output via `dotnet --info`)
-- PowerShell 5.1+
+- PowerShell 5.1+ (Windows) or PowerShell Core (macOS/Linux)
+
+Windows-only features (screen capture, clipboard, system tray) require Windows and are isolated to `packages/mcp-tools-windows`.
 
 From repo root:
 
@@ -29,6 +30,12 @@ Run locally:
 
 ```powershell
 ./dev/localrunner.ps1
+```
+
+On macOS or Linux, use the headless runtime directly:
+
+```bash
+dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
 ```
 
 Useful modes:

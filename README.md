@@ -24,7 +24,7 @@ No telemetry by default. No silent background autonomy. No hidden actions.
 
 If it acts, you see it. If you press **STOP**, it stops.
 
-**[Privacy and security policy →](SECURITY.md)**
+**[Privacy policy →](PRIVACY.md)** · **[Security policy →](SECURITY.md)**
 
 ---
 
@@ -51,6 +51,16 @@ That same interaction model applies throughout the runtime:
 <div align="center">
   <img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus desktop UI showing permission-based local AI workflow" width="800" />
 </div>
+
+---
+
+## Privacy, in plain English
+
+No telemetry. No analytics. No sign-up. No cloud sync.
+
+Sir Thaddeus does not phone home. Your prompts go to your local model server. Your data stays on your machine. If you ask it to browse a website, it connects only to the sites you asked it to reach — nothing else runs in the background.
+
+**[Full privacy details \u2192](PRIVACY.md)**
 
 ---
 
@@ -347,7 +357,7 @@ dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
 Sir Thaddeus is for:
 
 - Developers exploring **local AI tooling**
-- Privacy-conscious users who want **AI on Windows without telemetry**
+- Privacy-conscious users who want **AI without telemetry**
 - Builders interested in **MCP architecture**, **tool routing**, and **permissioned agents**
 - Anyone who wants an AI copilot they can actually control
 
@@ -360,6 +370,7 @@ It is not intended to be an unbounded autonomous agent that runs freely on your 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [Settings Reference](docs/SETTINGS.md)
 - [Contributing](CONTRIBUTING.md)
+- [Privacy Policy](PRIVACY.md)
 - [Security Policy](SECURITY.md)
 
 ---
