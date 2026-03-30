@@ -3,7 +3,7 @@
 
   <h1>Sir Thaddeus</h1>
 
-  <p><strong>Privacy-first, permission-based local AI copilot for Windows.</strong></p>
+  <p><strong>AI that runs on your computer. Not theirs.</strong></p>
 
   <p>
     <a href="https://github.com/raydeStar/sir-thaddeus/releases">
@@ -12,55 +12,19 @@
     <a href="https://github.com/raydeStar/sir-thaddeus/blob/main/LICENSE">
       <img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus" alt="Apache 2.0 license" />
     </a>
-    <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-lightgrey" alt="Platform Windows 10 and 11" />
     <img src="https://img.shields.io/badge/LLM-Local%20Models%20%7C%20LM%20Studio-orange" alt="Supports local models and LM Studio" />
   </p>
 </div>
 
 ---
 
-## Local-First AI Copilot for Windows
-
-**Sir Thaddeus runs on your machine.**
-
-Sir Thaddeus is a **local AI assistant for Windows** built for people who want useful AI without giving up control. It connects to **local language models** (for example, **LM Studio**), uses **permission-based tool access**, and keeps execution visible to the operator.
+Sir Thaddeus is a local-first AI copilot designed for **Windows, macOS, and Linux**. It handles chat, voice, desktop tasks, and browsing while keeping permissions explicit and actions visible. It connects to local language models — such as [LM Studio](https://lmstudio.ai/) — and runs entirely under your control.
 
 No telemetry by default. No silent background autonomy. No hidden actions.
 
 If it acts, you see it. If you press **STOP**, it stops.
 
----
-
-## Documentation
-
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [Settings Reference](docs/SETTINGS.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
-
----
-
-## Suggested GitHub Topics
-
-Use these in your repository "About" settings:
-
-`local-ai`, `windows`, `ai-copilot`, `offline-first`, `privacy-first`, `mcp`, `lm-studio`, `openai-compatible`, `voice-assistant`, `push-to-talk`, `asr`, `tts`, `avalonia-ui`, `headless-runtime`, `tool-orchestration`, `permissioned-ai`
-
----
-
-## Why Sir Thaddeus?
-
-Most everyday AI tasks do not need a massive cloud model.
-
-They need something that is:
-
-- **Private**
-- **Reliable**
-- **Fast enough on modest hardware**
-- **Simple to run**
-- **Respectful of user boundaries**
-
-Sir Thaddeus lowers the barrier to entry for **local AI on Windows** while keeping the user in charge.
+**[Privacy policy →](PRIVACY.md)** · **[Security policy →](SECURITY.md)**
 
 ---
 
@@ -90,7 +54,18 @@ That same interaction model applies throughout the runtime:
 
 ---
 
-## Features
+## Privacy, in plain English
+
+No telemetry. No analytics. No sign-up. No cloud sync.
+
+Sir Thaddeus does not phone home. Your prompts go to your local model server. Your data stays on your machine. If you ask it to browse a website, it connects only to the sites you asked it to reach — nothing else runs in the background.
+
+**[Full privacy details \u2192](PRIVACY.md)**
+
+---
+
+<details>
+<summary><strong>Features</strong></summary>
 
 ### Voice and Interface
 
@@ -131,28 +106,29 @@ That same interaction model applies throughout the runtime:
 - **Background watchers** for website changes
 - **Local notifications** for monitored events
 
+</details>
+
 ---
 
 ## Quick Start
 
 No cloud account required.
 
-1. Go to the [Releases page](https://github.com/raydeStar/sir-thaddeus/releases)
-2. Download the latest release ZIP
-3. Unzip the archive
-4. Run `SirThaddeus.exe`  
-   *Windows SmartScreen may appear. If so, choose **More Info -> Run Anyway***
-5. Start your local model runner  
-   *Tested primarily with [LM Studio](https://lmstudio.ai/)*
-6. Complete first-run setup inside the app
+1. Download the latest release from the [Releases page](https://github.com/raydeStar/sir-thaddeus/releases) and unzip the archive
+2. Run `SirThaddeus.exe`  
+   *Windows SmartScreen may appear — choose **More Info → Run Anyway***
+3. Start [LM Studio](https://lmstudio.ai/) or another OpenAI-compatible local model server
+4. Complete the first-run setup inside the app
+5. Hold the push-to-talk hotkey and ask something
 
 That is it.
 
 ---
 
-## Headless Runtime (MVP)
+<details>
+<summary><strong>Headless Runtime</strong></summary>
 
-A terminal entry point now exists for chat-first runs:
+A terminal entry point exists for chat-first runs:
 
 ```bash
 dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
@@ -193,6 +169,8 @@ Runtime API composition has also been modularized into focused endpoint groups
 (`core`, `memory`, `runs`, `profiles`, `personalities`) to reduce regression risk
 and improve production maintainability.
 
+</details>
+
 ---
 
 ## Changelog
@@ -219,7 +197,8 @@ Sir Thaddeus is not designed to replace your judgment. It is designed to extend 
 
 ---
 
-## Architecture
+<details>
+<summary><strong>Architecture</strong></summary>
 
 Sir Thaddeus uses a five-layer architecture that separates loop control, interface, model access, tools, and voice runtime.
 
@@ -297,9 +276,12 @@ flowchart LR
 | Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
 | Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
 
+</details>
+
 ---
 
-## Project Structure
+<details>
+<summary><strong>Project Structure</strong></summary>
 
 ```text
 sir-thaddeus/
@@ -317,9 +299,12 @@ sir-thaddeus/
 `-- project-notes/
 ```
 
+</details>
+
 ---
 
-## Development
+<details>
+<summary><strong>Development</strong></summary>
 
 ### Prerequisites
 
@@ -351,14 +336,19 @@ dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
 dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
 ```
 
+</details>
+
 ---
 
-## Technical Notes
+<details>
+<summary><strong>Technical Notes</strong></summary>
 
 - Tested primarily with **LM Studio** and smaller local models
 - Other local runtimes may work, but support may vary
 - Smaller reasoning models can take longer to respond, especially in deeper thinking modes
 - The runtime is designed around **permissioned execution**, **local visibility**, and **practical reliability**
+
+</details>
 
 ---
 
@@ -367,11 +357,21 @@ dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
 Sir Thaddeus is for:
 
 - Developers exploring **local AI tooling**
-- Privacy-conscious users who want **AI on Windows without telemetry**
+- Privacy-conscious users who want **AI without telemetry**
 - Builders interested in **MCP architecture**, **tool routing**, and **permissioned agents**
 - Anyone who wants an AI copilot they can actually control
 
 It is not intended to be an unbounded autonomous agent that runs freely on your machine.
+
+---
+
+## Documentation
+
+- [Architecture Overview](docs/ARCHITECTURE.md)
+- [Settings Reference](docs/SETTINGS.md)
+- [Contributing](CONTRIBUTING.md)
+- [Privacy Policy](PRIVACY.md)
+- [Security Policy](SECURITY.md)
 
 ---
 
