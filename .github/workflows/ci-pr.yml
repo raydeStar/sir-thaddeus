@@ -226,7 +226,7 @@ jobs:
           lfs: false
 
       - name: Download build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-windows-${{ github.ref_name }}
           path: artifacts/release
@@ -256,19 +256,19 @@ jobs:
 
     steps:
       - name: Download Windows build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-windows-${{ github.ref_name }}
           path: release-assets
 
       - name: Download Linux build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-linux-${{ github.ref_name }}
           path: release-assets
 
       - name: Download macOS build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-macos-${{ github.ref_name }}
           path: release-assets

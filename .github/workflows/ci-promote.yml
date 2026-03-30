@@ -248,7 +248,7 @@ jobs:
           lfs: false
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: promote-package-windows
           path: artifacts/release
@@ -322,20 +322,20 @@ jobs:
           git push origin "${{ inputs.version }}"
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: promote-package-windows
           path: release-assets
 
       - name: Download Linux artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: promote-package-linux
           path: release-assets
 
       - name: Download macOS artifacts
         if: ${{ !inputs.skip_macos }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: promote-package-macos
           path: release-assets
