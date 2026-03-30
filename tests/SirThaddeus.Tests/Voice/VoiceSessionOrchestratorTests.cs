@@ -131,7 +131,8 @@ public sealed class VoiceSessionOrchestratorTests
 
         orchestrator.EnqueueMicDown();
         orchestrator.EnqueueMicUp();
-        await WaitForStateAsync(orchestrator, VoiceState.Transcribing, TimeSpan.FromSeconds(5));
+        await asr.WaitForTranscribeStartAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(VoiceState.Transcribing, orchestrator.CurrentState);
 
         orchestrator.EnqueueMicDown();
         asr.Release("stale transcript");
@@ -338,6 +339,8 @@ public sealed class VoiceSessionOrchestratorTests
 
     private sealed class BlockingAsrService : IAsrService
     {
+        private readonly TaskCompletionSource<bool> _started =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<string> _completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -348,8 +351,12 @@ public sealed class VoiceSessionOrchestratorTests
         {
             _ = clip;
             _ = sessionId;
+            _started.TrySetResult(true);
             return _completion.Task.WaitAsync(cancellationToken);
         }
+
+        public Task WaitForTranscribeStartAsync(TimeSpan timeout) =>
+            _started.Task.WaitAsync(timeout);
 
         public void Release(string transcript) => _completion.TrySetResult(transcript);
     }
