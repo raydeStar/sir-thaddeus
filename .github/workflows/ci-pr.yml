@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload test results (TRX)
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-trx
           path: |
@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload harness artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: harness-artifacts
           path: |
@@ -110,7 +110,7 @@ jobs:
           ./dev/release-package.ps1 -SkipPreflight -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload Windows build package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-package-windows-${{ github.ref_name }}
           path: |
@@ -156,7 +156,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime linux-x64 -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload Linux build package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-package-linux-${{ github.ref_name }}
           path: |
@@ -202,7 +202,7 @@ jobs:
           pwsh ./dev/package-cross.ps1 -Runtime osx-arm64 -SelfContained -LiteBundle -Version "$branchName-$shortSha"
 
       - name: Upload macOS build package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-package-macos-${{ github.ref_name }}
           path: |
