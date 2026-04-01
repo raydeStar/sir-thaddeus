@@ -70,6 +70,19 @@ public sealed partial class SearchOrchestrator
     /// </summary>
     public string? PreferredUnits { get; set; }
 
+    /// <summary>
+    /// Enables the advanced deep-dive place briefing path.
+    /// Baseline profiles keep this off so lookup requests stay on the
+    /// simpler fact-find branch.
+    /// </summary>
+    public bool DeepDiveEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Enables advanced local-business enrichment flows that call place
+    /// discovery and place lookup tools.
+    /// </summary>
+    public bool AdvancedPlaceDiscoveryEnabled { get; set; } = true;
+
     // ── Tool name conventions (try both casings) ─────────────────────
     private const string WebSearchToolName    = "web_search";
     private const string WebSearchToolNameAlt = "WebSearch";
@@ -344,8 +357,28 @@ public sealed partial class SearchOrchestrator
             };
         }
 
+        var effectiveModeHint = !DeepDiveEnabled && modeHint == LookupModeHint.DeepDive
+            ? LookupModeHint.Fact
+            : modeHint;
+
+        if (effectiveModeHint != modeHint)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_MODE_HINT_PROFILE_DOWNGRADE",
+                Result = effectiveModeHint.ToString(),
+                Details = new Dictionary<string, object>
+                {
+                    ["requested_mode_hint"] = modeHint.ToString(),
+                    ["effective_mode_hint"] = effectiveModeHint.ToString(),
+                    ["reason"] = "advanced_deep_dive_disabled"
+                }
+            });
+        }
+
         var now  = DateTimeOffset.UtcNow;
-        var mode = ResolveMode(userMessage, modeHint, now);
+        var mode = ResolveMode(userMessage, effectiveModeHint, now);
 
         _audit.Append(new AuditEvent
         {
@@ -357,7 +390,8 @@ public sealed partial class SearchOrchestrator
                 ["user_message"]     = Truncate(userMessage, 80),
                 ["has_prior_results"] = Session.HasRecentResults(now),
                 ["mode_hint"] = modeHint.ToString(),
-                ["hint_forced_mode"] = modeHint != LookupModeHint.Auto
+                ["effective_mode_hint"] = effectiveModeHint.ToString(),
+                ["hint_forced_mode"] = effectiveModeHint != LookupModeHint.Auto
             }
         });
 

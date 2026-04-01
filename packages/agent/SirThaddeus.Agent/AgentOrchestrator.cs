@@ -160,6 +160,18 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         }
     }
 
+    public bool DeepDiveEnabled
+    {
+        get => _searchOrchestrator.DeepDiveEnabled;
+        set => _searchOrchestrator.DeepDiveEnabled = value;
+    }
+
+    public bool AdvancedPlaceDiscoveryEnabled
+    {
+        get => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled;
+        set => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled = value;
+    }
+
     private enum ChatIntent
     {
         Casual,

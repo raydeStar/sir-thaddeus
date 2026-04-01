@@ -360,6 +360,20 @@ public sealed partial class AgentOrchestrator
                 $"webReason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}");
         }
 
+        if (!DeepDiveEnabled &&
+            route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupFact,
+                confidence: Math.Clamp(Math.Max(route.Confidence, 0.88), 0.88, 0.96),
+                needsWeb: true,
+                needsSearch: true);
+
+            LogEvent(
+                "ROUTER_PROFILE_DEEPDIVE_DOWNGRADE",
+                "Normalized LookupDeepDive to LookupFact because advanced deep-dive is disabled for the active product profile.");
+        }
+
         return new RouteResolutionResult(route, webEvidence, footmanDecision);
     }
 

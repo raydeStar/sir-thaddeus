@@ -1172,7 +1172,14 @@
                     <TextBlock Text="VOICE PIPELINE" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
                       <StackPanel Spacing="12">
-                        <CheckBox Content="Enable Local VoiceHost" IsChecked="{Binding VoiceHostEnabled}" Classes="settingsCheck"/>
+                        <CheckBox Content="Enable Local VoiceHost"
+                                  IsChecked="{Binding VoiceHostEnabled}"
+                                  IsEnabled="{Binding IsVoiceHostSupportedByProfile}"
+                                  Classes="settingsCheck"/>
+                        <TextBlock Text="{Binding VoiceHostProfileRestrictionText}"
+                                   Classes="hint"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding IsVoiceHostRestrictedByProfile}"/>
                         <StackPanel Spacing="10" IsVisible="{Binding VoiceHostEnabled}">
                           <StackPanel Spacing="4">
                             <TextBlock Text="VoiceHost URL" Classes="hint"/>
@@ -1397,7 +1404,14 @@
                             <TextBlock Text="Local metasearch instance managed by Sir Thaddeus."
                                        Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <CheckBox Content="Auto-start bundled local SearXNG" IsChecked="{Binding SearxngAutoStart}" Classes="settingsCheck"/>
+                          <CheckBox Content="Auto-start bundled local SearXNG"
+                                    IsChecked="{Binding SearxngAutoStart}"
+                                    IsEnabled="{Binding IsSearxngAutoStartSupportedByProfile}"
+                                    Classes="settingsCheck"/>
+                          <TextBlock Text="{Binding SearxngProfileRestrictionText}"
+                                     Classes="hint"
+                                     TextWrapping="Wrap"
+                                     IsVisible="{Binding IsSearxngAutoStartRestrictedByProfile}"/>
                           <StackPanel Spacing="4">
                             <TextBlock Text="Base URL" Classes="hint"/>
                             <TextBox Text="{Binding SearxngBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>

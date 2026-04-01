@@ -106,6 +106,87 @@ public sealed class RouteNormalizationTests
     }
 
     [Fact]
+    public async Task ProcessAsync_ProfileGatedDeepDive_NormalizesToFactPath()
+    {
+        var router = new FixedRouter(DefaultRouter.MakeRoute(
+            Intents.LookupDeepDive,
+            confidence: 0.95,
+            needsWeb: true,
+            needsSearch: true,
+            needsBrowser: true));
+
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Portland Coffee Roasters","type":"org","hint":"coffee roaster"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"Portland Coffee Roasters reviews","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Portland Coffee Roasters appears to have recent positive local coverage.",
+                FinishReason = "stop"
+            };
+        });
+
+        var webSearchPayload =
+            "Portland Coffee Roasters review\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/coffee\",\"title\":\"Portland Coffee Roasters review\",\"domain\":\"example.com\",\"excerpt\":\"Recent review coverage for Portland Coffee Roasters.\"}]";
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool switch
+            {
+                "web_search" or "WebSearch" => webSearchPayload,
+                "browser_navigate" or "BrowserNavigate" => "Portland Coffee Roasters was reviewed positively for balanced espresso and friendly service.",
+                "places_lookup" or "PlacesLookup" => throw new InvalidOperationException("places_lookup should not be called when profile gating downgrades deep-dive."),
+                "places_discover" or "PlacesDiscover" => throw new InvalidOperationException("places_discover should not be called when profile gating downgrades deep-dive."),
+                _ => "{}"
+            },
+            FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator())
+        {
+            DeepDiveEnabled = false,
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await agent.ProcessAsync("Give me a briefing on Portland Coffee Roasters.");
+
+        Assert.True(result.Success);
+        Assert.Null(result.DeepDiveBriefing);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                                        c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("places", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.Events, evt => evt.Action == "ROUTER_PROFILE_DEEPDIVE_DOWNGRADE");
+    }
+
+    [Fact]
     public async Task ProcessAsync_HighRiskLockpickPrompt_RefusesBeforeTools()
     {
         var llmCalls = 0;

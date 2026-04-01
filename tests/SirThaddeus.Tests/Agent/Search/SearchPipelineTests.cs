@@ -1139,6 +1139,71 @@ public class SearchOrchestratorModeHintTests
         Assert.False(string.IsNullOrWhiteSpace(webSearchCall.Tool));
         Assert.Contains("deli", webSearchCall.Args, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_DeepDiveHint_WithProfileGates_SkipsAdvancedPlaceTools()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"best deli hillsboro oregon","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Bernie's Deli looks like a solid option based on the web results.",
+                FinishReason = "stop"
+            };
+        });
+
+        var searchResult =
+            "1. Bernie's Deli - example.com\n" +
+            "   Classic deli sandwiches in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/bernies-deli\",\"title\":\"Bernie's Deli\",\"domain\":\"example.com\",\"excerpt\":\"Classic deli sandwiches in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" => searchResult,
+            "WebSearch" => searchResult,
+            "browser_navigate" => "Bernie's Deli serves sandwiches in Hillsboro, OR.",
+            "BrowserNavigate" => "Bernie's Deli serves sandwiches in Hillsboro, OR.",
+            "places_lookup" => throw new InvalidOperationException("places_lookup should be gated off when advanced place discovery is disabled."),
+            "PlacesLookup" => throw new InvalidOperationException("places_lookup should be gated off when advanced place discovery is disabled."),
+            "places_discover" => throw new InvalidOperationException("places_discover should be gated off when advanced place discovery is disabled."),
+            "PlacesDiscover" => throw new InvalidOperationException("places_discover should be gated off when advanced place discovery is disabled."),
+            _ => ""
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            DeepDiveEnabled = false,
+            AdvancedPlaceDiscoveryEnabled = false,
+            UserLocationHint = "Hillsboro, OR"
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.DeepDive,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.DeepDiveBriefing);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                                        c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("places", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 #endregion

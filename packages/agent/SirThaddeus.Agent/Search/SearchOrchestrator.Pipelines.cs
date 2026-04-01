@@ -274,6 +274,22 @@ public sealed partial class SearchOrchestrator
         }
 
         var isLocalBusinessQuery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+        var advancedPlaceDiscoveryEnabled = AdvancedPlaceDiscoveryEnabled && isLocalBusinessQuery;
+
+        if (isLocalBusinessQuery && !advancedPlaceDiscoveryEnabled)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_BUSINESS_ENRICHMENT_DISABLED",
+                Result = "profile_disabled",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? string.Empty, 80)
+                }
+            });
+        }
+
         EntityResolver.ResolvedEntity? entity = null;
         if (!isLocalBusinessQuery)
         {
@@ -293,7 +309,7 @@ public sealed partial class SearchOrchestrator
         var query = await _queryBuilder.BuildAsync(
             SearchMode.WebFactFind, userMessage ?? "", entity, Session, history, ct);
 
-        if (isLocalBusinessQuery)
+        if (advancedPlaceDiscoveryEnabled)
         {
             var inlineLocation = ExtractInlineLocationFromMessage(userMessage ?? string.Empty);
             var shouldTryOpenPlaces =
@@ -381,7 +397,7 @@ public sealed partial class SearchOrchestrator
                 isNoResults = true;
         }
 
-        if (isNoResults && isLocalBusinessQuery)
+        if (isNoResults && advancedPlaceDiscoveryEnabled)
         {
             _audit.Append(new AuditEvent
             {
@@ -414,7 +430,7 @@ public sealed partial class SearchOrchestrator
 
             if (LooksLikeNoResultsPayload(toolResult))
             {
-                if (isLocalBusinessQuery)
+                if (advancedPlaceDiscoveryEnabled)
                 {
                     var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
                         userMessage ?? string.Empty,
@@ -430,7 +446,7 @@ public sealed partial class SearchOrchestrator
                     userMessage ?? "", memoryPackText, history, toolCallsMade, ct);
             }
 
-            if (isLocalBusinessQuery)
+            if (advancedPlaceDiscoveryEnabled)
             {
                 var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
                     userMessage ?? string.Empty,
@@ -552,10 +568,9 @@ public sealed partial class SearchOrchestrator
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
-        Session.LastWasLocalBusinessDiscovery =
-            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+        Session.LastWasLocalBusinessDiscovery = advancedPlaceDiscoveryEnabled;
 
-        if (isLocalBusinessQuery && sources.Count > 0)
+        if (advancedPlaceDiscoveryEnabled && sources.Count > 0)
         {
             Session.RecordLocalBusinessCandidates(
                 GetRequestedLocalBusinessLabel(userMessage ?? ""),
@@ -568,7 +583,7 @@ public sealed partial class SearchOrchestrator
 
         var strippedContent = StripSourcesJson(toolResult);
         var toolResultHasRichContent = strippedContent.Length >= MinRichContentLength;
-        var isLocalBizDiscovery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+    var isLocalBizDiscovery = advancedPlaceDiscoveryEnabled;
 
         string? articleContent = null;
 

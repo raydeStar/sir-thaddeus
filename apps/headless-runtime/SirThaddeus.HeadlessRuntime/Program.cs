@@ -174,6 +174,8 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
         gatekeeperLlm: gatekeeperLlm)
     {
         ActiveProfileId = currentSettings.ActiveProfileId,
+        DeepDiveEnabled = currentSettings.AllowsDeepDiveBriefingsByProfile(),
+        AdvancedPlaceDiscoveryEnabled = currentSettings.AllowsAdvancedPlaceDiscoveryByProfile(),
         MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
         UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
         UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
@@ -230,6 +232,7 @@ async Task<SearchStatusResponse> BuildSearchStatusAsync(CancellationToken ct)
 {
     var currentSettings = settings;
     var mode = NormalizeWebSearchMode(currentSettings.WebSearch.Mode);
+    var searxngAutoStartEnabled = currentSettings.IsManagedSearxngAutoStartEffective();
     var webPermission = ToolGroupPolicy.ResolveEffectivePolicy(
         "web",
         ToolGroupPolicy.BuildSnapshot(currentSettings, isDebugBuild: false));
@@ -257,10 +260,12 @@ async Task<SearchStatusResponse> BuildSearchStatusAsync(CancellationToken ct)
         searxngStatus = "Ready";
         searxngMessage = $"SearxNG responded at {searxngBaseUrl}.";
     }
-    else if (!currentSettings.WebSearch.SearxngAutoStart)
+    else if (!searxngAutoStartEnabled)
     {
         searxngStatus = "Disabled";
-        searxngMessage = "SearxNG auto-start is disabled and the local endpoint is not reachable.";
+        searxngMessage = currentSettings.AllowsManagedSearxngAutoStartByProfile()
+            ? "SearxNG auto-start is disabled and the local endpoint is not reachable."
+            : "This product profile keeps bundled SearxNG auto-start off and the local endpoint is not reachable.";
     }
     else
     {
@@ -378,7 +383,7 @@ async Task<SearchStatusResponse> BuildSearchStatusAsync(CancellationToken ct)
             BaseUrl: searxngBaseUrl,
             Reachable: searxngReachable,
             ManagedByRuntime: searxngLauncher.IsManagedSearxngRunning,
-            AutoStartEnabled: currentSettings.WebSearch.SearxngAutoStart,
+            AutoStartEnabled: searxngAutoStartEnabled,
             LastLaunchStatus: searxngLastLaunchStatus),
         SearchApi: new HostedSearchApiStatusDto(
             Status: searchApiStatus,
@@ -768,6 +773,40 @@ static async Task EnsureManagedSearxngAsync(
         return;
     }
 
+    var mode = NormalizeWebSearchMode(settings.WebSearch.Mode);
+    if ((mode is "auto" or "searxng") && !settings.IsManagedSearxngAutoStartEffective())
+    {
+        launcher.StopManagedSearxng();
+
+        var message = settings.AllowsManagedSearxngAutoStartByProfile()
+            ? "SearxNG auto-start is disabled in settings."
+            : "This product profile keeps bundled SearxNG auto-start disabled.";
+
+        audit.Append(new AuditEvent
+        {
+            Actor = "runtime",
+            Action = "SEARXNG_AUTOSTART",
+            Target = settings.WebSearch.SearxngBaseUrl,
+            Result = "skipped",
+            Details = new Dictionary<string, object>
+            {
+                ["status"] = "Disabled",
+                ["mode"] = mode,
+                ["message"] = message
+            }
+        });
+
+        recordLaunchStatus("Disabled", message);
+
+        if (mode == "searxng")
+        {
+            Console.WriteLine($"SearxNG: {message}");
+            Console.WriteLine("SearxNG-only mode is configured; web search will fail until SearxNG is reachable.");
+        }
+
+        return;
+    }
+
     SearxngLaunchResult result;
     try
     {
@@ -791,7 +830,6 @@ static async Task EnsureManagedSearxngAsync(
         return;
     }
 
-    var mode = (settings.WebSearch.Mode ?? "auto").Trim().ToLowerInvariant();
     var resultLabel = result.Status.ToString();
     var auditResult = result.Status switch
     {

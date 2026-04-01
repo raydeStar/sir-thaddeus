@@ -98,12 +98,41 @@ public sealed class SettingsManagerEnvironmentOverrideTests
             Assert.True(result.Settings.Audio.TtsEnabled);
             Assert.True(result.Settings.Voice.VoiceHostEnabled);
             Assert.True(result.Settings.WebSearch.SearxngAutoStart);
+            Assert.False(result.Settings.IsVoiceHostEnabledEffective());
+            Assert.False(result.Settings.IsManagedSearxngAutoStartEffective());
+            Assert.False(result.Settings.AllowsDeepDiveBriefingsByProfile());
+            Assert.False(result.Settings.AllowsAdvancedPlaceDiscoveryByProfile());
             Assert.Equal(AppSettings.CurrentSchemaVersion, result.Settings.SchemaVersion);
         }
         finally
         {
             DeleteTempSettingsPath(settingsPath);
         }
+    }
+
+    [Fact]
+    public void OptionalFeatureHelpers_NonBaselineProfile_AllowExplicitOptIns()
+    {
+        var settings = new AppSettings
+        {
+            ProductProfileId = "power-user",
+            Voice = new VoiceSettings
+            {
+                VoiceHostEnabled = true
+            },
+            WebSearch = new WebSearchSettings
+            {
+                SearxngAutoStart = true
+            }
+        };
+
+        Assert.False(settings.IsBaselineProductProfile());
+        Assert.True(settings.AllowsVoiceInteractionByProfile());
+        Assert.True(settings.AllowsManagedSearxngAutoStartByProfile());
+        Assert.True(settings.AllowsDeepDiveBriefingsByProfile());
+        Assert.True(settings.AllowsAdvancedPlaceDiscoveryByProfile());
+        Assert.True(settings.IsVoiceHostEnabledEffective());
+        Assert.True(settings.IsManagedSearxngAutoStartEffective());
     }
 
     private static string CreateTempSettingsPath()

@@ -65,6 +65,30 @@ public sealed partial record AppSettings
     [JsonPropertyName("productProfileId")]
     public string ProductProfileId { get; init; } = BaselineProductProfileId;
 
+    public string GetNormalizedProductProfileId()
+        => string.IsNullOrWhiteSpace(ProductProfileId)
+            ? BaselineProductProfileId
+            : ProductProfileId.Trim().ToLowerInvariant();
+
+    public bool IsBaselineProductProfile()
+        => GetNormalizedProductProfileId().Equals(
+            BaselineProductProfileId,
+            StringComparison.OrdinalIgnoreCase);
+
+    public bool AllowsVoiceInteractionByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsManagedSearxngAutoStartByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsDeepDiveBriefingsByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsAdvancedPlaceDiscoveryByProfile() => !IsBaselineProductProfile();
+
+    public bool IsVoiceHostEnabledEffective()
+        => AllowsVoiceInteractionByProfile() && Voice.VoiceHostEnabled;
+
+    public bool IsManagedSearxngAutoStartEffective()
+        => AllowsManagedSearxngAutoStartByProfile() && WebSearch.SearxngAutoStart;
+
     /// <summary>
     /// The profile_id of the currently active user profile.
     /// When set, the agent injects this profile's card into every
