@@ -56,6 +56,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly Tools.ToolAliasResolver _toolAliasResolver;
     private readonly IFootmanRouter? _footmanRouter;
     private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
+    private readonly LaneRouter _laneRouter;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -353,6 +354,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var routeResolution = await ResolveRouteAsync(userMessage, lowerIncoming, cancellationToken);
         var route = NormalizeRouteForPrompt(routeResolution.Route, lowerIncoming);
         var webEvidence = routeResolution.WebEvidence;
+
+        var laneResult = await ClassifyLaneAsync(userMessage, cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
         var hasRecentSearchContext =

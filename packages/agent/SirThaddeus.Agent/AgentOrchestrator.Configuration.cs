@@ -127,6 +127,7 @@ public sealed partial class AgentOrchestrator
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
         _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
+        _laneRouter = new Routing.LaneRouter(effectiveGatekeeper);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
             mcp,
             audit,

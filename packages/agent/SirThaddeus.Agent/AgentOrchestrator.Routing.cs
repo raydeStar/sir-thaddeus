@@ -25,6 +25,28 @@ public sealed partial class AgentOrchestrator
         RoutingDecision? FootmanDecision);
 
     /// <summary>
+    /// Runs lane classification before any tool is loaded and logs the result.
+    /// </summary>
+    private async Task<LaneRoutingResult> ClassifyLaneAsync(
+        string userMessage, CancellationToken cancellationToken)
+    {
+        var ctx = new ConversationContext
+        {
+            ConversationId = _currentConversationId,
+            Topic = _dialogueStore.Get().Topic,
+            HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
+        };
+
+        var result = await _laneRouter.ClassifyAsync(userMessage, ctx, cancellationToken);
+
+        LogEvent("LANE_ROUTER",
+            $"lane={result.Lane}, confidence={result.Confidence:F2}, " +
+            $"elapsed_ms={result.ElapsedMs:F1}, rationale={result.Rationale}");
+
+        return result;
+    }
+
+    /// <summary>
     /// Maps a <see cref="RouterOutput"/> back to the legacy
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
