@@ -87,10 +87,10 @@ public sealed class VoiceHostConfigTests
     }
 
     [Fact]
-    public void DefaultSettings_VoiceHostEnabled_IsTrue()
+    public void DefaultSettings_VoiceHostEnabled_IsFalse()
     {
         var settings = new VoiceSettings();
-        Assert.True(settings.VoiceHostEnabled);
+        Assert.False(settings.VoiceHostEnabled);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 {
+  "productProfileId": "baseline",
   "llm": {
     "baseUrl": "http://localhost:1234",
     "model": "local-model",
@@ -14,7 +15,10 @@
     "serverPath": "auto"
   },
   "audio": {
-    "ttsEnabled": true
+    "ttsEnabled": false
+  },
+  "voice": {
+    "voiceHostEnabled": false
   },
   "memory": {
     "enabled": true,
@@ -23,7 +27,7 @@
   "webSearch": {
     "mode": "auto",
     "searxngBaseUrl": "http://localhost:8080",
-    "searxngAutoStart": true,
+    "searxngAutoStart": false,
     "searxngLaunchCommand": "auto",
     "searxngLaunchArguments": "auto",
     "searxngStartupTimeoutMs": 120000,

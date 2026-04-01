@@ -29,6 +29,7 @@ public sealed partial class AgentOrchestrator
                 cancellationToken),
             TaskLane.Explain when ShouldFastPathExplainLane(userMessage, route, allowLookupLane) => await TryExecuteExplainLaneAsync(
                 userMessage,
+                route,
                 memoryPackText,
                 toolCallsMade,
                 roundTrips,
@@ -42,6 +43,9 @@ public sealed partial class AgentOrchestrator
         RouterOutput route,
         bool allowLookupLane)
     {
+        if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase))
+            return true;
+
         if (!allowLookupLane)
             return false;
 
@@ -145,6 +149,7 @@ public sealed partial class AgentOrchestrator
     /// </summary>
     private async Task<AgentResponse?> TryExecuteExplainLaneAsync(
         string userMessage,
+        RouterOutput route,
         string memoryPackText,
         List<ToolCallRecord> toolCallsMade,
         int roundTrips,
@@ -153,6 +158,17 @@ public sealed partial class AgentOrchestrator
         LogEvent("EXPLAIN_LANE_START", "Attempting explain-lane path.");
 
         var request = await _explainLane.ExtractRequestAsync(userMessage, cancellationToken);
+        if (route.Intent.Equals(Intents.ScreenObserve, StringComparison.OrdinalIgnoreCase))
+        {
+            request ??= ExplainLane.BuildScreenContextRequest(userMessage);
+            return await TryExecuteScreenGroundedExplainLaneAsync(
+                userMessage,
+                request,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+        }
+
         if (ExplainLane.NeedsClarification(request))
         {
             var clarification = ExplainLane.BuildClarifyingQuestion(userMessage);
@@ -208,5 +224,66 @@ public sealed partial class AgentOrchestrator
             LogEvent("EXPLAIN_LANE_ERROR", $"Explain lane failed: {ex.Message} — falling through to standard path.");
             return null;
         }
+    }
+
+    private async Task<AgentResponse?> TryExecuteScreenGroundedExplainLaneAsync(
+        string userMessage,
+        ExplainRequest request,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        var screenResult = await CallToolWithAliasAsync(
+            ScreenCaptureToolName,
+            ScreenCaptureToolNameAlt,
+            "{}",
+            cancellationToken);
+
+        toolCallsMade.Add(new ToolCallRecord
+        {
+            ToolName = screenResult.ToolName,
+            Arguments = "{}",
+            Result = screenResult.Result,
+            Success = screenResult.Success
+        });
+
+        if (!screenResult.Success || string.IsNullOrWhiteSpace(screenResult.Result))
+        {
+            LogEvent("EXPLAIN_LANE_SCREEN_CAPTURE_FAILED", screenResult.Result ?? "(empty)");
+            return null;
+        }
+
+        var groundedContext = TryBuildScreenCaptureSummary(screenResult.Result, out var summary)
+            ? summary
+            : screenResult.Result.Trim();
+
+        if (string.IsNullOrWhiteSpace(groundedContext))
+        {
+            LogEvent("EXPLAIN_LANE_SCREEN_CONTEXT_EMPTY", "No grounded screen context available.");
+            return null;
+        }
+
+        var groundedResponse = await _explainLane.ExplainGroundedContextAsync(
+            userMessage,
+            request,
+            groundedContext,
+            _personalityRuntime.BuildSystemPrompt(_systemPrompt),
+            cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(groundedResponse))
+            groundedResponse = groundedContext;
+
+        LogEvent("EXPLAIN_LANE_COMPLETE", "Returning screen-grounded explanation.");
+        AppendAssistantMessage(groundedResponse);
+
+        return new AgentResponse
+        {
+            Text = groundedResponse,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips + 2,
+            AllowToolResultPersonalityPresentation = true,
+            SuppressSourceCardsUi = true
+        };
     }
 }

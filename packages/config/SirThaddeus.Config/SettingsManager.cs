@@ -293,6 +293,7 @@ public static class SettingsManager
             SchemaVersion = settings.SchemaVersion <= 0
                 ? AppSettings.CurrentSchemaVersion
                 : settings.SchemaVersion,
+            ProductProfileId = StringOrFallback(settings.ProductProfileId, defaults.ProductProfileId),
             Llm = llm with
             {
                 BaseUrl = StringOrFallback(llm.BaseUrl, defaults.Llm.BaseUrl),

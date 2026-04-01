@@ -2,6 +2,7 @@ using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine.Profiles;
@@ -2866,6 +2867,155 @@ Example page content from the browser.
         Assert.DoesNotContain(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public async Task FileTask_PermissionDenied_BlocksBeforeExposingFileTools()
+    {
+        var exposedToolSets = new List<IReadOnlyList<ToolDefinition>>();
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools is { Count: > 0 })
+                exposedToolSets.Add(tools);
+
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (system.Contains("request classifier", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"lane":"Conversation","confidence":0.95,"rationale":"Not an explain-lane request."}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "ok",
+                FinishReason = "stop"
+            };
+        });
+
+        var inner = new FakeMcpClient((_, _) => "{}", FakeMcpClient.StandardToolSet);
+        var audit = new TestAuditLogger();
+        var mcp = new AuditedMcpToolClient(inner, audit, new AlwaysDenyGate("Denied by user"), "test-session");
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: new StubRouter(new RouterOutput
+            {
+                Intent = Intents.FileTask,
+                NeedsFileAccess = true,
+                RequiredCapabilities = [ToolCapability.FileRead],
+                Confidence = 1.0
+            }))
+        {
+            MemoryEnabled = false
+        };
+
+        var result = await agent.ProcessAsync("search the repo for TODO comments");
+
+        Assert.True(result.Success);
+        Assert.Contains("file access approval", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(inner.Calls);
+        Assert.Empty(exposedToolSets);
+        Assert.Contains(audit.Events, e =>
+            e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT" &&
+            e.Target == "file_read" &&
+            e.Result == "blocked");
+    }
+
+    [Fact]
+    public async Task ScreenObserve_ExplainLane_UsesGroundedScreenContext()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+
+            if (system.Contains("Extract the main topic, goal, and optional context", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"Topic":"this page","Goal":"summarize","Context":null}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (system.Contains("already-captured local context", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "This page is a rollout checklist for the baseline profile and it emphasizes disabling the voice host by default.",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (system.Contains("request classifier", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"lane":"Explain","confidence":0.97,"rationale":"Referential explanation request."}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "ok",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient((tool, _) =>
+        {
+            if (tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("ScreenCapture", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    [Screen Read]
+                    Window: Deployment checklist.pdf
+                    Content Type: Document
+                    Content:
+                    Baseline profile rollout checklist.
+                    Disable the voice host by default.
+                    Keep file access behind approval.
+                    Limitations: none.
+                    """;
+            }
+
+            return "{}";
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: new StubRouter(new RouterOutput
+            {
+                Intent = Intents.ScreenObserve,
+                NeedsScreenRead = true,
+                RequiredCapabilities = [ToolCapability.ScreenCapture],
+                Confidence = 1.0
+            }))
+        {
+            MemoryEnabled = false
+        };
+
+        var result = await agent.ProcessAsync("Can you summarize this page?");
+
+        Assert.True(result.Success);
+        Assert.Contains("rollout checklist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.True(result.SuppressSourceCardsUi);
+    }
 }
 
 #endregion
@@ -3041,6 +3191,16 @@ internal sealed class StubGuardrailsCoordinator : IGuardrailsCoordinator
         CancellationToken cancellationToken = default)
         => Task.FromResult<GuardrailsCoordinatorResult?>(null);
 }
+
+    internal sealed class StubRouter : IRouter
+    {
+        private readonly RouterOutput _route;
+
+        public StubRouter(RouterOutput route) => _route = route;
+
+        public Task<RouterOutput> RouteAsync(RouterRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult(_route);
+    }
 
 /// <summary>
 /// Fake MCP tool client with per-tool response routing and realistic

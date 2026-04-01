@@ -56,6 +56,15 @@ public sealed partial record AppSettings
     [JsonPropertyName("userProfile")]
     public UserProfileSettings UserProfile { get; init; } = new();
 
+    public const string BaselineProductProfileId = "baseline";
+
+    /// <summary>
+    /// Active product preset used for first-run defaults and future
+    /// baseline-vs-extended experience toggles.
+    /// </summary>
+    [JsonPropertyName("productProfileId")]
+    public string ProductProfileId { get; init; } = BaselineProductProfileId;
+
     /// <summary>
     /// The profile_id of the currently active user profile.
     /// When set, the agent injects this profile's card into every
@@ -296,7 +305,7 @@ public sealed record AudioSettings
     public string ShutupChord { get; init; } = "Ctrl+Alt+Escape";
 
     [JsonPropertyName("ttsEnabled")]
-    public bool TtsEnabled { get; init; } = true;
+    public bool TtsEnabled { get; init; } = false;
 
     /// <summary>
     /// Persisted product name of the selected input (recording) device.
@@ -328,7 +337,7 @@ public sealed record AudioSettings
 public sealed record VoiceSettings
 {
     [JsonPropertyName("voiceHostEnabled")]
-    public bool VoiceHostEnabled { get; init; } = true;
+    public bool VoiceHostEnabled { get; init; } = false;
 
     [JsonPropertyName("voiceHostBaseUrl")]
     public string VoiceHostBaseUrl { get; init; } = "http://127.0.0.1:17845";
@@ -728,7 +737,7 @@ public sealed record WebSearchSettings
     /// webSearch.mode is "auto" or "searxng" and the base URL is loopback.
     /// </summary>
     [JsonPropertyName("searxngAutoStart")]
-    public bool SearxngAutoStart { get; init; } = true;
+    public bool SearxngAutoStart { get; init; } = false;
 
     /// <summary>
     /// Launch command for managed SearxNG.

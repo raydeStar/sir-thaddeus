@@ -17,6 +17,7 @@ public sealed class ExplainLane
     private readonly ILlmClient _llm;
     private const int ExtractionMaxTokens = 120;
     private const int ExplainMaxTokens = 350;
+    private const int GroundedContextExplainMaxTokens = 280;
     private const int SearchFormatMaxTokens = 220;
 
     public ExplainLane(ILlmClient llm)
@@ -110,6 +111,39 @@ public sealed class ExplainLane
         }
     }
 
+    public async Task<string> ExplainGroundedContextAsync(
+        string userMessage,
+        ExplainRequest request,
+        string groundedContext,
+        string? systemPromptPrefix = null,
+        CancellationToken cancellationToken = default)
+    {
+        var systemPrompt = string.IsNullOrWhiteSpace(systemPromptPrefix)
+            ? GroundedContextExplainPrompt
+            : $"{systemPromptPrefix}\n\n{GroundedContextExplainPrompt}";
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System(systemPrompt),
+            ChatMessage.User(BuildGroundedContextExplainPrompt(userMessage, request, groundedContext))
+        };
+
+        try
+        {
+            var response = await _llm.ChatAsync(
+                messages,
+                tools: null,
+                GroundedContextExplainMaxTokens,
+                cancellationToken);
+
+            return response.Content?.Trim() ?? groundedContext;
+        }
+        catch
+        {
+            return groundedContext;
+        }
+    }
+
     public static string BuildSearchQuery(ExplainRequest request)
     {
         var query = request.Topic;
@@ -124,6 +158,25 @@ public sealed class ExplainLane
                string.IsNullOrWhiteSpace(request.Topic) ||
                string.Equals(request.Topic, "unknown", StringComparison.OrdinalIgnoreCase) ||
                IsReferentialTopic(request.Topic);
+    }
+
+    public static ExplainRequest BuildScreenContextRequest(string userMessage)
+    {
+        var lower = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        var topic = lower.Contains("pdf", StringComparison.Ordinal)
+            ? "current pdf"
+            : lower.Contains("document", StringComparison.Ordinal)
+                ? "current document"
+                : lower.Contains("page", StringComparison.Ordinal)
+                    ? "current page"
+                    : "current screen";
+
+        return new ExplainRequest
+        {
+            Topic = topic,
+            Goal = lower.Contains("summar", StringComparison.Ordinal) ? "summarize" : "explain",
+            Context = null
+        };
     }
 
     public static string BuildClarifyingQuestion(string userMessage)
@@ -218,6 +271,24 @@ public sealed class ExplainLane
             """;
     }
 
+    internal static string BuildGroundedContextExplainPrompt(
+        string userMessage,
+        ExplainRequest request,
+        string groundedContext)
+    {
+        return $"""
+            User question: {userMessage}
+            Topic: {request.Topic}
+            Goal: {request.Goal}
+            Context: {request.Context ?? "none"}
+
+            Grounded local context:
+            {groundedContext}
+
+            Explain the topic using the grounded local context above. If the user asked for a summary, lead with the gist.
+            """;
+    }
+
     internal static bool IsReferentialTopic(string? topic)
     {
         if (string.IsNullOrWhiteSpace(topic))
@@ -269,4 +340,10 @@ public sealed class ExplainLane
         "Keep the answer concise, readable, and faithful to the provided summary. " +
         "Preserve source grounding or caveats already present in the search summary. " +
         "Do not invent facts and do not add a preamble.";
+
+    private const string GroundedContextExplainPrompt =
+        "You are handling an Explain lane request grounded in already-captured local context. " +
+        "Use the grounded context exactly as provided. " +
+        "Do not claim you lack screen access, and do not invent details outside the grounded context. " +
+        "Keep the answer concise and direct.";
 }

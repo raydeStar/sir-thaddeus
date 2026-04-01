@@ -763,6 +763,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     cancellationToken);
             }
 
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase))
+            {
+                var blockedFileAccessResponse = await TryBlockGenericFileAccessIfDeniedAsync(
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+                if (blockedFileAccessResponse is not null)
+                    return AttachContextSnapshot(blockedFileAccessResponse, usageBaseline);
+            }
+
             if (!string.IsNullOrWhiteSpace(memoryPackText))
                 InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
             InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
@@ -1035,58 +1046,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 if (fileFallbackEligible)
                 {
-                    LogEvent("CHAT_FALLBACK_TO_FILE",
-                        "Chat-only refusal/uncertainty detected — falling back to file tools.");
-
-                    if (TryBuildExplicitFileReadArgs(userMessage, out var fallbackFileReadArgs, out var fallbackFilePath) ||
-                        TryBuildExplicitFileReadArgs(contextualUserMessage, out fallbackFileReadArgs, out fallbackFilePath))
-                    {
-                        return AttachContextSnapshot(
-                            await ExecuteExplicitFileReadAsync(
-                                fallbackFileReadArgs,
-                                fallbackFilePath,
-                                toolCallsMade,
-                                roundTrips,
-                                cancellationToken),
-                            usageBaseline);
-                    }
-
-                    if (TryBuildExplicitFileListArgs(userMessage, out var fallbackFileListArgs, out var fallbackFolderPath) ||
-                        TryBuildExplicitFileListArgs(contextualUserMessage, out fallbackFileListArgs, out fallbackFolderPath))
-                    {
-                        return AttachContextSnapshot(
-                            await ExecuteExplicitFileListAsync(
-                                fallbackFileListArgs,
-                                fallbackFolderPath,
-                                contextualUserMessage,
-                                toolCallsMade,
-                                roundTrips,
-                                cancellationToken),
-                            usageBaseline);
-                    }
-
-                    var fallbackToolsCatalog = await toolDefsTask;
-                    var filePolicy = PolicyGate.Evaluate(new RouterOutput
-                    {
-                        Intent = Intents.FileTask,
-                        NeedsFileAccess = true,
-                        RequiredCapabilities = [ToolCapability.FileRead],
-                        Confidence = 1.0
-                    });
-                    var fileTools = FilterKnowledgeStoreToolsIfNeeded(
-                        PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy),
-                        contextualUserMessage);
-
-                    LogEvent("AGENT_TOOLS_POLICY_FILTERED",
-                        $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
-
-                    var fileToolLoopResponse = await RunToolLoopAsync(
-                        fileTools,
+                    var fileFallbackResponse = await TryHandleChatFallbackToFileAsync(
+                        userMessage,
+                        contextualUserMessage,
+                        toolDefsTask,
                         toolCallsMade,
                         roundTrips,
                         cancellationToken);
-
-                    return AttachContextSnapshot(fileToolLoopResponse, usageBaseline);
+                    return AttachContextSnapshot(fileFallbackResponse, usageBaseline);
                 }
 
                 if (string.IsNullOrWhiteSpace(text))

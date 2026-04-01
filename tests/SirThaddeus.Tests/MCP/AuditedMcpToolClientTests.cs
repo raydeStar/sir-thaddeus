@@ -91,6 +91,25 @@ public class AuditedMcpToolClientTests
         Assert.Empty(inner.Calls);
     }
 
+    [Fact]
+    public async Task PreflightToolPermissionAsync_BlocksWithoutExecutingTool()
+    {
+        var inner = new FakeMcpClient("should not reach this");
+        var audit = new TestAuditLogger();
+        var gate = new AlwaysDenyGate("Denied before exposure");
+        var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+
+        var result = await sut.PreflightToolPermissionAsync("file_read", "{\"path\":\"C:\\\\repo\\\\README.md\"}");
+
+        Assert.False(result.Granted);
+        Assert.Equal("Denied before exposure", result.DenialReason);
+        Assert.Empty(inner.Calls);
+
+        var preflight = Assert.Single(audit.Events.Where(e => e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT"));
+        Assert.Equal("file_read", preflight.Target);
+        Assert.Equal("blocked", preflight.Result);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Permission Token — Recorded in Audit
     // ─────────────────────────────────────────────────────────────────

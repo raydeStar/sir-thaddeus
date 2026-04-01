@@ -111,6 +111,15 @@ public class ExplainLaneTests
     }
 
     [Fact]
+    public void BuildScreenContextRequest_PagePrompt_UsesPageTopicAndSummaryGoal()
+    {
+        var request = ExplainLane.BuildScreenContextRequest("Can you summarize this page?");
+
+        Assert.Equal("current page", request.Topic);
+        Assert.Equal("summarize", request.Goal);
+    }
+
+    [Fact]
     public void BuildSearchQuery_TopicOnly()
     {
         var request = new ExplainRequest { Topic = "TCP three-way handshake", Goal = "explain" };
@@ -171,6 +180,24 @@ public class ExplainLaneTests
     }
 
     [Fact]
+    public void BuildGroundedContextExplainPrompt_IncludesGroundedContext()
+    {
+        var request = new ExplainRequest
+        {
+            Topic = "current page",
+            Goal = "summarize"
+        };
+
+        var prompt = ExplainLane.BuildGroundedContextExplainPrompt(
+            "Summarize this page",
+            request,
+            "Visible content: Baseline profile checklist.");
+
+        Assert.Contains("current page", prompt);
+        Assert.Contains("Baseline profile checklist", prompt);
+    }
+
+    [Fact]
     public async Task ExtractRequestAsync_ValidResponse_ReturnsRequest()
     {
         var llm = new FakeLlmClient("""{"Topic": "photosynthesis", "Goal": "explain", "Context": "how it works"}""");
@@ -203,6 +230,21 @@ public class ExplainLaneTests
         var result = await lane.ExplainAsync("Explain photosynthesis", request);
 
         Assert.Contains("Photosynthesis", result);
+    }
+
+    [Fact]
+    public async Task ExplainGroundedContextAsync_ReturnsLlmText()
+    {
+        var llm = new FakeLlmClient("This page is a rollout checklist for the baseline profile.");
+        var lane = new ExplainLane(llm);
+        var request = new ExplainRequest { Topic = "current page", Goal = "summarize" };
+
+        var result = await lane.ExplainGroundedContextAsync(
+            "Summarize this page",
+            request,
+            "Visible content: Baseline profile rollout checklist.");
+
+        Assert.Contains("baseline profile", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

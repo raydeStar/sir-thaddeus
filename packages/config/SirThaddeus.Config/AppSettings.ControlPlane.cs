@@ -9,7 +9,7 @@ namespace SirThaddeus.Config;
 /// </summary>
 public sealed partial record AppSettings
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
