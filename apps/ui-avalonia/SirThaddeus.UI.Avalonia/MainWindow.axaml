@@ -354,6 +354,26 @@
                             </Expander>
                           </Border>
 
+                          <Border IsVisible="{Binding HasPlanContent}"
+                                  Background="{DynamicResource BackgroundPrimary}"
+                                  CornerRadius="{StaticResource RadiusSm}"
+                                  Padding="12,8"
+                                  Margin="0,0,0,8">
+                            <Expander IsExpanded="{Binding IsPlanExpanded}" Padding="0">
+                              <Expander.Header>
+                                <TextBlock Text="Plan" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextTertiary}"/>
+                              </Expander.Header>
+                              <SelectableTextBlock Text="{Binding PlanContent}"
+                                                   FontSize="12"
+                                                   FontFamily="Cascadia Mono, Consolas, monospace"
+                                                   LineHeight="18"
+                                                   Foreground="{DynamicResource TextSecondary}"
+                                                   Padding="0,6,0,0"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="300"/>
+                            </Expander>
+                          </Border>
+
                           <local:MarkdownTextBlock Markdown="{Binding Content}"
                                                    FontSize="15"
                                                    LineHeight="24"

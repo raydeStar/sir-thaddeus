@@ -2020,6 +2020,11 @@ public partial class MainWindow : Window
                             lastMsg.RetryPrompt = _lastUserPrompt;
                         }
 
+                        if (!string.IsNullOrWhiteSpace(completed?.PlanSummary))
+                        {
+                            lastMsg.PlanContent = completed!.PlanSummary;
+                        }
+
                         lastMsg.SetSourceCards(assistantSourceCards);
                     }
                 }

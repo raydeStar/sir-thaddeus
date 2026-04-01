@@ -57,6 +57,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly IFootmanRouter? _footmanRouter;
     private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
     private readonly LaneRouter _laneRouter;
+    private readonly Planning.PlanBuilder _planBuilder;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -1123,9 +1124,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
+            var taskPlan = await BuildTaskPlanAsync(
+                contextualUserMessage, laneResult, tools, cancellationToken);
+
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
             toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
+            if (taskPlan is not null)
+                toolLoopResponse = toolLoopResponse with { Plan = taskPlan };
 
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
                 route,

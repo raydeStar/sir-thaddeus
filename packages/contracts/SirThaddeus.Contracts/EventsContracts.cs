@@ -54,7 +54,8 @@ public sealed record RunCompletedPayload(
     bool? RetryGateAllowed = null,
     string? RetryGateReason = null,
     IReadOnlyList<AssistantSourceCardPayload>? SourceCards = null,
-    bool SuppressSourceCardsUi = false);
+    bool SuppressSourceCardsUi = false,
+    string? PlanSummary = null);
 
 public sealed record RunFailedPayload(
     string Error,

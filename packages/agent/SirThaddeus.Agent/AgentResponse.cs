@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Planning;
 using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.Agent.Workflow;
 
@@ -100,6 +101,13 @@ public sealed record AgentResponse
     /// and all audit events for this turn.
     /// </summary>
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// Typed execution plan produced before any tool call.
+    /// Null when planning was skipped or failed to produce a valid plan.
+    /// UI displays this collapsed above the response.
+    /// </summary>
+    public TaskPlan? Plan { get; init; }
 
     /// <summary>
     /// Deterministic completion confidence from the completion checker.
