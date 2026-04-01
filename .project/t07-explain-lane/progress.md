@@ -4,7 +4,7 @@ Status: Needs Human Testing
 Priority: P1 - High
 Area: Architecture
 Branch: task/implement-explain-lane
-Commit: not yet committed
+Commit: a492b9b
 Last updated: 2026-04-01
 
 ## Summary
