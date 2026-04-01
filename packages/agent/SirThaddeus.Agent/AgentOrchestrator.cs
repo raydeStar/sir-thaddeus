@@ -58,6 +58,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
     private readonly LaneRouter _laneRouter;
     private readonly Planning.PlanBuilder _planBuilder;
+    private readonly Validation.CompletionValidator _completionValidator;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -1124,8 +1125,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
-            var taskPlan = await BuildTaskPlanAsync(
-                contextualUserMessage, laneResult, tools, cancellationToken);
+            var taskPlan = await BuildTaskPlanAsync(contextualUserMessage, laneResult, tools, cancellationToken);
 
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
@@ -1133,13 +1133,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (taskPlan is not null)
                 toolLoopResponse = toolLoopResponse with { Plan = taskPlan };
 
+            toolLoopResponse = await ValidateAndMaybeRepairAsync(
+                contextualUserMessage, toolLoopResponse, toolCallsMade, cancellationToken);
+
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
-                route,
-                contextualUserMessage,
-                tools,
-                toolCallsMade,
-                toolLoopResponse,
-                cancellationToken);
+                route, contextualUserMessage, tools, toolCallsMade, toolLoopResponse, cancellationToken);
             if (deterministicMemoryFallback is not null)
                 return AttachContextSnapshot(deterministicMemoryFallback, usageBaseline);
 

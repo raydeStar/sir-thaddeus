@@ -129,6 +129,7 @@ public sealed partial class AgentOrchestrator
         _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
         _laneRouter = new Routing.LaneRouter(effectiveGatekeeper);
         _planBuilder = new Planning.PlanBuilder(effectiveGatekeeper);
+        _completionValidator = new Validation.CompletionValidator(effectiveGatekeeper);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
             mcp,
             audit,
