@@ -60,6 +60,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly Planning.PlanBuilder _planBuilder;
     private readonly Validation.CompletionValidator _completionValidator;
     private Validation.RepairLoop _repairLoop;
+    private readonly Lanes.CheckLane _checkLane;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -691,17 +692,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var forceLocalBusinessLookupFromFileIntent =
                 route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
                 IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming);
-
             if (forceLocalBusinessLookupFromFileIntent)
-            {
-                LogEvent(
-                    "LOCAL_BUSINESS_FILE_INTENT_OVERRIDE",
-                    "Rerouting local-business prompt from FileTask to web lookup pipeline.");
-            }
+                LogEvent("LOCAL_BUSINESS_FILE_INTENT_OVERRIDE", "Rerouting local-business prompt from FileTask to web lookup pipeline.");
 
             if (intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Fast-path: Check Lane for simple fact lookups.
+                var checkLaneResult = await TryExecuteCheckLaneAsync(contextualUserMessage, laneResult, memoryPackText, toolCallsMade, roundTrips, cancellationToken);
+                if (checkLaneResult is not null) return AttachContextSnapshot(checkLaneResult, usageBaseline);
+
                 var lookupModeHint = forceLocalBusinessLookupFromFileIntent
                     ? LookupModeHint.Fact
                     : ResolveLookupModeHint(route);

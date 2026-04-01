@@ -141,6 +141,7 @@ public sealed partial class AgentOrchestrator
         _planBuilder = new Planning.PlanBuilder(effectiveGatekeeper);
         _completionValidator = new Validation.CompletionValidator(effectiveGatekeeper);
         _repairLoop = new Validation.RepairLoop(effectiveGatekeeper, _completionValidator);
+        _checkLane = new Lanes.CheckLane(effectiveGatekeeper);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
             mcp,
             audit,
