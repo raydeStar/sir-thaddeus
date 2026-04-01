@@ -657,57 +657,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RefreshSearchStatusButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await RefreshSearchStatusAsync();
-    }
-
-    private async Task RefreshSearchStatusAsync()
-    {
-        if (_runtimeApiClient is null)
-        {
-            _backendSettings.ResetSearchHealthState(
-                "Disconnected",
-                "Connect the runtime to inspect live web-search and MCP health.");
-            return;
-        }
-
-        try
-        {
-            var snapshot = await _runtimeApiClient.GetSearchStatusAsync(CancellationToken.None);
-            _backendSettings.ApplySearchStatus(snapshot);
-        }
-        catch (Exception ex)
-        {
-            _backendSettings.ResetSearchHealthState(
-                "Unavailable",
-                "Search status refresh failed: " + ex.Message);
-        }
-    }
-
-    private async void RefreshAuditButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await RefreshAuditAsync();
-    }
-
-    private async Task RefreshAuditAsync()
-    {
-        if (_runtimeApiClient is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var entries = await _runtimeApiClient.GetAuditAsync(CancellationToken.None);
-            AuditList.ItemsSource = entries.Select(ToAuditLine).ToArray();
-        }
-        catch (Exception ex)
-        {
-            AuditList.ItemsSource = new[] { "Audit load failed: " + ex.Message };
-        }
-        }
-
     private void AppendTranscript(string line)
     {
         var wasEmpty = _currentSession.Messages.Count == 0;
@@ -1068,52 +1017,6 @@ public partial class MainWindow : Window
             "Failed"                 => "Failed",
             _                        => reason
         };
-    }
-
-    private static string ToAuditLine(AuditEntryDto dto)
-    {
-        return $"{dto.TimestampUtc:O} [{dto.Category}] {dto.Message}";
-    }
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Audit log file / folder handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-    private void OpenAuditLogFile_Click(object? sender, RoutedEventArgs e)
-    {
-        var path = SirThaddeus.AuditLog.JsonLineAuditLogger.GetDefaultPath();
-        if (!System.IO.File.Exists(path))
-        {
-            AppendTranscript("[system] Audit log file not found: " + path);
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            AppendTranscript("[error] Failed to open audit log: " + ex.Message);
-        }
-    }
-
-    private void OpenAuditLogFolder_Click(object? sender, RoutedEventArgs e)
-    {
-        var path = SirThaddeus.AuditLog.JsonLineAuditLogger.GetDefaultPath();
-        var folder = System.IO.Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(folder) || !System.IO.Directory.Exists(folder))
-        {
-            AppendTranscript("[system] Audit log folder not found.");
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            AppendTranscript("[error] Failed to open audit folder: " + ex.Message);
-        }
     }
 
     private IBrush ResolveThemeBrush(string key, IBrush fallback)
