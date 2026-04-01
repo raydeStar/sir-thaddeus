@@ -498,8 +498,6 @@ public sealed class SearxngHostLauncher : IDisposable
     private static IEnumerable<string> EnumerateBundledPythonCandidates(string root)
     {
         yield return Path.Combine(root, "runtime", "python", "python.exe");
-        yield return Path.GetFullPath(Path.Combine(root, "..", "voice", "runtime", "python", "python.exe"));
-        yield return Path.GetFullPath(Path.Combine(root, "..", "..", "voice-backend", "runtime", "python", "python.exe"));
     }
 
     private static string? FindRepoRoot()
