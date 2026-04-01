@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Net.Http.Json;
 using SirThaddeus.Contracts;
+using SirThaddeus.Core;
 
 namespace SirThaddeus.UI.Avalonia;
 
@@ -26,7 +27,7 @@ internal sealed class RuntimeHostLauncher : IDisposable
 
     public async Task<RuntimeLaunchResult> EnsureRunningAsync(Uri runtimeBaseUri, CancellationToken cancellationToken)
     {
-        if (!IsLoopback(runtimeBaseUri))
+        if (!LoopbackProcessSupport.IsLoopback(runtimeBaseUri))
         {
             return new RuntimeLaunchResult(
                 RuntimeLaunchStatus.NotLocalAddress,
@@ -68,7 +69,11 @@ internal sealed class RuntimeHostLauncher : IDisposable
             return new RuntimeLaunchResult(RuntimeLaunchStatus.FailedToStart, ex.Message);
         }
 
-        var healthy = await WaitForHealthAsync(runtimeBaseUri, TimeSpan.FromSeconds(20), cancellationToken);
+        var healthy = await LoopbackProcessSupport.WaitForProbeAsync(
+            probeCancellationToken => ProbeHealthAsync(runtimeBaseUri, probeCancellationToken),
+            TimeSpan.FromSeconds(20),
+            TimeSpan.FromMilliseconds(350),
+            cancellationToken);
         if (healthy)
         {
             return new RuntimeLaunchResult(RuntimeLaunchStatus.Started, "Local runtime started.");
@@ -80,45 +85,12 @@ internal sealed class RuntimeHostLauncher : IDisposable
 
     public void StopManagedRuntime()
     {
-        if (_managedProcess is null)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!_managedProcess.HasExited)
-            {
-                _managedProcess.Kill(entireProcessTree: true);
-                _managedProcess.WaitForExit(5000);
-            }
-        }
-        catch
-        {
-            // Best effort shutdown only.
-        }
-        finally
-        {
-            _managedProcess.Dispose();
-            _managedProcess = null;
-        }
+        LoopbackProcessSupport.StopManagedProcess(ref _managedProcess);
     }
 
     public void Dispose()
     {
         StopManagedRuntime();
-    }
-
-    private static bool IsLoopback(Uri uri)
-    {
-        if (uri.IsLoopback)
-        {
-            return true;
-        }
-
-        var host = uri.Host;
-        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-               host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildRuntimeArguments(string baseArguments, int port)
@@ -128,40 +100,25 @@ internal sealed class RuntimeHostLauncher : IDisposable
             : $"{baseArguments} --server --tools --port {port}";
     }
 
-    private static async Task<bool> WaitForHealthAsync(Uri runtimeBaseUri, TimeSpan timeout, CancellationToken cancellationToken)
+    private static async Task<bool> ProbeHealthAsync(Uri runtimeBaseUri, CancellationToken cancellationToken)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
-
         using var http = new HttpClient
         {
             BaseAddress = runtimeBaseUri,
             Timeout = TimeSpan.FromSeconds(2)
         };
 
-        while (!timeoutCts.IsCancellationRequested)
+        try
         {
-            try
+            var health = await http.GetFromJsonAsync<HealthResponse>("/api/health", cancellationToken);
+            if (health is not null && health.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
             {
-                var health = await http.GetFromJsonAsync<HealthResponse>("/api/health", timeoutCts.Token);
-                if (health is not null && health.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
-            catch
-            {
-                // Retry until timeout.
-            }
-
-            try
-            {
-                await Task.Delay(350, timeoutCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+        }
+        catch
+        {
+            // Retry until timeout.
         }
 
         return false;
