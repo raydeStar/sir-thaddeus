@@ -695,13 +695,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             if (forceLocalBusinessLookupFromFileIntent)
                 LogEvent("LOCAL_BUSINESS_FILE_INTENT_OVERRIDE", "Rerouting local-business prompt from FileTask to web lookup pipeline.");
 
+            var laneFastPathResult = await TryExecuteLaneFastPathAsync(contextualUserMessage, route, intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent, laneResult, memoryPackText, toolCallsMade, roundTrips, cancellationToken);
+            if (laneFastPathResult is not null) return AttachContextSnapshot(laneFastPathResult, usageBaseline);
+
             if (intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                // Fast-path: Check Lane for simple fact lookups.
-                var checkLaneResult = await TryExecuteCheckLaneAsync(contextualUserMessage, laneResult, memoryPackText, toolCallsMade, roundTrips, cancellationToken);
-                if (checkLaneResult is not null) return AttachContextSnapshot(checkLaneResult, usageBaseline);
 
                 var lookupModeHint = forceLocalBusinessLookupFromFileIntent
                     ? LookupModeHint.Fact
