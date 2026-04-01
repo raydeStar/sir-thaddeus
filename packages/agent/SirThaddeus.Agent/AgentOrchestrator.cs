@@ -59,6 +59,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly LaneRouter _laneRouter;
     private readonly Planning.PlanBuilder _planBuilder;
     private readonly Validation.CompletionValidator _completionValidator;
+    private Validation.RepairLoop _repairLoop;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 

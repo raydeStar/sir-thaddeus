@@ -28,6 +28,16 @@ public sealed partial class AgentOrchestrator
         }
     }
 
+    /// <summary>
+    /// Maximum number of repair attempts when the Completion Validator flags a failure.
+    /// Default is 1. Configurable via settings.
+    /// </summary>
+    public int MaxRepairAttempts
+    {
+        get => _repairLoop.MaxAttempts;
+        set => _repairLoop.MaxAttempts = Math.Max(value, 0);
+    }
+
     public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
     {
         foreach (var (role, content) in priorMessages)
@@ -130,6 +140,7 @@ public sealed partial class AgentOrchestrator
         _laneRouter = new Routing.LaneRouter(effectiveGatekeeper);
         _planBuilder = new Planning.PlanBuilder(effectiveGatekeeper);
         _completionValidator = new Validation.CompletionValidator(effectiveGatekeeper);
+        _repairLoop = new Validation.RepairLoop(effectiveGatekeeper, _completionValidator);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
             mcp,
             audit,

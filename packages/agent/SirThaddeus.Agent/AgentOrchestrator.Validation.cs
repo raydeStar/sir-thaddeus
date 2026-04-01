@@ -11,10 +11,15 @@ public sealed partial class AgentOrchestrator
         "I wasn't fully able to answer this — here's what I found:";
 
     /// <summary>
+    /// Transparent note when a repair attempt was made but also failed.
+    /// </summary>
+    private const string RepairFailedNote =
+        "I tried to improve this answer but wasn't fully successful. Here's what I found:";
+
+    /// <summary>
     /// Runs the completion validator on a response. If validation fails,
-    /// returns a modified response with a transparent partial-answer note.
-    /// When the Bounded Repair Loop is wired in, this will trigger repair
-    /// instead of immediately applying the note.
+    /// executes a bounded repair loop. If repair also fails, returns a
+    /// modified response with a transparent partial-answer note.
     /// </summary>
     private async Task<AgentResponse> ValidateAndMaybeRepairAsync(
         string userRequest,
@@ -45,11 +50,28 @@ public sealed partial class AgentOrchestrator
             if (result.Passed)
                 return response;
 
-            // TODO: When Bounded Repair Loop is implemented, trigger repair here
-            // instead of immediately falling back to the transparent note.
+            // Attempt bounded repair.
+            var repairResult = await _repairLoop.TryRepairAsync(
+                userRequest, response.Text, result, toolCallsMade, cancellationToken);
 
-            // Persistent failure path: prepend a transparent partial-answer note.
-            var annotatedText = $"{PartialAnswerNote}\n\n{response.Text}";
+            // Log every repair attempt.
+            foreach (var attempt in repairResult.Attempts)
+            {
+                LogEvent("REPAIR_ATTEMPT",
+                    $"attempt={attempt.AttemptNumber}, succeeded={attempt.RepairSucceeded}, " +
+                    $"elapsed_ms={attempt.ElapsedMs:F1}, " +
+                    $"failure_reason={Truncate(attempt.FailureReason, 80)}");
+            }
+
+            if (repairResult.Repaired)
+            {
+                LogEvent("REPAIR_SUCCEEDED", "Repaired response passed validation.");
+                return response with { Text = repairResult.FinalText };
+            }
+
+            // Persistent failure: prepend transparent note.
+            LogEvent("REPAIR_FAILED", "All repair attempts failed. Applying partial-answer note.");
+            var annotatedText = $"{RepairFailedNote}\n\n{response.Text}";
             return response with { Text = annotatedText };
         }
         catch (Exception ex)
