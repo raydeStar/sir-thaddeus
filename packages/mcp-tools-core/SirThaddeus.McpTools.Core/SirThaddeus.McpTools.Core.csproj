@@ -27,11 +27,4 @@
     <ProjectReference Include="..\..\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
     <ProjectReference Include="..\..\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\*.cs"
-             Exclude="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs;..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ClipboardTools.cs"
-             Link="Tools\%(Filename)%(Extension)" />
-  </ItemGroup>
-
 </Project>
