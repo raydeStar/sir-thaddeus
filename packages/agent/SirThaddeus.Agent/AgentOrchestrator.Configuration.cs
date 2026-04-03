@@ -18,6 +18,48 @@ namespace SirThaddeus.Agent;
 
 public sealed partial class AgentOrchestrator
 {
+    public string? ActiveProfileId { get; set; }
+
+    public bool MemoryEnabled { get; set; } = true;
+
+    public bool PanicModeEnabled { get; set; }
+
+    public bool SafeModeEnabled { get; set; }
+
+    public string? UserLocationHint
+    {
+        get => _userLocationHint;
+        set
+        {
+            _userLocationHint = value;
+            _searchOrchestrator.UserLocationHint = value;
+        }
+    }
+
+    public string? UserTimezone { get; set; }
+
+    public string? PreferredUnits
+    {
+        get => _preferredUnits;
+        set
+        {
+            _preferredUnits = NormalizeUnitPreference(value);
+            _searchOrchestrator.PreferredUnits = _preferredUnits;
+        }
+    }
+
+    public bool DeepDiveEnabled
+    {
+        get => _searchOrchestrator.DeepDiveEnabled;
+        set => _searchOrchestrator.DeepDiveEnabled = value;
+    }
+
+    public bool AdvancedPlaceDiscoveryEnabled
+    {
+        get => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled;
+        set => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled = value;
+    }
+
     public int MaxTokensBudget
     {
         get => _maxTokensCasual;

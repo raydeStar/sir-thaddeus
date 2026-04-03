@@ -174,6 +174,20 @@ public class DeepDiveBriefingContractTests
     }
 
     [Fact]
+    public void WebExtractor_InfersAddressFromLaterSourceWhenFirstSourceLacksAddress()
+    {
+        var sources = new List<SourceItem>
+        {
+            new() { Url = "https://example.com/a", Title = "Trader Joe's Portland - Yelp" },
+            new() { Url = "https://example.com/b", Title = "Trader Joe's - 7215 SW Garden Home Rd, Portland, OR 97223" }
+        };
+
+        var result = DeepDiveWebExtractor.Extract(["some content"], sources);
+
+        Assert.Equal("7215 SW Garden Home Rd, Portland, OR 97223", result.Address);
+    }
+
+    [Fact]
     public void CardOrdering_PlaceCards_PrioritizesWarningsAndHours()
     {
         var ordered = DeepDiveCardOrdering.Apply(
@@ -448,6 +462,47 @@ Phone: (503) 555-9580
         // is preferred.
         Assert.Contains("13459 NW Cornell Rd", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("12090 SW Main St", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeepDiveCoordinator_ZeroResultFallback_BuildsStructuredVerificationResponse()
+    {
+        var mcp = new FakeMcpClient((tool, _) =>
+        {
+            if (tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return """{"provider":"google_places","query":"demo","error":"key missing","place":null,"sources":[]}""";
+            }
+
+            if (tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "[search: 0 result(s) returned]";
+            }
+
+            return string.Empty;
+        });
+
+        var coordinator = new DeepDiveCoordinator(mcp, new TestAuditLogger());
+        var toolCalls = new List<ToolCallRecord>();
+
+        var result = await coordinator.BuildPlaceBriefingAsync(
+            query: "Is McDonalds in Portland OR open right now?",
+            timezone: "America/Los_Angeles",
+            locale: "en-US",
+            userLocationHint: "Portland, OR",
+            toolCallsMade: toolCalls,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Briefing);
+        Assert.Contains("Verification recommended", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
+        var hoursCard = Assert.Single(result.Briefing.Cards.Where(card =>
+            card.Type.Equals("hours", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains(hoursCard.Bullets, bullet =>
+            bullet.Contains("Hours could not be found in the available web sources.", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("couldn't verify live hours, reviews, or contact details", result.AssistantText!, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SourceRef Source(string name, string url) => new()

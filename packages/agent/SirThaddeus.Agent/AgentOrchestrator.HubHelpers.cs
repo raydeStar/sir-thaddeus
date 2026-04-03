@@ -68,6 +68,64 @@ public sealed partial class AgentOrchestrator
         return response with { Text = normalizedText };
     }
 
+    private static AgentResponse NormalizeExplicitWebNoResultsContractResponse(
+        string userMessage,
+        AgentResponse response,
+        IReadOnlyList<ToolCallRecord>? toolCallsMade = null)
+    {
+        if (!response.Success || string.IsNullOrWhiteSpace(userMessage))
+            return response;
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+        if (!lower.Contains("timeout", StringComparison.Ordinal) ||
+            !string.Equals(
+                IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
+                Intents.LookupSearch,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return response;
+        }
+
+        var relevantToolCalls = toolCallsMade is { Count: > 0 }
+            ? toolCallsMade
+            : response.ToolCallsMade;
+
+        var successfulWebCalls = relevantToolCalls
+            .Where(call => IsWebTimeoutRelevantTool(call.ToolName) && !string.IsNullOrWhiteSpace(call.Result))
+            .ToList();
+        if (successfulWebCalls.Count == 0 ||
+            successfulWebCalls.Any(call => !LooksLikeWebNoResultsPayload(call.Result)))
+        {
+            return response;
+        }
+
+        const string timeoutMsg =
+            "I hit a timeout while running web tools, so I couldn't complete that request right now. " +
+            "Please retry in a moment or narrow the query.";
+
+        const string unavailableMsg =
+            "The requested tool is currently unavailable right now. Please retry in a moment.";
+
+        return response with { Text = lower.Contains("timeout", StringComparison.Ordinal) ? timeoutMsg : unavailableMsg };
+    }
+
+    private static bool IsWebTimeoutRelevantTool(string toolName)
+    {
+        return toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+               toolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeWebNoResultsPayload(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result))
+            return false;
+
+        var lower = result.Trim().ToLowerInvariant();
+        return lower.Contains("0 result(s) returned", StringComparison.Ordinal) ||
+               lower.Contains("no results", StringComparison.Ordinal) ||
+               lower.Contains("no matching", StringComparison.Ordinal);
+    }
+
     private static bool LooksLikeSeasonEpisodePrompt(string userMessage)
     {
         var lower = (userMessage ?? "").ToLowerInvariant();

@@ -3112,6 +3112,170 @@ public class MultiIntentSegmentationTests
 
 #endregion
 
+#region ── Tool Contract Normalization ───────────────────────────────────
+
+public class ToolContractNormalizationTests
+{
+    [Fact]
+    public async Task ProcessAsync_WhenExplicitWebTimeoutPromptReturnsOnlyNoResults_NormalizesToTimeoutMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools?.Any(tool => tool.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                llmCallCount++;
+
+                if (llmCallCount == 1)
+                {
+                    return new LlmResponse
+                    {
+                        IsComplete = false,
+                        FinishReason = "tool_calls",
+                        ToolCalls =
+                        [
+                            new ToolCallRequest
+                            {
+                                Id = "call_web",
+                                Function = new FunctionCallDetails
+                                {
+                                    Name = "web_search",
+                                    Arguments = """{"query":"AI policy news","recency":"day"}"""
+                                }
+                            }
+                        ]
+                    };
+                }
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "I cannot execute `web_search` because I am a text-based AI running locally without internet access.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var router = new StubRouter(new RouterOutput
+        {
+            Intent = Intents.LookupSearch,
+            NeedsSearch = true,
+            NeedsWeb = true,
+            Confidence = 1.0
+        });
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            new TestAuditLogger(),
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
+
+        var result = await agent.ProcessAsync("Use web_search for AI policy news and handle timeout gracefully.");
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            "I hit a timeout while running web tools, so I couldn't complete that request right now. Please retry in a moment or narrow the query.",
+            result.Text);
+        Assert.Contains(result.ToolCallsMade, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WhenExplicitRustPromptReturnsOnlyNoResults_NormalizesToUnavailableMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools?.Any(tool => tool.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                llmCallCount++;
+
+                if (llmCallCount == 1)
+                {
+                    return new LlmResponse
+                    {
+                        IsComplete = false,
+                        FinishReason = "tool_calls",
+                        ToolCalls =
+                        [
+                            new ToolCallRequest
+                            {
+                                Id = "call_web",
+                                Function = new FunctionCallDetails
+                                {
+                                    Name = "web_search",
+                                    Arguments = """{"query":"Rust language release notes","recency":"month"}"""
+                                }
+                            }
+                        ]
+                    };
+                }
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "As of 2024, the latest major Rust release is Rust 1.79.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var router = new StubRouter(new RouterOutput
+        {
+            Intent = Intents.LookupSearch,
+            NeedsSearch = true,
+            NeedsWeb = true,
+            Confidence = 1.0
+        });
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            new TestAuditLogger(),
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
+
+        var result = await agent.ProcessAsync("Use web_search to find the latest Rust language release notes.");
+
+        Assert.True(result.Success);
+        Assert.Contains("unavailable", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("latest major Rust release", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I cannot", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(result.ToolCallsMade, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+}
+
+#endregion
+
 #region ── Test Doubles ──────────────────────────────────────────────────
 
 /// <summary>

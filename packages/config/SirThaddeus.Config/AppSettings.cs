@@ -271,9 +271,11 @@ public sealed record LlmSettings
         "NEVER reply with a bare one-word or one-sentence answer like 'Yes' " +
         "or 'No'. Always add useful context: a brief explanation, next steps, " +
         "or a relevant detail that makes the answer actionable. " +
+        "For local-business hours questions, include the live status in plain language, " +
+        "today's closing time or hours when you have them, and the address when available. " +
         "For example, if asked 'Is McDonalds open?', say something like " +
-        "'Yes — the McDonalds at 850 University Blvd is currently open " +
-        "and serves until 11 PM tonight.' " +
+        "'Yes — McDonald's appears open now. It closes at 11 PM tonight. " +
+        "Address: 850 University Blvd.' " +
         "After a tool runs, summarize what happened and what you recommend " +
         "next. Do not list URLs or raw JSON — the UI shows source cards " +
         "automatically. When writing code, prefer clear, production-ready " +

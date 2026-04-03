@@ -174,7 +174,10 @@ AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
         gatekeeperLlm: gatekeeperLlm)
     {
         ActiveProfileId = currentSettings.ActiveProfileId,
-        DeepDiveEnabled = currentSettings.AllowsDeepDiveBriefingsByProfile(),
+        // The headless runtime powers harness and API evaluation, so keep
+        // explicit deep-dive briefings available even when the desktop
+        // baseline preset hides that surface area.
+        DeepDiveEnabled = true,
         AdvancedPlaceDiscoveryEnabled = currentSettings.AllowsAdvancedPlaceDiscoveryByProfile(),
         MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
         UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),

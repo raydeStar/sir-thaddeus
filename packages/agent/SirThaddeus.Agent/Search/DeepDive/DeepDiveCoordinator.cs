@@ -274,6 +274,16 @@ public sealed partial class DeepDiveCoordinator
             }
         }
 
+        if (sources.Count == 0)
+        {
+            var directSources = BuildDirectPlaceFallbackSources(cleanedQuery);
+            if (directSources.Count > 0)
+            {
+                AddAuditStep(auditSteps, "search", "Web search returned 0 usable sources; trying direct store-locator fallback.");
+                sources = directSources.Take(maxOpenedSources).ToList();
+            }
+        }
+
         // The "0 structured sources" warning is deferred until after raw-text
         // extraction so we don't surface it when the web search text itself
         // yielded hours/address/phone data.
@@ -354,17 +364,7 @@ public sealed partial class DeepDiveCoordinator
         // Deferred "0 results" warning — only surface when the raw text
         // extraction also failed to find anything useful.
         if (zeroStructuredSources && !hasUsefulData)
-            warnings.Add("Fallback search came back with 0 results for the query.");
-
-        if (sources.Count == 0 && !hasUsefulData && (explicitRegionTokens.Count > 0 || extractedChunks.Count == 0))
-        {
-            return new DeepDiveExecutionResult
-            {
-                Success = false,
-                IsPartial = true,
-                AssistantText = BuildNoGroundingResponse(cleanedQuery, effectiveLocationHint)
-            };
-        }
+            warnings.Add("Fallback search did not surface a trustworthy hours page for the query.");
 
         var confidence = hasUsefulData
             ? DeepDiveConstants.ConfidenceMedium
@@ -1121,7 +1121,10 @@ public sealed partial class DeepDiveCoordinator
         var lines = new List<string>();
 
         if (warnings.Any(w => w.Contains("0 results", StringComparison.OrdinalIgnoreCase)))
-            lines.Add("The fallback search came back with 0 results for this query.");
+            lines.Add("The live search fallback did not surface a trustworthy hours page in this run.");
+
+        if (warnings.Any(w => w.Contains("trustworthy hours page", StringComparison.OrdinalIgnoreCase)))
+            lines.Add("The live search fallback did not surface a trustworthy hours page in this run.");
 
         return lines;
     }
@@ -1285,17 +1288,15 @@ public sealed partial class DeepDiveCoordinator
         if (string.IsNullOrWhiteSpace(extractedName) || string.IsNullOrWhiteSpace(cleanedQuery))
             return false;
 
-        var nameTokens = extractedName
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Trim(',', '.', '?', '!', ':', ';', '"', '\'').ToLowerInvariant())
-            .Where(t => t.Length >= 3)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var queryTokens = cleanedQuery
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Trim(',', '.', '?', '!', ':', ';', '"', '\'').ToLowerInvariant())
-            .Where(t => t.Length >= 3)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        static HashSet<string> TokenizeSignificantTerms(string value, HashSet<string> stopWords)
+        {
+            return Regex.Matches(value, @"[A-Za-z0-9']+", RegexOptions.CultureInvariant)
+                .Select(match => match.Value.Trim('\''))
+                .Where(token => token.Length >= 3)
+                .Select(token => token.ToLowerInvariant())
+                .Where(token => !stopWords.Contains(token))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
 
         // Exclude stop words that appear everywhere and cause false positives
         var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1306,7 +1307,39 @@ public sealed partial class DeepDiveCoordinator
             "too", "use", "way", "who", "new", "now", "old", "see"
         };
 
-        return nameTokens.Any(t => !stopWords.Contains(t) && queryTokens.Contains(t));
+        var nameTokens = TokenizeSignificantTerms(extractedName, stopWords);
+        var queryTokens = TokenizeSignificantTerms(cleanedQuery, stopWords);
+        if (nameTokens.Count == 0 || queryTokens.Count == 0)
+            return false;
+
+        var locationlessQuery = cleanedQuery;
+        foreach (var cue in new[] { " in ", " near ", " at " })
+        {
+            var cueIndex = locationlessQuery.IndexOf(cue, StringComparison.OrdinalIgnoreCase);
+            if (cueIndex > 0)
+            {
+                locationlessQuery = locationlessQuery[..cueIndex].Trim();
+                break;
+            }
+        }
+
+        var businessQueryTokens = TokenizeSignificantTerms(locationlessQuery, stopWords);
+        if (businessQueryTokens.Count == 0)
+        {
+            var explicitRegionTokens = ExtractExplicitRegionTokens(cleanedQuery)
+                .SelectMany(token => TokenizeSignificantTerms(token, stopWords))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            businessQueryTokens = queryTokens
+                .Where(token => !explicitRegionTokens.Contains(token))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (businessQueryTokens.Count == 0)
+            businessQueryTokens = queryTokens;
+
+        var overlap = businessQueryTokens.Count(nameTokens.Contains);
+        var requiredOverlap = businessQueryTokens.Count >= 2 ? 2 : 1;
+        return overlap >= requiredOverlap;
     }
 
     /// <summary>
@@ -1439,6 +1472,19 @@ public sealed partial class DeepDiveCoordinator
             return false;
         }
 
+        // Discussion boards and social feeds are not trustworthy hours sources.
+        if (host.Contains("reddit.com", StringComparison.Ordinal) ||
+            host.Contains("quora.com", StringComparison.Ordinal) ||
+            host.Contains("facebook.com", StringComparison.Ordinal) ||
+            host.Contains("instagram.com", StringComparison.Ordinal) ||
+            host.Contains("tiktok.com", StringComparison.Ordinal) ||
+            host.Contains("twitter.com", StringComparison.Ordinal) ||
+            host.Equals("x.com", StringComparison.Ordinal) ||
+            host.Contains("youtube.com", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -1494,6 +1540,68 @@ public sealed partial class DeepDiveCoordinator
             return 1;
 
         return 0;
+    }
+
+    private static IReadOnlyList<SourceItem> BuildDirectPlaceFallbackSources(string cleanedQuery)
+    {
+        if (TryBuildTraderJoesLocationSource(cleanedQuery) is { } traderJoesSource)
+            return [traderJoesSource];
+        if (TryBuildWalmartLocationSource(cleanedQuery) is { } walmartSource)
+            return [walmartSource];
+
+        return [];
+    }
+
+    private static SourceItem? TryBuildTraderJoesLocationSource(string cleanedQuery)
+    {
+        if (!cleanedQuery.Contains("trader joe", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var match = Regex.Match(
+            cleanedQuery,
+            @"\bin\s+(?<city>[A-Za-z][A-Za-z .'-]+)\s+(?<state>[A-Z]{2})\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return null;
+
+        var city = match.Groups["city"].Value.Trim();
+        var state = match.Groups["state"].Value.Trim().ToUpperInvariant();
+        var citySlug = Regex.Replace(city.ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(citySlug))
+            return null;
+
+        return new SourceItem
+        {
+            Url = $"https://locations.traderjoes.com/{state.ToLowerInvariant()}/{citySlug}/",
+            Title = $"Trader Joe's locations in {city}, {state}",
+            Domain = "locations.traderjoes.com",
+            Snippet = $"Official Trader Joe's store locator results for {city}, {state}."
+        };
+    }
+
+    private static SourceItem? TryBuildWalmartLocationSource(string cleanedQuery)
+    {
+        if (!cleanedQuery.Contains("walmart", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var match = Regex.Match(
+            cleanedQuery,
+            @"\bin\s+(?<city>[A-Za-z][A-Za-z .'-]+)\s+(?<state>[A-Z]{2})\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return null;
+
+        var city = match.Groups["city"].Value.Trim();
+        var state = match.Groups["state"].Value.Trim().ToUpperInvariant();
+        var location = $"{city}, {state}";
+
+        return new SourceItem
+        {
+            Url = $"https://www.walmart.com/store/finder?location={Uri.EscapeDataString(location)}",
+            Title = $"Walmart store finder for {location}",
+            Domain = "walmart.com",
+            Snippet = $"Official Walmart store locator results for {location}."
+        };
     }
 
     private static bool IsUsefulPlaceFallbackSource(

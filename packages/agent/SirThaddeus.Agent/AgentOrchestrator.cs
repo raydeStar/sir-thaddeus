@@ -130,48 +130,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
     private const int MaxHistoryTurns = 12;
 
-    public string? ActiveProfileId { get; set; }
-
-    public bool MemoryEnabled { get; set; } = true;
-
-    public bool PanicModeEnabled { get; set; }
-
-    public bool SafeModeEnabled { get; set; }
-
-    public string? UserLocationHint
-    {
-        get => _userLocationHint;
-        set
-        {
-            _userLocationHint = value;
-            _searchOrchestrator.UserLocationHint = value;
-        }
-    }
-
-    public string? UserTimezone { get; set; }
-
-    public string? PreferredUnits
-    {
-        get => _preferredUnits;
-        set
-        {
-            _preferredUnits = NormalizeUnitPreference(value);
-            _searchOrchestrator.PreferredUnits = _preferredUnits;
-        }
-    }
-
-    public bool DeepDiveEnabled
-    {
-        get => _searchOrchestrator.DeepDiveEnabled;
-        set => _searchOrchestrator.DeepDiveEnabled = value;
-    }
-
-    public bool AdvancedPlaceDiscoveryEnabled
-    {
-        get => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled;
-        set => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled = value;
-    }
-
     private enum ChatIntent
     {
         Casual,
@@ -501,6 +459,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             LogEvent("PLACE_CONTEXT_INFERRED", $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
         }
 
+        var contextualDeterministicPromptResponse = TryBuildDeterministicPromptResponse(
+            contextualUserMessage,
+            toolCallsMade,
+            roundTrips);
+        if (contextualDeterministicPromptResponse is not null)
+            return AttachContextSnapshot(contextualDeterministicPromptResponse, usageBaseline);
+
         if (SafeModeEnabled &&
             (route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent)))
         {
@@ -732,8 +697,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
                 InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
+                var lookupExecutionMessage = contextualUserMessage;
+                if (string.Equals(
+                    IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lowerIncoming),
+                    Intents.LookupSearch,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    lookupExecutionMessage = userMessage;
+                    if (!string.Equals(lookupExecutionMessage, contextualUserMessage, StringComparison.Ordinal))
+                    {
+                        LogEvent(
+                            "LOOKUP_EXECUTION_RAW_PROMPT_PRESERVED",
+                            "Preserved explicit lookup-tool phrasing for search execution.");
+                    }
+                }
+
                 var searchResponse = await _searchOrchestrator.ExecuteAsync(
-                    contextualUserMessage,
+                    lookupExecutionMessage,
                     memoryPackText,
                     _history,
                     toolCallsMade,
@@ -755,6 +735,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     searchResponse.AllowToolResultPersonalityPresentation);
                 if (!string.Equals(sanitizedSearchText, searchResponse.Text, StringComparison.Ordinal))
                     searchResponse = searchResponse with { Text = sanitizedSearchText };
+                searchResponse = NormalizeExplicitWebNoResultsContractResponse(
+                    contextualUserMessage,
+                    searchResponse,
+                    toolCallsMade);
 
                 if (searchResponse.Success)
                     AppendAssistantMessage(searchResponse.Text);
@@ -1110,11 +1094,19 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
             toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
+            toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
+                contextualUserMessage,
+                toolLoopResponse,
+                toolCallsMade);
             if (taskPlan is not null)
                 toolLoopResponse = toolLoopResponse with { Plan = taskPlan };
 
             toolLoopResponse = await ValidateAndMaybeRepairAsync(
                 contextualUserMessage, toolLoopResponse, toolCallsMade, cancellationToken);
+            toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
+                contextualUserMessage,
+                toolLoopResponse,
+                toolCallsMade);
 
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
                 route, contextualUserMessage, tools, toolCallsMade, toolLoopResponse, cancellationToken);

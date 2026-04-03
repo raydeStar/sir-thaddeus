@@ -706,6 +706,64 @@ public class QueryBuilderFallbackTests
     }
 
     [Fact]
+    public async Task FactFind_DirectQuery_StripsMediaComparisonLeadModifiers_FromResolvedEntity()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var entity = new EntityResolver.ResolvedEntity
+        {
+            CanonicalName = "live-action How to Train Your Dragon",
+            Type = "Media"
+        };
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            entity,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Contains("\"How to Train Your Dragon\"", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"live-action How to Train Your Dragon\"", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("difference", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
+    public async Task FactFind_DirectQuery_RewritesMediaComparisonPrompt_WithoutResolvedEntity()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            entity: null,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Contains("\"How to Train Your Dragon\"", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tell me if", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("word for word", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
     public async Task FactFind_DirectQuery_BroadensMarketplaceRecommendationPrompt()
     {
         var builder = new QueryBuilder(
@@ -734,6 +792,41 @@ public class QueryBuilderFallbackTests
         Assert.Contains("Ashwagandha", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("review", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Amazon", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
+    public async Task FactFind_DirectQuery_DoesNotRewriteNonMediaStructuredComparisonPrompt()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var entity = new EntityResolver.ResolvedEntity
+        {
+            CanonicalName = ".NET Aspire",
+            Type = "Technology"
+        };
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "Search for recent updates and developments in .NET Aspire from the last year. " +
+            "Synthesize information from multiple sources, compare what overlaps and what differs. " +
+            "Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            entity,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Contains(".NET Aspire", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("update", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("original adaptation", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("live action", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.False(result.UsedFallback);
     }
 }
@@ -1087,6 +1180,90 @@ public class SearchOrchestratorModeHintTests
 
         Assert.True(followUp.Success);
         Assert.NotNull(followUp.DeepDiveBriefing);
+    }
+
+    [Theory]
+    [InlineData(LookupModeHint.Auto)]
+    [InlineData(LookupModeHint.Fact)]
+    public async Task ExecuteAsync_ExplicitDeepDivePrompt_UsesDeepDiveBriefing_ForAutoAndFactHints(LookupModeHint modeHint)
+    {
+        var llm = new FakeLlmClient((messages, _) => new LlmResponse
+        {
+            IsComplete = true,
+            Content = "chat",
+            FinishReason = "stop"
+        });
+
+        var placesPayload = """
+        {
+            "provider": "google_places",
+            "query": "Seattle Flowers",
+            "fetchedAt": "2026-04-01T00:00:00.0000000Z",
+            "error": null,
+            "place": {
+                "placeId": "seattle-flowers",
+                "name": "Seattle Flowers",
+                "address": "100 Pike St, Seattle, WA 98101",
+                "phone": "(206) 555-0100",
+                "website": "https://example.test/seattle-flowers",
+                "directionsUrl": "https://maps.google.com/?q=Seattle+Flowers",
+                "rating": 4.3,
+                "userRatingsTotal": 96,
+                "openNow": true,
+                "weekdayText": ["Tuesday: 9:00 AM - 6:00 PM"],
+                "reviews": [
+                    {
+                        "author": "A",
+                        "rating": 5,
+                        "text": "Beautiful arrangements.",
+                        "relativeTimeDescription": "2 days ago"
+                    }
+                ],
+                "geometry": {
+                    "lat": 47.6097,
+                    "lng": -122.3331
+                }
+            },
+            "sources": [
+                {
+                    "name": "Google Places",
+                    "url": "https://maps.google.com/?q=Seattle+Flowers",
+                    "fetchedIso": "2026-04-01T00:00:00.0000000Z"
+                }
+            ]
+        }
+        """;
+
+        var webSearchPayload =
+            "1. Seattle Flowers reviews\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.test/seattle-flowers/reviews\",\"title\":\"Seattle Flowers reviews\",\"domain\":\"example.test\",\"excerpt\":\"Recent customer reviews for Seattle Flowers.\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "places_lookup" or "PlacesLookup" => placesPayload,
+            "web_search" or "WebSearch" => webSearchPayload,
+            "browser_navigate" or "BrowserNavigate" => "Seattle Flowers\n100 Pike St, Seattle, WA 98101\nOpen now",
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "Deep dive Seattle Flowers with hours + reviews and what to expect.",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: modeHint,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.DeepDiveBriefing);
+
+        var firstCall = mcp.Calls.FirstOrDefault();
+        Assert.False(string.IsNullOrWhiteSpace(firstCall.Tool));
+        Assert.Equal("places_lookup", firstCall.Tool, ignoreCase: true);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1604,6 +1781,43 @@ public class SearchPipelineGoldenTests
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UtilityBypass_Weather_DayPlanPrompt_UsesActivityAdvice()
+    {
+        var llm = new FakeLlmClient("LLM should not be needed here.");
+        var geocodeResult =
+            """{"query":"Denver","source":"open-meteo","cache":{"hit":false,"ageSeconds":0},"results":[{"name":"Denver, Colorado, US","countryCode":"US","isUs":true,"latitude":39.7392,"longitude":-104.9849,"confidence":0.95}]}""";
+        var forecastResult =
+            """{"provider":"open-meteo","cache":{"hit":false,"ageSeconds":0},"location":{"name":"Denver, Colorado, US","countryCode":"US","isUs":true,"latitude":39.7392,"longitude":-104.9849},"current":{"temperature":39,"unit":"F","condition":"clear","wind":"4 mph","humidityPercent":45},"daily":[{"date":"2026-02-10","avgTemp":44,"unit":"F","condition":"clear"}],"alerts":[]}""";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "weather_geocode" => geocodeResult,
+            "weather_forecast" => forecastResult,
+            _ => "unexpected tool call"
+        });
+
+        var agent = new AgentOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await agent.ProcessAsync(
+            "Use weather tools for Denver and provide a concise, useful plan for the day.");
+
+        Assert.True(result.Success);
+        Assert.Contains("Today in Denver", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("39F", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("clear", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            result.Text.Contains("Good options", StringComparison.OrdinalIgnoreCase) ||
+            result.Text.Contains("Best fit right now", StringComparison.OrdinalIgnoreCase),
+            $"Expected an activity-plan phrase, got: {result.Text}");
+        Assert.True(
+            result.Text.Contains("Bring a layer", StringComparison.OrdinalIgnoreCase) ||
+            result.Text.Contains("waterproof", StringComparison.OrdinalIgnoreCase),
+            $"Expected a practical caution, got: {result.Text}");
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_geocode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("weather_forecast", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -3057,7 +3271,7 @@ public class LocalBusinessDetectionTests
         Assert.Equal(10, bulletCount);
 
         var webCall = mcp.Calls.FirstOrDefault(c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("\"maxResults\":20", webCall.Args, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"maxResults\":10", webCall.Args, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -3340,6 +3554,1464 @@ public class LocalBusinessDetectionTests
         Assert.Contains(
             mcp.Calls.Select(c => c.Tool),
             t => t.Equals("places_lookup", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_SparseExplicitLocationResult_RetriesAndUsesDirectoryResponse()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var webSearchCalls = 0;
+        var sparseResult =
+            "1. \"Google Search\" — google.com\n" +
+            "   Search results page\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.google.com/search?q=florist+hillsboro\",\"title\":\"Google Search\",\"domain\":\"google.com\",\"excerpt\":\"Search results page\"}]";
+
+        var recoveredResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local directory of florist options in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Florists&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local directory of florist options in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            webSearchCalls++;
+            return webSearchCalls == 1 ? sparseResult : recoveredResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are the live florists results I found", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yelp.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(webSearchCalls >= 2, "Expected a retry after the sparse unusable first result.");
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_GenericLandingPage_RetriesWithAliasAndUsesLocationDirectoryResponse()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var genericLandingResult =
+            "1. \"Flower Delivery: Send Flowers Online | FTD\" — ftd.com\n" +
+            "   National flower delivery landing page.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.ftd.com/\",\"title\":\"Flower Delivery: Send Flowers Online | FTD\",\"domain\":\"ftd.com\",\"excerpt\":\"National flower delivery landing page.\"}]";
+
+        var recoveredDirectoryResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local directory of florist options in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Florists&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local directory of florist options in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return args.Contains("flower shop", StringComparison.OrdinalIgnoreCase)
+                ? recoveredDirectoryResult
+                : genericLandingResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are the live florists results I found", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yelp.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ftd.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("flower shop", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_ExplicitLocationRejectsOutOfAreaMatches_AndRetriesAlias()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var outOfAreaResult =
+            "1. \"The Marketplace Deli – San Diego | Sandwiches, Catering, Pizza and More\" — themarketplacesd.com\n" +
+            "   The Marketplace Deli in San Diego serves sandwiches, soups, and pizza.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://themarketplacesd.com/\",\"title\":\"The Marketplace Deli – San Diego | Sandwiches, Catering, Pizza and More\",\"domain\":\"themarketplacesd.com\",\"excerpt\":\"The Marketplace Deli in San Diego serves sandwiches, soups, and pizza.\"}]";
+
+        var recoveredDirectoryResult =
+            "1. \"Best Delis in Hillsboro, OR\" — yelp.com\n" +
+            "   Local deli listings in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Delis&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Delis in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local deli listings in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return args.Contains("sandwich shop", StringComparison.OrdinalIgnoreCase)
+                ? recoveredDirectoryResult
+                : outOfAreaResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are the live delis results I found", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yelp.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("San Diego", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("sandwich shop", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_ExplicitLocationRejectsSameCityWrongStateMatches_AndRetriesAlias()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var wrongStateResult =
+            "1. \"Hillsboro, IL Flower Shops\" — loc8nearme.com\n" +
+            "   Flower shops in Hillsboro, Illinois.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://loc8nearme.com/illinois/hillsboro/flower-shops/\",\"title\":\"Hillsboro, IL Flower Shops\",\"domain\":\"loc8nearme.com\",\"excerpt\":\"Flower shops in Hillsboro, Illinois.\"}]";
+
+        var recoveredDirectoryResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local directory of florist options in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Florists&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local directory of florist options in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return args.Contains("flower shop", StringComparison.OrdinalIgnoreCase)
+                ? recoveredDirectoryResult
+                : wrongStateResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Here are the live florists results I found", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yelp.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Hillsboro, IL", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("flower shop", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_ExplicitLocationDeliRetry_UsesSecondaryAliasBeforeGivingUp()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var outOfAreaResult =
+            "1. \"Best Delis in Seattle, WA\" — restaurantji.com\n" +
+            "   Browse Seattle deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/wa/seattle/deli/\",\"title\":\"Best Delis in Seattle, WA\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Seattle deli listings and local reviews.\"}]";
+
+        var recoveredDirectoryResult =
+            "1. \"Potbelly Sandwich Shop, Hillsboro\" — tripadvisor.com\n" +
+            "   Order food online at Potbelly Sandwich Shop, Hillsboro and see local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.tripadvisor.com/Restaurant_Review-g51730-d8089140-Reviews-Potbelly_Sandwich_Shop-Hillsboro_Oregon.html\",\"title\":\"Potbelly Sandwich Shop, Hillsboro\",\"domain\":\"tripadvisor.com\",\"excerpt\":\"Order food online at Potbelly Sandwich Shop, Hillsboro and see local reviews.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) =>
+        {
+            if (!tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return args.Contains("delicatessen", StringComparison.OrdinalIgnoreCase)
+                ? recoveredDirectoryResult
+                : outOfAreaResult;
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Potbelly Sandwich Shop", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Seattle", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("delicatessen in Hillsboro, OR", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_ExplicitLocationDeliRetry_UsesDirectDirectoryBrowserFallbackAfterAliasesFail()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var outOfAreaResult =
+            "1. \"McAlister's Deli Peoria\" — locations.mcalistersdeli.com\n" +
+            "   Visit your local deli restaurant and sandwich shop in Peoria, AZ.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://locations.mcalistersdeli.com/az/peoria\",\"title\":\"McAlister's Deli Peoria\",\"domain\":\"locations.mcalistersdeli.com\",\"excerpt\":\"Visit your local deli restaurant and sandwich shop in Peoria, AZ.\"}]";
+
+        var browserResult = """
+            Title: Best Delis in Hillsboro, OR - Yelp
+
+            Cheba Hut Toasted Subs
+            Neighborhood deli in Hillsboro, OR.
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => outOfAreaResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Cheba Hut Toasted Subs", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Peoria", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_ExplicitLocationDeliRetry_UsesTrustworthyNoMatchResponse_WhenReturnedPagesDoNotYieldShortlist()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var outOfAreaResult =
+            "1. \"McAlister's Deli Peoria\" — locations.mcalistersdeli.com\n" +
+            "   Visit your local deli restaurant and sandwich shop in Peoria, AZ.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://locations.mcalistersdeli.com/az/peoria\",\"title\":\"McAlister's Deli Peoria\",\"domain\":\"locations.mcalistersdeli.com\",\"excerpt\":\"Visit your local deli restaurant and sandwich shop in Peoria, AZ.\"}]";
+
+        const string cancelledError = "{" +
+            "\"error\":{\"code\":\"tool_error\",\"message\":\"Cancelled\",\"retriable\":false}}";
+
+        var yelpBrowserResult = """
+            Title: Best Delis in Hillsboro, OR - Yelp
+
+            Find the best delis near Hillsboro from recent reviews and neighborhood listings.
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => outOfAreaResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => yelpBrowserResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji.com/or/hillsboro/deli/", StringComparison.OrdinalIgnoreCase) => cancelledError,
+            "places_lookup" or "PlacesLookup" => cancelledError,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("trustworthy deli recommendation", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("restaurantji.com/or/hillsboro/deli/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_NoTrustworthyWebCandidates_UsesDirectPlacesFallback_WhenAdvancedDiscoveryDisabled()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var outOfAreaResult =
+            "1. \"The Marketplace Deli – San Diego | Sandwiches, Catering, Pizza and More\" — themarketplacesd.com\n" +
+            "   The Marketplace Deli in San Diego serves sandwiches, soups, and pizza.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://themarketplacesd.com/\",\"title\":\"The Marketplace Deli – San Diego | Sandwiches, Catering, Pizza and More\",\"domain\":\"themarketplacesd.com\",\"excerpt\":\"The Marketplace Deli in San Diego serves sandwiches, soups, and pizza.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => outOfAreaResult,
+            "places_lookup" or "PlacesLookup" when args.Contains("Hillsboro, OR", StringComparison.OrdinalIgnoreCase) =>
+                """
+                {
+                  "place": {
+                    "name": "Biscuit Delicatessen",
+                    "address": "171 NE 3rd Ave, Hillsboro, OR",
+                    "rating": 4.6,
+                    "userRatingsTotal": 412,
+                    "openNow": true
+                  }
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Biscuit Delicatessen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("Hillsboro, OR", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_NoTrustworthyWebCandidates_UsesBrowserFallbackNames_WhenPlacesUnavailable()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var localDirectoryResult =
+            "1. \"Delis\" — restaurantji.com\n" +
+            "   Browse Hillsboro deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/or/hillsboro/delis/\",\"title\":\"Delis\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Hillsboro deli listings and local reviews.\"}]";
+
+        var browserResult = """
+            Best sandwich shops in Hillsboro, OR
+
+            1. Biscuit Delicatessen
+            2. Main Street Deli
+            3. Hillsboro Sandwich Spot
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => localDirectoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Biscuit Delicatessen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Main Street Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_BrowserFallbackNames_CarryDirectoryEvidenceYear_WhenAvailable()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var localDirectoryResult =
+            "1. \"Delis\" — restaurantji.com\n" +
+            "   Browse Hillsboro deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/or/hillsboro/delis/\",\"title\":\"Delis\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Hillsboro deli listings and local reviews.\"}]";
+
+        var browserResult = """
+            Title: Best delis near Hillsboro, OR - 2026 Restaurantji
+
+            1. Biscuit Delicatessen
+            7418 W Baseline Rd, Hillsboro
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => localDirectoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Biscuit Delicatessen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2026", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_NoParsedSearchSources_UsesDirectDirectoryBrowserFallback_ForExplicitLocation()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var textOnlySearchResult =
+            "1. \"Best Delis in Hillsboro, OR\" — yelp.com\n" +
+            "   Local deli listings in Hillsboro, OR.";
+
+        var browserResult = """
+            Title: Best Delis in Hillsboro, OR - Yelp
+
+            Cheba Hut Toasted Subs
+            Neighborhood deli in Hillsboro, OR.
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => textOnlySearchResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Cheba Hut Toasted Subs", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FloristFallback_UsesStaticDirectoryBrowserFallback_WhenYelpIsEmpty()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var textOnlySearchResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local florist listings in Hillsboro, OR.";
+
+        var floristDirectoryBrowserResult = """
+            Florists in Hillsboro, OR
+
+            1. Flowers By Burkhardt's
+            6318 SE Virginia St, Hillsboro, OR 97123
+
+            2. Flowers By Zsuzsana
+            928 NE Orenco Station Loop, Hillsboro, OR 97124
+            """;
+
+        var yelpBrowserResult = """
+            One last step
+            Please solve the challenge below to continue.
+            cf-turnstile
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" when
+                args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) ||
+                args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) ||
+                args.Contains("\"query\":\"local florist Hillsboro OR", StringComparison.OrdinalIgnoreCase) ||
+                args.Contains("\"query\":\"flower shop Hillsboro OR", StringComparison.OrdinalIgnoreCase)
+                => string.Empty,
+            "web_search" or "WebSearch" => textOnlySearchResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("superpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => floristDirectoryBrowserResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yellowpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => floristDirectoryBrowserResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => yelpBrowserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "florists near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Flowers By Burkhardt's", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("superpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FloristFallback_PrefersRecoverySearchBeforeStaticDirectories()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var initialSearchResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local florist listings in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?cflt=florists&find_loc=Hillsboro%2C%20OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}]";
+
+        var recoveryTextOnlyResult =
+            "1. \"Florists - Hillsboro, OR | City of Hillsboro, OR | Chamber of Commerce\" — chamberofcommerce.com\n" +
+            "   Find local florists in Hillsboro, OR.\n\n" +
+            "2. \"Florist Hillsboro OR | Terry's Florist\" — terrysflorist.com\n" +
+            "   Flower delivery catalog for Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.chamberofcommerce.com/business-directory/oregon/hillsboro/florist/2033-hill-florist-and-gifts\",\"title\":\"Florists - Hillsboro, OR | City of Hillsboro, OR | Chamber of Commerce\",\"domain\":\"chamberofcommerce.com\",\"excerpt\":\"Find local florists in Hillsboro, OR.\"}," +
+            "{\"url\":\"https://terrysflorist.com/florists/oregon/hillsboro/\",\"title\":\"Florist Hillsboro OR | Terry's Florist\",\"domain\":\"terrysflorist.com\",\"excerpt\":\"Flower delivery catalog for Hillsboro, OR.\"}]";
+
+        var chamberBrowserResult = """
+            Hill Florist & Gifts
+            111 SE 3rd Ave Ste A, Hillsboro, OR 97123
+
+            Flowers by Zsuzsana
+            928 NE Orenco Station Loop, Hillsboro, OR 97124
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => recoveryTextOnlyResult,
+            "web_search" or "WebSearch" => initialSearchResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => chamberBrowserResult,
+            "browser_navigate" or "BrowserNavigate" => throw new InvalidOperationException("static-directory browser fallback should not run when florist recovery search has a usable chamber source"),
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "florists near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("florist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("City of Hillsboro", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Terry's Florist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            (call.Args.Contains("superpages.com", StringComparison.OrdinalIgnoreCase) ||
+             call.Args.Contains("yellowpages.com", StringComparison.OrdinalIgnoreCase) ||
+             call.Args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FloristFallback_RejectsProductCatalogNames()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var directoryResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local florist listings in Hillsboro, OR.\n\n" +
+            "2. \"The Flower Shop - Emissary Blooms\" — hillsborochamber.example\n" +
+            "   Florist and gifts in Hillsboro, OR.\n\n" +
+            "3. \"Florist Hillsboro OR | Terry's Florist\" — terrysflorist.com\n" +
+            "   Flower delivery catalog for Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Florists&find_loc=Hillsboro%2C+OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}," +
+            "{\"url\":\"https://business.hillsborochamber.example/the-flower-shop-emissary-blooms.htm\",\"title\":\"The Flower Shop - Emissary Blooms\",\"domain\":\"hillsborochamber.example\",\"excerpt\":\"Florist and gifts in Hillsboro, OR.\"}," +
+            "{\"url\":\"https://terrysflorist.com/florists/oregon/hillsboro/\",\"title\":\"Florist Hillsboro OR | Terry's Florist\",\"domain\":\"terrysflorist.com\",\"excerpt\":\"Flower delivery catalog for Hillsboro, OR.\"}]";
+
+        var chamberBrowserResult = """
+            ## [Emissary Blooms](https://business.hillsborochamber.example/the-flower-shop-emissary-blooms.htm)
+            450 E Main St, Hillsboro, OR 97123
+            """;
+
+        var terryBrowserResult = """
+            Happy Blooms Bouquet
+            Spring Fling
+            Comforting Standing Spray
+            Terry's Florist
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => directoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("hillsborochamber.example", StringComparison.OrdinalIgnoreCase) => chamberBrowserResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("terrysflorist.com", StringComparison.OrdinalIgnoreCase) => terryBrowserResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => "One last step\ncf-turnstile",
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "florists near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Emissary Blooms", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Happy Blooms Bouquet", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Comforting Standing Spray", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Terry's Florist", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_FloristFallback_UsesScopedRecoverySearch_WhenStaticDirectoriesAreBlocked()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var initialSearchResult =
+            "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+            "   Local florist listings in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?cflt=florists&find_loc=Hillsboro%2C%20OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}]";
+
+        var scopedRecoveryResult =
+            "1. \"Flowers By Zsuzsana - Hillsboro OR - Hours, Directions, Reviews - Loc8NearMe\" — loc8nearme.com\n" +
+            "   Florist in Hillsboro, OR with current address details.\n\n" +
+            "2. \"Hill Florist & Gifts | Florists - Chamber of Commerce\" — chamberofcommerce.com\n" +
+            "   Family-owned florist in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.loc8nearme.com/oregon/hillsboro/flowers-by-zsuzsana/\",\"title\":\"Flowers By Zsuzsana - Hillsboro OR - Hours, Directions, Reviews - Loc8NearMe\",\"domain\":\"loc8nearme.com\",\"excerpt\":\"Florist in Hillsboro, OR with current address details.\"}," +
+            "{\"url\":\"https://www.chamberofcommerce.com/business-directory/oregon/hillsboro/florist/2033-hill-florist-and-gifts\",\"title\":\"Hill Florist & Gifts | Florists - Chamber of Commerce\",\"domain\":\"chamberofcommerce.com\",\"excerpt\":\"Family-owned florist in Hillsboro, OR.\"}]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" when args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) => scopedRecoveryResult,
+            "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => scopedRecoveryResult,
+            "web_search" or "WebSearch" => initialSearchResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("superpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => "Attention Required! | Cloudflare",
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yellowpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => "Attention Required! | Cloudflare",
+            "browser_navigate" or "BrowserNavigate" when args.Contains("yelp.com/search", StringComparison.OrdinalIgnoreCase) => "One last step\ncf-turnstile",
+            "browser_navigate" or "BrowserNavigate" when args.Contains("loc8nearme.com", StringComparison.OrdinalIgnoreCase) => "Flowers By Zsuzsana\n928 NE Orenco Station Loop, Hillsboro, OR 97124\nOpen now",
+            "browser_navigate" or "BrowserNavigate" when args.Contains("chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => "Hill Florist & Gifts\n111 SE 3rd Ave Ste A, Hillsboro, OR 97123\nFamily owned florist",
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "florists near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good florist in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("florist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            (call.Args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) ||
+             call.Args.Contains("local florist Hillsboro", StringComparison.OrdinalIgnoreCase) ||
+             call.Args.Contains("flower shop Hillsboro OR", StringComparison.OrdinalIgnoreCase) ||
+             call.Args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase)));
+    }
+
+        [Fact]
+        public async Task LocalBusinessDiscovery_FloristFallback_UsesBingRssRecovery_WhenSearchResultsAreGarbage()
+        {
+                var llm = new FakeLlmClient((messages, _) =>
+                {
+                        var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+                        if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                                return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+                        return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+                });
+
+                var initialSearchResult =
+                        "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+                        "   Local florist listings in Hillsboro, OR.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "[{\"url\":\"https://www.yelp.com/search?cflt=florists&find_loc=Hillsboro%2C%20OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}]";
+
+                var bingRssResult = """
+                        <rss>
+                            <channel>
+                                <title>Bing: hillsboro or florist gifts</title>
+                                <item>
+                                    <title>About Hill Florist &amp; Gifts - Hillsboro, OR Florist</title>
+                                    <link>https://www.hillflorist.com/about_us.php</link>
+                                </item>
+                                <item>
+                                    <title>Shop by Flowers Delivery Hillsboro OR - Hill Florist &amp; Gifts</title>
+                                    <link>https://www.hillflorist.com/</link>
+                                </item>
+                                <item>
+                                    <title>Hill Florist &amp; Gifts, Hillsboro, OR | Find a Florist</title>
+                                    <link>https://www.findaflorist.com/oregon/hillsboro/hill-florist-and-gifts</link>
+                                </item>
+                            </channel>
+                        </rss>
+                        """;
+
+                var mcp = new FakeMcpClient((tool, args) => tool switch
+                {
+                        "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" when args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" => initialSearchResult,
+                        "browser_navigate" or "BrowserNavigate" when args.Contains("bing.com/search?format=rss", StringComparison.OrdinalIgnoreCase) => bingRssResult,
+                        "browser_navigate" or "BrowserNavigate" => throw new InvalidOperationException("static directory fallback should not run when Bing RSS recovery returns florist names"),
+                        "places_lookup" or "PlacesLookup" =>
+                                """
+                                {
+                                    "provider": "google_places",
+                                    "query": "florists near Hillsboro, OR",
+                                    "error": "Google Places API key is not configured.",
+                                    "place": null,
+                                    "sources": []
+                                }
+                                """,
+                        _ => string.Empty
+                });
+
+                var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+                {
+                        UserLocationHint = "Hillsboro, OR",
+                        AdvancedPlaceDiscoveryEnabled = false
+                };
+
+                var result = await orchestrator.ExecuteAsync(
+                        "Can you find me a good florist in Hillsboro, OR?",
+                        memoryPackText: "",
+                        history: [ChatMessage.System("Test assistant.")],
+                        toolCallsMade: [],
+                        modeHint: LookupModeHint.Fact,
+                        ct: CancellationToken.None);
+
+                Assert.True(result.Success);
+                Assert.Contains("Hill Florist & Gifts", result.Text, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains(mcp.Calls, call =>
+                        call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+                        call.Args.Contains("bing.com/search?format=rss", StringComparison.OrdinalIgnoreCase));
+        }
+
+                [Fact]
+                public async Task LocalBusinessDiscovery_FloristFallback_UsesBingRssRecovery_WhenBrowserReturnsPlainText()
+                {
+                    var llm = new FakeLlmClient((messages, _) =>
+                    {
+                        var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+                        if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                            return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+                        return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+                    });
+
+                    var initialSearchResult =
+                        "1. \"Best Florists in Hillsboro, OR\" — yelp.com\n" +
+                        "   Local florist listings in Hillsboro, OR.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "[{\"url\":\"https://www.yelp.com/search?cflt=florists&find_loc=Hillsboro%2C%20OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}]";
+
+                    var bingRssPlainText =
+                        "bing: hillsboro or florist gifts\n" +
+                        "Hillsboro Florist. Hillsboro OR Flower Delivery. Avas Flowers Shop\n" +
+                        "About Hill Florist & Gifts - Hillsboro, OR Florist\n" +
+                        "Shop by Flowers Delivery Hillsboro OR - Hill Florist & Gifts\n" +
+                        "Hill Florist & Gifts, Hillsboro, OR | Find a Florist\n";
+
+                    var mcp = new FakeMcpClient((tool, args) => tool switch
+                    {
+                        "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" when args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" => initialSearchResult,
+                        "browser_navigate" or "BrowserNavigate" when args.Contains("bing.com/search?format=rss", StringComparison.OrdinalIgnoreCase) => bingRssPlainText,
+                        "browser_navigate" or "BrowserNavigate" => throw new InvalidOperationException("static directory fallback should not run when Bing RSS plain text yields florist names"),
+                        "places_lookup" or "PlacesLookup" =>
+                            """
+                            {
+                                "provider": "google_places",
+                                "query": "florists near Hillsboro, OR",
+                                "error": "Google Places API key is not configured.",
+                                "place": null,
+                                "sources": []
+                            }
+                            """,
+                        _ => string.Empty
+                    });
+
+                    var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+                    {
+                        UserLocationHint = "Hillsboro, OR",
+                        AdvancedPlaceDiscoveryEnabled = false
+                    };
+
+                    var result = await orchestrator.ExecuteAsync(
+                        "Can you find me a good florist in Hillsboro, OR?",
+                        memoryPackText: "",
+                        history: [ChatMessage.System("Test assistant.")],
+                        toolCallsMade: [],
+                        modeHint: LookupModeHint.Fact,
+                        ct: CancellationToken.None);
+
+                    Assert.True(result.Success);
+                    Assert.Contains("Hill Florist & Gifts", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("Avas", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+                }
+
+                [Fact]
+                public async Task LocalBusinessDiscovery_FloristFallback_ReusesEarlierSearchEvidence_WhenLaterToolsHitBudgetStops()
+                {
+                    var llm = new FakeLlmClient((messages, _) =>
+                    {
+                        var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+                        if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                            return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+                        return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+                    });
+
+                    var initialSearchResult =
+                        "1. \"Flowers by Zsuzsana\" — flowersbyzsuzsana.com\n" +
+                        "   Hillsboro florist with same-day delivery in Hillsboro, OR.\n" +
+                        "2. \"FLOWERS BY BURKHARDT'S\" — flowersbyburkhardts.com\n" +
+                        "   Florist in Hillsboro, OR with current shop details.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "[{\"url\":\"https://www.yelp.com/search?cflt=florists&find_loc=Hillsboro%2C%20OR\",\"title\":\"Best Florists in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Local florist listings in Hillsboro, OR.\"}]";
+
+                    const string cancelledError = "{" +
+                        "\"error\":{\"code\":\"tool_error\",\"message\":\"Cancelled\",\"retriable\":false}}";
+                    const string budgetError = "{" +
+                        "\"error\":{\"code\":\"tool_budget_exceeded\",\"message\":\"Tool budget exceeded\",\"retriable\":false}}";
+
+                    var mcp = new FakeMcpClient((tool, args) => tool switch
+                    {
+                        "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => cancelledError,
+                        "web_search" or "WebSearch" when args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) => cancelledError,
+                        "web_search" or "WebSearch" => initialSearchResult,
+                        "browser_navigate" or "BrowserNavigate" => budgetError,
+                        "places_lookup" or "PlacesLookup" => budgetError,
+                        _ => string.Empty
+                    });
+
+                    var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+                    {
+                        UserLocationHint = "Hillsboro, OR",
+                        AdvancedPlaceDiscoveryEnabled = false
+                    };
+
+                    var result = await orchestrator.ExecuteAsync(
+                        "Can you find me a good florist in Hillsboro, OR?",
+                        memoryPackText: "",
+                        history: [ChatMessage.System("Test assistant.")],
+                        toolCallsMade: [],
+                        modeHint: LookupModeHint.Fact,
+                        ct: CancellationToken.None);
+
+                    Assert.True(result.Success);
+                    Assert.Contains("Flowers by Zsuzsana", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.Contains("FLOWERS BY BURKHARDT'S", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+                }
+
+                [Fact]
+                public async Task LocalBusinessDiscovery_FloristFallback_UsesStaticDirectories_WhenScopedRecoveryBrowseWasCancelled()
+                {
+                    var llm = new FakeLlmClient((messages, _) =>
+                    {
+                        var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+                        if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                            return new LlmResponse { IsComplete = true, Content = """{"query":"a good florist in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+                        return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+                    });
+
+                    var initialSearchResult =
+                        "1. \"Google Search\" — google.com\n" +
+                        "   Search results page.\n\n" +
+                        "2. \"Florist Hillsboro OR | Terry's Florist\" — terrysflorist.com\n" +
+                        "   Flower delivery catalog for Hillsboro, OR.\n\n" +
+                        "<!-- SOURCES_JSON -->\n" +
+                        "[{\"url\":\"https://www.google.com/search?q=florist+hillsboro\",\"title\":\"Google Search\",\"domain\":\"google.com\",\"excerpt\":\"Search results page.\"}," +
+                        "{\"url\":\"https://terrysflorist.com/florists/oregon/hillsboro/\",\"title\":\"Florist Hillsboro OR | Terry's Florist\",\"domain\":\"terrysflorist.com\",\"excerpt\":\"Flower delivery catalog for Hillsboro, OR.\"}]";
+
+                    const string cancelledError = "{" +
+                        "\"error\":{\"code\":\"tool_error\",\"message\":\"Cancelled\",\"retriable\":false}}";
+
+                    var floristDirectoryBrowserResult = """
+                        Florists in Hillsboro, OR
+
+                        1. Hill Florist & Gifts
+                        111 SE 3rd Ave Ste A, Hillsboro, OR 97123
+
+                        2. Flowers by Zsuzsana
+                        928 NE Orenco Station Loop, Hillsboro, OR 97124
+                        """;
+
+                    var mcp = new FakeMcpClient((tool, args) => tool switch
+                    {
+                        "web_search" or "WebSearch" when args.Contains("site:chamberofcommerce.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" when args.Contains("site:loc8nearme.com", StringComparison.OrdinalIgnoreCase) => string.Empty,
+                        "web_search" or "WebSearch" => initialSearchResult,
+                        "browser_navigate" or "BrowserNavigate" when args.Contains("bing.com/search?format=rss", StringComparison.OrdinalIgnoreCase) => cancelledError,
+                        "browser_navigate" or "BrowserNavigate" when args.Contains("superpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => floristDirectoryBrowserResult,
+                        "browser_navigate" or "BrowserNavigate" when args.Contains("yellowpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase) => floristDirectoryBrowserResult,
+                        "places_lookup" or "PlacesLookup" => cancelledError,
+                        _ => string.Empty
+                    });
+
+                    var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+                    {
+                        UserLocationHint = "Hillsboro, OR",
+                        AdvancedPlaceDiscoveryEnabled = false
+                    };
+
+                    var result = await orchestrator.ExecuteAsync(
+                        "Can you find me a good florist in Hillsboro, OR?",
+                        memoryPackText: "",
+                        history: [ChatMessage.System("Test assistant.")],
+                        toolCallsMade: [],
+                        modeHint: LookupModeHint.Fact,
+                        ct: CancellationToken.None);
+
+                    Assert.True(result.Success);
+                    Assert.Contains("Hill Florist & Gifts", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.Contains("Flowers by Zsuzsana", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+                    Assert.Contains(mcp.Calls, call =>
+                        call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+                        call.Args.Contains("superpages.com/hillsboro-or/florists", StringComparison.OrdinalIgnoreCase));
+                }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_BrowserFallback_DoesNotBrowseWrongAreaSources_ForExplicitLocation()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var wrongAreaDirectoryResult =
+            "1. \"Best Delis in Seattle, WA\" — restaurantji.com\n" +
+            "   Browse Seattle deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/wa/seattle/deli/\",\"title\":\"Best Delis in Seattle, WA\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Seattle deli listings and local reviews.\"}]";
+
+        var browserResult = "Best delis in Seattle, WA\n1. Market House Meats\n2. George's Polish Deli";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => wrongAreaDirectoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Market House Meats", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("George's Polish Deli", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("restaurantji.com/wa/seattle", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_BrowserFallbackFailure_DoesNotLeakPlacesConfigWhenSearchReturnedSources()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var localDirectoryResult =
+            "1. \"Delis\" — restaurantji.com\n" +
+            "   Browse Hillsboro deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/or/hillsboro/delis/\",\"title\":\"Delis\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Hillsboro deli listings and local reviews.\"}]";
+
+        var browserChallenge = """
+            One last step
+            Please solve the challenge below to continue.
+            cf-turnstile
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" => localDirectoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase) => browserChallenge,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("Google Places provider is missing an API key", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("trustworthy deli recommendation", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_RedditResult_IsRejectedAndAliasRetryFindsBrowsableDirectory()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var redditResult =
+            "1. \"r/Hillsboro - Need deli recs\" — reddit.com\n" +
+            "   Looking for a good deli in Hillsboro, OR.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.reddit.com/r/Hillsboro/comments/abc123/need_deli_recs/\",\"title\":\"r/Hillsboro - Need deli recs\",\"domain\":\"reddit.com\",\"excerpt\":\"Looking for a good deli in Hillsboro, OR.\"}]";
+
+        var directoryResult =
+            "1. \"Delis\" — restaurantji.com\n" +
+            "   Browse Hillsboro deli listings and local reviews.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.restaurantji.com/or/hillsboro/delis/\",\"title\":\"Delis\",\"domain\":\"restaurantji.com\",\"excerpt\":\"Browse Hillsboro deli listings and local reviews.\"}]";
+
+        var browserResult = """
+            Best sandwich shops in Hillsboro, OR
+
+            1. Biscuit Delicatessen
+            2. Main Street Deli
+            """;
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" when args.Contains("a good deli in Hillsboro, OR", StringComparison.OrdinalIgnoreCase) => redditResult,
+            "web_search" or "WebSearch" => directoryResult,
+            "browser_navigate" or "BrowserNavigate" when args.Contains("restaurantji", StringComparison.OrdinalIgnoreCase) => browserResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "delis near Hillsboro, OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Biscuit Delicatessen", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            !call.Args.Contains("a good deli in Hillsboro, OR", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LocalBusinessDiscovery_GenericDirectorySnippet_ExtractsNamedBusinesses()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"a good deli in Hillsboro, OR","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var directoryResult =
+            "1. \"THE BEST 10 Delis in Hillsboro, OR\" — yelp.com\n" +
+            "   Monkey's Subs, Lu's Etta's Deli & Market, Progress Grocery & Deli, Phil's 1500 Subs, Sunshine Market & Deli.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.yelp.com/search?find_desc=Delis&find_loc=Hillsboro%2C+OR\",\"title\":\"THE BEST 10 Delis in Hillsboro, OR\",\"domain\":\"yelp.com\",\"excerpt\":\"Monkey's Subs, Lu's Etta's Deli & Market, Progress Grocery & Deli, Phil's 1500 Subs, Sunshine Market & Deli.\"}]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" or "WebSearch" => directoryResult,
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Hillsboro, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Can you find me a good deli in Hillsboro, OR?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("delis nearby in Hillsboro, OR", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("could not retrieve live local business results", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("THE BEST 10 Delis in Hillsboro, OR", result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -3642,6 +5314,61 @@ public class LocalBusinessDetectionTests
     }
 
     [Fact]
+    public async Task LocalBusinessVerificationFallback_DoesNotClaimZeroResults_WhenSearchReturnedCandidates()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var sys = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
+            if (sys.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+                return new LlmResponse { IsComplete = true, Content = """{"query":"McDonalds in Portland OR hours","recency":"any"}""", FinishReason = "stop" };
+            return new LlmResponse { IsComplete = true, Content = "unused", FinishReason = "stop" };
+        });
+
+        var searchResult =
+            "1. \"McDonald's - Seattle, WA\" — example.com\n" +
+            "   Seattle location hours listing.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://example.com/seattle-mcdonalds\",\"title\":\"McDonald's - Seattle, WA\",\"domain\":\"example.com\",\"excerpt\":\"Seattle location hours listing.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, _) => tool switch
+        {
+            "web_search" or "WebSearch" => searchResult,
+            "places_lookup" or "PlacesLookup" =>
+                """
+                {
+                  "provider": "google_places",
+                  "query": "McDonalds in Portland OR",
+                  "error": "Google Places API key is not configured.",
+                  "place": null,
+                  "sources": []
+                }
+                """,
+            "browser_navigate" or "BrowserNavigate" => throw new InvalidOperationException("browser fallback should skip out-of-area candidates"),
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.")
+        {
+            UserLocationHint = "Portland, OR",
+            AdvancedPlaceDiscoveryEnabled = false
+        };
+
+        var result = await orchestrator.ExecuteAsync(
+            "Is McDonalds in Portland OR open right now?",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Verification recommended", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("fallback search came back with 0 results", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task LocalBusinessDiscovery_KeepsAmbiguousRelevantResults_WhenLocationIsKnown()
     {
         var llm = new FakeLlmClient((messages, _) =>
@@ -3728,6 +5455,7 @@ public class LocalBusinessDetectionTests
     [InlineData("tell me about quantum computing")]    // no business term
     [InlineData("what is the news today")]              // news, not local business
     [InlineData("open source software")]                // "open source" guard
+    [InlineData("can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?")]
     public void LooksLikeDeepDiveLookup_RejectsNonLocalBusiness(string input)
     {
         var result = IntentFeatureExtractor.LooksLikeDeepDiveLookup(input.ToLowerInvariant());
@@ -4020,6 +5748,83 @@ public class LocalBusinessNameExtractionTests
             "Can you find me a good deli in Hillsboro, OR?");
 
         Assert.Null(name);
+    }
+
+    [Theory]
+    [InlineData("Flower Delivery: Send Flowers Online | FTD", "Can you find me a good florist in Hillsboro, OR?")]
+    [InlineData("Delicatessen - Wikipedia", "Can you find me a good deli in Hillsboro, OR?")]
+    [InlineData("50 Best Sandwich Recipes & Ideas | Food Network", "Can you find me a good deli in Hillsboro, OR?")]
+    public void GenericCategoryLandingTitle_RejectedAsBusinessName(string title, string userMessage)
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(title, userMessage);
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void DirectoryClaimBannerPrefix_StrippedFromBusinessName()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "You Unclaimed Cheba Hut Toasted Subs",
+            "Can you find me a good deli in Hillsboro, OR?");
+
+        Assert.Equal("Cheba Hut Toasted Subs", name);
+    }
+
+    [Fact]
+    public void FloristSeoTitle_WithCategoryPrefix_ExtractsCleanBusinessName()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Hillsboro Florist: Flowers by Zsuzsana - Flower Delivery in OR, 97124",
+            "Can you find me a good florist in Hillsboro, OR?");
+
+        Assert.Equal("Flowers by Zsuzsana", name);
+    }
+
+    [Fact]
+    public void FloristSeoTitle_WithPipeSegments_ExtractsBusinessNameFromLaterSegment()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Flower Shop Hillsboro | Florist in Hillsboro, OR | FLOWERS BY BURKHARDT'S",
+            "Can you find me a good florist in Hillsboro, OR?");
+
+        Assert.Equal("FLOWERS BY BURKHARDT'S", name);
+    }
+
+    [Fact]
+    public void FloristDashSeparatedPageTitle_ExtractsBusinessNameFromLaterSegment()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Shop by Flowers Delivery Hillsboro OR - Hill Florist & Gifts",
+            "Can you find me a good florist in Hillsboro, OR?");
+
+        Assert.Equal("Hill Florist & Gifts", name);
+    }
+
+    [Fact]
+    public void FloristSeoTitle_WithCivicDirectorySegment_IsRejected()
+    {
+        var name = SearchOrchestrator.TestHook_ExtractBusinessNameFromSourceTitle(
+            "Florists - Hillsboro, OR | City of Hillsboro, OR | Chamber of Commerce",
+            "Can you find me a good florist in Hillsboro, OR?");
+
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void SanitizedWebSearchQuery_StripsRetryPlannerScaffold()
+    {
+        var query = """
+            good deli in Hillsboro, OR?
+            Retry strategy: official_source_search
+            Guidance: Prioritize official/first-party documentation and policy pages.
+            Previous answer for verification:
+            I could not retrieve live local business results.
+            Return concise, evidence-grounded output and call out uncertainty when unresolved.
+            """;
+
+        var sanitized = SearchOrchestrator.TestHook_SanitizeWebSearchQuery(query);
+
+        Assert.Equal("good deli in Hillsboro, OR?", sanitized);
     }
 
     [Fact]

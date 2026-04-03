@@ -708,7 +708,8 @@ public sealed partial class QueryBuilder
         string query;
         if (LooksLikeMediaComparisonQuery(lower))
         {
-            var comparisonSubject = NormalizeComparisonSubject(subject, entity);
+            var comparisonSubject = FormatComparisonSubjectForSearch(
+                NormalizeComparisonSubject(subject, entity));
             var comparisonSuffix = lower.Contains("live-action", StringComparison.Ordinal) ||
                                    lower.Contains("live action", StringComparison.Ordinal)
                 ? "live action differences original movie"
@@ -763,16 +764,39 @@ public sealed partial class QueryBuilder
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
-        return lower.Contains("word for word", StringComparison.Ordinal) ||
-               lower.Contains("like the original", StringComparison.Ordinal) ||
-               lower.Contains("same as the original", StringComparison.Ordinal) ||
-               lower.Contains("compare", StringComparison.Ordinal) ||
-               lower.Contains("compared", StringComparison.Ordinal) ||
-               lower.Contains("difference", StringComparison.Ordinal) ||
-               lower.Contains("differences", StringComparison.Ordinal) ||
-               lower.Contains("live-action", StringComparison.Ordinal) ||
-               lower.Contains("live action", StringComparison.Ordinal) ||
-               lower.Contains("remake", StringComparison.Ordinal);
+            if (lower.Contains("word for word", StringComparison.Ordinal) ||
+                lower.Contains("like the original", StringComparison.Ordinal) ||
+                lower.Contains("same as the original", StringComparison.Ordinal) ||
+                lower.Contains("live-action", StringComparison.Ordinal) ||
+                lower.Contains("live action", StringComparison.Ordinal) ||
+                lower.Contains("remake", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var hasComparisonCue = lower.Contains("compare", StringComparison.Ordinal) ||
+                                   lower.Contains("compared", StringComparison.Ordinal) ||
+                                   lower.Contains("difference", StringComparison.Ordinal) ||
+                                   lower.Contains("differences", StringComparison.Ordinal);
+
+            if (!hasComparisonCue)
+                return false;
+
+            return lower.Contains("movie", StringComparison.Ordinal) ||
+                   lower.Contains("movies", StringComparison.Ordinal) ||
+                   lower.Contains("film", StringComparison.Ordinal) ||
+                   lower.Contains("films", StringComparison.Ordinal) ||
+                   lower.Contains("show", StringComparison.Ordinal) ||
+                   lower.Contains("episode", StringComparison.Ordinal) ||
+                   lower.Contains("season", StringComparison.Ordinal) ||
+                   lower.Contains("series", StringComparison.Ordinal) ||
+                   lower.Contains("adaptation", StringComparison.Ordinal) ||
+                   lower.Contains("adaptations", StringComparison.Ordinal) ||
+                   lower.Contains("original", StringComparison.Ordinal) ||
+                   lower.Contains("scene", StringComparison.Ordinal) ||
+                   lower.Contains("dialogue", StringComparison.Ordinal) ||
+                   lower.Contains("book", StringComparison.Ordinal) ||
+                   lower.Contains("books", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeProductRecommendationQuery(string lower)
@@ -801,10 +825,89 @@ public sealed partial class QueryBuilder
         EntityResolver.ResolvedEntity? entity)
     {
         var preferred = entity?.CanonicalName;
-        if (!string.IsNullOrWhiteSpace(preferred))
-            return CollapseWhitespace(preferred).Trim();
+        var candidate = string.IsNullOrWhiteSpace(preferred) ? subject : preferred;
 
-        return CollapseWhitespace(subject).Trim();
+        candidate = CollapseWhitespace(candidate).Trim().Trim('"');
+        candidate = StripComparisonLeadIn(candidate);
+        candidate = StripComparisonTail(candidate);
+        candidate = StripMediaComparisonDescriptorPrefix(candidate);
+        candidate = CollapseWhitespace(candidate).Trim().Trim('"');
+
+        if (!string.IsNullOrWhiteSpace(candidate))
+            return candidate;
+
+        return CollapseWhitespace(subject).Trim().Trim('"');
+    }
+
+    private static string FormatComparisonSubjectForSearch(string subject)
+    {
+        var normalized = CollapseWhitespace(subject).Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+
+        return normalized.Contains(' ', StringComparison.Ordinal)
+            ? $"\"{normalized}\""
+            : normalized;
+    }
+
+    private static string StripComparisonLeadIn(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var cleaned = text;
+        cleaned = Regex.Replace(
+            cleaned,
+            @"^(?:tell\s+me\s+(?:if|whether)|let\s+me\s+know\s+if|do\s+you\s+know\s+if|is\s+it\s+true\s+that|whether|if)\s+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(
+            cleaned,
+            @"^(?:the\s+)?new\s+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+
+        return cleaned.Trim();
+    }
+
+    private static string StripComparisonTail(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var patterns = new[]
+        {
+            @"\b(?:is|are|was|were)\s+(?:word[\s-]?for[\s-]?word|identical|the\s+same|same\s+as|like\s+the\s+original).*?$",
+            @"\bword[\s-]?for[\s-]?word\b.*?$",
+            @"\blike\s+the\s+original\b.*?$",
+            @"\b(?:same\s+as|identical\s+to|different\s+from)\b.*?$"
+        };
+
+        var cleaned = text;
+        foreach (var pattern in patterns)
+        {
+            cleaned = Regex.Replace(
+                cleaned,
+                pattern,
+                string.Empty,
+                RegexOptions.IgnoreCase);
+        }
+
+        return cleaned.Trim().Trim('?', '.', '!', ',');
+    }
+
+    private static string StripMediaComparisonDescriptorPrefix(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        var cleaned = text;
+        cleaned = Regex.Replace(
+            cleaned,
+            @"^(?:(?:animated|live[\s-]?action|original|new)\s+)+",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        return cleaned.Trim();
     }
 
     private static string NormalizeProductSubject(

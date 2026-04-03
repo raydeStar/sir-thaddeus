@@ -20,7 +20,7 @@ public sealed partial class AgentOrchestrator
     {
         return laneResult.Lane switch
         {
-            TaskLane.Lookup when allowLookupLane => await TryExecuteCheckLaneAsync(
+            TaskLane.Lookup when allowLookupLane && ShouldFastPathCheckLane(userMessage, route) => await TryExecuteCheckLaneAsync(
                 userMessage,
                 laneResult,
                 memoryPackText,
@@ -36,6 +36,18 @@ public sealed partial class AgentOrchestrator
                 cancellationToken),
             _ => null
         };
+    }
+
+    private static bool ShouldFastPathCheckLane(string userMessage, RouterOutput route)
+    {
+        if (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) ||
+            route.Intent.Equals(Intents.LookupNews, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+        return !IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower) &&
+               !IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower) &&
+               !IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower);
     }
 
     private static bool ShouldFastPathExplainLane(

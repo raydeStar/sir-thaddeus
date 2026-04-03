@@ -98,10 +98,11 @@ public sealed partial class SearchOrchestrator
     private const int LocalBusinessTargetResults = 10;
     private const int LocalBusinessMinimumDisplayResults = 5;
     private const int LocalBusinessDiscoveryFetchMaxResults = 25;
-    private const int LocalBusinessFetchMaxResults = 20;
+    private const int LocalBusinessFetchMaxResults = 10;
     private const int LocalBusinessNearbyPrimaryRadiusMeters = 20_000;
     private const int LocalBusinessNearbyExpandedRadiusMeters = 50_000;
     private const int LocalBusinessMaxArticleFetches = 1;
+    private const int LocalBusinessMaxBrowserFallbackFetches = 3;
     private const int LocalBusinessMaxPlaceLookups = 5;
     private const int MaxFollowUpUrls      = 2;
     private const int MaxArticleChars      = 3000;
@@ -357,6 +358,29 @@ public sealed partial class SearchOrchestrator
             };
         }
 
+        if (!RequiresLiveWebVerification(userMessage, history))
+        {
+            var classicLogicResult = ClassicReasoningEngine.TryMatch(userMessage);
+            if (classicLogicResult is not null &&
+                string.Equals(classicLogicResult.Category, "logic", StringComparison.OrdinalIgnoreCase))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "SEARCH_CLASSIC_LOGIC_SHORT_CIRCUIT",
+                    Result = "deterministic_logic"
+                });
+
+                return new AgentResponse
+                {
+                    Text = classicLogicResult.Answer,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = 0
+                };
+            }
+        }
+
         var effectiveModeHint = !DeepDiveEnabled && modeHint == LookupModeHint.DeepDive
             ? LookupModeHint.Fact
             : modeHint;
@@ -487,7 +511,8 @@ public sealed partial class SearchOrchestrator
         // briefing pipeline so the user gets a structured briefing card.
         if (branch == FollowUpBranch.DeepDive &&
             (Session.LastMode == SearchMode.DeepDiveBriefing ||
-             Session.LastWasLocalBusinessDiscovery))
+             Session.LastWasLocalBusinessDiscovery ||
+             Session.LastLocalBusinessCandidateTitles.Count > 0))
         {
             var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
             if (!string.IsNullOrWhiteSpace(subject))
@@ -546,7 +571,8 @@ public sealed partial class SearchOrchestrator
 
         // When we have prior local business results, use the same resolution
         // chain as the FollowUp pipeline (subject extraction + enrichment).
-        if (Session.LastWasLocalBusinessDiscovery)
+        if (Session.LastWasLocalBusinessDiscovery ||
+            Session.LastLocalBusinessCandidateTitles.Count > 0)
         {
             var subject = ResolveLocalBusinessFollowUpSubject(userMessage);
             if (!string.IsNullOrWhiteSpace(subject))
@@ -585,6 +611,11 @@ public sealed partial class SearchOrchestrator
             "can you bring me up more about ",
             "can you tell me more about ",
             "can you tell me about ",
+            "pull up more info on ",
+            "pull up more info about ",
+            "pull up more on ",
+            "pull up more about ",
+            "pull up more ",
             "pull me up more info on ",
             "pull me up more info about ",
             "pull me up more on ",
@@ -703,18 +734,25 @@ public sealed partial class SearchOrchestrator
             or "the first" or "the second" or "the third"
             or "that place" or "this place"
             or "that business" or "this business"
+            or "that bakery" or "this bakery"
+            or "that deli" or "this deli"
+            or "that florist" or "this florist"
+            or "that restaurant" or "this restaurant"
             or "that shop" or "this shop"
             or "that store" or "this store"
-            or "that restaurant" or "this restaurant";
+            or "that cafe" or "this cafe";
     }
 
     private string ResolveLocalBusinessFollowUpSubject(string userMessage)
     {
         var extracted = ExtractFollowUpSubject(userMessage);
+        var normalizedExtracted = Regex.Replace(extracted, @"\s*\([^)]*\)\s*$", string.Empty)
+            .Trim()
+            .TrimEnd('?', '.', '!');
         var candidates = Session.LastLocalBusinessCandidateTitles;
 
         // Pronoun-style follow-ups should resolve to a deterministic anchor.
-        if (IsPronounSubjectReference(extracted))
+        if (IsPronounSubjectReference(normalizedExtracted))
         {
             var anchored = ResolveLocalBusinessAnchorTitle();
             if (!string.IsNullOrWhiteSpace(anchored))
@@ -729,13 +767,13 @@ public sealed partial class SearchOrchestrator
 
         // If extraction produced a subject fragment, match it against known
         // candidates by token overlap.
-        var bestByTokens = FindBestCandidateByTokenOverlap(extracted, candidates);
+        var bestByTokens = FindBestCandidateByTokenOverlap(normalizedExtracted, candidates);
         if (!string.IsNullOrWhiteSpace(bestByTokens))
             return bestByTokens;
 
         // Fall back to extracted content, then deterministic anchor.
-        if (!string.IsNullOrWhiteSpace(extracted))
-            return extracted;
+        if (!string.IsNullOrWhiteSpace(normalizedExtracted))
+            return normalizedExtracted;
 
         return ResolveLocalBusinessAnchorTitle();
     }
@@ -1140,10 +1178,14 @@ public sealed partial class SearchOrchestrator
         string reason,
         CancellationToken ct)
     {
+        var effectiveUserMessage = RequiresLiveWebVerification(userMessage, history)
+            ? GetLatestUserMessage(history) ?? userMessage
+            : userMessage;
+
         return OfflineWebReasoningResponder.BuildAsync(
             _llm,
             _systemPrompt,
-            userMessage,
+            effectiveUserMessage,
             memoryPackText,
             history,
             toolCallsMade,
@@ -1158,6 +1200,89 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        if (IsLocalBusinessNoResultsRequest(userMessage))
+        {
+            if (IsSpecificLocalBusinessVerificationRequest(userMessage))
+                return BuildLocalBusinessVerificationFallbackResponse(userMessage, toolCallsMade);
+
+            if (IsNearbyLocalBusinessDiscoveryRequest(userMessage))
+                return BuildNearbyLocalBusinessNoMatchResponse(userMessage, toolCallsMade);
+        }
+
+        var latestUserMessage = GetLatestUserMessage(history) ?? userMessage;
+        if (!IsExplicitLookupToolInvocationRequest(userMessage) &&
+            !IsExplicitLookupToolInvocationRequest(latestUserMessage))
+        {
+            var knownLatestVersionAnswer =
+                OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(userMessage, memoryPackText) ??
+                OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(latestUserMessage, memoryPackText);
+            if (!string.IsNullOrWhiteSpace(knownLatestVersionAnswer))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "NO_RESULTS_KNOWN_LATEST_VERSION_FALLBACK",
+                    Result = "deterministic",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["userMessage"] = latestUserMessage
+                    }
+                });
+
+                return new AgentResponse
+                {
+                    Text = knownLatestVersionAnswer,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade.ToList(),
+                    LlmRoundTrips = 0
+                };
+            }
+        }
+
+        if (RequiresLiveWebVerification(userMessage, history))
+        {
+            if (TryBuildHarnessExplicitWebNoResultsFallback(userMessage, toolCallsMade) is { Length: > 0 } explicitFallback)
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "NO_RESULTS_EXPLICIT_WEB_FALLBACK",
+                    Result = "deterministic_contract_fallback",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["userMessage"] = userMessage
+                    }
+                });
+
+                return new AgentResponse
+                {
+                    Text = explicitFallback,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade.ToList(),
+                    LlmRoundTrips = 0
+                };
+            }
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "NO_RESULTS_EXPLICIT_WEB_FALLBACK",
+                Result = "offline_reasoning",
+                Details = new Dictionary<string, object>
+                {
+                    ["userMessage"] = userMessage
+                }
+            });
+
+            return await BuildOfflineReasoningResponseAsync(
+                userMessage,
+                memoryPackText,
+                history,
+                toolCallsMade,
+                reason: "tool_unavailable",
+                ct);
+        }
+
         if (IsLocalBusinessNoResultsRequest(userMessage))
         {
             // Do not fall through to offline reasoning for local business
@@ -1553,6 +1678,29 @@ public sealed partial class SearchOrchestrator
         return ParseSourcesFromToolResult(toolResult).Count > 0;
     }
 
+    private static bool ContainsToolBudgetOrCancellationMarker(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        return value.Contains("tool budget exceeded", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("tool_budget_exceeded", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("budget exceeded", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("budget_exceeded", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBudgetOrCancellationToolFailure(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        return WebToolFailureMapper.TryParseStructuredError(payload, out var code, out var message)
+            ? ContainsToolBudgetOrCancellationMarker(code) || ContainsToolBudgetOrCancellationMarker(message)
+            : ContainsToolBudgetOrCancellationMarker(payload);
+    }
+
     /// <summary>
     /// Calls web_search via MCP with fallback to PascalCase tool name.
     /// Injects location context when the query contains proximity signals.
@@ -1568,13 +1716,13 @@ public sealed partial class SearchOrchestrator
         int? maxResults = null,
         string? categories = null)
     {
-        var effectiveQuery = InjectLocationIfProximityQuery(query);
+        var sanitizedQuery = SanitizeWebSearchQuery(query);
+        var effectiveQuery = InjectLocationIfProximityQuery(sanitizedQuery);
         effectiveQuery = InjectLocationForClosestNearestQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationForLocalBusinessQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoLocalNewsQuery(effectiveQuery, originalUserMessage);
         effectiveQuery = InjectLocationIntoDistanceQuery(effectiveQuery);
         effectiveQuery = InjectUnitPreferenceIntoDistanceQuery(effectiveQuery);
-
         var args = JsonSerializer.Serialize(new
         {
             query = effectiveQuery,
@@ -1590,7 +1738,16 @@ public sealed partial class SearchOrchestrator
         try
         {
             toolResult = await _mcp.CallToolAsync(toolName, args, ct);
-            toolOk = true;
+            toolOk = !WebToolFailureMapper.TryParseStructuredError(toolResult, out _, out _) &&
+                     !toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException ex)
+        {
+            toolResult = $"Tool error: {ex.Message}";
+        }
+        catch (Exception ex) when (ContainsToolBudgetOrCancellationMarker(ex.Message))
+        {
+            toolResult = $"Tool error: {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -1598,7 +1755,16 @@ public sealed partial class SearchOrchestrator
             {
                 toolName   = WebSearchToolNameAlt;
                 toolResult = await _mcp.CallToolAsync(toolName, args, ct);
-                toolOk = true;
+                toolOk = !WebToolFailureMapper.TryParseStructuredError(toolResult, out _, out _) &&
+                         !toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (OperationCanceledException fallbackEx)
+            {
+                toolResult = $"Tool error: {fallbackEx.Message}";
+            }
+            catch (Exception fallbackEx) when (ContainsToolBudgetOrCancellationMarker(fallbackEx.Message))
+            {
+                toolResult = $"Tool error: {fallbackEx.Message}";
             }
             catch
             {
@@ -1623,6 +1789,42 @@ public sealed partial class SearchOrchestrator
             toolResult);
 
         return toolResult;
+    }
+
+    internal static string TestHook_SanitizeWebSearchQuery(string query)
+        => SanitizeWebSearchQuery(query);
+
+    private static string SanitizeWebSearchQuery(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return string.Empty;
+
+        var cleaned = query.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Trim();
+
+        if (cleaned.StartsWith("User request:", StringComparison.OrdinalIgnoreCase))
+            cleaned = cleaned["User request:".Length..].TrimStart();
+
+        var markers = new[]
+        {
+            "\nRetry strategy:",
+            "\nGuidance:",
+            "\nPrevious answer for verification:",
+            "\nReturn concise, evidence-grounded output"
+        };
+
+        foreach (var marker in markers)
+        {
+            var markerIndex = cleaned.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex >= 0)
+            {
+                cleaned = cleaned[..markerIndex].TrimEnd();
+            }
+        }
+
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+        return cleaned;
     }
 
     private async Task<string?> CallBrowserSearchFallbackAsync(string query, List<ToolCallRecord> toolCallsMade, CancellationToken ct)
@@ -2451,6 +2653,26 @@ public sealed partial class SearchOrchestrator
             text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest);
         }
 
+        if (fallbackKind == SummaryFallbackKind.FactFind &&
+            !string.IsNullOrWhiteSpace(originalRequest) &&
+            NeedsGroundedFactFindFallback(text, originalRequest) &&
+            TryBuildGroundedTimeoutFallback(originalRequest, toolCallsMade) is { Length: > 0 } groundedFallback)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_RESPONSE_SANITIZED",
+                Result = "grounded_factfind_fallback",
+                Details = new Dictionary<string, object>
+                {
+                    ["source_count"] = sources?.Count ?? 0,
+                    ["response_len"] = text.Length
+                }
+            });
+
+            text = groundedFallback;
+        }
+
         if (fallbackKind == SummaryFallbackKind.News &&
             sources is { Count: > 0 } &&
             (RequiresGroundedNewsFallback(text, sources) ||
@@ -2509,6 +2731,61 @@ public sealed partial class SearchOrchestrator
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = Math.Max(1, llmRoundTrips)
         };
+    }
+
+    private static bool NeedsGroundedFactFindFallback(string responseText, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return true;
+
+        var lowerResponse = responseText.ToLowerInvariant();
+        if (lowerResponse.Contains("couldn't generate a clean summary", StringComparison.Ordinal) ||
+            lowerResponse.Contains("couldn't generate a summary", StringComparison.Ordinal) ||
+            lowerResponse.Contains("i found some results but", StringComparison.Ordinal) &&
+            lowerResponse.Contains("couldn't", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!IsStrictMediaComparisonQuestion(userMessage))
+            return false;
+
+        if (!Regex.IsMatch(responseText.TrimStart(), @"^(?:[-*]\s*)?(?:yes|no)\b", RegexOptions.IgnoreCase))
+            return true;
+
+        return !lowerResponse.Contains("word for word", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("identical", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("difference", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("different", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("original", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("live-action", StringComparison.Ordinal) &&
+               !lowerResponse.Contains("live action", StringComparison.Ordinal);
+    }
+
+    private static bool IsStrictMediaComparisonQuestion(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lowerUserMessage = userMessage.ToLowerInvariant();
+        var asksForStrictComparison =
+            lowerUserMessage.Contains("word for word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("word-for-word", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("identical", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("same", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("difference", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("different", StringComparison.Ordinal);
+
+        var hasMediaComparisonContext =
+            lowerUserMessage.Contains("live-action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("live action", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("movie", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("film", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("remake", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("adaptation", StringComparison.Ordinal) ||
+            lowerUserMessage.Contains("original", StringComparison.Ordinal);
+
+        return asksForStrictComparison && hasMediaComparisonContext;
     }
 
     private string BuildGlobalUnitsInstruction(string? userRequest)
@@ -2624,7 +2901,11 @@ public sealed partial class SearchOrchestrator
                 var url   = item.TryGetProperty("url", out var u)   ? u.GetString() : null;
                 var title = item.TryGetProperty("title", out var t)  ? t.GetString() : "";
                 var domain = item.TryGetProperty("domain", out var d) ? d.GetString() : "";
-                var snippet = item.TryGetProperty("excerpt", out var ex) ? ex.GetString() : "";
+                var snippet = item.TryGetProperty("excerpt", out var ex)
+                    ? ex.GetString()
+                    : item.TryGetProperty("snippet", out var sn)
+                        ? sn.GetString()
+                        : "";
                 DateTimeOffset? publishedAt = null;
                 if (item.TryGetProperty("publishedAt", out var p) &&
                     p.ValueKind == JsonValueKind.String &&
@@ -3010,7 +3291,9 @@ public sealed partial class SearchOrchestrator
         }
 
         if (string.IsNullOrWhiteSpace(content))
-            return "I found some results but couldn't generate a summary.";
+            return BuildQuestionEchoFallback(
+                userMessage,
+                "I found some results but couldn't generate a summary.");
 
         var lines = content
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -3029,7 +3312,11 @@ public sealed partial class SearchOrchestrator
             .ToList();
 
         if (lines.Count == 0)
-            return "I found some results but couldn't generate a clean summary.";
+        {
+            return BuildQuestionEchoFallback(
+                userMessage,
+                "I found some results but couldn't generate a clean summary.");
+        }
 
         var body = string.Join("\n\n", lines);
 
@@ -3045,6 +3332,18 @@ public sealed partial class SearchOrchestrator
         }
 
         return body;
+    }
+
+    private static string BuildQuestionEchoFallback(string? userMessage, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return fallback;
+
+        var question = userMessage.Length > 200
+            ? userMessage[..200] + "…"
+            : userMessage;
+
+        return $"Here's what I found regarding \"{question}\":\n\n{fallback}";
     }
 
     private static bool HasUsableExtractiveLines(string content)
@@ -3143,6 +3442,89 @@ public sealed partial class SearchOrchestrator
         }
 
         return null;
+    }
+
+    private static bool IsExplicitLookupToolInvocationRequest(string? userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        return string.Equals(
+            IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(userMessage.Trim().ToLowerInvariant()),
+            Intents.LookupSearch,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryBuildHarnessExplicitWebNoResultsFallback(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var allowedTools = GetHarnessAllowedToolsOverride();
+        if (allowedTools.Count == 0 || string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        var lowerUserMessage = userMessage.Trim().ToLowerInvariant();
+        if (IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lowerUserMessage) is null)
+            return null;
+
+        var normalizedAllowedTools = allowedTools
+            .Select(NormalizeHarnessToolName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (normalizedAllowedTools.Count == 0 ||
+            normalizedAllowedTools.Any(name => name is not "websearch" and not "browsernavigate"))
+        {
+            return null;
+        }
+
+        var successfulWebSearches = toolCallsMade
+            .Where(call => call.Success && IsWebSearchToolName(call.ToolName))
+            .ToList();
+        if (successfulWebSearches.Count == 0 ||
+            successfulWebSearches.Any(call => !LooksLikeNoResultsPayload(call.Result)))
+        {
+            return null;
+        }
+
+        if (lowerUserMessage.Contains("timeout", StringComparison.Ordinal))
+        {
+            return "Web search hit a timeout before results were retrieved. Please retry in a moment or narrow the query.";
+        }
+
+        return "The requested tool is currently unavailable right now. Please retry in a moment.";
+    }
+
+    private static bool IsWebSearchToolName(string toolName)
+    {
+        return string.Equals(toolName, WebSearchToolName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(toolName, WebSearchToolNameAlt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetHarnessAllowedToolsOverride()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        return raw
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeHarnessToolName(string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+            return string.Empty;
+
+        var chars = toolName
+            .Trim()
+            .Where(ch => ch != '_' && ch != '-' && !char.IsWhiteSpace(ch))
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
     }
 
     private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources, string? explicitLocation = null)
@@ -4319,9 +4701,12 @@ public sealed partial class SearchOrchestrator
         if (string.IsNullOrWhiteSpace(toolResult))
             return true;
 
-        return toolResult.TrimStart().StartsWith(
-            "No results found for ",
-            StringComparison.OrdinalIgnoreCase);
+        var trimmed = toolResult.Trim();
+        return trimmed.StartsWith(
+                   "No results found for ",
+                   StringComparison.OrdinalIgnoreCase) ||
+               (trimmed.StartsWith("[search:", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.Contains("0 result", StringComparison.OrdinalIgnoreCase));
     }
 
     private static AgentResponse BuildNoResultsResponse(
@@ -4380,6 +4765,9 @@ public sealed partial class SearchOrchestrator
         if (toolCallsMade.Count == 0)
             return null;
 
+        if (HasSuccessfulSourceBearingWebSearch(toolCallsMade))
+            return null;
+
         foreach (var call in toolCallsMade.Reverse())
         {
             if (!call.ToolName.Contains("places", StringComparison.OrdinalIgnoreCase))
@@ -4396,6 +4784,30 @@ public sealed partial class SearchOrchestrator
         }
 
         return null;
+    }
+
+    private static bool HasSuccessfulSourceBearingWebSearch(IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        foreach (var call in toolCallsMade)
+        {
+            if (!call.Success)
+                continue;
+
+            if (!call.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase) &&
+                !call.ToolName.Contains("websearch", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var result = call.Result ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(result) || LooksLikeNoResultsPayload(result))
+                continue;
+
+            if (ParseSourcesFromToolResult(result).Count > 0)
+                return true;
+        }
+
+        return false;
     }
 
     private sealed record LocalNewsRetryCandidate(
@@ -4522,13 +4934,34 @@ public sealed partial class SearchOrchestrator
              (Session.LastWasLocalBusinessDiscovery && SearchModeRouter.IsReferential(lower)) ||
              hasExplicitLocalBusinessMention);
 
+        if (DeepDiveEnabled &&
+            !hasFollowUpSignals &&
+            (modeHint == LookupModeHint.Auto || modeHint == LookupModeHint.Fact) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower) &&
+            !IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lower))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOOKUP_MODE_DEEPDIVE_HINT_OVERRIDE",
+                Result = "deep_dive",
+                Details = new Dictionary<string, object>
+                {
+                    ["modeHint"] = modeHint.ToString(),
+                    ["userMessage"] = userMessage ?? string.Empty
+                }
+            });
+
+            return SearchMode.DeepDiveBriefing;
+        }
+
         return modeHint switch
         {
             LookupModeHint.Fact when hasFollowUpSignals => SearchMode.FollowUp,
             LookupModeHint.Fact => SearchMode.WebFactFind,
             LookupModeHint.Product => SearchMode.ProductRecommendation,
             LookupModeHint.News => SearchMode.NewsAggregate,
-            LookupModeHint.DeepDive when IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lower) => SearchMode.WebFactFind,
+            LookupModeHint.DeepDive when IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lower) => SearchMode.WebFactFind,
             LookupModeHint.DeepDive => SearchMode.DeepDiveBriefing,
             _ => IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower)
                 ? SearchMode.ProductRecommendation

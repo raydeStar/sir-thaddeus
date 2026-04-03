@@ -312,6 +312,11 @@ public static partial class WeatherResponseBuilder
                lowerMessage.Contains("what can i do", StringComparison.Ordinal) ||
                lowerMessage.Contains("could i do", StringComparison.Ordinal) ||
                lowerMessage.Contains("what should i do", StringComparison.Ordinal) ||
+                             lowerMessage.Contains("plan for the day", StringComparison.Ordinal) ||
+                             lowerMessage.Contains("plan for today", StringComparison.Ordinal) ||
+                             lowerMessage.Contains("plan my day", StringComparison.Ordinal) ||
+                             lowerMessage.Contains("useful plan", StringComparison.Ordinal) ||
+                             lowerMessage.Contains("day plan", StringComparison.Ordinal) ||
              lowerMessage.Contains("kinds of things", StringComparison.Ordinal) ||
                lowerMessage.Contains("kind of things", StringComparison.Ordinal) ||
                lowerMessage.Contains("things to do", StringComparison.Ordinal) ||

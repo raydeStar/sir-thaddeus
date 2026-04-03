@@ -127,6 +127,36 @@ public class MemoryContextProviderTests
     }
 
     [Fact]
+    public async Task GetContextAsync_SkipsWhenHarnessDisallowsMemoryRetrieve()
+    {
+        var previous = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", "web_search,browser_navigate");
+
+        try
+        {
+            var mcp = new FakeMcpClient("should-not-run");
+            var audit = new TestAuditLogger();
+            var provider = new MemoryContextProvider(mcp, audit, new FakeSmartIntentClassifier(), TimeProvider.System);
+
+            var result = await provider.GetContextAsync(new MemoryContextRequest
+            {
+                UserMessage = "Use web_search to find Rust release notes.",
+                MemoryEnabled = true,
+                Timeout = TimeSpan.FromMilliseconds(500)
+            });
+
+            Assert.True(result.Provenance.Skipped);
+            Assert.False(result.Provenance.Success);
+            Assert.Equal("Memory retrieve disallowed by harness tool policy.", result.Provenance.Summary);
+            Assert.Empty(mcp.Calls);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", previous);
+        }
+    }
+
+    [Fact]
     public async Task GetContextAsync_SkipsUtilityTimePrompt_WithoutCallingMemoryTool()
     {
         var mcp = new FakeMcpClient("should-not-run");

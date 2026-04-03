@@ -1,3 +1,4 @@
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Search;
@@ -37,7 +38,7 @@ internal static partial class OfflineWebReasoningResponder
         var isLocalNewsRequest = LooksLikeLocalNewsRequest(userMessage, out _);
         var isMediaInstallmentRequest = LooksLikeMediaInstallmentPlotRequest(userMessage, out _);
         var messages = BuildMessages(systemPrompt, memoryPackText, history, userMessage, failureReason);
-        var forceDeterministicFallback = ShouldUseDeterministicFallbackFirst(failureReason, toolCallsMade)
+        var forceDeterministicFallback = ShouldUseDeterministicFallbackFirst(userMessage, failureReason, toolCallsMade)
             || isLocalBusinessRequest
             || isLocalNewsRequest
             || isMediaInstallmentRequest;
@@ -64,6 +65,7 @@ internal static partial class OfflineWebReasoningResponder
                     BuildDeterministicFallback(userMessage, memoryPackText),
                     toolCallsMade);
             var finalText = BuildFinalText(answer, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
+            finalText = EnsureUnavailableKeywordForExplicitWebFallback(finalText, userMessage);
 
             return new AgentResponse
             {
@@ -80,6 +82,7 @@ internal static partial class OfflineWebReasoningResponder
                 memoryPackText);
             fallback = EnsureSearchTokenIfWebFallback(fallback, toolCallsMade);
             var finalText = BuildFinalText(fallback, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
+            finalText = EnsureUnavailableKeywordForExplicitWebFallback(finalText, userMessage);
 
             return new AgentResponse
             {
@@ -92,6 +95,7 @@ internal static partial class OfflineWebReasoningResponder
     }
 
     private static bool ShouldUseDeterministicFallbackFirst(
+        string userMessage,
         string failureReason,
         IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
@@ -104,7 +108,7 @@ internal static partial class OfflineWebReasoningResponder
             return true;
         }
 
-        return false;
+        return RequiresLiveWebVerification(userMessage);
     }
 
     private static List<ChatMessage> BuildMessages(
@@ -179,11 +183,30 @@ internal static partial class OfflineWebReasoningResponder
         return Truncate($"{prefix}\n\n{trimmed}", 2200);
     }
 
+    private static string EnsureUnavailableKeywordForExplicitWebFallback(string text, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            !RequiresLiveWebVerification(userMessage) ||
+            text.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        if (RequiresStrictOutputFormat(userMessage) &&
+            text.StartsWith("Answer:", StringComparison.OrdinalIgnoreCase) &&
+            text.Contains("\nCommentary:", StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        return $"The requested tool is currently unavailable right now.\n\n{text.Trim()}";
+    }
+
     private static string BuildDeterministicFallback(string userMessage, string memoryPackText = "")
     {
         var name = ExtractPreferredName(memoryPackText);
         var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
-        var shouldMentionOutage = LooksLikeVerificationContractPrompt(userMessage);
+        var shouldMentionOutage = RequiresLiveWebVerification(userMessage);
 
         if (LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
         {
@@ -258,14 +281,23 @@ internal static partial class OfflineWebReasoningResponder
                        failureReason.Contains("timeout", StringComparison.OrdinalIgnoreCase);
             }
 
-            private static bool LooksLikeVerificationContractPrompt(string userMessage)
+            private static bool RequiresLiveWebVerification(string userMessage)
             {
                 if (string.IsNullOrWhiteSpace(userMessage))
                     return false;
 
-                return userMessage.Contains("Verification requirement", StringComparison.OrdinalIgnoreCase) ||
-                       userMessage.Contains("Do not answer from memory alone", StringComparison.OrdinalIgnoreCase) ||
-                       userMessage.Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase);
+                if (userMessage.Contains("Verification requirement", StringComparison.OrdinalIgnoreCase) ||
+                    userMessage.Contains("Do not answer from memory alone", StringComparison.OrdinalIgnoreCase) ||
+                    userMessage.Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                var lower = userMessage.Trim().ToLowerInvariant();
+                return string.Equals(
+                    IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
+                    Intents.LookupSearch,
+                    StringComparison.OrdinalIgnoreCase);
             }
 
     private static bool LooksLikeLatestVersionQuestion(string userMessage, out string subject, out string yearHint)

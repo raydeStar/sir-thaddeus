@@ -890,6 +890,9 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        if (LooksLikeMediaComparisonOrAdaptationPrompt(lower))
+            return false;
+
         ReadOnlySpan<string> explicitSignals =
         [
             "deep dive",
@@ -982,6 +985,31 @@ public static class IntentFeatureExtractor
             lower.Contains("what to expect", StringComparison.Ordinal);
 
         return hasHoursVerb && hasReviewVerb;
+    }
+
+    private static bool LooksLikeMediaComparisonOrAdaptationPrompt(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        if (lower.Contains("word for word", StringComparison.Ordinal) ||
+            lower.Contains("scene for scene", StringComparison.Ordinal) ||
+            lower.Contains("adaptation", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var hasLiveActionCue =
+            lower.Contains("live-action", StringComparison.Ordinal) ||
+            lower.Contains("live action", StringComparison.Ordinal);
+
+        if (!hasLiveActionCue)
+            return false;
+
+        return lower.Contains("movie", StringComparison.Ordinal) ||
+               lower.Contains("movies", StringComparison.Ordinal) ||
+               lower.Contains("film", StringComparison.Ordinal) ||
+               lower.Contains("original", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1117,6 +1145,15 @@ public static class IntentFeatureExtractor
             lower.Contains("tonight", StringComparison.Ordinal);
 
         return hasLocalCue;
+    }
+
+    public static bool LooksLikeGenericLocalBusinessDiscovery(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+
+        return LooksLikeLocalBusinessDiscovery(lower) &&
+               !LooksLikeDeepDiveLookup(lower);
     }
 
     /// <summary>

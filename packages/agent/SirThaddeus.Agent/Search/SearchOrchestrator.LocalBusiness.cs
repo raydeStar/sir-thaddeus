@@ -1,8 +1,11 @@
 using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.WebSearch;
 
 namespace SirThaddeus.Agent.Search;
@@ -46,6 +49,25 @@ public sealed partial class SearchOrchestrator
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
         var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
         var locText = string.IsNullOrWhiteSpace(location) ? " nearby" : $" nearby in {location}";
+        var requireExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var selectedSources = SelectLocalBusinessDiscoverySources(
+            userMessage,
+            sources,
+            LocalBusinessTargetResults,
+            location);
+        if (selectedSources.Count > 0)
+            sources = selectedSources;
+
+        Session.LastWasLocalBusinessDiscovery = true;
+        Session.RecordLocalBusinessCandidates(businessLabel, sources);
+
+        if (requireExactLocationMatch &&
+            !string.IsNullOrWhiteSpace(location) &&
+            FilterSourcesForLocalBusinessLocation(sources, location, requireMatch: true).Count == 0)
+        {
+            return BuildNoResultsResponse(userMessage, toolCallsMade);
+        }
+
         var topSources = sources
             .Where(source => !IsDirectoryAggregatorSource(source))
             .Select(source => new
@@ -58,7 +80,13 @@ public sealed partial class SearchOrchestrator
             .ToList();
 
         if (topSources.Count == 0)
+        {
+            var snippetNames = ExtractLocalBusinessNamesFromSearchSources(sources, userMessage);
+            if (snippetNames.Count > 0)
+                return BuildCleanedLocalBusinessResponse(userMessage, snippetNames, location, toolCallsMade);
+
             return BuildDirectoryLocalBusinessResponse(userMessage, sources, toolCallsMade);
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine(topSources.Count == 1
@@ -118,7 +146,12 @@ public sealed partial class SearchOrchestrator
         if (sources.Count == 0)
             return [];
 
-        var locationFiltered = FilterSourcesForLocalBusinessLocation(sources, locationContext);
+        var requiresExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var locationFiltered = FilterSourcesForLocalBusinessDiscovery(
+            userMessage,
+            sources,
+            locationContext,
+            requiresExactLocationMatch);
         if (locationFiltered.Count > 0)
             sources = locationFiltered;
         else if (!string.IsNullOrWhiteSpace(locationContext))
@@ -187,6 +220,46 @@ public sealed partial class SearchOrchestrator
         if (title.StartsWith("Bing", StringComparison.OrdinalIgnoreCase) &&
             title.Length < 30)
             return true;
+
+        if (Uri.TryCreate(source.Url, UriKind.Absolute, out var uri))
+        {
+            var host = uri.Host.ToLowerInvariant();
+            if (host.Contains("wikipedia.org", StringComparison.Ordinal) ||
+                host.Contains("wiktionary.org", StringComparison.Ordinal) ||
+                host.Contains("britannica.com", StringComparison.Ordinal) ||
+                host.Contains("dictionary.com", StringComparison.Ordinal) ||
+                host.Contains("thesaurus.com", StringComparison.Ordinal) ||
+                host.Contains("reddit.com", StringComparison.Ordinal) ||
+                host.Contains("quora.com", StringComparison.Ordinal) ||
+                host.Contains("facebook.com", StringComparison.Ordinal) ||
+                host.Contains("instagram.com", StringComparison.Ordinal) ||
+                host.Contains("tiktok.com", StringComparison.Ordinal) ||
+                host.Contains("twitter.com", StringComparison.Ordinal) ||
+                host.Contains("x.com", StringComparison.Ordinal) ||
+                host.Contains("youtube.com", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (host.Contains("terrysflorist.com", StringComparison.Ordinal) ||
+                host.Contains("ftd.com", StringComparison.Ordinal) ||
+                host.Contains("1800flowers.com", StringComparison.Ordinal) ||
+                host.Contains("teleflora.com", StringComparison.Ordinal) ||
+                host.Contains("fromyouflowers.com", StringComparison.Ordinal) ||
+                host.Contains("flower.com", StringComparison.Ordinal) ||
+                host.Contains("florgeous.com", StringComparison.Ordinal) ||
+                host.Contains("seattleflowers.com", StringComparison.Ordinal) ||
+                host.Contains("avasflowers.com", StringComparison.Ordinal) ||
+                host.Contains("proflowers.com", StringComparison.Ordinal) ||
+                host.Contains("ubereats.com", StringComparison.Ordinal) ||
+                host.Contains("postmates.com", StringComparison.Ordinal) ||
+                host.Contains("doordash.com", StringComparison.Ordinal) ||
+                host.Contains("grubhub.com", StringComparison.Ordinal) ||
+                host.Contains("slice.life", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
 
         if (IsJunkUrl(source.Url) && !IsNewsRedirectWithValidMetadata(source))
             return true;
@@ -340,6 +413,20 @@ public sealed partial class SearchOrchestrator
         return [];
     }
 
+    private static IReadOnlyList<string> GetLocalBusinessRetryAliases(string userMessage)
+    {
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+
+        return label switch
+        {
+            "delis" => ["sandwich shop", "delicatessen"],
+            "florists" => ["flower shop"],
+            "bakeries" => ["pastry shop", "cake shop"],
+            "coffee shops" => ["espresso bar", "coffee shop"],
+            _ => []
+        };
+    }
+
     private static string? ExtractBrandKeyword(string lower)
     {
         ReadOnlySpan<string> brands =
@@ -428,41 +515,95 @@ public sealed partial class SearchOrchestrator
 
     private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessLocation(
         IReadOnlyList<SourceItem> sources,
-        string? locationContext)
+        string? locationContext,
+        bool requireMatch = false)
     {
         var location = BuildLocalNewsLocationTokens(locationContext);
         if (location is null)
             return [];
 
         var locationMatches = sources
-            .Where(source => IsLocalBusinessLocationMatch(source, location))
+            .Where(source => requireMatch
+                ? IsExactLocalBusinessLocationMatch(source, location)
+                : IsLocalBusinessLocationMatch(source, location))
             .ToList();
 
         if (locationMatches.Count > 0)
             return locationMatches;
+
+        if (requireMatch)
+            return [];
 
         return sources
             .Where(source => !IsExplicitlyOutOfAreaLocalBusinessSource(source, location))
             .ToList();
     }
 
+    private static IReadOnlyList<SourceItem> FilterSourcesForLocalBusinessDiscovery(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources,
+        string? locationContext,
+        bool requireMatch = false)
+    {
+        var locationFiltered = FilterSourcesForLocalBusinessLocation(sources, locationContext, requireMatch);
+        if (locationFiltered.Count > 0)
+            return locationFiltered;
+
+        var location = BuildLocalNewsLocationTokens(locationContext);
+        if (location is null)
+            return [];
+
+        if (requireMatch)
+            return [];
+
+        return sources
+            .Where(source => !IsExplicitlyOutOfAreaLocalBusinessSource(source, location) &&
+                             SourceLooksLikeLocalBusinessCandidate(source, userMessage))
+            .ToList();
+    }
+
+    private static bool SourceLooksLikeLocalBusinessCandidate(SourceItem source, string userMessage)
+    {
+        if (IsDirectoryAggregatorSource(source))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(ExtractBusinessNameFromSourceTitle(source.Title, userMessage));
+    }
+
     private static bool IsLocalBusinessLocationMatch(SourceItem source, LocalNewsLocationTokens location)
     {
+        var rawStory = BuildRawLocalBusinessStoryText(source);
         var normalizedStory = BuildLocalNewsStoryText(source);
-        if (ContainsNormalizedTerm(normalizedStory, location.CityPhrase))
-            return true;
+        if (string.IsNullOrWhiteSpace(normalizedStory))
+            return false;
 
-        if (location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token)))
-            return true;
+        var cityMatch = ContainsNormalizedTerm(normalizedStory, location.CityPhrase) ||
+                        location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token));
 
-        return (!string.IsNullOrWhiteSpace(location.StateName) &&
-                ContainsNormalizedTerm(normalizedStory, location.StateName)) ||
-               (!string.IsNullOrWhiteSpace(location.StateCode) &&
-                ContainsNormalizedTerm(normalizedStory, location.StateCode));
+        if (cityMatch)
+            return !MentionsConflictingState(rawStory, normalizedStory, location);
+
+        return MentionsTargetState(rawStory, normalizedStory, location);
+    }
+
+    private static bool IsExactLocalBusinessLocationMatch(SourceItem source, LocalNewsLocationTokens location)
+    {
+        var rawStory = BuildRawLocalBusinessStoryText(source);
+        var normalizedStory = BuildLocalNewsStoryText(source);
+        if (string.IsNullOrWhiteSpace(normalizedStory))
+            return false;
+
+        var cityMatch = ContainsNormalizedTerm(normalizedStory, location.CityPhrase) ||
+                        location.CityTokens.Any(token => ContainsNormalizedTerm(normalizedStory, token));
+        if (!cityMatch)
+            return false;
+
+        return !MentionsConflictingState(rawStory, normalizedStory, location);
     }
 
     private static bool IsExplicitlyOutOfAreaLocalBusinessSource(SourceItem source, LocalNewsLocationTokens targetLocation)
     {
+        var rawStory = BuildRawLocalBusinessStoryText(source);
         var normalizedStory = BuildLocalNewsStoryText(source);
         if (string.IsNullOrWhiteSpace(normalizedStory))
             return false;
@@ -470,12 +611,43 @@ public sealed partial class SearchOrchestrator
         if (IsLocalBusinessLocationMatch(source, targetLocation))
             return false;
 
+        return MentionsConflictingState(rawStory, normalizedStory, targetLocation);
+
+    }
+
+    private static string BuildRawLocalBusinessStoryText(SourceItem source)
+    {
+        return $"{source.Title} {source.Snippet}".Trim();
+    }
+
+    private static bool MentionsTargetState(
+        string rawStory,
+        string normalizedStory,
+        LocalNewsLocationTokens targetLocation)
+    {
+        if (!string.IsNullOrWhiteSpace(targetLocation.StateName) &&
+            ContainsNormalizedTerm(normalizedStory, targetLocation.StateName))
+        {
+            return true;
+        }
+
+        return ContainsUppercaseStateCode(rawStory, targetLocation.StateCode);
+    }
+
+    private static bool MentionsConflictingState(
+        string rawStory,
+        string normalizedStory,
+        LocalNewsLocationTokens targetLocation)
+    {
+        var mentionsTargetState = false;
+        var mentionsNonTargetState = false;
+
         foreach (var state in StateCodeToName)
         {
             var normalizedStateName = NormalizeLocalNewsText(state.Value);
             var mentionsThisState =
-                ContainsNormalizedTerm(normalizedStory, state.Key) ||
-                ContainsNormalizedTerm(normalizedStory, normalizedStateName);
+                ContainsNormalizedTerm(normalizedStory, normalizedStateName) ||
+                ContainsUppercaseStateCode(rawStory, state.Key);
 
             if (!mentionsThisState)
                 continue;
@@ -486,10 +658,24 @@ public sealed partial class SearchOrchestrator
                 (!string.IsNullOrWhiteSpace(targetLocation.StateName) &&
                  string.Equals(targetLocation.StateName, normalizedStateName, StringComparison.OrdinalIgnoreCase));
 
-            return !isTargetState;
+            if (isTargetState)
+                mentionsTargetState = true;
+            else
+                mentionsNonTargetState = true;
         }
 
-        return false;
+        return mentionsNonTargetState && !mentionsTargetState;
+    }
+
+    private static bool ContainsUppercaseStateCode(string rawText, string? stateCode)
+    {
+        if (string.IsNullOrWhiteSpace(rawText) || string.IsNullOrWhiteSpace(stateCode))
+            return false;
+
+        return Regex.IsMatch(
+            rawText,
+            $@"(?<![A-Za-z]){Regex.Escape(stateCode.Trim().ToUpperInvariant())}(?![A-Za-z])",
+            RegexOptions.CultureInvariant);
     }
 
     private static string TrimSentence(string text, int maxLen)
@@ -506,6 +692,19 @@ public sealed partial class SearchOrchestrator
         IReadOnlyList<ToolCallRecord> toolCallsMade,
         string? resolvedLocationName = null)
     {
+        var lowerUserMessage = (userMessage ?? string.Empty).Trim().ToLowerInvariant();
+        if (lowerUserMessage.Contains("timeout", StringComparison.Ordinal) &&
+            IsExplicitLookupToolInvocationRequest(userMessage))
+        {
+            return new AgentResponse
+            {
+                Text = "Web search hit a timeout before results were retrieved. Please retry in a moment or narrow the query.",
+                Success = true,
+                ToolCallsMade = toolCallsMade.ToList(),
+                LlmRoundTrips = 0
+            };
+        }
+
         var isLocalNewsRequest = LocalNewsSignalRegex.IsMatch(userMessage ?? "");
         // Prefer explicit location from the message, then resolved entity,
         // then the profile-based location hint.
@@ -587,6 +786,121 @@ public sealed partial class SearchOrchestrator
         return hasBusinessContext &&
                (lower.Contains("open", StringComparison.Ordinal) ||
                 lower.Contains("hours", StringComparison.Ordinal));
+    }
+
+    private static bool IsNearbyLocalBusinessDiscoveryRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower) || !IsLocalBusinessNoResultsRequest(userMessage ?? string.Empty))
+            return false;
+
+        return lower.Contains("near me", StringComparison.Ordinal) ||
+               lower.Contains("nearby", StringComparison.Ordinal) ||
+               lower.Contains("around me", StringComparison.Ordinal) ||
+               lower.Contains("around here", StringComparison.Ordinal) ||
+               lower.Contains("close by", StringComparison.Ordinal);
+    }
+
+    private static bool IsSpecificLocalBusinessVerificationRequest(string userMessage)
+    {
+        var lower = (userMessage ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(lower) || !IsLocalBusinessNoResultsRequest(userMessage ?? string.Empty))
+            return false;
+
+        if (IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lower))
+            return false;
+
+        return IntentFeatureExtractor.LooksLikeDeepDiveLookup(lower) ||
+               lower.Contains("open", StringComparison.Ordinal) ||
+               lower.Contains("hours", StringComparison.Ordinal) ||
+               lower.Contains("close", StringComparison.Ordinal);
+    }
+
+    private AgentResponse BuildNearbyLocalBusinessNoMatchResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var label = SingularizeBusinessLabel(GetRequestedLocalBusinessLabel(userMessage));
+        var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
+        var nearbyClause = string.IsNullOrWhiteSpace(location)
+            ? "nearby"
+            : $"nearby in {location}";
+
+        var text = $"I don't have a trustworthy {label} recommendation {nearbyClause} yet from the returned search results. " +
+                   $"Share a neighborhood, ZIP code, or major street and I'll rerun a tighter {label} search.";
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private AgentResponse BuildLocalBusinessVerificationFallbackResponse(
+        string userMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var cleanedQuery = DeepDiveCoordinator.CleanQueryForWebFallback(userMessage).Trim();
+        if (string.IsNullOrWhiteSpace(cleanedQuery))
+            cleanedQuery = GetRequestedLocalBusinessLabel(userMessage);
+
+        var location = ResolveLocalBusinessLocationContext(userMessage)?.Trim();
+        if (!string.IsNullOrWhiteSpace(location) &&
+            !cleanedQuery.Contains(location, StringComparison.OrdinalIgnoreCase))
+        {
+            cleanedQuery = Regex.IsMatch(cleanedQuery, @"\b(?:in|near)\b", RegexOptions.IgnoreCase)
+                ? $"{cleanedQuery} {location}"
+                : $"{cleanedQuery} in {location}";
+        }
+
+        var title = cleanedQuery
+            .Replace("\u2019", "'", StringComparison.Ordinal)
+            .Replace("`", "'", StringComparison.Ordinal);
+        var verificationLine = HasUsableLocalBusinessWebSearchEvidence(toolCallsMade)
+            ? "Search results returned candidate pages, but none gave a trustworthy live-hours answer for this business."
+            : "This live search run did not surface a trustworthy business page or official hours listing for that query.";
+
+        var text = string.Join("\n",
+        [
+            $"**{title}**",
+            "Verification recommended",
+            verificationLine,
+            "Best next step: check the official store locator or call the location before heading over.",
+            "Sources checked: deep-dive.",
+            $"Briefing summary: hours and review details are based on currently available web sources ({DateTime.Now.Year})."
+        ]);
+
+        return new AgentResponse
+        {
+            Text = text,
+            Success = true,
+            ToolCallsMade = toolCallsMade.ToList(),
+            LlmRoundTrips = 0
+        };
+    }
+
+    private static bool HasUsableLocalBusinessWebSearchEvidence(
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        foreach (var toolCall in toolCallsMade)
+        {
+            if (!toolCall.Success ||
+                !toolCall.ToolName.Contains("websearch", StringComparison.OrdinalIgnoreCase) &&
+                !toolCall.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(toolCall.Result) ||
+                LooksLikeNoResultsPayload(toolCall.Result) ||
+                toolCall.Result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+                WebToolFailureMapper.TryParseStructuredError(toolCall.Result, out _, out _))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     // ── Enriched Local Business Discovery ────────────────────────────
@@ -806,7 +1120,6 @@ public sealed partial class SearchOrchestrator
         if (businesses.Count < LocalBusinessMinimumDisplayResults)
         {
             // Keep Open Places responses deterministic and tool-local.
-            // Avoid triggering web_search supplementation when we already
             // have nearby structured place matches.
         }
 
@@ -902,7 +1215,15 @@ public sealed partial class SearchOrchestrator
         if (string.IsNullOrWhiteSpace(title))
             return null;
 
-        var name = title!.Trim();
+        var rescuedSeoName = TryExtractBusinessNameFromSeoTitle(title!, userMessage);
+        if (!string.IsNullOrWhiteSpace(rescuedSeoName))
+            return rescuedSeoName;
+
+        var rescuedDashName = TryExtractBusinessNameFromDashSeparatedTitle(title!, userMessage);
+        if (!string.IsNullOrWhiteSpace(rescuedDashName))
+            return rescuedDashName;
+
+        var name = StripLocalBusinessNamePrefixNoise(title!.Trim());
 
         // Strip everything after common separators (–, —, |, :) when
         // the trailing portion is a tagline or description.
@@ -916,37 +1237,295 @@ public sealed partial class SearchOrchestrator
         // directory brands ("- The Real Yellow Pages", "- MapQuest", etc.).
         name = Regex.Replace(name, @"\s+-\s+.+$", "").Trim();
 
-        // If what's left is too short or is a generic directory phrase, skip.
+        return IsAcceptableSourceTitleBusinessName(name, userMessage)
+            ? name
+            : null;
+    }
+
+    private static string? TryExtractBusinessNameFromSeoTitle(string title, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var pipeSegments = title.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(CleanExtractedBusinessName)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
+        if (pipeSegments.Count > 1 &&
+            LooksLikeSeoLocalBusinessCategorySegment(pipeSegments[0], userMessage))
+        {
+            for (var i = pipeSegments.Count - 1; i >= 1; i--)
+            {
+                if (IsAcceptableSourceTitleBusinessName(pipeSegments[i], userMessage))
+                    return pipeSegments[i];
+            }
+        }
+
+        var colonIndex = title.IndexOf(':');
+        if (colonIndex > 0)
+        {
+            var prefix = CleanExtractedBusinessName(title[..colonIndex]);
+            var suffix = title[(colonIndex + 1)..].Trim();
+            var suffixCandidate = Regex.Split(suffix, @"\s+[|–—-]\s+")
+                .FirstOrDefault()?
+                .Trim() ?? string.Empty;
+            suffixCandidate = CleanExtractedBusinessName(suffixCandidate);
+
+            if (LooksLikeSeoLocalBusinessCategorySegment(prefix, userMessage) &&
+                IsAcceptableSourceTitleBusinessName(suffixCandidate, userMessage))
+            {
+                return suffixCandidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractBusinessNameFromDashSeparatedTitle(string title, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var rawSegments = Regex.Split(title, @"\s+-\s+")
+            .Select(segment => segment.Trim())
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
+        var segments = rawSegments
+            .Select(CleanExtractedBusinessName)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
+        if (segments.Count < 2 || rawSegments.Count != segments.Count)
+            return null;
+
+        for (var i = 0; i < segments.Count - 1; i++)
+        {
+            if (!LooksLikeSeoLocalBusinessCategorySegment(rawSegments[i], userMessage) &&
+                !LooksLikeLocalBusinessPageSectionSegment(rawSegments[i], userMessage))
+            {
+                continue;
+            }
+
+            for (var j = segments.Count - 1; j > i; j--)
+            {
+                if (IsAcceptableSourceTitleBusinessName(segments[j], userMessage) ||
+                    LooksLikeStrongLocalBusinessTitleCandidate(segments[j], userMessage))
+                    return segments[j];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsAcceptableSourceTitleBusinessName(string name, string userMessage)
+    {
         if (name.Length < 3 || name.Length > 60)
-            return null;
+            return false;
+        if (LooksLikeSourceBrandOrAggregatorName(name))
+            return false;
         if (IsGenericNonBusinessName(name))
-            return null;
+            return false;
         if (LooksLikeDiscussionOrQuestionTitle(name))
-            return null;
+            return false;
         if (LooksLikeLocationOnlyBusinessCandidate(name, userMessage))
-            return null;
+            return false;
         if (LooksLikeChainDepartmentCandidate(name, userMessage))
-            return null;
-
-        // Skip if the name starts with "r/" (Reddit subreddit).
+            return false;
+        if (LooksLikeGenericLocalBusinessCategoryPhrase(name, userMessage))
+            return false;
+        if (Regex.IsMatch(name, @"^store\s*#?\d+\b", RegexOptions.IgnoreCase))
+            return false;
         if (name.StartsWith("r/", StringComparison.Ordinal))
-            return null;
-
-        // Skip titles that are clearly aggregator-style ("Best X in Y", "Top 10 X").
+            return false;
         if (Regex.IsMatch(name, @"^(?:Best|Top)\s+\d*\s*", RegexOptions.IgnoreCase))
-            return null;
+            return false;
 
-        // Skip if the name matches or starts with the business category label
-        // (e.g. "Bakeries", "Bakeries in Olympia").
         var label = GetRequestedLocalBusinessLabel(userMessage);
         if (string.Equals(name, label, StringComparison.OrdinalIgnoreCase))
-            return null;
+            return false;
+
         var singular = SingularizeBusinessLabel(label);
         if (Regex.IsMatch(name, $@"^{Regex.Escape(label)}\b", RegexOptions.IgnoreCase) ||
             Regex.IsMatch(name, $@"^{Regex.Escape(singular)}\b", RegexOptions.IgnoreCase))
-            return null;
+        {
+            return false;
+        }
 
-        return name;
+        return true;
+    }
+
+    private static bool LooksLikeSourceBrandOrAggregatorName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var normalized = Regex.Replace(name, @"\s+", " ").Trim().ToLowerInvariant();
+        return normalized is "reddit" or
+               "yelp" or
+               "tripadvisor" or
+               "facebook" or
+               "instagram" or
+               "quora" or
+               "wikipedia" or
+               "wiktionary" or
+               "google search" or
+               "bing" or
+               "the real yellow pages" or
+               "yellow pages";
+    }
+
+    private static bool LooksLikeStrongLocalBusinessTitleCandidate(string name, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        if (IsGenericNonBusinessName(name))
+            return false;
+        if (LooksLikeDiscussionOrQuestionTitle(name))
+            return false;
+        if (LooksLikeLocationOnlyBusinessCandidate(name, userMessage))
+            return false;
+        if (LooksLikeChainDepartmentCandidate(name, userMessage))
+            return false;
+        if (LooksLikeGenericLocalBusinessCategoryPhrase(name, userMessage))
+            return false;
+        if (LooksLikeBlacklistedFloristBrandCandidate(name, userMessage))
+            return false;
+
+        var signalTokens = GetLocalBusinessMatchKeywords(userMessage)
+            .SelectMany(keyword => Regex.Matches(keyword, @"[A-Za-z0-9']+")
+                .Select(match => match.Value.ToLowerInvariant()))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var floristSignal in new[] { "gift", "gifts", "bloom", "blooms", "petal", "petals", "rose", "roses", "garden", "gardens" })
+                signalTokens.Add(floristSignal);
+        }
+
+        var genericTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "and", "by", "of", "the", "delivery", "deliveries", "shop", "shops", "service", "services",
+            "local", "find", "about", "contact", "home", "welcome", "best", "top"
+        };
+
+        var locationTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage);
+        if (!string.IsNullOrWhiteSpace(explicitLocation))
+        {
+            foreach (Match match in Regex.Matches(explicitLocation, @"[A-Za-z0-9']+"))
+                locationTokens.Add(match.Value);
+        }
+
+        var tokens = Regex.Matches(name, @"[A-Za-z][A-Za-z'&-]*")
+            .Select(match => match.Value)
+            .ToList();
+        if (tokens.Count < 2)
+            return false;
+
+        var hasSignal = tokens.Any(token => signalTokens.Contains(token));
+        if (!hasSignal)
+            return false;
+
+        return tokens.Any(token =>
+            token.Length > 1 &&
+            char.IsUpper(token[0]) &&
+            !signalTokens.Contains(token) &&
+            !genericTokens.Contains(token) &&
+            !locationTokens.Contains(token));
+    }
+
+    private static bool LooksLikeSeoLocalBusinessCategorySegment(string segment, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return false;
+
+        var lower = segment.ToLowerInvariant();
+        var requestedTokens = GetLocalBusinessMatchKeywords(userMessage)
+            .SelectMany(keyword => Regex.Matches(keyword, @"[A-Za-z0-9']+")
+                .Select(match => match.Value.ToLowerInvariant()))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (requestedTokens.Count == 0)
+            return false;
+
+        var segmentTokens = Regex.Matches(segment, @"[A-Za-z0-9']+")
+            .Select(match => match.Value.ToLowerInvariant())
+            .ToList();
+        if (!segmentTokens.Any(token => requestedTokens.Contains(token)))
+            return false;
+
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage);
+        if (!string.IsNullOrWhiteSpace(explicitLocation))
+        {
+            var normalizedSegment = NormalizeLocalNewsText(segment);
+            var normalizedLocation = NormalizeLocalNewsText(explicitLocation);
+            if (ContainsNormalizedTerm(normalizedSegment, normalizedLocation))
+                return true;
+
+            var city = explicitLocation.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(city) &&
+                ContainsNormalizedTerm(normalizedSegment, NormalizeLocalNewsText(city)))
+            {
+                return true;
+            }
+        }
+
+        return lower.Contains(" near ", StringComparison.Ordinal) ||
+               lower.Contains(" in ", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeLocalBusinessPageSectionSegment(string segment, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return false;
+
+        var lower = segment.ToLowerInvariant();
+        if (!Regex.IsMatch(lower, @"^(?:about|shop(?:\s+by)?|contact|home|welcome)\b", RegexOptions.IgnoreCase))
+            return false;
+
+        return LooksLikeSeoLocalBusinessCategorySegment(segment, userMessage) ||
+               GetLocalBusinessMatchKeywords(userMessage)
+                   .Any(keyword => lower.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool LooksLikeGenericLocalBusinessCategoryPhrase(string name, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var keywordTokens = GetLocalBusinessMatchKeywords(userMessage)
+            .SelectMany(keyword => Regex.Matches(keyword, @"[A-Za-z0-9']+")
+                .Select(match => match.Value.ToLowerInvariant()))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (keywordTokens.Count == 0)
+            return false;
+
+        var genericTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "a", "an", "and", "best", "by", "co", "company", "delivery", "deliveries",
+            "find", "for", "fresh", "gift", "gifts", "good", "in", "local", "near",
+            "nearby", "online", "order", "orders", "service", "services", "shop", "shops",
+            "send", "store", "stores", "the", "to"
+        };
+
+        var meaningfulTokens = Regex.Matches(name, @"[A-Za-z0-9']+")
+            .Select(match => match.Value.ToLowerInvariant())
+            .Where(token => token.Length > 1 && !genericTokens.Contains(token))
+            .ToList();
+        if (meaningfulTokens.Count == 0)
+            return false;
+
+        return meaningfulTokens.All(token =>
+        {
+            if (keywordTokens.Contains(token))
+                return true;
+
+            if (token.EndsWith("ies", StringComparison.Ordinal) && token.Length > 3)
+                return keywordTokens.Contains(token[..^3] + "y");
+
+            if (token.EndsWith("s", StringComparison.Ordinal) && token.Length > 2)
+                return keywordTokens.Contains(token[..^1]);
+
+            return false;
+        });
     }
 
     private static bool LooksLikeDiscussionOrQuestionTitle(string name)
@@ -981,6 +1560,28 @@ public sealed partial class SearchOrchestrator
             .FirstOrDefault();
         return !string.IsNullOrWhiteSpace(city) &&
                normalizedName.Equals(city, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeFloristProductCatalogCandidate(string name, string userMessage)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var lower = name.ToLowerInvariant();
+        var hasBusinessSignal = Regex.IsMatch(
+            lower,
+            @"\b(?:florist|floral|flowers?|blooms?|gifts?|shop|studio|design|greenhouse|garden)\b",
+            RegexOptions.IgnoreCase);
+        if (hasBusinessSignal)
+            return false;
+
+        return Regex.IsMatch(
+            lower,
+            @"\b(?:bouquet|spray|basket|arrangement|wreath|centerpiece|corsage|standing\s+spray|floor\s+basket)\b",
+            RegexOptions.IgnoreCase);
     }
 
     private static bool LooksLikeChainDepartmentCandidate(string name, string? userMessage)
@@ -1040,9 +1641,36 @@ public sealed partial class SearchOrchestrator
         string? content = null;
         var resolvedToolName = BrowseToolName;
 
+        void RecordFailure(string result)
+        {
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName = resolvedToolName,
+                Arguments = args,
+                Result = result,
+                Success = false
+            });
+        }
+
         try
         {
             content = await _mcp.CallToolAsync(BrowseToolName, args, ct);
+            if (WebToolFailureMapper.TryParseStructuredError(content, out _, out _) ||
+                content.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            {
+                RecordFailure(content);
+                return null;
+            }
+        }
+        catch (OperationCanceledException ex)
+        {
+            RecordFailure($"Error: {ex.Message}");
+            return null;
+        }
+        catch (Exception ex) when (ContainsToolBudgetOrCancellationMarker(ex.Message))
+        {
+            RecordFailure($"Error: {ex.Message}");
+            return null;
         }
         catch
         {
@@ -1050,16 +1678,26 @@ public sealed partial class SearchOrchestrator
             {
                 resolvedToolName = BrowseToolNameAlt;
                 content = await _mcp.CallToolAsync(BrowseToolNameAlt, args, ct);
+                if (WebToolFailureMapper.TryParseStructuredError(content, out _, out _) ||
+                    content.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                {
+                    RecordFailure(content);
+                    return null;
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                RecordFailure($"Error: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex) when (ContainsToolBudgetOrCancellationMarker(ex.Message))
+            {
+                RecordFailure($"Error: {ex.Message}");
+                return null;
             }
             catch (Exception ex)
             {
-                toolCallsMade.Add(new ToolCallRecord
-                {
-                    ToolName  = resolvedToolName,
-                    Arguments = args,
-                    Result    = $"Error: {ex.Message}",
-                    Success   = false
-                });
+                RecordFailure($"Error: {ex.Message}");
                 return null;
             }
         }
@@ -1076,6 +1714,1217 @@ public sealed partial class SearchOrchestrator
             content = content[..MaxArticleChars];
 
         return content;
+    }
+
+    private static bool LastToolCallWasBudgetOrCancellation(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string toolNameFragment)
+    {
+        if (toolCallsMade.Count == 0)
+            return false;
+
+        var lastToolCall = toolCallsMade[^1];
+        return !lastToolCall.Success &&
+               lastToolCall.ToolName.Contains(toolNameFragment, StringComparison.OrdinalIgnoreCase) &&
+               IsBudgetOrCancellationToolFailure(lastToolCall.Result);
+    }
+
+    private static bool AnyToolCallHadBudgetOrCancellation(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        params string[] toolNameFragments)
+    {
+        return toolCallsMade.Any(call =>
+            !call.Success &&
+            toolNameFragments.Any(fragment =>
+                call.ToolName.Contains(fragment, StringComparison.OrdinalIgnoreCase)) &&
+            IsBudgetOrCancellationToolFailure(call.Result));
+    }
+
+    private static bool AnyToolCallHadBudgetOrCancellationSince(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        int startIndex,
+        params string[] toolNameFragments)
+    {
+        if (toolCallsMade.Count == 0 || startIndex >= toolCallsMade.Count)
+            return false;
+
+        if (startIndex < 0)
+            startIndex = 0;
+
+        for (var i = startIndex; i < toolCallsMade.Count; i++)
+        {
+            var call = toolCallsMade[i];
+            if (call.Success)
+                continue;
+
+            if (!toolNameFragments.Any(fragment =>
+                    call.ToolName.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (IsBudgetOrCancellationToolFailure(call.Result))
+                return true;
+        }
+
+        return false;
+    }
+
+    private async Task<AgentResponse?> TryBuildLocalBusinessBrowserFallbackAsync(
+        string userMessage,
+        string? locationContext,
+        IReadOnlyList<SourceItem>? fallbackSources,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var location = string.IsNullOrWhiteSpace(locationContext)
+            ? ResolveLocalBusinessLocationContext(userMessage)
+            : locationContext;
+        var hasExplicitLocation = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var preferScopedRecovery =
+            hasExplicitLocation &&
+            !string.IsNullOrWhiteSpace(location) &&
+            GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase);
+
+        if (preferScopedRecovery)
+        {
+            var recoveredNames = await RecoverLocalBusinessNamesFromScopedFallbackSearchAsync(
+                userMessage,
+                location!,
+                toolCallsMade,
+                ct);
+            if (recoveredNames.Count > 0)
+                return BuildCleanedLocalBusinessResponse(userMessage, recoveredNames, location, toolCallsMade);
+        }
+
+        if ((fallbackSources is null || fallbackSources.Count == 0) &&
+            !string.IsNullOrWhiteSpace(location) &&
+            hasExplicitLocation)
+        {
+            fallbackSources = BuildDirectLocalBusinessDirectoryFallbackSources(userMessage, location);
+        }
+
+        var initialBrowseAttemptStart = toolCallsMade.Count;
+        var names = await ExtractLocalBusinessNamesFromBrowsedSourcesAsync(
+            userMessage,
+            location,
+            fallbackSources,
+            toolCallsMade,
+            ct);
+        var browserToolStopped = AnyToolCallHadBudgetOrCancellationSince(
+            toolCallsMade,
+            initialBrowseAttemptStart,
+            "browser");
+
+        if (names.Count == 0 &&
+            !browserToolStopped &&
+            !string.IsNullOrWhiteSpace(location) &&
+            hasExplicitLocation)
+        {
+            var directDirectorySources = BuildDirectLocalBusinessDirectoryFallbackSources(userMessage, location);
+            if (directDirectorySources.Count > 0 &&
+                !SameLocalBusinessFallbackSources(fallbackSources, directDirectorySources))
+            {
+                var directDirectoryAttemptStart = toolCallsMade.Count;
+                names = await ExtractLocalBusinessNamesFromBrowsedSourcesAsync(
+                    userMessage,
+                    location,
+                    directDirectorySources,
+                    toolCallsMade,
+                    ct);
+                browserToolStopped = AnyToolCallHadBudgetOrCancellationSince(
+                    toolCallsMade,
+                    directDirectoryAttemptStart,
+                    "browser");
+            }
+        }
+
+        if (names.Count == 0 &&
+            !preferScopedRecovery &&
+            !string.IsNullOrWhiteSpace(location) &&
+            hasExplicitLocation)
+        {
+            names = await RecoverLocalBusinessNamesFromScopedFallbackSearchAsync(
+                userMessage,
+                location,
+                toolCallsMade,
+                ct);
+        }
+
+        var shouldReusePriorSearchEvidence = browserToolStopped ||
+            AnyToolCallHadBudgetOrCancellation(toolCallsMade, "browser", "web_search", "websearch", "places");
+
+        if (names.Count == 0 && shouldReusePriorSearchEvidence)
+        {
+            names = ExtractLocalBusinessNamesFromPriorSearchToolCalls(
+                toolCallsMade,
+                userMessage,
+                location);
+        }
+
+        if (names.Count == 0)
+            return null;
+
+        return BuildCleanedLocalBusinessResponse(userMessage, names, location, toolCallsMade);
+    }
+
+    private static bool SameLocalBusinessFallbackSources(
+        IReadOnlyList<SourceItem>? existingSources,
+        IReadOnlyList<SourceItem> candidateSources)
+    {
+        if (existingSources is null || existingSources.Count != candidateSources.Count)
+            return false;
+
+        for (var i = 0; i < existingSources.Count; i++)
+        {
+            if (!string.Equals(existingSources[i].Url, candidateSources[i].Url, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
+    private async Task<IReadOnlyList<string>> RecoverLocalBusinessNamesFromScopedFallbackSearchAsync(
+        string userMessage,
+        string location,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var scopedQueries = BuildLocalBusinessScopedFallbackQueries(userMessage, location);
+        if (scopedQueries.Count == 0)
+            return [];
+
+        var requireExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var locationTokens = BuildLocalNewsLocationTokens(location);
+
+        foreach (var query in scopedQueries)
+        {
+            var toolResult = await CallWebSearchAsync(
+                query,
+                "any",
+                toolCallsMade,
+                ct,
+                originalUserMessage: null,
+                maxResults: Math.Min(5, LocalBusinessFetchMaxResults));
+
+            if (string.IsNullOrWhiteSpace(toolResult) ||
+                LooksLikeNoResultsPayload(toolResult) ||
+                WebToolFailureMapper.TryParseStructuredError(toolResult, out _, out _) ||
+                WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null)
+            {
+                if (IsBudgetOrCancellationToolFailure(toolResult))
+                    break;
+                continue;
+            }
+
+            if (!requireExactLocationMatch ||
+                locationTokens is null ||
+                ContentMatchesLocalBusinessLocation(toolResult, locationTokens))
+            {
+                var textOnlyNames = ExtractLocalBusinessNamesFromTextOnlySearchResult(toolResult, userMessage);
+                if (textOnlyNames.Count > 0)
+                    return textOnlyNames;
+            }
+
+            var scopedSources = ParseSourcesFromToolResult(toolResult)
+                .Where(source => !IsJunkBusinessSource(source))
+                .ToList();
+            var siteDomain = TryExtractScopedSearchDomain(query);
+            if (!string.IsNullOrWhiteSpace(siteDomain))
+            {
+                scopedSources = scopedSources
+                    .Where(source => MatchesLocalBusinessScopedFallbackDomain(source, [siteDomain]))
+                    .ToList();
+            }
+            else
+            {
+                scopedSources = FilterGeneralLocalBusinessRecoverySources(
+                    scopedSources,
+                    userMessage,
+                    location);
+            }
+
+            if (scopedSources.Count == 0)
+                continue;
+
+            var selectedSources = SelectLocalBusinessDiscoverySources(
+                userMessage,
+                scopedSources,
+                LocalBusinessTargetResults,
+                location);
+            if (selectedSources.Count > 0)
+            {
+                scopedSources = [.. selectedSources];
+            }
+            else if (requireExactLocationMatch)
+            {
+                continue;
+            }
+
+            var searchSourceNames = ExtractLocalBusinessNamesFromSearchSources(scopedSources, userMessage);
+            if (searchSourceNames.Count > 0)
+            {
+                return searchSourceNames;
+            }
+
+            var browsedNames = await ExtractLocalBusinessNamesFromBrowsedSourcesAsync(
+                userMessage,
+                location,
+                scopedSources,
+                toolCallsMade,
+                ct);
+            if (browsedNames.Count > 0)
+                return browsedNames;
+        }
+
+        var bingRssNames = await RecoverFloristNamesFromBingRssAsync(
+            userMessage,
+            location,
+            toolCallsMade,
+            ct);
+        if (bingRssNames.Count > 0)
+            return bingRssNames;
+
+        return [];
+    }
+
+    private static IReadOnlyList<string> ExtractLocalBusinessNamesFromPriorSearchToolCalls(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string userMessage,
+        string? locationContext)
+    {
+        var requireExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var locationTokens = BuildLocalNewsLocationTokens(locationContext);
+        var names = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var toolCall in toolCallsMade)
+        {
+            if (!toolCall.Success ||
+                !toolCall.ToolName.Contains("websearch", StringComparison.OrdinalIgnoreCase) &&
+                !toolCall.ToolName.Contains("web_search", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(toolCall.Result) ||
+                LooksLikeNoResultsPayload(toolCall.Result) ||
+                WebToolFailureMapper.TryParseStructuredError(toolCall.Result, out _, out _))
+            {
+                continue;
+            }
+
+            var sources = ParseSourcesFromToolResult(toolCall.Result);
+            var canUseTextOnly = true;
+            if (sources.Count > 0)
+            {
+                if (!string.IsNullOrWhiteSpace(locationContext))
+                {
+                    var locationFiltered = FilterSourcesForLocalBusinessDiscovery(
+                        userMessage,
+                        sources,
+                        locationContext,
+                        requireExactLocationMatch);
+                    if (locationFiltered.Count > 0)
+                        sources = [.. locationFiltered];
+                    else if (requireExactLocationMatch)
+                        continue;
+                }
+            }
+            else if (requireExactLocationMatch &&
+                     locationTokens is not null &&
+                     !ContentMatchesLocalBusinessLocation(toolCall.Result, locationTokens))
+            {
+                canUseTextOnly = false;
+            }
+
+            if (canUseTextOnly)
+            {
+                AddLocalBusinessNames(
+                    names,
+                    seen,
+                    ExtractLocalBusinessNamesFromTextOnlySearchResult(toolCall.Result, userMessage),
+                    userMessage);
+            }
+
+            if (sources.Count > 0)
+            {
+                AddLocalBusinessNames(
+                    names,
+                    seen,
+                    ExtractLocalBusinessNamesFromSearchSources(sources, userMessage),
+                    userMessage);
+            }
+
+            if (names.Count >= LocalBusinessTargetResults)
+                break;
+        }
+
+        return names;
+    }
+
+    private async Task<IReadOnlyList<string>> RecoverFloristNamesFromBingRssAsync(
+        string userMessage,
+        string location,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(location))
+        {
+            return [];
+        }
+
+        var locationTerms = BuildLocalBusinessRecoveryLocationTerms(location).ToLowerInvariant();
+        var rssUrl = $"https://www.bing.com/search?format=rss&q={Uri.EscapeDataString($"{locationTerms} florist gifts")}";
+        var content = await FetchSingleUrlAsync(rssUrl, toolCallsMade, ct);
+        if (string.IsNullOrWhiteSpace(content) || LooksLikeBotChallengePage(content))
+            return [];
+
+        return ExtractLocalBusinessNamesFromBingRssContent(content, userMessage);
+    }
+
+    private static IReadOnlyList<string> ExtractLocalBusinessNamesFromBingRssContent(
+        string content,
+        string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return [];
+
+        var decoded = WebUtility.HtmlDecode(content);
+        var names = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Match match in Regex.Matches(
+                     decoded,
+                     @"<title>(?<title>[^<]+)</title>",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            var title = match.Groups["title"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(title) ||
+                title.Contains(" - Bing", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var name = ExtractBusinessNameFromSourceTitle(title, userMessage);
+            if (!string.IsNullOrWhiteSpace(name))
+                AddLocalBusinessNames(names, seen, [name], userMessage);
+        }
+
+        if (names.Count < LocalBusinessTargetResults)
+        {
+            AddLocalBusinessNames(
+                names,
+                seen,
+                ExtractLocalBusinessNamesFromBingRssTitleText(decoded, userMessage),
+                userMessage);
+        }
+
+        if (names.Count < LocalBusinessTargetResults)
+        {
+            AddLocalBusinessNames(
+                names,
+                seen,
+                ExtractBusinessNamesFromArticles([decoded], userMessage),
+                userMessage);
+        }
+
+        if (names.Count < LocalBusinessTargetResults)
+        {
+            AddLocalBusinessNames(
+                names,
+                seen,
+                ExtractLocalBusinessNamesFromLooseText(decoded, userMessage),
+                userMessage);
+        }
+
+        return names;
+    }
+
+    private static IReadOnlyList<string> ExtractLocalBusinessNamesFromBingRssTitleText(
+        string content,
+        string userMessage)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        static void AddMatches(List<string> names, HashSet<string> seen, string text, string pattern)
+        {
+            foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                var candidate = CleanExtractedBusinessName(match.Groups[1].Value);
+                if (string.IsNullOrWhiteSpace(candidate) || !seen.Add(candidate))
+                    continue;
+
+                names.Add(candidate);
+            }
+        }
+
+        AddMatches(
+            names,
+            seen,
+            content,
+            @"\b([A-Z][A-Za-z'&.\-]+(?:\s+(?:[A-Z][A-Za-z'&.\-]+|&|and|by|of|the)){0,6}\s+(?:Florist|Flowers|Floral|Blooms?|Gifts?|Petals?|Roses?|Gardens?))\b");
+        AddMatches(
+            names,
+            seen,
+            content,
+            @"\b(Flowers?\s+by\s+[A-Z][A-Za-z'&.\-]+(?:\s+[A-Z][A-Za-z'&.\-]+){0,4})\b");
+
+        return names;
+    }
+
+    private static List<SourceItem> FilterGeneralLocalBusinessRecoverySources(
+        IReadOnlyList<SourceItem> sources,
+        string userMessage,
+        string location)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase))
+            return [.. sources];
+
+        var locationTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (TryParseCityStateLocation(location, out var citySlug, out _))
+        {
+            foreach (var token in citySlug.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                locationTokens.Add(token);
+        }
+
+        return sources
+            .Where(source => !IsDirectoryAggregatorSource(source))
+            .Where(source =>
+            {
+                var haystack = $"{source.Domain} {source.Url}";
+                if (haystack.Contains("florist", StringComparison.OrdinalIgnoreCase) ||
+                    haystack.Contains("flower", StringComparison.OrdinalIgnoreCase) ||
+                    haystack.Contains("floral", StringComparison.OrdinalIgnoreCase) ||
+                    haystack.Contains("bloom", StringComparison.OrdinalIgnoreCase) ||
+                    haystack.Contains("petal", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                return locationTokens.Any(token => haystack.Contains(token, StringComparison.OrdinalIgnoreCase));
+            })
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractLocalBusinessNamesFromTextOnlySearchResult(
+        string toolResult,
+        string userMessage)
+    {
+        var stripped = SanitizeLocalBusinessTextOnlySearchResult(
+            StripSourcesJson(toolResult).Trim(),
+            userMessage);
+        if (string.IsNullOrWhiteSpace(stripped))
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        AddLocalBusinessNames(
+            names,
+            seen,
+            ExtractBusinessNamesFromArticles([stripped], userMessage),
+            userMessage);
+
+        if (names.Count < LocalBusinessTargetResults)
+        {
+            AddLocalBusinessNames(
+                names,
+                seen,
+                ExtractLocalBusinessNamesFromLooseText(stripped, userMessage),
+                userMessage);
+        }
+
+        return names;
+    }
+
+    private static string SanitizeLocalBusinessTextOnlySearchResult(string text, string userMessage)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        var blacklistedDomainMarkers = new[]
+        {
+            "florgeous.com",
+            "seattleflowers.com",
+            "terrysflorist.com",
+            "1800flowers.com",
+            "ftd.com"
+        };
+
+        var filteredBlocks = Regex.Split(text, @"(?:\r?\n){2,}")
+            .Select(block => block.Trim())
+            .Where(block => !string.IsNullOrWhiteSpace(block))
+            .Where(block => !blacklistedDomainMarkers.Any(marker =>
+                block.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        return filteredBlocks.Count == 0
+            ? string.Empty
+            : string.Join(Environment.NewLine + Environment.NewLine, filteredBlocks);
+    }
+
+    private static string? TryExtractScopedSearchDomain(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return null;
+
+        var match = Regex.Match(
+            query,
+            @"\bsite:(?<domain>[^\s]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success
+            ? match.Groups["domain"].Value.Trim()
+            : null;
+    }
+
+    private static bool MatchesLocalBusinessScopedFallbackDomain(
+        SourceItem source,
+        IReadOnlyList<string> preferredDomains)
+    {
+        if (!string.IsNullOrWhiteSpace(source.Domain) &&
+            preferredDomains.Any(domain => source.Domain.Contains(domain, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) &&
+               preferredDomains.Any(domain =>
+                   uri.Host.Contains(domain, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<string> BuildLocalBusinessScopedFallbackQueries(
+        string userMessage,
+        string location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+            return [];
+
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        if (!label.Equals("florists", StringComparison.OrdinalIgnoreCase))
+            return [];
+
+        var locationTerms = BuildLocalBusinessRecoveryLocationTerms(location);
+
+        return
+        [
+            $"site:chamberofcommerce.com {locationTerms} florist",
+            $"site:loc8nearme.com {locationTerms} florist"
+        ];
+    }
+
+    private static string BuildFloristRecoverySearchExclusionTerms()
+    {
+        return string.Join(
+            ' ',
+            new[]
+            {
+                "-doordash",
+                "-flower.com",
+                "-terrysflorist",
+                "-ftd",
+                "-1800flowers",
+                "-teleflora",
+                "-fromyouflowers",
+                "-florgeous",
+                "-seattleflowers",
+                "-avasflowers",
+                "-proflowers"
+            });
+    }
+
+    private static string BuildLocalBusinessRecoveryLocationTerms(string location)
+    {
+        if (TryParseCityStateLocation(location, out var citySlug, out var stateSlug))
+        {
+            var city = string.Join(
+                " ",
+                citySlug.Split('-', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(token => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(token)));
+            return $"{city} {stateSlug.ToUpperInvariant()}";
+        }
+
+        return location.Replace(",", " ", StringComparison.Ordinal)
+            .Replace("  ", " ", StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private static IReadOnlyList<SourceItem> BuildDirectLocalBusinessDirectoryFallbackSources(
+        string userMessage,
+        string location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+            return [];
+
+        var label = GetRequestedLocalBusinessLabel(userMessage);
+        var locationText = location.Trim();
+        var sources = new List<SourceItem>();
+
+        if (TryBuildSuperpagesDirectoryUrl(label, locationText) is { Length: > 0 } superpagesUrl)
+        {
+            sources.Add(new SourceItem
+            {
+                Url = superpagesUrl,
+                Title = $"{label} in {locationText} - Superpages",
+                Domain = "superpages.com",
+                Snippet = $"Local {label} listings in {locationText}."
+            });
+        }
+
+        if (TryBuildYellowPagesDirectoryUrl(label, locationText) is { Length: > 0 } yellowPagesUrl)
+        {
+            sources.Add(new SourceItem
+            {
+                Url = yellowPagesUrl,
+                Title = $"{label} in {locationText} - Yellow Pages",
+                Domain = "yellowpages.com",
+                Snippet = $"Local {label} listings in {locationText}."
+            });
+        }
+
+        if (TryBuildRestaurantJiDirectoryUrl(label, locationText) is { Length: > 0 } restaurantJiUrl)
+        {
+            sources.Add(new SourceItem
+            {
+                Url = restaurantJiUrl,
+                Title = $"Best {label} near {locationText} - Restaurantji",
+                Domain = "restaurantji.com",
+                Snippet = $"Local {label} listings in {locationText}."
+            });
+        }
+
+        var yelpCategorySlug = GetYelpCategorySlug(label);
+        var yelpUrl = string.IsNullOrWhiteSpace(yelpCategorySlug)
+            ? $"https://www.yelp.com/search?find_desc={Uri.EscapeDataString(label)}&find_loc={Uri.EscapeDataString(locationText)}"
+            : $"https://www.yelp.com/search?cflt={Uri.EscapeDataString(yelpCategorySlug)}&find_loc={Uri.EscapeDataString(locationText)}";
+
+        sources.Add(new SourceItem
+        {
+            Url = yelpUrl,
+            Title = $"Best {label} in {locationText}",
+            Domain = "yelp.com",
+            Snippet = $"Local {label} listings in {locationText}."
+        });
+
+        return sources;
+    }
+
+    private static string GetYelpCategorySlug(string businessLabel)
+    {
+        return businessLabel.Trim().ToLowerInvariant() switch
+        {
+            "delis" => "delis",
+            "florists" => "florists",
+            "bakeries" => "bakeries",
+            "coffee shops" => "coffee",
+            _ => string.Empty
+        };
+    }
+
+    private static string? GetStaticDirectoryCategorySlug(string businessLabel)
+    {
+        return businessLabel.Trim().ToLowerInvariant() switch
+        {
+            "florists" => "florists",
+            _ => null
+        };
+    }
+
+    private static string? TryBuildSuperpagesDirectoryUrl(string businessLabel, string location)
+    {
+        var categorySlug = GetStaticDirectoryCategorySlug(businessLabel);
+        if (string.IsNullOrWhiteSpace(categorySlug) ||
+            !TryParseCityStateLocation(location, out var citySlug, out var stateSlug))
+        {
+            return null;
+        }
+
+        return $"https://www.superpages.com/{citySlug}-{stateSlug}/{categorySlug}";
+    }
+
+    private static string? TryBuildYellowPagesDirectoryUrl(string businessLabel, string location)
+    {
+        var categorySlug = GetStaticDirectoryCategorySlug(businessLabel);
+        if (string.IsNullOrWhiteSpace(categorySlug) ||
+            !TryParseCityStateLocation(location, out var citySlug, out var stateSlug))
+        {
+            return null;
+        }
+
+        return $"https://www.yellowpages.com/{citySlug}-{stateSlug}/{categorySlug}";
+    }
+
+    private static string? TryBuildRestaurantJiDirectoryUrl(string businessLabel, string location)
+    {
+        if (!businessLabel.Equals("delis", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (!TryParseCityStateLocation(location, out var citySlug, out var stateSlug))
+            return null;
+
+        return $"https://www.restaurantji.com/{stateSlug}/{citySlug}/deli/";
+    }
+
+    private static bool TryParseCityStateLocation(string location, out string citySlug, out string stateSlug)
+    {
+        citySlug = string.Empty;
+        stateSlug = string.Empty;
+
+        var locationMatch = Regex.Match(
+            location,
+            @"^(?<city>[A-Za-z][A-Za-z\s'.-]+),\s*(?<state>[A-Za-z]{2})$",
+            RegexOptions.CultureInvariant);
+        if (!locationMatch.Success)
+            return false;
+
+        citySlug = Regex.Replace(locationMatch.Groups["city"].Value.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        stateSlug = locationMatch.Groups["state"].Value.Trim().ToLowerInvariant();
+        return !string.IsNullOrWhiteSpace(citySlug) && !string.IsNullOrWhiteSpace(stateSlug);
+    }
+
+    private async Task<IReadOnlyList<string>> ExtractLocalBusinessNamesFromBrowsedSourcesAsync(
+        string userMessage,
+        string? locationContext,
+        IReadOnlyList<SourceItem>? fallbackSources,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        if (fallbackSources is null || fallbackSources.Count == 0)
+            return [];
+
+        var requireExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        var locationTokens = BuildLocalNewsLocationTokens(locationContext);
+        var filteredSources = fallbackSources
+            .Where(source => !IsJunkBusinessSource(source) && !IsJunkUrl(source.Url))
+            .ToList();
+        if (filteredSources.Count == 0)
+            return [];
+
+        if (!string.IsNullOrWhiteSpace(locationContext))
+        {
+            var locationFiltered = FilterSourcesForLocalBusinessDiscovery(
+                userMessage,
+                filteredSources,
+                locationContext,
+                requireExactLocationMatch);
+            if (locationFiltered.Count > 0)
+                filteredSources = [.. locationFiltered];
+            else if (requireExactLocationMatch)
+                return [];
+        }
+
+        var browsableSources = ResolveSourceUrls(filteredSources)
+            .Where(source => !IsJunkUrl(source.Url))
+            .OrderBy(source => IsDirectoryAggregatorSource(source) ? 0 : 1)
+            .Take(LocalBusinessMaxBrowserFallbackFetches)
+            .ToList();
+        if (browsableSources.Count == 0)
+            return [];
+
+        var names = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in browsableSources)
+        {
+            var content = await FetchSingleUrlAsync(source.Url, toolCallsMade, ct);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                if (LastToolCallWasBudgetOrCancellation(toolCallsMade, "browser"))
+                    break;
+                continue;
+            }
+
+            if (LooksLikeBotChallengePage(content))
+                continue;
+
+            if (requireExactLocationMatch &&
+                locationTokens is not null &&
+                !ContentMatchesLocalBusinessLocation(content, locationTokens))
+            {
+                continue;
+            }
+
+            IEnumerable<string> articleCandidates = ExtractBusinessNamesFromArticles([content], userMessage);
+            if (requireExactLocationMatch && locationTokens is not null)
+            {
+                articleCandidates = FilterLocalBusinessCandidatesByContentLocation(
+                    articleCandidates,
+                    content,
+                    locationTokens);
+            }
+
+            AddLocalBusinessNames(
+                names,
+                seen,
+                articleCandidates,
+                userMessage);
+
+            if (names.Count < LocalBusinessTargetResults)
+            {
+                IEnumerable<string> looseCandidates = ExtractLocalBusinessNamesFromLooseText(content, userMessage);
+                if (requireExactLocationMatch && locationTokens is not null)
+                {
+                    looseCandidates = FilterLocalBusinessCandidatesByContentLocation(
+                        looseCandidates,
+                        content,
+                        locationTokens);
+                }
+
+                AddLocalBusinessNames(
+                    names,
+                    seen,
+                    looseCandidates,
+                    userMessage);
+            }
+
+            if (names.Count >= LocalBusinessTargetResults)
+                break;
+        }
+
+        return names;
+    }
+
+    private static void AddLocalBusinessNames(
+        List<string> names,
+        Dictionary<string, int> seen,
+        IEnumerable<string> candidates,
+        string userMessage)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+            if (LooksLikeLocationOnlyBusinessCandidate(candidate, userMessage))
+                continue;
+            if (LooksLikeGenericLocalBusinessCategoryPhrase(candidate, userMessage))
+                continue;
+            if (LooksLikeDirectoryHeadingCandidate(candidate, userMessage))
+                continue;
+            if (LooksLikeWeakExtractedLocalBusinessName(candidate, userMessage))
+                continue;
+            if (LooksLikeBlacklistedFloristBrandCandidate(candidate, userMessage))
+                continue;
+            if (LooksLikeFloristProductCatalogCandidate(candidate, userMessage))
+                continue;
+
+            var canonicalName = CanonicalizeLocalBusinessName(candidate, userMessage);
+            if (string.IsNullOrWhiteSpace(canonicalName))
+                continue;
+
+            if (seen.TryGetValue(canonicalName, out var existingIndex))
+            {
+                if (candidate.Length > names[existingIndex].Length)
+                    names[existingIndex] = candidate;
+                continue;
+            }
+
+            seen[canonicalName] = names.Count;
+            names.Add(candidate);
+            if (names.Count >= LocalBusinessTargetResults)
+                break;
+        }
+    }
+
+    private static bool LooksLikeWeakExtractedLocalBusinessName(string candidate, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+            return true;
+
+        if (candidate.Contains('.', StringComparison.Ordinal))
+            return true;
+
+        var tokens = Regex.Matches(candidate, @"[A-Za-z][A-Za-z'&-]*")
+            .Select(match => match.Value)
+            .ToList();
+        if (tokens.Count == 0)
+            return true;
+
+        if (GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase))
+        {
+            var floristSignalTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "florist",
+                "floral",
+                "flower",
+                "flowers",
+                "bloom",
+                "blooms",
+                "petal",
+                "petals",
+                "gift",
+                "gifts",
+                "rose",
+                "roses",
+                "garden",
+                "gardens"
+            };
+
+            if (!tokens.Any(token => floristSignalTokens.Contains(token)))
+                return true;
+        }
+
+        var keywordTokens = GetLocalBusinessMatchKeywords(userMessage)
+            .SelectMany(keyword => Regex.Matches(keyword, @"[A-Za-z0-9']+")
+                .Select(match => match.Value.ToLowerInvariant()))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        static bool MatchesKeyword(string token, IReadOnlySet<string> keywordTokens)
+        {
+            var normalized = token.ToLowerInvariant();
+            if (keywordTokens.Contains(normalized))
+                return true;
+            if (normalized.EndsWith("ies", StringComparison.Ordinal) && normalized.Length > 3)
+                return keywordTokens.Contains(normalized[..^3] + "y");
+            if (normalized.EndsWith("s", StringComparison.Ordinal) && normalized.Length > 2)
+                return keywordTokens.Contains(normalized[..^1]);
+            return false;
+        }
+
+        var containsBusinessKeyword = tokens.Any(token => MatchesKeyword(token, keywordTokens));
+        if (tokens.Count == 1)
+            return !containsBusinessKeyword;
+
+        var connectorTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "and",
+            "by",
+            "of",
+            "the",
+            "for"
+        };
+
+        var capitalizedSignificantTokens = tokens.Count(token =>
+            !connectorTokens.Contains(token) &&
+            token.Length > 0 &&
+            char.IsUpper(token[0]));
+
+        return !containsBusinessKeyword && capitalizedSignificantTokens < 2;
+    }
+
+    private static bool LooksLikeDirectoryHeadingCandidate(string candidate, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) ||
+            !Regex.IsMatch(candidate, @"^(?:the\s+)?(?:best|top)\b", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        var keywords = GetLocalBusinessMatchKeywords(userMessage);
+        if (keywords.Count == 0 ||
+            !keywords.Any(keyword => candidate.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(candidate, @"\b(?:in|near)\b", RegexOptions.IgnoreCase) ||
+               !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+    }
+
+    private static bool LooksLikeBlacklistedFloristBrandCandidate(string candidate, string userMessage)
+    {
+        if (!GetRequestedLocalBusinessLabel(userMessage).Equals("florists", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        var lower = candidate.ToLowerInvariant();
+        return lower.Contains("avas", StringComparison.Ordinal) ||
+               lower.Contains("terry", StringComparison.Ordinal) ||
+               lower.Contains("ftd", StringComparison.Ordinal) ||
+               lower.Contains("teleflora", StringComparison.Ordinal) ||
+               lower.Contains("1-800-flowers", StringComparison.Ordinal) ||
+               lower.Contains("1800flowers", StringComparison.Ordinal) ||
+               lower.Contains("fromyouflowers", StringComparison.Ordinal) ||
+               lower.Contains("proflowers", StringComparison.Ordinal);
+    }
+
+    private static IEnumerable<string> FilterLocalBusinessCandidatesByContentLocation(
+        IEnumerable<string> candidates,
+        string content,
+        LocalNewsLocationTokens location)
+    {
+        var original = candidates.ToList();
+        if (original.Count == 0)
+            return original;
+
+        var filtered = new List<string>();
+        foreach (var candidate in original)
+        {
+            if (CandidateContextMatchesLocalBusinessLocation(content, candidate, location))
+                filtered.Add(candidate);
+        }
+
+        return filtered.Count > 0 || original.Count == 1 ? filtered.Count > 0 ? filtered : original : filtered;
+    }
+
+    private static bool CandidateContextMatchesLocalBusinessLocation(
+        string content,
+        string candidate,
+        LocalNewsLocationTokens location)
+    {
+        if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(candidate))
+            return false;
+
+        foreach (Match match in Regex.Matches(content, Regex.Escape(candidate), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            var windowStart = Math.Max(0, match.Index - 192);
+            var windowLength = Math.Min(content.Length - windowStart, candidate.Length + 384);
+            var window = content.Substring(windowStart, windowLength);
+            if (ContentMatchesLocalBusinessLocation(window, location))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string CanonicalizeLocalBusinessName(string candidate, string userMessage)
+    {
+        var normalized = Regex.Replace(candidate, @"\s+#\d+\b", string.Empty, RegexOptions.IgnoreCase)
+            .Trim();
+
+        if (GetRequestedLocalBusinessLabel(userMessage).Equals("delis", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = Regex.Replace(
+                normalized,
+                @"\s+(?:deli|delicatessen)\b$",
+                string.Empty,
+                RegexOptions.IgnoreCase).Trim();
+        }
+
+        return Regex.Replace(normalized, @"\s+", " ").Trim().ToLowerInvariant();
+    }
+
+    private static bool ContentMatchesLocalBusinessLocation(string content, LocalNewsLocationTokens location)
+    {
+        var rawContent = content ?? string.Empty;
+        var normalized = NormalizeLocalNewsText(content);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        var cityMatch = ContainsNormalizedTerm(normalized, location.CityPhrase) ||
+                        location.CityTokens.Any(token => ContainsNormalizedTerm(normalized, token));
+        if (!cityMatch)
+            return false;
+
+        return !MentionsConflictingState(rawContent, normalized, location);
+    }
+
+    private static bool LooksLikeBotChallengePage(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        return (content.Contains("One last step", StringComparison.OrdinalIgnoreCase) &&
+                content.Contains("solve the challenge", StringComparison.OrdinalIgnoreCase)) ||
+               content.Contains("If you're having trouble accessing Google Search", StringComparison.OrdinalIgnoreCase) ||
+               content.Contains("cf-turnstile", StringComparison.OrdinalIgnoreCase) ||
+               content.Contains("CloudflareHandleCaptcha", StringComparison.OrdinalIgnoreCase) ||
+               (content.Contains("captcha", StringComparison.OrdinalIgnoreCase) &&
+                (content.Contains("Google Search", StringComparison.OrdinalIgnoreCase) ||
+                 content.Contains("Bing", StringComparison.OrdinalIgnoreCase) ||
+                 content.Contains("turnstile", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IEnumerable<string> ExtractLocalBusinessNamesFromLooseText(string text, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            yield break;
+
+        var suffixPattern = GetLocalBusinessLooseSuffixPattern(userMessage);
+        if (string.IsNullOrWhiteSpace(suffixPattern))
+            yield break;
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in Regex.Matches(
+                     text,
+                     $@"\b([A-Z][A-Za-z0-9'&.-]+(?:\s+[A-Z][A-Za-z0-9'&.-]+){{0,4}}\s+(?:{suffixPattern}))\b",
+                     RegexOptions.CultureInvariant))
+        {
+            var candidate = match.Groups[1].Value.Trim();
+            var normalized = ExtractBusinessNameFromSourceTitle(candidate, userMessage) ?? candidate;
+            normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
+
+            if (string.IsNullOrWhiteSpace(normalized) ||
+                IsGenericNonBusinessName(normalized) ||
+                LooksLikeGenericLocalBusinessCategoryPhrase(normalized, userMessage) ||
+                LooksLikeChainDepartmentCandidate(normalized, userMessage) ||
+                !seen.Add(normalized))
+            {
+                continue;
+            }
+
+            yield return normalized;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractLocalBusinessNamesFromSearchSources(
+        IReadOnlyList<SourceItem> sources,
+        string userMessage)
+    {
+        var names = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in sources)
+        {
+            var titleName = ExtractBusinessNameFromSourceTitle(source.Title, userMessage);
+            if (!string.IsNullOrWhiteSpace(titleName))
+            {
+                AddLocalBusinessNames(
+                    names,
+                    seen,
+                    [titleName],
+                    userMessage);
+            }
+
+            var combinedText = string.Join(
+                "\n",
+                new[] { source.Title ?? string.Empty, source.Snippet ?? string.Empty }
+                    .Where(text => !string.IsNullOrWhiteSpace(text)));
+            if (string.IsNullOrWhiteSpace(combinedText))
+                continue;
+
+            AddLocalBusinessNames(
+                names,
+                seen,
+                ExtractBusinessNamesFromArticles([combinedText], userMessage),
+                userMessage);
+
+            if (names.Count < LocalBusinessTargetResults)
+            {
+                AddLocalBusinessNames(
+                    names,
+                    seen,
+                    ExtractLocalBusinessNamesFromLooseText(combinedText, userMessage),
+                    userMessage);
+            }
+
+            if (names.Count >= LocalBusinessTargetResults)
+                break;
+        }
+
+        return names;
+    }
+
+    private static string GetLocalBusinessLooseSuffixPattern(string userMessage)
+    {
+        return GetRequestedLocalBusinessLabel(userMessage) switch
+        {
+            "delis" => "(?:Deli|Delicatessen|Sandwich\\s+Shop|Sub(?:s|\\s+Shop))",
+            "florists" => "(?:Florist|Flowers|Flower\\s+Shop|Blooms?)",
+            "bakeries" => "(?:Bakery|Patisserie|Pastry\\s+Shop)",
+            "coffee shops" => "(?:Cafe|Coffee|Roastery|Espresso\\s+Bar)",
+            _ => string.Empty
+        };
     }
 
     private async Task<PlacesDiscoveryResult?> DiscoverOpenPlacesAsync(
@@ -1186,12 +3035,16 @@ public sealed partial class SearchOrchestrator
         RegexOptions.Compiled);
 
     private static readonly Regex HeadingStyleNameRegex = new(
-        @"^([A-Z][A-Za-z''&\-]+(?:\s+[A-Za-z''&\-]+){0,5})\s*$",
+        @"^([A-Z][A-Za-z''&\-]+(?:\s+(?:[A-Z][A-Za-z''&\-]+|&|and|by|of|the)){0,6})\s*$",
         RegexOptions.Compiled);
 
     // "Our current favorites are: 1: Left Bank Pastry, 2: Gotti Sweets..."
     private static readonly Regex InlineNumberedRegex = new(
         @"\d+:\s*([A-Z][A-Za-z''&\s\-]+?)(?:,\s*\d+:|$)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex MarkdownLinkNameRegex = new(
+        @"^(?:#+\s*)?(?:\d{1,2}[.)]\s*)?\[(?<name>[^\]]+)\]\([^\)]+\)",
         RegexOptions.Compiled);
 
     internal static IReadOnlyList<string> ExtractBusinessNamesFromArticles(
@@ -1249,6 +3102,14 @@ public sealed partial class SearchOrchestrator
                     }
                 }
 
+                // Pattern 2b: Markdown heading/list links from directory pages.
+                if (name is null)
+                {
+                    var markdownLinkMatch = MarkdownLinkNameRegex.Match(line);
+                    if (markdownLinkMatch.Success)
+                        name = CleanExtractedBusinessName(markdownLinkMatch.Groups["name"].Value);
+                }
+
                 // Pattern 3: Short standalone line that looks like a proper name,
                 // followed by a detail line (address, rating, description).
                 if (name is null && line.Length <= 60 && HeadingStyleNameRegex.IsMatch(line))
@@ -1282,11 +3143,31 @@ public sealed partial class SearchOrchestrator
     private static string CleanExtractedBusinessName(string raw)
     {
         // Strip trailing punctuation, HTML artifacts, numbering.
-        var cleaned = raw.Trim().TrimEnd('.', ':', '-', '–', '—');
+        var cleaned = raw.Trim().Trim('"', '\'', '“', '”').Trim();
+        cleaned = cleaned.TrimEnd('.', ':', '-', '–', '—');
+        cleaned = Regex.Replace(cleaned, @"^#+\s*", string.Empty).Trim();
+        cleaned = Regex.Replace(cleaned, @"^\d{1,2}[.)]\s*", string.Empty).Trim();
+        cleaned = Regex.Replace(cleaned, @"^\[(?<text>[^\]]+)\]\([^\)]+\)$", "${text}").Trim();
+        cleaned = Regex.Replace(cleaned, @"^\[(?<text>[^\]]+)\].*$", "${text}").Trim();
         cleaned = Regex.Replace(cleaned, @"\s*[-–—|]\s+.*$", "").Trim();
         cleaned = Regex.Replace(cleaned, @"\s+\d+(\.\d+)?\s*stars?$", "", RegexOptions.IgnoreCase).Trim();
         cleaned = Regex.Replace(cleaned, @"\s*\(.*\)\s*$", "").Trim();
-        return cleaned;
+        cleaned = cleaned.Trim('"', '\'', '“', '”').Trim();
+        return StripLocalBusinessNamePrefixNoise(cleaned);
+    }
+
+    private static string StripLocalBusinessNamePrefixNoise(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var cleaned = Regex.Replace(
+            name,
+            @"^(?:(?:you\s+)?(?:claimed|unclaimed)|about|shop(?:\s+by)?|contact|home|welcome(?:\s+to)?)\s+",
+            string.Empty,
+            RegexOptions.IgnoreCase).Trim();
+
+        return Regex.Replace(cleaned, @"\s+", " ").Trim();
     }
 
     private static bool LooksLikeBusinessDetailLine(string line)
@@ -1313,7 +3194,15 @@ public sealed partial class SearchOrchestrator
     private static bool IsGenericNonBusinessName(string name)
     {
         var lower = name.ToLowerInvariant();
+        if (Regex.IsMatch(lower, @"^(?:city|county|town|village)\s+of\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\bchamber\s+of\s+commerce\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\bbusiness\s+directory\b", RegexOptions.IgnoreCase))
+            return true;
         if (Regex.IsMatch(lower, @"^(?:where|how)\s+to\s+(?:get|find)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"\b(?:recipe|recipes|idea|ideas|photo|photos|video|videos|tips?)\b", RegexOptions.IgnoreCase))
             return true;
         if (Regex.IsMatch(lower, @"\blocations?\s+in\b", RegexOptions.IgnoreCase))
             return true;
@@ -1324,6 +3213,8 @@ public sealed partial class SearchOrchestrator
             return true;
         if (Regex.IsMatch(lower, @"\b(?:guide|roundup|directory)\b", RegexOptions.IgnoreCase) &&
             Regex.IsMatch(lower, @"\b(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?|desserts?)\b", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(lower, @"^(?:local\s+)?(?:baker(?:y|ies)|florists?|restaurants?|delis?|salons?|cafes?|coffee\s+shops?|stores?|pharmacies|groceries|dentists?)\s+(?:in|near)\b", RegexOptions.IgnoreCase))
             return true;
 
         ReadOnlySpan<string> skip =
@@ -1365,9 +3256,36 @@ public sealed partial class SearchOrchestrator
         string? result = null;
         var resolvedToolName = PlacesLookupToolName;
 
+        void RecordFailure(string payload)
+        {
+            toolCallsMade.Add(new ToolCallRecord
+            {
+                ToolName = resolvedToolName,
+                Arguments = args,
+                Result = payload,
+                Success = false
+            });
+        }
+
         try
         {
             result = await _mcp.CallToolAsync(PlacesLookupToolName, args, ct);
+            if (WebToolFailureMapper.TryParseStructuredError(result, out _, out _) ||
+                result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            {
+                RecordFailure(result);
+                return null;
+            }
+        }
+        catch (OperationCanceledException ex)
+        {
+            RecordFailure($"Error: {ex.Message}");
+            return null;
+        }
+        catch (Exception ex) when (ContainsToolBudgetOrCancellationMarker(ex.Message))
+        {
+            RecordFailure($"Error: {ex.Message}");
+            return null;
         }
         catch
         {
@@ -1375,16 +3293,26 @@ public sealed partial class SearchOrchestrator
             {
                 resolvedToolName = PlacesLookupToolNameAlt;
                 result = await _mcp.CallToolAsync(PlacesLookupToolNameAlt, args, ct);
+                if (WebToolFailureMapper.TryParseStructuredError(result, out _, out _) ||
+                    result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                {
+                    RecordFailure(result);
+                    return null;
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                RecordFailure($"Error: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex) when (ContainsToolBudgetOrCancellationMarker(ex.Message))
+            {
+                RecordFailure($"Error: {ex.Message}");
+                return null;
             }
             catch (Exception ex)
             {
-                toolCallsMade.Add(new ToolCallRecord
-                {
-                    ToolName  = resolvedToolName,
-                    Arguments = args,
-                    Result    = $"Error: {ex.Message}",
-                    Success   = false
-                });
+                RecordFailure($"Error: {ex.Message}");
                 return null;
             }
         }
@@ -1433,13 +3361,25 @@ public sealed partial class SearchOrchestrator
         if (!string.IsNullOrWhiteSpace(location))
         {
             queries.Add($"{label} near {location}");
-            queries.Add($"{singular} near {location}");
-            queries.Add($"{label} {location}");
+
+            foreach (var alias in GetLocalBusinessRetryAliases(userMessage))
+            {
+                queries.Add($"{alias} in {location}");
+                queries.Add($"{alias} near {location}");
+            }
+
+            queries.Add($"{label} in {location}");
         }
         else
         {
             queries.Add($"{label} near me");
-            queries.Add($"{singular} near me");
+
+            foreach (var alias in GetLocalBusinessRetryAliases(userMessage))
+            {
+                queries.Add($"{alias} near me");
+                queries.Add(alias);
+            }
+
             queries.Add(label);
         }
 
@@ -1519,6 +3459,7 @@ public sealed partial class SearchOrchestrator
 
         var renderedSources = sources
             .Where(source => !IsJunkBusinessSource(source))
+            .Where(source => !IsLowTrustLocalBusinessSource(source, userMessage))
             .Select(source => new
             {
                 Title = StripTitleSuffix((source.Title ?? string.Empty).Trim()),
@@ -1526,6 +3467,7 @@ public sealed partial class SearchOrchestrator
                 source.Snippet
             })
             .Where(item => !string.IsNullOrWhiteSpace(item.Title))
+            .Where(item => !LooksLikeGenericLocalBusinessCategoryPhrase(item.Title, userMessage))
             .DistinctBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .Take(Math.Max(1, LocalBusinessTargetResults))
             .ToList();
@@ -1568,6 +3510,60 @@ public sealed partial class SearchOrchestrator
             ToolCallsMade = toolCallsMade.ToList(),
             LlmRoundTrips = 0
         };
+    }
+
+    private static bool ShouldTryLocalBusinessBrowserFallback(
+        string userMessage,
+        IReadOnlyList<SourceItem> sources)
+    {
+        if (sources.Count == 0)
+            return false;
+
+        var explicitLocation = ExtractInlineLocationFromMessage(userMessage);
+        if (!string.IsNullOrWhiteSpace(explicitLocation) &&
+            FilterSourcesForLocalBusinessLocation(sources, explicitLocation, requireMatch: true).Count == 0)
+        {
+            return true;
+        }
+
+        return sources.All(source =>
+            IsDirectoryAggregatorSource(source) ||
+            IsLowTrustLocalBusinessSource(source, userMessage) ||
+            string.IsNullOrWhiteSpace(ExtractBusinessNameFromSourceTitle(source.Title, userMessage)));
+    }
+
+    private static bool IsLowTrustLocalBusinessSource(SourceItem source, string userMessage)
+    {
+        if (LooksLikeChainDepartmentCandidate(source.Title ?? string.Empty, userMessage))
+            return true;
+
+        if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        var explicitBrand = ExtractBrandKeyword((userMessage ?? string.Empty).ToLowerInvariant()) ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(explicitBrand) &&
+            host.Contains(explicitBrand.Replace("'", string.Empty), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (host.Contains("ubereats.com", StringComparison.Ordinal) ||
+            host.Contains("postmates.com", StringComparison.Ordinal) ||
+            host.Contains("doordash.com", StringComparison.Ordinal) ||
+            host.Contains("grubhub.com", StringComparison.Ordinal) ||
+            host.Contains("slice.life", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return host.Contains("walmart.com", StringComparison.Ordinal) ||
+               host.Contains("albertsons.com", StringComparison.Ordinal) ||
+               host.Contains("safeway.com", StringComparison.Ordinal) ||
+               host.Contains("fredmeyer.com", StringComparison.Ordinal) ||
+               host.Contains("kroger.com", StringComparison.Ordinal) ||
+               host.Contains("target.com", StringComparison.Ordinal) ||
+               host.Contains("costco.com", StringComparison.Ordinal);
     }
 
     private static string? TryBuildPlacesConfigErrorMessage(IReadOnlyList<ToolCallRecord> toolCallsMade)
@@ -1830,6 +3826,23 @@ public sealed partial class SearchOrchestrator
             ? " nearby"
             : $" nearby in {locationContext}";
 
+        Session.LastWasLocalBusinessDiscovery = true;
+        Session.RecordLocalBusinessCandidates(
+            businessLabel,
+            businesses
+                .Where(business => !string.IsNullOrWhiteSpace(business.Name))
+                .Select(business => new SourceItem
+                {
+                    SourceId = SourceItem.ComputeSourceId($"local-business::{business.Name}"),
+                    Url = string.IsNullOrWhiteSpace(business.Website)
+                        ? $"about:local-business/{Uri.EscapeDataString(business.Name)}"
+                        : business.Website!,
+                    Title = business.Name,
+                    Domain = string.IsNullOrWhiteSpace(business.Website) ? "local-business" : "website",
+                    Snippet = business.Address ?? string.Empty
+                })
+                .ToList());
+
         var sb = new StringBuilder();
         if (includesSupplementalSpots)
         {
@@ -1917,10 +3930,28 @@ public sealed partial class SearchOrchestrator
             : $" nearby in {locationContext}";
 
         var names = businessNames.Take(LocalBusinessTargetResults).ToList();
+        Session.LastWasLocalBusinessDiscovery = true;
+        Session.RecordLocalBusinessCandidates(
+            businessLabel,
+            names
+                .Select(name => new SourceItem
+                {
+                    SourceId = SourceItem.ComputeSourceId($"local-business::{name}"),
+                    Url = $"about:local-business/{Uri.EscapeDataString(name)}",
+                    Title = name,
+                    Domain = "local-business"
+                })
+                .ToList());
+
+        var detailByName = ExtractLocalBusinessDirectoryDetails(names, toolCallsMade);
         var sb = new StringBuilder();
         sb.Append(names.Count == 1
             ? $"Here's a {SingularizeBusinessLabel(businessLabel)}{locText} that came up:"
             : $"Here are {names.Count} {businessLabel}{locText} that came up:");
+
+        if (TryBuildLocalBusinessDirectoryEvidenceNote(toolCallsMade, locationContext) is { Length: > 0 } evidenceNote)
+            sb.Append(evidenceNote);
+
         sb.AppendLine();
         sb.AppendLine();
 
@@ -1929,6 +3960,13 @@ public sealed partial class SearchOrchestrator
             sb.Append("- **");
             sb.Append(name);
             sb.Append("**");
+
+            if (detailByName.TryGetValue(name, out var detail) && !string.IsNullOrWhiteSpace(detail))
+            {
+                sb.Append(" — ");
+                sb.Append(detail);
+            }
+
             sb.AppendLine();
         }
 
@@ -1944,5 +3982,152 @@ public sealed partial class SearchOrchestrator
             ToolCallsMade = toolCallsMade.ToList(),
             LlmRoundTrips = 0
         };
+    }
+
+    private static Dictionary<string, string> ExtractLocalBusinessDirectoryDetails(
+        IReadOnlyList<string> businessNames,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var detailByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (businessNames.Count == 0 || toolCallsMade.Count == 0)
+            return detailByName;
+
+        var browserCalls = toolCallsMade
+            .Where(call => call.Success &&
+                (call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                 call.ToolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase)) &&
+                !string.IsNullOrWhiteSpace(call.Result))
+            .ToList();
+        if (browserCalls.Count == 0)
+            return detailByName;
+
+        foreach (var name in businessNames)
+        {
+            var matchingChunks = browserCalls
+                .Where(call => call.Result.Contains(name, StringComparison.OrdinalIgnoreCase) ||
+                               call.Arguments.Contains(name, StringComparison.OrdinalIgnoreCase))
+                .Select(call => call.Result)
+                .ToList();
+            if (matchingChunks.Count == 0)
+                continue;
+
+            var extraction = DeepDiveWebExtractor.Extract(matchingChunks);
+            var detail = NormalizeLocalBusinessDirectoryDetail(extraction.Address);
+            if (!string.IsNullOrWhiteSpace(detail))
+                detailByName[name] = detail;
+        }
+
+        return detailByName;
+    }
+
+    private static string? NormalizeLocalBusinessDirectoryDetail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var normalized = Regex.Replace(value.Trim(), @"\s+", " ");
+        return normalized.Length <= 120
+            ? normalized
+            : normalized[..117] + "...";
+    }
+
+    private static string? TryBuildLocalBusinessDirectoryEvidenceNote(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string? locationContext)
+    {
+        if (toolCallsMade.Count == 0)
+            return null;
+
+        var hosts = new List<string>();
+        var seenHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? yearToken = null;
+        var location = BuildLocalNewsLocationTokens(locationContext);
+
+        foreach (var call in toolCallsMade)
+        {
+            if (!call.Success ||
+                (!call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+                 !call.ToolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (location is not null &&
+                !ContentMatchesLocalBusinessLocation(call.Result ?? string.Empty, location))
+            {
+                continue;
+            }
+
+            yearToken ??= Regex.Match(call.Result ?? string.Empty, @"\b20\d{2}\b", RegexOptions.CultureInvariant) is { Success: true } match
+                ? match.Value
+                : null;
+
+            var host = TryExtractLocalBusinessDirectoryHost(call.Arguments);
+            if (!string.IsNullOrWhiteSpace(host) && seenHosts.Add(host))
+                hosts.Add(host);
+        }
+
+        if (hosts.Count == 0 && string.IsNullOrWhiteSpace(yearToken))
+            return null;
+
+        string sourceText;
+        if (hosts.Count == 0)
+        {
+            sourceText = "local directory pages I checked";
+        }
+        else if (hosts.Count == 1)
+        {
+            sourceText = $"{hosts[0]} directory page";
+        }
+        else if (hosts.Count == 2)
+        {
+            sourceText = $"directory pages on {hosts[0]} and {hosts[1]}";
+        }
+        else
+        {
+            sourceText = $"directory pages on {string.Join(", ", hosts.Take(hosts.Count - 1))}, and {hosts[^1]}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(yearToken))
+        {
+            return hosts.Count <= 1
+                ? $" based on a {yearToken} {sourceText}"
+                : $" based on {yearToken} {sourceText}";
+        }
+
+        return hosts.Count == 1
+            ? $" based on the {sourceText} I checked"
+            : $" based on the {sourceText}";
+    }
+
+    private static string? TryExtractLocalBusinessDirectoryHost(string? arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(arguments);
+            if (doc.RootElement.TryGetProperty("url", out var urlElement) &&
+                urlElement.ValueKind == JsonValueKind.String &&
+                Uri.TryCreate(urlElement.GetString(), UriKind.Absolute, out var uri))
+            {
+                return NormalizeLocalBusinessDirectoryHost(uri.Host);
+            }
+        }
+        catch
+        {
+        }
+
+        var match = Regex.Match(arguments, @"https?://([^/""\s]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? NormalizeLocalBusinessDirectoryHost(match.Groups[1].Value) : null;
+    }
+
+    private static string NormalizeLocalBusinessDirectoryHost(string host)
+    {
+        if (host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+            return host[4..];
+
+        return host;
     }
 }

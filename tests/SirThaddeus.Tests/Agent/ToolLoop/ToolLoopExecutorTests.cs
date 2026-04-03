@@ -449,6 +449,200 @@ public class ToolLoopExecutorTests
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitToolInvocationFallsBackAfterUnavailable_KeepsUnavailableKeyword()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"Rust language release notes","recency":"month"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Rust release notes are usually published on the official Rust blog.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => """{"error":{"code":"tool_unavailable","message":"web_search unavailable"}}""",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Use web_search to find the latest Rust language release notes.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitWebSearchReturnsOnlyNoResults_UsesDeterministicUnavailableFallback()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"latest Rust release notes","recency":"any"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "This should not run.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Use web_search to find the latest Rust language release notes.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal(1, llmCallCount);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "The requested tool is currently unavailable right now. Please retry in a moment.",
+            response.Text);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitWebToolTimesOutWithPlainTextError_ReturnsDeterministicTimeoutMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((_, _) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"AI policy news","recency":"day"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "should not be used",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "Error: web_search timed out.",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Use web_search for AI policy news and handle timeout gracefully.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "I hit a timeout while running web tools, so I couldn't complete that request right now. Please retry in a moment or narrow the query.",
+            response.Text);
+        Assert.Equal(1, llmCallCount);
+    }
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

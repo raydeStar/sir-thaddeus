@@ -121,11 +121,20 @@ public sealed partial class AgentOrchestrator
         Action<string, string> logEvent)
     {
         if (lookupModeHint == LookupModeHint.DeepDive &&
-            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+            IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerIncoming))
         {
             logEvent(
                 "LOOKUP_MODE_LOCAL_BUSINESS_OVERRIDE",
                 "Forced generic local-business discovery onto the fact-find pipeline.");
+            return LookupModeHint.Fact;
+        }
+
+        if (lookupModeHint == LookupModeHint.DeepDive &&
+            !IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            logEvent(
+                "LOOKUP_MODE_DEEPDIVE_SAFETY_DOWNGRADE",
+                "Downgraded a misrouted deep-dive lookup to fact-find because the prompt lacks deep-dive signals.");
             return LookupModeHint.Fact;
         }
 
@@ -285,6 +294,22 @@ public sealed partial class AgentOrchestrator
 
             LogEvent("ROUTER_NEWS_NORMALIZATION",
                 "Normalized misrouted lookup intent to LookupNews for an explicit news request.");
+        }
+
+        if (RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            !route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerIncoming))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupDeepDive,
+                confidence: Math.Max(route.Confidence, 0.95),
+                needsWeb: true,
+                needsSearch: true,
+                needsBrowser: true);
+
+            LogEvent("ROUTER_DEEPDIVE_NORMALIZATION",
+                "Normalized misrouted lookup intent to LookupDeepDive for an explicit deep-dive request.");
         }
 
         var shouldNormalizeSelfContainedLookupToChat =
