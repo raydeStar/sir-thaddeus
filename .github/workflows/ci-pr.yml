@@ -301,7 +301,7 @@ jobs:
               "refs/tags/${{ steps.tag.outputs.tag }}" 2>/dev/null || true
 
       - name: Create rolling GitHub release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.title }}
