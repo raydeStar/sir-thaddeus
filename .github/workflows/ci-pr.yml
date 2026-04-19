@@ -255,7 +255,7 @@ jobs:
           lfs: false
 
       - name: Download Linux build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-linux-${{ github.ref_name }}
           path: artifacts/release
@@ -284,7 +284,7 @@ jobs:
           lfs: false
 
       - name: Download macOS build package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: build-package-macos-${{ github.ref_name }}
           path: artifacts/release
