@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload harness artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: harness-${{ matrix.suite }}
           path: |
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: stage-test-results-${{ matrix.os }}
           path: artifacts/test-results/**/*.trx
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload visual grade artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: visual-grade-artifacts
           path: |
@@ -194,7 +194,7 @@ jobs:
           lfs: false
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/nightly-all/
 
@@ -222,7 +222,7 @@ jobs:
           Write-Host ($summary -join "`n")
 
       - name: Upload nightly summary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: nightly-summary
           path: artifacts/nightly-summary.md
