@@ -211,7 +211,7 @@ jobs:
           if-no-files-found: error
 
   smoke-test:
-    name: Smoke Test Package
+    name: Smoke Test Package (Windows)
     needs: [package-windows, package-linux, package-macos]
     if: >
       github.event_name == 'push' &&
@@ -239,15 +239,75 @@ jobs:
           if (-not $zip) { Write-Error "No win-x64 full zip found in artifacts/release"; exit 1 }
           ./dev/smoke-test.ps1 -ZipPath $zip.FullName -SkipLaunch
 
+  smoke-test-linux:
+    name: Smoke Test Package (Linux)
+    needs: [package-linux]
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Download Linux build package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: build-package-linux-${{ github.ref_name }}
+          path: artifacts/release
+
+      - name: Run cross-platform smoke test on tar.gz
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-linux-x64-*-full.tar.gz" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $archive) { Write-Error "No linux-x64 full tar.gz found in artifacts/release"; exit 1 }
+          ./dev/smoke-test-cross.ps1 -ArchivePath $archive.FullName -SkipLaunch
+
+  smoke-test-macos:
+    name: Smoke Test Package (macOS)
+    needs: [package-macos]
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/dev'
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Download macOS build package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: build-package-macos-${{ github.ref_name }}
+          path: artifacts/release
+
+      - name: Run cross-platform smoke test on tar.gz
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -Path artifacts/release -Filter "sir-thaddeus-osx-arm64-*-full.tar.gz" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $archive) { Write-Error "No osx-arm64 full tar.gz found in artifacts/release"; exit 1 }
+          ./dev/smoke-test-cross.ps1 -ArchivePath $archive.FullName -SkipLaunch
+
   publish:
     name: Publish Rolling Release
-    needs: [package-windows, package-linux, package-macos, smoke-test]
+    needs: [package-windows, package-linux, package-macos, smoke-test, smoke-test-linux, smoke-test-macos]
     if: >
       always() &&
       needs.package-windows.result == 'success' &&
       needs.package-linux.result == 'success' &&
       needs.package-macos.result == 'success' &&
       (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped') &&
+      (needs.smoke-test-linux.result == 'success' || needs.smoke-test-linux.result == 'skipped') &&
+      (needs.smoke-test-macos.result == 'success' || needs.smoke-test-macos.result == 'skipped') &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
