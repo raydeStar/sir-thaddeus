@@ -113,6 +113,15 @@ public sealed partial class AgentOrchestrator
     {
         if (TryBuildExplicitFileReadArgs(userMessage, out var earlyFileReadArgs, out var earlyFilePath))
         {
+            var blockedResponse = await TryBlockFileAccessIfDeniedAsync(
+                ToolNames.FileRead,
+                earlyFileReadArgs,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+            if (blockedResponse is not null)
+                return blockedResponse;
+
             return await ExecuteExplicitFileReadAsync(
                 earlyFileReadArgs,
                 earlyFilePath,
@@ -123,6 +132,15 @@ public sealed partial class AgentOrchestrator
 
         if (TryBuildExplicitFileListArgs(userMessage, out var earlyFileListArgs, out var earlyFolderPath))
         {
+            var blockedResponse = await TryBlockFileAccessIfDeniedAsync(
+                ToolNames.FileList,
+                earlyFileListArgs,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+            if (blockedResponse is not null)
+                return blockedResponse;
+
             return await ExecuteExplicitFileListAsync(
                 earlyFileListArgs,
                 earlyFolderPath,
@@ -141,6 +159,15 @@ public sealed partial class AgentOrchestrator
                 out var earlyKnowledgeStoreCreateArgs,
                 out var earlyKnowledgeStoreListArgs))
         {
+            var blockedResponse = await TryBlockFileAccessIfDeniedAsync(
+                "knowledge_store_create_file",
+                earlyKnowledgeStoreCreateArgs,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+            if (blockedResponse is not null)
+                return blockedResponse;
+
             return await ExecuteExplicitKnowledgeStoreCreateListRoundTripAsync(
                 earlyKnowledgeStoreRootId,
                 earlyKnowledgeStoreRelativePath,
@@ -162,6 +189,136 @@ public sealed partial class AgentOrchestrator
         }
 
         return null;
+    }
+
+    private async Task<AgentResponse?> TryBlockGenericFileAccessIfDeniedAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        return await TryBlockFileAccessIfDeniedAsync(
+            ToolNames.FileRead,
+            BuildGenericFileAccessPreflightArgs(userMessage),
+            toolCallsMade,
+            roundTrips,
+            cancellationToken);
+    }
+
+    private async Task<AgentResponse?> TryBlockFileAccessIfDeniedAsync(
+        string toolName,
+        string argumentsJson,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        if (_mcp is not AuditedMcpToolClient auditedClient)
+            return null;
+
+        var permission = await auditedClient.PreflightToolPermissionAsync(
+            toolName,
+            argumentsJson,
+            cancellationToken);
+
+        if (permission.Granted)
+            return null;
+
+        var denialReason = string.IsNullOrWhiteSpace(permission.DenialReason)
+            ? "File access was not approved."
+            : permission.DenialReason.Trim();
+
+        var responseText =
+            "I need file access approval before I can work with local files or the knowledge store. " +
+            "This request was blocked before any file tools were exposed or run. " +
+            $"Reason: {denialReason}";
+
+        AppendAssistantMessage(responseText);
+        LogEvent("FILE_ACCESS_PREFLIGHT_BLOCKED", $"tool={toolName}, reason={denialReason}");
+
+        return new AgentResponse
+        {
+            Text = responseText,
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = roundTrips,
+            SuppressToolActivityUi = true
+        };
+    }
+
+    private static string BuildGenericFileAccessPreflightArgs(string userMessage)
+    {
+        var trimmed = (userMessage ?? string.Empty).Trim();
+        if (trimmed.Length > 200)
+            trimmed = trimmed[..200];
+
+        return JsonSerializer.Serialize(new
+        {
+            query = string.IsNullOrWhiteSpace(trimmed) ? "local file access requested" : trimmed
+        });
+    }
+
+    private async Task<AgentResponse> TryHandleChatFallbackToFileAsync(
+        string userMessage,
+        string contextualUserMessage,
+        Task<IReadOnlyList<ToolDefinition>> toolDefsTask,
+        List<ToolCallRecord> toolCallsMade,
+        int roundTrips,
+        CancellationToken cancellationToken)
+    {
+        LogEvent("CHAT_FALLBACK_TO_FILE",
+            "Chat-only refusal/uncertainty detected — falling back to file tools.");
+
+        var blockedFileAccessResponse = await TryBlockGenericFileAccessIfDeniedAsync(
+            contextualUserMessage,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken);
+        if (blockedFileAccessResponse is not null)
+            return blockedFileAccessResponse;
+
+        if (TryBuildExplicitFileReadArgs(userMessage, out var fallbackFileReadArgs, out var fallbackFilePath) ||
+            TryBuildExplicitFileReadArgs(contextualUserMessage, out fallbackFileReadArgs, out fallbackFilePath))
+        {
+            return await ExecuteExplicitFileReadAsync(
+                fallbackFileReadArgs,
+                fallbackFilePath,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+        }
+
+        if (TryBuildExplicitFileListArgs(userMessage, out var fallbackFileListArgs, out var fallbackFolderPath) ||
+            TryBuildExplicitFileListArgs(contextualUserMessage, out fallbackFileListArgs, out fallbackFolderPath))
+        {
+            return await ExecuteExplicitFileListAsync(
+                fallbackFileListArgs,
+                fallbackFolderPath,
+                contextualUserMessage,
+                toolCallsMade,
+                roundTrips,
+                cancellationToken);
+        }
+
+        var fallbackToolsCatalog = await toolDefsTask;
+        var filePolicy = PolicyGate.Evaluate(new RouterOutput
+        {
+            Intent = Intents.FileTask,
+            NeedsFileAccess = true,
+            RequiredCapabilities = [ToolCapability.FileRead],
+            Confidence = 1.0
+        });
+        var fileTools = FilterKnowledgeStoreToolsIfNeeded(
+            PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy),
+            contextualUserMessage);
+
+        LogEvent("AGENT_TOOLS_POLICY_FILTERED",
+            $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
+
+        return await RunToolLoopAsync(
+            fileTools,
+            toolCallsMade,
+            roundTrips,
+            cancellationToken);
     }
 
     private AgentResponse? TryBuildConnectivityRecoveredResponse(

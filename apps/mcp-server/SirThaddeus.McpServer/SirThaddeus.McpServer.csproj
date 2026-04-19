@@ -29,9 +29,4 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
     <ProjectReference Include="..\..\..\packages\mcp-tools-windows\SirThaddeus.McpTools.Windows\SirThaddeus.McpTools.Windows.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="Tools\**\*.cs" />
-  </ItemGroup>
-
 </Project>

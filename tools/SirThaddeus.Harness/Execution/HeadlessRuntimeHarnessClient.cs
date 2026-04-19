@@ -30,6 +30,11 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
     private Process? _process;
     private HarnessRuntimeSandbox? _sandbox;
 
+    // Built once per process to avoid per-test DLL copy races when the
+    // previous runtime process still holds file handles after Kill().
+    private static bool _runtimeBuilt;
+    private static readonly object _buildLock = new();
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -53,19 +58,51 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         await Task.CompletedTask;
     }
 
+    private static void EnsureRuntimeBuilt()
+    {
+        lock (_buildLock)
+        {
+            if (_runtimeBuilt)
+                return;
+
+            var project = ResolveHeadlessRuntimeProject();
+            var build = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = $"build \"{project}\" -c Debug --no-restore",
+                    WorkingDirectory = Directory.GetCurrentDirectory(),
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false,
+                    UseShellExecute = false,
+                    CreateNoWindow = false
+                }
+            };
+            build.Start();
+            build.WaitForExit();
+            if (build.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Headless runtime pre-build failed (exit {build.ExitCode}).");
+
+            _runtimeBuilt = true;
+        }
+    }
+
     internal async Task<HeadlessExecutionResult> ExecuteAsync(
         HarnessTestCase test,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(test);
 
+        EnsureRuntimeBuilt();
         await EnsureFreshRuntimeAsync(test, cancellationToken);
 
         var runtimeProject = ResolveHeadlessRuntimeProject();
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{runtimeProject}\" -- --server --tools --port {_port}",
+            Arguments = $"run --project \"{runtimeProject}\" --no-build -- --server --tools --port {_port}",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,

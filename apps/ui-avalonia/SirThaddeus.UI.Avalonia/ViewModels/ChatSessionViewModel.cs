@@ -179,8 +179,10 @@ public class ChatMessageItem : INotifyPropertyChanged
     private string _role = string.Empty;
     private string _content = string.Empty;
     private string _thoughtContent = string.Empty;
+    private string _planContent = string.Empty;
     private string _toolSummary = string.Empty;
     private bool _isThoughtExpanded;
+    private bool _isPlanExpanded;
     private DateTimeOffset _timestamp = DateTimeOffset.Now;
     private bool _isPending;
 
@@ -238,6 +240,30 @@ public class ChatMessageItem : INotifyPropertyChanged
     {
         get => _isThoughtExpanded;
         set { _isThoughtExpanded = value; OnPropertyChanged(nameof(IsThoughtExpanded)); }
+    }
+
+    /// <summary>
+    /// Typed plan contract displayed in a collapsible expander above the response.
+    /// </summary>
+    public string PlanContent
+    {
+        get => _planContent;
+        set
+        {
+            _planContent = value;
+            OnPropertyChanged(nameof(PlanContent));
+            OnPropertyChanged(nameof(HasPlanContent));
+        }
+    }
+
+    /// <summary>True when this message has a plan to display.</summary>
+    public bool HasPlanContent => !string.IsNullOrWhiteSpace(_planContent);
+
+    /// <summary>Expanded/collapsed state for the plan expander.</summary>
+    public bool IsPlanExpanded
+    {
+        get => _isPlanExpanded;
+        set { _isPlanExpanded = value; OnPropertyChanged(nameof(IsPlanExpanded)); }
     }
 
     /// <summary>

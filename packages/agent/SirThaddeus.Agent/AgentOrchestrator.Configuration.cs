@@ -18,6 +18,48 @@ namespace SirThaddeus.Agent;
 
 public sealed partial class AgentOrchestrator
 {
+    public string? ActiveProfileId { get; set; }
+
+    public bool MemoryEnabled { get; set; } = true;
+
+    public bool PanicModeEnabled { get; set; }
+
+    public bool SafeModeEnabled { get; set; }
+
+    public string? UserLocationHint
+    {
+        get => _userLocationHint;
+        set
+        {
+            _userLocationHint = value;
+            _searchOrchestrator.UserLocationHint = value;
+        }
+    }
+
+    public string? UserTimezone { get; set; }
+
+    public string? PreferredUnits
+    {
+        get => _preferredUnits;
+        set
+        {
+            _preferredUnits = NormalizeUnitPreference(value);
+            _searchOrchestrator.PreferredUnits = _preferredUnits;
+        }
+    }
+
+    public bool DeepDiveEnabled
+    {
+        get => _searchOrchestrator.DeepDiveEnabled;
+        set => _searchOrchestrator.DeepDiveEnabled = value;
+    }
+
+    public bool AdvancedPlaceDiscoveryEnabled
+    {
+        get => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled;
+        set => _searchOrchestrator.AdvancedPlaceDiscoveryEnabled = value;
+    }
+
     public int MaxTokensBudget
     {
         get => _maxTokensCasual;
@@ -26,6 +68,16 @@ public sealed partial class AgentOrchestrator
             _maxTokensCasual = value > 0 ? value : 512;
             _maxTokensCasualRetry = Math.Max(_maxTokensCasual, 2048);
         }
+    }
+
+    /// <summary>
+    /// Maximum number of repair attempts when the Completion Validator flags a failure.
+    /// Default is 1. Configurable via settings.
+    /// </summary>
+    public int MaxRepairAttempts
+    {
+        get => _repairLoop.MaxAttempts;
+        set => _repairLoop.MaxAttempts = Math.Max(value, 0);
     }
 
     public void SeedHistory(IEnumerable<(string Role, string Content)> priorMessages)
@@ -127,6 +179,12 @@ public sealed partial class AgentOrchestrator
         _reasoningGuardrailsPipeline = new ReasoningGuardrailsPipeline(effectiveGatekeeper, audit);
         _deterministicUtilityEngine = deterministicUtilityEngine ?? new DeterministicUtilityEngineAdapter();
         _router = router ?? new Routing.RouterV2(effectiveGatekeeper, _deterministicUtilityEngine);
+        _laneRouter = new Routing.LaneRouter(effectiveGatekeeper);
+        _planBuilder = new Planning.PlanBuilder(effectiveGatekeeper);
+        _completionValidator = new Validation.CompletionValidator(effectiveGatekeeper);
+        _repairLoop = new Validation.RepairLoop(effectiveGatekeeper, _completionValidator);
+        _checkLane = new Lanes.CheckLane(effectiveGatekeeper);
+        _explainLane = new Lanes.ExplainLane(effectiveGatekeeper);
         _memoryContextProvider = memoryContextProvider ?? new MemoryContextProvider(
             mcp,
             audit,

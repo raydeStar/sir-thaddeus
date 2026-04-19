@@ -3,6 +3,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using FluentIcons.Avalonia;
+using FluentIcons.Common;
 using System.Globalization;
 
 namespace SirThaddeus.UI.Avalonia;
@@ -376,6 +378,388 @@ public partial class MainWindow
         }
 
         cancellation?.Dispose();
+    }
+
+    private void PttHoldButton_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!PttHoldButton.IsEnabled)
+        {
+            return;
+        }
+
+        if (IsVoiceResponseActive())
+        {
+            _pttInterruptTapArmed = true;
+            e.Handled = true;
+            _ = RequestVoiceCancelAsync("button tap interrupt");
+            return;
+        }
+
+        e.Pointer.Capture(PttHoldButton);
+        e.Handled = true;
+        _ = BeginPushToTalkAsync("button");
+    }
+
+    private void PttHoldButton_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_pttInterruptTapArmed)
+        {
+            _pttInterruptTapArmed = false;
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Pointer.Captured == PttHoldButton)
+        {
+            e.Pointer.Capture(null);
+        }
+
+        e.Handled = true;
+        _ = EndPushToTalkAsync("button");
+    }
+
+    private void PttHoldButton_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (_pttInterruptTapArmed)
+        {
+            _pttInterruptTapArmed = false;
+            return;
+        }
+
+        _ = EndPushToTalkAsync("capture_lost");
+    }
+
+    private async Task BeginPushToTalkAsync(string source)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (IsVoiceResponseActive())
+        {
+            await RequestVoiceCancelAsync($"{source} interrupt");
+            return;
+        }
+
+        await _pttGate.WaitAsync();
+        try
+        {
+            if (_pttCaptureActive)
+            {
+                return;
+            }
+
+            if (_pttTranscriptionActive)
+            {
+                SetPushToTalkBusyTranscribing();
+                return;
+            }
+
+            await _microphoneCaptureService.StartCaptureAsync(CancellationToken.None);
+            _pttCaptureActive = true;
+            MarkPushToTalkCaptureStarted(source);
+        }
+        catch (Exception ex)
+        {
+            _pttCaptureActive = false;
+            MarkPushToTalkFailure("PTT start failed.", ex.Message);
+            AppendTranscript("[error] PTT start failed: " + ex.Message);
+        }
+        finally
+        {
+            _pttGate.Release();
+        }
+    }
+
+    private async Task EndPushToTalkAsync(string source)
+    {
+        byte[]? wavBytes;
+        CancellationTokenSource? transcriptionCancellation = null;
+
+        await _pttGate.WaitAsync();
+        try
+        {
+            if (!_pttCaptureActive)
+            {
+                return;
+            }
+
+            _pttCaptureActive = false;
+            _pttTranscriptionActive = true;
+            transcriptionCancellation = new CancellationTokenSource();
+            _pttTranscriptionCancellation = transcriptionCancellation;
+            MarkPushToTalkTranscribing(source);
+            wavBytes = await _microphoneCaptureService.StopCaptureAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _pttTranscriptionActive = false;
+            if (ReferenceEquals(_pttTranscriptionCancellation, transcriptionCancellation))
+            {
+                _pttTranscriptionCancellation = null;
+            }
+
+            transcriptionCancellation?.Dispose();
+            MarkPushToTalkFailure("PTT stop failed.", ex.Message);
+            AppendTranscript("[error] PTT stop failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            _pttGate.Release();
+        }
+
+        if (wavBytes is null || wavBytes.Length == 0)
+        {
+            await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+            MarkPushToTalkNoAudio();
+            return;
+        }
+
+        try
+        {
+            var sessionId = $"ui-ptt-{Interlocked.Increment(ref _pttSessionCounter)}";
+            var transcript = (await _transcriptionService.TranscribeAsync(
+                wavBytes,
+                sessionId,
+                transcriptionCancellation?.Token ?? CancellationToken.None)).Trim();
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                MarkPushToTalkNoSpeech();
+                return;
+            }
+
+            var existing = PromptBox.Text;
+            PromptBox.Text = string.IsNullOrWhiteSpace(existing)
+                ? transcript
+                : existing.TrimEnd() + " " + transcript;
+            PromptBox.CaretIndex = PromptBox.Text.Length;
+            MarkPushToTalkTranscriptInserted(transcript);
+
+            var fullPrompt = PromptBox.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(fullPrompt))
+            {
+                PromptBox.Text = string.Empty;
+                await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+                transcriptionCancellation = null;
+                await SubmitPromptAsync(fullPrompt, voiceInitiated: true);
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (transcriptionCancellation?.IsCancellationRequested == true)
+        {
+            MarkPushToTalkCanceled(
+                headline: "Transcription canceled.",
+                detail: $"The local ASR request for {DescribeCaptureSource(_pttLastCaptureSource)} was canceled before the composer changed.");
+        }
+        catch (Exception ex)
+        {
+            MarkPushToTalkFailure("Transcription failed.", ex.Message);
+            AppendTranscript("[error] PTT transcription failed: " + ex.Message);
+        }
+        finally
+        {
+            await ClearPushToTalkTranscriptionAsync(transcriptionCancellation);
+        }
+    }
+
+    private static readonly string[] PttStateClasses = ["pttListening", "pttProcessing", "pttSpeaking", "pttResponding"];
+
+    private void SetVoiceChatStatus(string state, string? _detail = null)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(state) ? "Hold" : state.Trim();
+
+        Symbol iconSymbol;
+        string? cssClass;
+        string brushKey;
+        switch (trimmed)
+        {
+            case "Listening...":
+                _voiceStatusLabel = "Listening";
+                iconSymbol = Symbol.Mic;
+                cssClass = "pttListening";
+                brushKey = "AccentPrimary";
+                break;
+            case "Processing...":
+            case "Transcribing...":
+                _voiceStatusLabel = "Working";
+                iconSymbol = Symbol.Scan;
+                cssClass = "pttProcessing";
+                brushKey = "TextSecondary";
+                break;
+            case "Speaking":
+                _voiceStatusLabel = "Speaking";
+                iconSymbol = Symbol.SpeakerSettings;
+                cssClass = "pttSpeaking";
+                brushKey = "TextSecondary";
+                break;
+            case "Responding...":
+                _voiceStatusLabel = "Responding";
+                iconSymbol = Symbol.Send;
+                cssClass = "pttResponding";
+                brushKey = "AccentPrimary";
+                break;
+            default:
+                _voiceStatusLabel = PttHoldButton.IsEnabled ? "Ready" : "Unavailable";
+                iconSymbol = Symbol.Mic;
+                cssClass = null;
+                brushKey = PttHoldButton.IsEnabled ? "TextSecondary" : "TextTertiary";
+                break;
+        }
+
+        PttHoldButton.Content = new SymbolIcon
+        {
+            Symbol = iconSymbol,
+            FontSize = 20,
+            Foreground = ResolveThemeBrush(brushKey, Brushes.LightGray)
+        };
+        ToolTip.SetTip(PttHoldButton, string.Equals(trimmed, "Hold", StringComparison.Ordinal)
+            ? "Hold to talk"
+            : trimmed);
+
+        foreach (var cls in PttStateClasses)
+        {
+            PttHoldButton.Classes.Set(cls, cls == cssClass);
+        }
+
+        UpdateRuntimeStatusStrip();
+    }
+
+    private bool IsVoiceResponseActive()
+    {
+        return _readAloudActive || !string.IsNullOrWhiteSpace(_activeRunId);
+    }
+
+    private static bool IsConfiguredHotkeyDown(KeyEventArgs e, string chord)
+    {
+        if (!TryParseUiChord(chord, out var triggerKey, out var modifiers))
+        {
+            return false;
+        }
+
+        return e.Key == triggerKey && ModifiersMatch(e.KeyModifiers, modifiers);
+    }
+
+    private static bool IsConfiguredHotkeyTriggerKey(Key key, string chord)
+    {
+        return TryParseUiChord(chord, out var triggerKey, out _) && key == triggerKey;
+    }
+
+    private static bool ModifiersMatch(KeyModifiers actual, KeyModifiers expected)
+    {
+        var flags = KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift | KeyModifiers.Meta;
+        return (actual & flags) == (expected & flags);
+    }
+
+    private static bool TryParseUiChord(string? chord, out Key triggerKey, out KeyModifiers modifiers)
+    {
+        triggerKey = Key.None;
+        modifiers = KeyModifiers.None;
+
+        if (string.IsNullOrWhiteSpace(chord))
+        {
+            return false;
+        }
+
+        var parts = chord.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            var token = parts[i];
+            if (token.Equals("ctrl", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("control", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Control;
+            }
+            else if (token.Equals("alt", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Alt;
+            }
+            else if (token.Equals("shift", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Shift;
+            }
+            else if (token.Equals("win", StringComparison.OrdinalIgnoreCase) ||
+                     token.Equals("meta", StringComparison.OrdinalIgnoreCase))
+            {
+                modifiers |= KeyModifiers.Meta;
+            }
+        }
+
+        return TryParseUiKey(parts[^1], out triggerKey);
+    }
+
+    private static bool TryParseUiKey(string token, out Key key)
+    {
+        key = Key.None;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        var normalized = token.Trim();
+
+        if ((normalized.StartsWith('F') || normalized.StartsWith('f')) &&
+            int.TryParse(normalized[1..], out var fn) &&
+            fn is >= 1 and <= 24)
+        {
+            key = (Key)((int)Key.F1 + (fn - 1));
+            return true;
+        }
+
+        if (normalized.Length == 1)
+        {
+            var ch = char.ToUpperInvariant(normalized[0]);
+            if (ch is >= 'A' and <= 'Z')
+            {
+                key = Enum.Parse<Key>(ch.ToString(), ignoreCase: true);
+                return true;
+            }
+
+            if (ch is >= '0' and <= '9')
+            {
+                key = (Key)((int)Key.D0 + (ch - '0'));
+                return true;
+            }
+        }
+
+        if (normalized.Equals("escape", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("esc", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Escape;
+            return true;
+        }
+
+        if (normalized.Equals("space", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Space;
+            return true;
+        }
+
+        if (normalized.Equals("enter", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Enter;
+            return true;
+        }
+
+        if (normalized.Equals("tab", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Tab;
+            return true;
+        }
+
+        if (normalized.Equals("backspace", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Key.Back;
+            return true;
+        }
+
+        return false;
     }
 
     private string DescribeAsrEndpoint()

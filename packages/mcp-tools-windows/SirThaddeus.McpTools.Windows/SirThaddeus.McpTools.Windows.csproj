@@ -23,10 +23,4 @@
   <ItemGroup>
     <ProjectReference Include="..\..\mcp-tools-core\SirThaddeus.McpTools.Core\SirThaddeus.McpTools.Core.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ScreenTools.cs" Link="Tools\ScreenTools.cs" />
-    <Compile Include="..\..\..\apps\mcp-server\SirThaddeus.McpServer\Tools\ClipboardTools.cs" Link="Tools\ClipboardTools.cs" />
-  </ItemGroup>
-
 </Project>

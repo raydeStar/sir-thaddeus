@@ -187,18 +187,27 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public string[] YouTubeAsrProviderOptions => ["faster-whisper", "qwen3asr"];
     public string[] YouTubeDraftToneOptions => ["professional", "direct", "playful"];
 
+    public bool IsVoiceHostSupportedByProfile => _appSettings.AllowsVoiceInteractionByProfile();
+
+    public bool IsVoiceHostRestrictedByProfile => !IsVoiceHostSupportedByProfile;
+
+    public string VoiceHostProfileRestrictionText => IsVoiceHostRestrictedByProfile
+        ? "The baseline product profile keeps local voice interaction disabled."
+        : "";
+
     public bool VoiceHostEnabled
     {
-        get => _appSettings.Voice.VoiceHostEnabled;
+        get => _appSettings.IsVoiceHostEnabledEffective();
         set
         {
-            if (_appSettings.Voice.VoiceHostEnabled != value)
+            var normalizedValue = IsVoiceHostSupportedByProfile && value;
+            if (_appSettings.Voice.VoiceHostEnabled != normalizedValue)
             {
-                _appSettings = _appSettings with { Voice = _appSettings.Voice with { VoiceHostEnabled = value } };
+                _appSettings = _appSettings with { Voice = _appSettings.Voice with { VoiceHostEnabled = normalizedValue } };
                 OnPropertyChanged();
                 MarkDirty();
 
-                if (!value)
+                if (!normalizedValue)
                 {
                     StopVoiceHostHealthPolling();
                     ResetVoiceHostHealthState("Disabled", "Enable Local VoiceHost to probe local voice readiness.");
@@ -555,20 +564,29 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public bool SearxngAutoStart
     {
-        get => _appSettings.WebSearch.SearxngAutoStart;
+        get => _appSettings.IsManagedSearxngAutoStartEffective();
         set
         {
-            if (_appSettings.WebSearch.SearxngAutoStart != value)
+            var normalizedValue = IsSearxngAutoStartSupportedByProfile && value;
+            if (_appSettings.WebSearch.SearxngAutoStart != normalizedValue)
             {
                 _appSettings = _appSettings with
                 {
-                    WebSearch = _appSettings.WebSearch with { SearxngAutoStart = value }
+                    WebSearch = _appSettings.WebSearch with { SearxngAutoStart = normalizedValue }
                 };
                 OnPropertyChanged();
                 MarkDirty();
             }
         }
     }
+
+    public bool IsSearxngAutoStartSupportedByProfile => _appSettings.AllowsManagedSearxngAutoStartByProfile();
+
+    public bool IsSearxngAutoStartRestrictedByProfile => !IsSearxngAutoStartSupportedByProfile;
+
+    public string SearxngProfileRestrictionText => IsSearxngAutoStartRestrictedByProfile
+        ? "The baseline product profile keeps bundled SearXNG auto-start disabled."
+        : "";
 
     public string SearchApiKey
     {

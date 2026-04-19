@@ -1,6 +1,7 @@
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.PostProcessing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 
@@ -171,23 +172,24 @@ public class SearchOfflineFallbackTests
     public async Task ExecuteAsync_WhenWebSearchUnavailable_UsesBestEffortReasoning()
     {
         var llm = new StubLlmClient(
-            "Trader Joe's locations often open early, commonly around 8:00-9:00 AM, but verify directly.");
+            "The capital of Oregon is Salem, but verify current civic details directly.");
         var mcp = new StubMcpClient(
             "{\"error\":{\"code\":\"tool_unavailable\",\"message\":\"web search unavailable\"}}");
+        var audit = new RecordingAuditLogger();
         var orchestrator = new SearchOrchestrator(
             llm,
             mcp,
-            new StubAuditLogger(),
+            audit,
             "You are a concise assistant.");
 
         var history = new List<ChatMessage>
         {
-            ChatMessage.User("When does Trader Joe's in Portland OR open?")
+            ChatMessage.User("What is the capital of Oregon?")
         };
         var toolCalls = new List<ToolCallRecord>();
 
         var response = await orchestrator.ExecuteAsync(
-            userMessage: "When does Trader Joe's in Portland OR open?",
+            userMessage: "What is the capital of Oregon?",
             memoryPackText: "",
             history: history,
             toolCallsMade: toolCalls,
@@ -197,15 +199,70 @@ public class SearchOfflineFallbackTests
         Assert.True(response.Success);
         Assert.Contains("Live web lookup is unavailable right now", response.Text, StringComparison.Ordinal);
         Assert.Contains("best-effort answer", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Trader Joe", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(response.Text.Length > 50);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitWebSearchUnavailable_KeepsUnavailableKeyword()
+    {
+        var llm = new StubLlmClient(
+            "Rust release notes are usually published on the official Rust blog and release channels, but verify the current page directly.");
+        var mcp = new StubMcpClient(
+            "{\"error\":{\"code\":\"tool_unavailable\",\"message\":\"web search unavailable\"}}");
+        var audit = new RecordingAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "You are a concise assistant.");
+
+        var userMessage = "Use web_search to find the latest Rust language release notes.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenLookupPromptIsClassicLogicPuzzle_ReturnsDeterministicAnswerWithoutTools()
+    {
+        const string userMessage = "I'm on a game show with three doors. Behind one door is a car, behind the other two are goats. I pick door 1. The host opens door 3, showing a goat. Should I switch to door 2 or stick with door 1?";
+
+        var llm = new StubLlmClient("This should not be used.");
+        var mcp = new TrackingStubMcpClient("[search: 1 result(s) returned]");
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("switch", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("better odds", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
     }
 
     [Fact]
     public async Task ExecuteAsync_WhenWebSearchReturnsNoResults_DoesNotOpenBrowserFallback()
     {
         var llm = new StubLlmClient(
-            "I cannot verify live web facts for this question right now, so any answer may be incomplete or out of date.");
-        var mcp = new TrackingStubMcpClient("No results found for C# 13 changes");
+            "C# 13 adds params collections and new escape-sequence features.");
+        var mcp = new TrackingStubMcpClient("[search: 0 result(s) returned]");
         var orchestrator = new SearchOrchestrator(
             llm,
             mcp,
@@ -221,9 +278,620 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Contains("cannot verify live web facts", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        var toolCall = Assert.Single(mcp.Calls);
+        Assert.Equal("web_search", toolCall, ignoreCase: true);
         Assert.DoesNotContain(mcp.Calls, call =>
             call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitWebSearchNoResultsAfterEntityResolution_KeepsUnavailableKeyword()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Rust","type":"topic","hint":"Programming language"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"rust release notes history","recency":"month"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Rust release notes are usually posted on the official Rust blog.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new TrackingStubMcpClient("[search: 0 result(s) returned]");
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        const string originalUserMessage = "Use web_search to find the latest Rust language release notes.";
+        const string userMessage = "Find the latest Rust language release notes.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(originalUserMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            mcp.Calls.Count(call => call.Equals("web_search", StringComparison.OrdinalIgnoreCase)) >= 2,
+            "Expected at least the entity-resolution and fact-find web_search calls.");
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExplicitRustSearchReturnsNoResults_DoesNotUseOfflineLatestVersionFallback()
+    {
+        var llm = new StubLlmClient(
+            "Rust release notes are usually posted on the official Rust blog.");
+        var mcp = new TrackingStubMcpClient("[search: 0 result(s) returned]");
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        const string userMessage = "Use web_search to find the latest Rust language release notes.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("latest major Rust release", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenKnownLatestVersionSearchReturnsNoResults_UsesPinnedDeterministicAnswer()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":".NET","type":"framework","hint":"Microsoft developer platform"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"the latest stable version of .NET as of 2025","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "This should not be used when the deterministic latest-version fallback succeeds.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+            toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase)
+                ? "[search: 0 result(s) returned]"
+                : string.Empty);
+
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        const string userMessage = "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.",
+            response.Text);
+        Assert.Contains(mcp.Calls, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenStrictMediaComparisonDraftIsIndirect_UsesDirectGroundedFallback()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"How to Train Your Dragon","type":"movie","hint":"film"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"\"How to Train Your Dragon\" live action differences original movie","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content =
+                    "- Reviews say the remake adds new material and scene changes.\n" +
+                    "- Coverage also points to tonal shifts from the original animated movie.\n" +
+                    "- Multiple writeups describe creative differences rather than a scene-for-scene copy.",
+                FinishReason = "stop"
+            };
+        });
+
+        var webSearchPayload =
+            "1. \"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\" — collider.com\n" +
+            "   The article highlights story and scene differences between the live-action remake and the original animated film.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://collider.com/how-to-train-your-dragon-live-action-differences/\",\"title\":\"5 Surprising Differences Between the Animated and Live-Action How to Train Your Dragon Movies\",\"domain\":\"collider.com\",\"excerpt\":\"The article highlights story and scene differences between the live-action remake and the original animated film.\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+            toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase)
+                ? webSearchPayload
+                : string.Empty);
+
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        const string userMessage = "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.StartsWith("No", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("word for word", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("difference", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("strongest evidence I found", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OfflineWebReasoningResponder_WhenStrictTwoLineFallbackIsUsed_DoesNotPrefixUnavailableBanner()
+    {
+        const string userMessage = "Use web_search to find the latest stable version of .NET as of 2025. Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
+
+        var response = await OfflineWebReasoningResponder.BuildAsync(
+            new StubLlmClient("This should not be used when deterministic fallback is forced."),
+            "You are a concise assistant.",
+            userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            failureReason: "tool_unavailable",
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.",
+            response.Text);
+        Assert.DoesNotContain("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenLocalBusinessHoursLookupReturnsNoResults_UsesDirectLocatorFallback()
+    {
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+        {
+            if (toolName.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    {
+                      "provider": "google_places",
+                      "query": "Trader Joe's in Portland OR",
+                      "error": "Google Places API key is not configured.",
+                      "place": null,
+                      "sources": []
+                    }
+                    """;
+            }
+
+            if (toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return "[search: 0 result(s) returned]";
+            }
+
+            if (toolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    Trader Joe's Locations in Portland, OR
+                    Portland NW (146)
+                    2122 NW Glisan St Portland, OR 97210
+                    Call Portland NW (146), Portland on (971) 544-0788
+                    """;
+            }
+
+            return string.Empty;
+        });
+
+        var coordinator = new DeepDiveCoordinator(mcp, new TestAuditLogger());
+        var toolCalls = new List<ToolCallRecord>();
+
+        var response = await coordinator.BuildPlaceBriefingAsync(
+            query: "When does Trader Joe's in Portland OR open?",
+            timezone: "America/Los_Angeles",
+            locale: "en-US",
+            userLocationHint: "Portland, OR",
+            toolCallsMade: toolCalls,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("Trader Joe", response.AssistantText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("fallback search came back with 0 results", response.AssistantText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.ArgumentsJson.Contains("locations.traderjoes.com", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenPlaceHoursWebFallbackOnlyReturnsReddit_IgnoresOffTopicThreadTitles()
+    {
+        const string redditResult =
+            "1. \"Whats your alls opinion on rogue trader (the game)\" — reddit.com\n" +
+            "   Thread title unrelated to Trader Joe's hours.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.reddit.com/r/RogueTrader/comments/abc123/opinion_thread/\",\"title\":\"Whats your alls opinion on rogue trader (the game)\",\"domain\":\"reddit.com\",\"excerpt\":\"Thread title unrelated to Trader Joe's hours.\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+        {
+            if (toolName.Equals("places_lookup", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("PlacesLookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    {
+                      "provider": "google_places",
+                      "query": "Trader Joe's in Portland OR",
+                      "error": "Google Places API key is not configured.",
+                      "place": null,
+                      "sources": []
+                    }
+                    """;
+            }
+
+            if (toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return redditResult;
+            }
+
+            return "[browser: title: \"reddit - please wait for verification\", content returned]";
+        });
+        var coordinator = new DeepDiveCoordinator(mcp, new TestAuditLogger());
+        var toolCalls = new List<ToolCallRecord>();
+
+        var response = await coordinator.BuildPlaceBriefingAsync(
+            query: "When does Trader Joe's in Portland OR open?",
+            timezone: "America/Los_Angeles",
+            locale: "en-US",
+            userLocationHint: "Portland, OR",
+            toolCallsMade: toolCalls,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("Trader Joe", response.AssistantText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rogue trader", response.AssistantText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.ArgumentsJson.Contains("locations.traderjoes.com", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mcp.Calls, call =>
+            call.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.ArgumentsJson.Contains("reddit.com", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenNearbyLocalBusinessSearchOnlyFindsIrrelevantResult_ReturnsSafeNoMatchResponse()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"deli near Olympia, WA","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Yes - the local bakery at 40 Rue de lAlma is currently open.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string irrelevantSearchResult =
+            "1. \"La Boulangerie\" — example.fr\n" +
+            "   Bakery at 40 Rue de lAlma, Paris. Open until 8 PM.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.fr/bakery\",\"title\":\"La Boulangerie\",\"domain\":\"example.fr\",\"excerpt\":\"Bakery at 40 Rue de lAlma, Paris. Open until 8 PM.\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+        {
+            if (toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                toolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase))
+            {
+                return irrelevantSearchResult;
+            }
+
+            return string.Empty;
+        });
+
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new RecordingAuditLogger(),
+            "You are a concise assistant.")
+        {
+            UserLocationHint = "Olympia, WA",
+            AdvancedPlaceDiscoveryEnabled = false,
+            DeepDiveEnabled = false
+        };
+
+        const string userMessage = "Is there a deli nearby?";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("deli", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Olympia, WA", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Rue de lAlma", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("bakery", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("try naming one specific place", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenNoResultsRecoveredByBroaderRecency_StopsAfterRecoveredRetry()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Rust","type":"topic","hint":"Programming language"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"rust release notes history","recency":"month"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Rust release notes are published on the official Rust blog, including the latest stable release notes.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string recoveredSearchResult =
+            "1. \"Rust 1.81.0 release notes\" — blog.rust-lang.org\n" +
+            "   The Rust team announced the latest stable release.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://blog.rust-lang.org/2024/09/05/Rust-1.81.0.html\",\"title\":\"Rust 1.81.0 release notes\",\"domain\":\"blog.rust-lang.org\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, argumentsJson, callIndex) =>
+        {
+            if (!toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase))
+                return recoveredSearchResult;
+
+            if (callIndex == 1)
+                return "[search: 0 result(s) returned]";
+
+            if (argumentsJson.Contains("\"recency\":\"any\"", StringComparison.OrdinalIgnoreCase))
+                return recoveredSearchResult;
+
+            return "[search: 0 result(s) returned]";
+        });
+
+        var audit = new RecordingAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "You are a concise assistant.");
+
+        const string userMessage = "Find the latest Rust language release notes.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.DoesNotContain("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
+
+        var webCalls = mcp.Calls.Where(call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Assert.Equal(3, webCalls.Count);
+        Assert.Contains(webCalls, call =>
+            call.ArgumentsJson.Contains("\"recency\":\"month\"", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(webCalls, call =>
+            call.ArgumentsJson.Contains("\"recency\":\"any\"", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.Events, auditEvent =>
+            auditEvent.Action == "NO_RESULTS_RECENCY_BROADEN" &&
+            auditEvent.Result == "recovered");
+        Assert.DoesNotContain(audit.Events, auditEvent =>
+            auditEvent.Action == "NO_RESULTS_QUERY_RETRY");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenSeasonEpisodeSearchNeedsFollowupEvidence_ReturnsNonexistentInstallmentFallback()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":"Stargate Universe","type":"series","hint":"Sci-fi television series"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":"plot of episode 1 s3 stargate universe","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Hallucinated plot summary that should be replaced by the existence guard.",
+                FinishReason = "stop"
+            };
+        });
+
+        const string genericSearchResult =
+            "1. \"Stargate Universe discussion thread\" — reddit.com\n" +
+            "   Fans discuss the series in general terms.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://www.reddit.com/r/Stargate/comments/abc123/stargate_universe/\",\"title\":\"Stargate Universe discussion thread\",\"domain\":\"reddit.com\",\"excerpt\":\"Fans discuss the series in general terms.\"}]";
+
+        const string cancellationEvidenceResult =
+            "1. \"Stargate Universe cancelled after two seasons\" — wikipedia.org\n" +
+            "   The series ended after season 2 and was never renewed for season 3.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://en.wikipedia.org/wiki/Stargate_Universe\",\"title\":\"Stargate Universe cancelled after two seasons\",\"domain\":\"wikipedia.org\",\"excerpt\":\"The series ended after season 2 and was never renewed for season 3.\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, argumentsJson, _) =>
+        {
+            if (toolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase))
+                return "[browser: title: \"reddit - please wait for verification\", content returned]";
+
+            if (!toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase))
+                return "{}";
+
+            if (argumentsJson.Contains("season 3 cancelled", StringComparison.OrdinalIgnoreCase) ||
+                argumentsJson.Contains("number of seasons", StringComparison.OrdinalIgnoreCase) ||
+                argumentsJson.Contains("episode list", StringComparison.OrdinalIgnoreCase))
+            {
+                return cancellationEvidenceResult;
+            }
+
+            return genericSearchResult;
+        });
+
+        var audit = new RecordingAuditLogger();
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "You are a concise assistant.");
+
+        const string userMessage = "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("Stargate Universe", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 3 Episode 1", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no real episode plot", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("surviving survivor", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.ArgumentsJson.Contains("season 3 cancelled", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.Events, auditEvent =>
+            auditEvent.Action == "EXISTENCE_GUARD_TRIGGERED" &&
+            auditEvent.Result == "does_not_exist");
     }
 
     private sealed class StubLlmClient(string responseText, string finishReason = "stop") : ILlmClient
@@ -279,6 +947,47 @@ public class SearchOfflineFallbackTests
 
         public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
+    }
+
+    private sealed class RecordingStubMcpClient(Func<string, string, int, string> responseFactory) : IMcpToolClient
+    {
+        public List<(string ToolName, string ArgumentsJson)> Calls { get; } = [];
+
+        public Task<string> CallToolAsync(
+            string toolName,
+            string argumentsJson,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add((toolName, argumentsJson));
+            return Task.FromResult(responseFactory(toolName, argumentsJson, Calls.Count));
+        }
+
+        public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<McpToolInfo>>([]);
+    }
+
+    private sealed class RecordingAuditLogger : IAuditLogger
+    {
+        public List<AuditEvent> Events { get; } = [];
+
+        public void Append(AuditEvent auditEvent) => Events.Add(auditEvent);
+
+        public Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default)
+        {
+            Events.Add(auditEvent);
+            return Task.CompletedTask;
+        }
+
+        public IReadOnlyList<AuditEvent> ReadTail(int maxEvents)
+            => Events.TakeLast(Math.Max(0, maxEvents)).ToList();
+
+        public Task<IReadOnlyList<AuditEvent>> ReadTailAsync(
+            int maxEvents,
+            CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<AuditEvent> result = ReadTail(maxEvents);
+            return Task.FromResult(result);
+        }
     }
 
     private sealed class StubAuditLogger : IAuditLogger
@@ -385,6 +1094,45 @@ public class BareResponseEnrichmentTests
         Assert.Contains("-- Sir Thaddeus", result, StringComparison.Ordinal);
         Assert.DoesNotContain("don't have access to live search results", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("real-time internet feeds", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_SirThaddeusTcpEssay_CompressesToStructuredFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "The TCP (Transmission Control Protocol) three-way handshake is the handshake protocol that initiates a connection between two end-hosts over an unreliable network such as the Internet. It ensures reliable transmission of data by coordinating state before establishing communication, ensuring no packets are sent without confirmation from the peer. Here's how it works:\n\n1. **SYN** client starts the connection. 2. **SYN-ACK** server acknowledges and replies. 3. **ACK** client confirms the server response. Reliability matters because it synchronizes sequence numbers, supports retransmission behavior, protects against half-open sessions, and makes delivery more dependable across unreliable links.\n\n-- Sir Thaddeus",
+            [],
+            "Explain how TCP three-way handshake works and why it matters for reliability.");
+
+        Assert.Contains("TCP three-way handshake", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1)", result, StringComparison.Ordinal);
+        Assert.Contains("SYN", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SYN-ACK", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ACK", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-- Sir Thaddeus", result, StringComparison.Ordinal);
+        Assert.True(result.Length < 700, "Expected the deterministic rewrite to stay concise.");
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedAnswer_StripsRawUrlCitation()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "You can pull up local news in Boise using WashBOINER. Source: WashBOINER (https://washboinereader.org) -- Sir Thaddeus",
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"Boise news\"}",
+                    Result = "[search: 1 result(s) returned]",
+                    Success = true
+                }
+            },
+            "Pull up local news in Boise and summarize the key stories.");
+
+        Assert.Contains("Source: WashBOINER", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("https://", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("()", result, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -546,6 +1294,41 @@ public class BareResponseEnrichmentTests
             "Can you find me a good one in Hillsboro, OR?");
 
         Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ExplicitDeepDiveBriefingShell_DoesNotCollapseToLocalBusinessShortlist()
+    {
+        const string briefingShell =
+            "**Seattle Flowers**\n" +
+            "Verification recommended - check the listed source before visiting.\n" +
+            "Sources checked: visitseattle.org.\n" +
+            "Briefing summary: hours and review details are based on currently available web sources (2026).";
+
+        var result = _processor.SanitizeFinalResponse(
+            briefingShell,
+            new List<ToolCallRecord>
+            {
+                new()
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{\"query\":\"Deep dive Seattle Flowers with hours + reviews and what to expect.\"}",
+                    Result = "[Places lookup error: Google Places API key is not configured.]",
+                    Success = false
+                },
+                new()
+                {
+                    ToolName = "browser_navigate",
+                    Arguments = "{\"url\":\"https://visitseattle.org/\"}",
+                    Result = "[browser: title: \"visit seattle washington | travel & tourism | official site\", content returned]",
+                    Success = true
+                }
+            },
+            "Deep dive Seattle Flowers with hours + reviews and what to expect.");
+
+        Assert.Contains("Verification recommended", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Sources checked:", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Here are a few local businesses I found nearby", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -57,6 +57,13 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         var sandboxSettings = baseSettings with
         {
             WebSearch = BuildHarnessWebSearchSettings(baseSettings.WebSearch),
+            RuntimeSafety = baseSettings.RuntimeSafety with
+            {
+                PanicMode = false,
+                SafeMode = false,
+                SafeModeReason = string.Empty,
+                SafeModeSinceUtc = string.Empty
+            },
             Memory = baseSettings.Memory with
             {
                 DbPath = Path.Combine(dataDirectory, "memory.db")
@@ -91,6 +98,11 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         environment["ST_AUDIT_PATH"] = auditPath;
         environment["ST_CHAT_HISTORY_PATH"] = Path.Combine(dataDirectory, "chat-history.json");
         environment["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(dataDirectory, "briefing-history.json");
+
+        if (test.Assertions.AllowedToolsOnly && test.AllowedTools.Count > 0)
+        {
+            environment["ST_HARNESS_ALLOWED_TOOLS"] = string.Join(",", test.AllowedTools);
+        }
 
         // Propagate stub configuration so the MCP server can force-fail
         // specific tools during contract tests.

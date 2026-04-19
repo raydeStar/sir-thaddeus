@@ -56,6 +56,39 @@ public sealed partial record AppSettings
     [JsonPropertyName("userProfile")]
     public UserProfileSettings UserProfile { get; init; } = new();
 
+    public const string BaselineProductProfileId = "baseline";
+
+    /// <summary>
+    /// Active product preset used for first-run defaults and future
+    /// baseline-vs-extended experience toggles.
+    /// </summary>
+    [JsonPropertyName("productProfileId")]
+    public string ProductProfileId { get; init; } = BaselineProductProfileId;
+
+    public string GetNormalizedProductProfileId()
+        => string.IsNullOrWhiteSpace(ProductProfileId)
+            ? BaselineProductProfileId
+            : ProductProfileId.Trim().ToLowerInvariant();
+
+    public bool IsBaselineProductProfile()
+        => GetNormalizedProductProfileId().Equals(
+            BaselineProductProfileId,
+            StringComparison.OrdinalIgnoreCase);
+
+    public bool AllowsVoiceInteractionByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsManagedSearxngAutoStartByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsDeepDiveBriefingsByProfile() => !IsBaselineProductProfile();
+
+    public bool AllowsAdvancedPlaceDiscoveryByProfile() => !IsBaselineProductProfile();
+
+    public bool IsVoiceHostEnabledEffective()
+        => AllowsVoiceInteractionByProfile() && Voice.VoiceHostEnabled;
+
+    public bool IsManagedSearxngAutoStartEffective()
+        => AllowsManagedSearxngAutoStartByProfile() && WebSearch.SearxngAutoStart;
+
     /// <summary>
     /// The profile_id of the currently active user profile.
     /// When set, the agent injects this profile's card into every
@@ -238,9 +271,11 @@ public sealed record LlmSettings
         "NEVER reply with a bare one-word or one-sentence answer like 'Yes' " +
         "or 'No'. Always add useful context: a brief explanation, next steps, " +
         "or a relevant detail that makes the answer actionable. " +
+        "For local-business hours questions, include the live status in plain language, " +
+        "today's closing time or hours when you have them, and the address when available. " +
         "For example, if asked 'Is McDonalds open?', say something like " +
-        "'Yes — the McDonalds at 850 University Blvd is currently open " +
-        "and serves until 11 PM tonight.' " +
+        "'Yes — McDonald's appears open now. It closes at 11 PM tonight. " +
+        "Address: 850 University Blvd.' " +
         "After a tool runs, summarize what happened and what you recommend " +
         "next. Do not list URLs or raw JSON — the UI shows source cards " +
         "automatically. When writing code, prefer clear, production-ready " +
@@ -296,7 +331,7 @@ public sealed record AudioSettings
     public string ShutupChord { get; init; } = "Ctrl+Alt+Escape";
 
     [JsonPropertyName("ttsEnabled")]
-    public bool TtsEnabled { get; init; } = true;
+    public bool TtsEnabled { get; init; } = false;
 
     /// <summary>
     /// Persisted product name of the selected input (recording) device.
@@ -328,7 +363,7 @@ public sealed record AudioSettings
 public sealed record VoiceSettings
 {
     [JsonPropertyName("voiceHostEnabled")]
-    public bool VoiceHostEnabled { get; init; } = true;
+    public bool VoiceHostEnabled { get; init; } = false;
 
     [JsonPropertyName("voiceHostBaseUrl")]
     public string VoiceHostBaseUrl { get; init; } = "http://127.0.0.1:17845";
@@ -728,7 +763,7 @@ public sealed record WebSearchSettings
     /// webSearch.mode is "auto" or "searxng" and the base URL is loopback.
     /// </summary>
     [JsonPropertyName("searxngAutoStart")]
-    public bool SearxngAutoStart { get; init; } = true;
+    public bool SearxngAutoStart { get; init; } = false;
 
     /// <summary>
     /// Launch command for managed SearxNG.

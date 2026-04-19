@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using SirThaddeus.Config;
+using SirThaddeus.Core;
 
 namespace SirThaddeus.UI.Avalonia;
 
@@ -47,7 +48,7 @@ internal sealed class VoiceHostLauncher : IDisposable
                 "VoiceHost base URL is invalid.");
         }
 
-        if (!IsLoopback(baseUri))
+        if (!LoopbackProcessSupport.IsLoopback(baseUri))
         {
             return new VoiceHostLaunchResult(
                 VoiceHostLaunchStatus.NotLocalAddress,
@@ -125,7 +126,11 @@ internal sealed class VoiceHostLauncher : IDisposable
         }
 
         var timeoutMs = Math.Clamp(settings.VoiceHostStartupTimeoutMs, 2_000, 180_000);
-        var healthy = await WaitForReadyAsync(baseUri, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken);
+        var healthy = await LoopbackProcessSupport.WaitForProbeAsync(
+            probeCancellationToken => ProbeReadyAsync(baseUri, probeCancellationToken),
+            TimeSpan.FromMilliseconds(timeoutMs),
+            TimeSpan.FromMilliseconds(500),
+            cancellationToken);
         if (healthy)
         {
             return new VoiceHostLaunchResult(
@@ -142,30 +147,8 @@ internal sealed class VoiceHostLauncher : IDisposable
 
     public void StopManagedVoiceHost()
     {
-        if (_managedProcess is null)
-        {
-            _managedBaseUri = null;
-            return;
-        }
-
-        try
-        {
-            if (!_managedProcess.HasExited)
-            {
-                _managedProcess.Kill(entireProcessTree: true);
-                _managedProcess.WaitForExit(5000);
-            }
-        }
-        catch
-        {
-            // Best effort shutdown only.
-        }
-        finally
-        {
-            _managedProcess.Dispose();
-            _managedProcess = null;
-            _managedBaseUri = null;
-        }
+        LoopbackProcessSupport.StopManagedProcess(ref _managedProcess);
+        _managedBaseUri = null;
     }
 
     public void Dispose()
@@ -227,43 +210,6 @@ internal sealed class VoiceHostLauncher : IDisposable
             yield return "--tts-voice-id";
             yield return ttsVoiceId;
         }
-    }
-
-    private static bool IsLoopback(Uri uri)
-    {
-        if (uri.IsLoopback)
-        {
-            return true;
-        }
-
-        var host = uri.Host;
-        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-               host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static async Task<bool> WaitForReadyAsync(Uri baseUri, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
-
-        while (!timeoutCts.IsCancellationRequested)
-        {
-            if (await ProbeReadyAsync(baseUri, timeoutCts.Token))
-            {
-                return true;
-            }
-
-            try
-            {
-                await Task.Delay(500, timeoutCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-
-        return false;
     }
 
     private static async Task<bool> ProbeReadyAsync(Uri baseUri, CancellationToken cancellationToken)
@@ -412,5 +358,6 @@ internal sealed class VoiceHostLauncher : IDisposable
 
     private sealed record VoiceHostLaunchConfig(string StartFileName, string WorkingDirectory);
 }
+
 
 

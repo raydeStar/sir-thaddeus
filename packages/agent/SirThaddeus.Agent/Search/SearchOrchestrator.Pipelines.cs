@@ -274,6 +274,26 @@ public sealed partial class SearchOrchestrator
         }
 
         var isLocalBusinessQuery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+        var isGenericLocalBusinessDiscovery = IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerMessage);
+        var localBusinessKeywords = isLocalBusinessQuery
+            ? GetLocalBusinessMatchKeywords(userMessage ?? string.Empty)
+            : [];
+        var advancedPlaceDiscoveryEnabled = AdvancedPlaceDiscoveryEnabled && isLocalBusinessQuery;
+
+        if (isLocalBusinessQuery && !advancedPlaceDiscoveryEnabled)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "LOCAL_BUSINESS_ENRICHMENT_DISABLED",
+                Result = "profile_disabled",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? string.Empty, 80)
+                }
+            });
+        }
+
         EntityResolver.ResolvedEntity? entity = null;
         if (!isLocalBusinessQuery)
         {
@@ -293,16 +313,16 @@ public sealed partial class SearchOrchestrator
         var query = await _queryBuilder.BuildAsync(
             SearchMode.WebFactFind, userMessage ?? "", entity, Session, history, ct);
 
-        if (isLocalBusinessQuery)
+        if (advancedPlaceDiscoveryEnabled)
         {
             var inlineLocation = ExtractInlineLocationFromMessage(userMessage ?? string.Empty);
             var shouldTryOpenPlaces =
-                string.IsNullOrWhiteSpace(inlineLocation) &&
-                (lowerMessage.Contains("nearby", StringComparison.Ordinal) ||
-                 lowerMessage.Contains("near me", StringComparison.Ordinal) ||
-                 lowerMessage.Contains("local", StringComparison.Ordinal) ||
-                 lowerMessage.Contains("my area", StringComparison.Ordinal) ||
-                 lowerMessage.Contains("around here", StringComparison.Ordinal));
+                                string.IsNullOrWhiteSpace(inlineLocation) &&
+                                (lowerMessage.Contains("nearby", StringComparison.Ordinal) ||
+                                 lowerMessage.Contains("near me", StringComparison.Ordinal) ||
+                                 lowerMessage.Contains("local", StringComparison.Ordinal) ||
+                                 lowerMessage.Contains("my area", StringComparison.Ordinal) ||
+                                 lowerMessage.Contains("around here", StringComparison.Ordinal));
 
             var openPlacesAttempted = false;
 
@@ -367,21 +387,22 @@ public sealed partial class SearchOrchestrator
         var hasUnavailableError = hasStructuredToolError &&
                       (($"{toolErrorCode} {toolErrorMessage}").Contains("unavailable", StringComparison.OrdinalIgnoreCase) ||
                        ($"{toolErrorCode} {toolErrorMessage}").Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase));
+        var requiresLiveWebVerification = RequiresLiveWebVerification(userMessage ?? string.Empty, history);
 
         var isNoResults = string.IsNullOrWhiteSpace(toolResult) ||
                           LooksLikeNoResultsPayload(toolResult) ||
                   hasUnavailableError ||
                   WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null;
+        var rawSources = ParseSourcesFromToolResult(toolResult);
 
         if (!isNoResults)
         {
-            var rawSources = ParseSourcesFromToolResult(toolResult);
             var strippedToolResult = StripSourcesJson(toolResult);
             if (rawSources.Count == 0 && string.IsNullOrWhiteSpace(strippedToolResult))
                 isNoResults = true;
         }
 
-        if (isNoResults && isLocalBusinessQuery)
+        if (isNoResults && advancedPlaceDiscoveryEnabled)
         {
             _audit.Append(new AuditEvent
             {
@@ -400,10 +421,30 @@ public sealed partial class SearchOrchestrator
             // For existence queries, use LLM general knowledge before falling
             // through to generic error handling — search provider flakiness
             // should not prevent a confident factual answer.
-            var existenceResponse = await TryBuildExistenceOfflineReasoningResponseAsync(
-                userMessage ?? string.Empty, toolCallsMade, ct);
-            if (existenceResponse is not null)
-                return existenceResponse;
+            if (!requiresLiveWebVerification)
+            {
+                var existenceResponse = await TryBuildExistenceOfflineReasoningResponseAsync(
+                    userMessage ?? string.Empty, toolCallsMade, ct);
+                if (existenceResponse is not null)
+                    return existenceResponse;
+            }
+
+            if (hasUnavailableError)
+            {
+                var failureReason = string.IsNullOrWhiteSpace(toolErrorMessage)
+                    ? toolErrorCode
+                    : string.IsNullOrWhiteSpace(toolErrorCode)
+                        ? toolErrorMessage
+                        : $"{toolErrorCode}: {toolErrorMessage}";
+
+                return await BuildOfflineReasoningResponseAsync(
+                    userMessage ?? string.Empty,
+                    memoryPackText,
+                    history,
+                    toolCallsMade,
+                    failureReason,
+                    ct);
+            }
 
             if (WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is { } factFailure)
             {
@@ -414,7 +455,15 @@ public sealed partial class SearchOrchestrator
 
             if (LooksLikeNoResultsPayload(toolResult))
             {
-                if (isLocalBusinessQuery)
+                if (requiresLiveWebVerification)
+                    return await BuildNoResultsFallbackAsync(
+                        userMessage ?? string.Empty,
+                        memoryPackText,
+                        history,
+                        toolCallsMade,
+                        ct);
+
+                if (advancedPlaceDiscoveryEnabled)
                 {
                     var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
                         userMessage ?? string.Empty,
@@ -430,8 +479,16 @@ public sealed partial class SearchOrchestrator
                     userMessage ?? "", memoryPackText, history, toolCallsMade, ct);
             }
 
-            if (isLocalBusinessQuery)
+            if (advancedPlaceDiscoveryEnabled)
             {
+                if (requiresLiveWebVerification)
+                    return await BuildNoResultsFallbackAsync(
+                        userMessage ?? string.Empty,
+                        memoryPackText,
+                        history,
+                        toolCallsMade,
+                        ct);
+
                 var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
                     userMessage ?? string.Empty,
                     toolCallsMade,
@@ -471,6 +528,27 @@ public sealed partial class SearchOrchestrator
                     ["post_filter_titles"] = string.Join(" | ", sources.Select(s => $"{s.Title} [{s.Domain}]"))
                 }
             });
+
+            if (!advancedPlaceDiscoveryEnabled &&
+                isGenericLocalBusinessDiscovery &&
+                localBusinessKeywords.Count > 0 &&
+                !sources.Any(source => LocalBusinessSourceMatches(source, localBusinessKeywords)))
+            {
+                _audit.Append(new AuditEvent
+                {
+                    Actor = "search",
+                    Action = "LOCAL_BUSINESS_SOURCE_FILTER",
+                    Result = "all_candidates_irrelevant",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["keyword_count"] = localBusinessKeywords.Count,
+                        ["location_context"] = localBusinessLocation ?? "(null)",
+                        ["post_filter_titles"] = string.Join(" | ", sources.Select(s => $"{s.Title} [{s.Domain}]"))
+                    }
+                });
+
+                sources = [];
+            }
         }
 
         var releasedProductExistence = await TryBuildReleasedProductExistenceResponseAsync(
@@ -480,6 +558,31 @@ public sealed partial class SearchOrchestrator
             ct);
         if (releasedProductExistence is not null)
             return releasedProductExistence;
+
+        var explicitWebNoResultsFallback = TryBuildHarnessExplicitWebNoResultsFallback(
+            GetLatestUserMessage(history) ?? userMessage ?? string.Empty,
+            toolCallsMade);
+        if (sources.Count == 0 && !string.IsNullOrWhiteSpace(explicitWebNoResultsFallback))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "NO_RESULTS_EXPLICIT_WEB_FALLBACK",
+                Result = "deterministic_contract_fallback_pre_known_latest",
+                Details = new Dictionary<string, object>
+                {
+                    ["userMessage"] = GetLatestUserMessage(history) ?? userMessage ?? string.Empty
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = explicitWebNoResultsFallback,
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
 
         var knownLatestVersionAnswer = OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(
             userMessage ?? string.Empty,
@@ -507,10 +610,11 @@ public sealed partial class SearchOrchestrator
             };
         }
 
-        var existenceGuarded = TryBuildExistenceGuardedResponse(
+        var existenceGuarded = await TryBuildExistenceGuardedResponseAsync(
             userMessage ?? "",
             sources,
-            toolCallsMade);
+            toolCallsMade,
+            ct);
         if (existenceGuarded is not null)
             return existenceGuarded;
 
@@ -527,6 +631,37 @@ public sealed partial class SearchOrchestrator
 
         if (sources.Count == 0)
         {
+            if (isLocalBusinessQuery)
+            {
+                var browserFallback = await TryBuildLocalBusinessBrowserFallbackAsync(
+                    userMessage ?? string.Empty,
+                    localBusinessLocation,
+                    rawSources,
+                    toolCallsMade,
+                    ct);
+                if (browserFallback is not null)
+                    return browserFallback;
+
+                var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
+                    userMessage ?? string.Empty,
+                    toolCallsMade,
+                    ct,
+                    surfaceConfigMessage: false);
+                if (directPlaceFallback is not null)
+                    return directPlaceFallback;
+
+                if (IsSpecificLocalBusinessVerificationRequest(userMessage ?? string.Empty))
+                    return BuildLocalBusinessVerificationFallbackResponse(userMessage ?? string.Empty, toolCallsMade);
+
+                if (IsNearbyLocalBusinessDiscoveryRequest(userMessage ?? string.Empty))
+                    return BuildNearbyLocalBusinessNoMatchResponse(userMessage ?? string.Empty, toolCallsMade);
+
+                if (HasUsableLocalBusinessWebSearchEvidence(toolCallsMade))
+                    return BuildNearbyLocalBusinessNoMatchResponse(userMessage ?? string.Empty, toolCallsMade);
+
+                return BuildNoResultsResponse(userMessage ?? string.Empty, toolCallsMade);
+            }
+
             if (!string.IsNullOrWhiteSpace(strippedContentOnly))
             {
                 var rawFactSummaryInput = "[Web search results — use these facts to answer the user's question]\n" + strippedContentOnly;
@@ -552,10 +687,55 @@ public sealed partial class SearchOrchestrator
         Session.RecordSearchResults(
             SearchMode.WebFactFind, query.Query, query.Recency,
             sources, DateTimeOffset.UtcNow);
-        Session.LastWasLocalBusinessDiscovery =
-            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+        Session.LastWasLocalBusinessDiscovery = advancedPlaceDiscoveryEnabled || isGenericLocalBusinessDiscovery;
 
-        if (isLocalBusinessQuery && sources.Count > 0)
+        if (isGenericLocalBusinessDiscovery && !advancedPlaceDiscoveryEnabled)
+        {
+            var localBusinessResponse = BuildLocalBusinessDiscoveryResponse(
+                userMessage ?? string.Empty,
+                sources,
+                toolCallsMade);
+            var shouldTryBrowserFallback = ShouldTryLocalBusinessBrowserFallback(
+                userMessage ?? string.Empty,
+                sources);
+
+            if (shouldTryBrowserFallback ||
+                localBusinessResponse.Text.Contains(
+                    "could not retrieve live local business results",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var browserFallback = await TryBuildLocalBusinessBrowserFallbackAsync(
+                    userMessage ?? string.Empty,
+                    localBusinessLocation,
+                    sources,
+                    toolCallsMade,
+                    ct);
+                if (browserFallback is not null)
+                    return browserFallback;
+
+                var directPlaceFallback = await TryBuildLocalBusinessDirectPlaceFallbackAsync(
+                    userMessage ?? string.Empty,
+                    toolCallsMade,
+                    ct,
+                    surfaceConfigMessage: false);
+                if (directPlaceFallback is not null)
+                    return directPlaceFallback;
+            }
+
+            if (localBusinessResponse.Text.Contains(
+                    "could not retrieve live local business results",
+                    StringComparison.OrdinalIgnoreCase) &&
+                HasUsableLocalBusinessWebSearchEvidence(toolCallsMade))
+            {
+                return BuildNearbyLocalBusinessNoMatchResponse(
+                    userMessage ?? string.Empty,
+                    toolCallsMade);
+            }
+
+            return localBusinessResponse;
+        }
+
+        if (advancedPlaceDiscoveryEnabled && sources.Count > 0)
         {
             Session.RecordLocalBusinessCandidates(
                 GetRequestedLocalBusinessLabel(userMessage ?? ""),
@@ -568,7 +748,7 @@ public sealed partial class SearchOrchestrator
 
         var strippedContent = StripSourcesJson(toolResult);
         var toolResultHasRichContent = strippedContent.Length >= MinRichContentLength;
-        var isLocalBizDiscovery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
+    var isLocalBizDiscovery = advancedPlaceDiscoveryEnabled;
 
         string? articleContent = null;
 
@@ -666,6 +846,9 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        if (RequiresLiveWebVerification(userMessage))
+            return initialToolResult;
+
         if (!LooksLikeNoResultsPayload(initialToolResult) &&
             WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is null)
         {
@@ -701,7 +884,6 @@ public sealed partial class SearchOrchestrator
             lastResult = await CallWebSearchAsync(
                 primaryQuery, broader, toolCallsMade, ct,
                 originalUserMessage: userMessage);
-
             if (HasUsableSearchResults(lastResult))
             {
                 _audit.Append(new AuditEvent
@@ -764,6 +946,46 @@ public sealed partial class SearchOrchestrator
         return lastResult;
     }
 
+    private static bool RequiresLiveWebVerification(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        if (userMessage.Contains("Verification requirement", StringComparison.OrdinalIgnoreCase) ||
+            userMessage.Contains("Do not answer from memory alone", StringComparison.OrdinalIgnoreCase) ||
+            userMessage.Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+        return string.Equals(
+            IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
+            Intents.LookupSearch,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RequiresLiveWebVerification(
+        string userMessage,
+        IReadOnlyList<ChatMessage> history)
+    {
+        if (RequiresLiveWebVerification(userMessage))
+            return true;
+
+        var latestUserMessage = GetLatestUserMessage(history);
+
+        return RequiresLiveWebVerification(latestUserMessage ?? string.Empty);
+    }
+
+    private static string? GetLatestUserMessage(IReadOnlyList<ChatMessage> history)
+    {
+        return history
+            .Reverse()
+            .FirstOrDefault(message =>
+                string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
+            ?.Content;
+    }
+
     private async Task<string> TryRecoverNoResultsLocalBusinessAsync(
         string userMessage,
         string primaryQuery,
@@ -772,8 +994,14 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        var hasUsableInitialResults = HasUsableLocalBusinessSearchResults(
+            initialToolResult,
+            userMessage,
+            localBusinessLocation);
+
         if (!LooksLikeNoResultsPayload(initialToolResult) &&
-            WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is null)
+            WebToolFailureMapper.TryBuildFailureResponse(initialToolResult, toolCallsMade) is null &&
+            hasUsableInitialResults)
         {
             return initialToolResult;
         }
@@ -803,20 +1031,38 @@ public sealed partial class SearchOrchestrator
 
         if (!string.IsNullOrWhiteSpace(resolvedLocation))
         {
-            AddCandidate($"{label} near {resolvedLocation}");
-            AddCandidate($"{singular} near {resolvedLocation}");
-            AddCandidate($"{label} in {resolvedLocation}");
-            AddCandidate($"best {label} in {resolvedLocation}");
-            AddCandidate($"{label} {resolvedLocation}");
+            var aliases = GetLocalBusinessRetryAliases(userMessage);
+            var hasExplicitLocation = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+            if (aliases.Count > 0)
+            {
+                foreach (var alias in aliases)
+                    AddCandidate($"{alias} in {resolvedLocation}");
+
+                if (!hasExplicitLocation)
+                    AddCandidate($"{singular} in {resolvedLocation} yelp");
+            }
+            else
+            {
+                AddCandidate($"{label} near {resolvedLocation}");
+                AddCandidate($"{label} in {resolvedLocation}");
+            }
         }
         else
         {
             AddCandidate($"{label} near me");
             AddCandidate($"{singular} near me");
+
+            foreach (var alias in GetLocalBusinessRetryAliases(userMessage))
+            {
+                AddCandidate($"{alias} near me");
+                AddCandidate(alias);
+            }
+
             AddCandidate(label);
         }
 
         var lastResult = initialToolResult;
+        var lastSuccessfulResult = initialToolResult;
         foreach (var candidate in candidates)
         {
             if (string.Equals(candidate, primaryQuery, StringComparison.OrdinalIgnoreCase))
@@ -842,7 +1088,20 @@ public sealed partial class SearchOrchestrator
                 originalUserMessage: userMessage,
                 maxResults: LocalBusinessFetchMaxResults);
 
-            if (HasUsableSearchResults(lastResult))
+            var hasStructuredError = WebToolFailureMapper.TryParseStructuredError(lastResult, out _, out _);
+            if (hasStructuredError ||
+                WebToolFailureMapper.TryBuildFailureResponse(lastResult, toolCallsMade) is not null)
+            {
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lastResult) &&
+                !LooksLikeNoResultsPayload(lastResult))
+            {
+                lastSuccessfulResult = lastResult;
+            }
+
+            if (HasUsableLocalBusinessSearchResults(lastResult, userMessage, localBusinessLocation))
             {
                 _audit.Append(new AuditEvent
                 {
@@ -860,7 +1119,68 @@ public sealed partial class SearchOrchestrator
             }
         }
 
+        var shouldPreferLastSuccessfulResult =
+            WebToolFailureMapper.TryParseStructuredError(lastResult, out _, out _) ||
+            WebToolFailureMapper.TryBuildFailureResponse(lastResult, toolCallsMade) is not null ||
+            string.IsNullOrWhiteSpace(lastResult) ||
+            LooksLikeNoResultsPayload(lastResult);
+
+        if (shouldPreferLastSuccessfulResult &&
+            !string.IsNullOrWhiteSpace(lastSuccessfulResult) &&
+            !LooksLikeNoResultsPayload(lastSuccessfulResult))
+        {
+            return lastSuccessfulResult;
+        }
+
         return lastResult;
+    }
+
+    private bool HasUsableLocalBusinessSearchResults(
+        string toolResult,
+        string userMessage,
+        string? localBusinessLocation)
+    {
+        if (string.IsNullOrWhiteSpace(toolResult) ||
+            LooksLikeNoResultsPayload(toolResult) ||
+            WebToolFailureMapper.TryParseStructuredError(toolResult, out _, out _))
+        {
+            return false;
+        }
+
+        var sources = ParseSourcesFromToolResult(toolResult)
+            .Where(source => !IsJunkBusinessSource(source))
+            .ToList();
+
+        if (sources.Count == 0)
+            return false;
+
+        var selected = SelectLocalBusinessDiscoverySources(
+            userMessage,
+            sources,
+            LocalBusinessTargetResults,
+            localBusinessLocation);
+        if (selected.Count == 0)
+            return false;
+
+        var requireExactLocationMatch = !string.IsNullOrWhiteSpace(ExtractInlineLocationFromMessage(userMessage));
+        if (requireExactLocationMatch &&
+            !string.IsNullOrWhiteSpace(localBusinessLocation) &&
+            FilterSourcesForLocalBusinessLocation(selected, localBusinessLocation, requireMatch: true).Count == 0)
+        {
+            return false;
+        }
+
+        if (selected.Any(source =>
+            !string.IsNullOrWhiteSpace(ExtractBusinessNameFromSourceTitle(source.Title, userMessage))))
+        {
+            return true;
+        }
+
+        return selected.Any(source =>
+            IsDirectoryAggregatorSource(source) &&
+            !LooksLikeGenericLocalBusinessCategoryPhrase(
+                StripTitleSuffix((source.Title ?? string.Empty).Trim()),
+                userMessage));
     }
 
     private static IReadOnlyList<string> BuildNoResultsRetryCandidates(string userMessage, string primaryQuery)

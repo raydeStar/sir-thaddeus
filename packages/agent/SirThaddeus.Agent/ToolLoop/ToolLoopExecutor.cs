@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.ToolLoop;
@@ -155,6 +156,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 
             var executedWinnerCount = 0;
             var successfulPayloadCount = 0;
+            var noResultsPayloadCount = 0;
             var timeoutErrorCount = 0;
             var unavailableErrorCount = 0;
             var budgetExceededCount = 0;
@@ -190,6 +192,8 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 executedToolNames.Add(toolCall.Function.Name);
                 if (success && !LooksLikeStructuredError(result))
                     successfulPayloadCount++;
+                if (success && LooksLikeNoResultsPayload(result))
+                    noResultsPayloadCount++;
                 if (IsTimeoutLikeResult(result))
                     timeoutErrorCount++;
                 if (IsUnavailableLikeResult(result))
@@ -212,6 +216,26 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 
                 request.History.Add(ChatMessage.ToolResult(toolCall.Id, result));
                 log("AGENT_TOOL_RESULT", $"{toolCall.Function.Name} -> {(success ? "ok" : "error")}");
+            }
+
+            if (executedWinnerCount > 0 &&
+                noResultsPayloadCount == executedWinnerCount &&
+                executedToolNames.Count > 0 &&
+                executedToolNames.All(IsWebFamilyToolName) &&
+                IsExplicitToolInvocationRequest(request.History))
+            {
+                const string explicitNoResultsMsg =
+                    "The requested tool is currently unavailable right now. Please retry in a moment.";
+                request.History.Add(ChatMessage.Assistant(explicitNoResultsMsg));
+                log("AGENT_EXPLICIT_WEB_NO_RESULTS_FALLBACK", explicitNoResultsMsg);
+
+                return new AgentResponse
+                {
+                    Text = explicitNoResultsMsg,
+                    Success = true,
+                    ToolCallsMade = request.ToolCallsMade,
+                    LlmRoundTrips = roundTrips
+                };
             }
 
             // All tools failed with structured errors — return deterministic
@@ -387,6 +411,17 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         }
     }
 
+    private static bool LooksLikeNoResultsPayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return true;
+
+        var trimmed = payload.Trim();
+        return trimmed.StartsWith("No results found for ", StringComparison.OrdinalIgnoreCase) ||
+               (trimmed.StartsWith("[search:", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.Contains("0 result", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool IsUnavailableLikeResult(string payload)
     {
         if (string.IsNullOrWhiteSpace(payload))
@@ -448,20 +483,20 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             }
 
             if (errorEl.ValueKind == JsonValueKind.String)
-                return errorEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true;
+                return ContainsTimeoutSignal(errorEl.GetString());
 
             if (errorEl.ValueKind == JsonValueKind.Object)
             {
                 if (errorEl.TryGetProperty("code", out var codeEl) &&
                     codeEl.ValueKind == JsonValueKind.String &&
-                    codeEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true)
+                    ContainsTimeoutSignal(codeEl.GetString()))
                 {
                     return true;
                 }
 
                 if (errorEl.TryGetProperty("message", out var msgEl) &&
                     msgEl.ValueKind == JsonValueKind.String &&
-                    msgEl.GetString()?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true)
+                    ContainsTimeoutSignal(msgEl.GetString()))
                 {
                     return true;
                 }
@@ -471,8 +506,17 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         }
         catch
         {
-            return payload.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+            return ContainsTimeoutSignal(payload);
         }
+    }
+
+    private static bool ContainsTimeoutSignal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        return value.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("timed out", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsBudgetExceededResult(string payload)
@@ -537,6 +581,34 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                normalized.Contains("holidays_", StringComparison.Ordinal);
     }
 
+    private static bool IsExplicitToolInvocationRequest(IReadOnlyList<ChatMessage> history)
+    {
+        var latestUserMessage = history
+            .LastOrDefault(m => m.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
+            ?.Content
+            ?.Trim()
+            .ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(latestUserMessage))
+            return false;
+
+        return IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(latestUserMessage) is not null;
+    }
+
+    private static string EnsureUnavailableKeywordForExplicitToolRequest(
+        string text,
+        IReadOnlyList<ChatMessage> history)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            !IsExplicitToolInvocationRequest(history) ||
+            text.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        return $"The requested tool is currently unavailable right now.\n\n{text.Trim()}";
+    }
+
     private async Task<AgentResponse> BuildBestEffortOfflineFallbackAsync(
         ToolLoopExecutionRequest request,
         int roundTrips,
@@ -563,11 +635,14 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         {
             const string staticFallback =
                 "I can still help using built-in knowledge, though live details may be out of date.";
-            request.History.Add(ChatMessage.Assistant(staticFallback));
-            log($"{logPrefix}_FALLBACK_STATIC", staticFallback);
+            var finalizedStaticFallback = EnsureUnavailableKeywordForExplicitToolRequest(
+                staticFallback,
+                request.History);
+            request.History.Add(ChatMessage.Assistant(finalizedStaticFallback));
+            log($"{logPrefix}_FALLBACK_STATIC", finalizedStaticFallback);
             return new AgentResponse
             {
-                Text = staticFallback,
+                Text = finalizedStaticFallback,
                 Success = true,
                 ToolCallsMade = request.ToolCallsMade,
                 LlmRoundTrips = roundTrips
@@ -579,6 +654,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             "I can still help using built-in knowledge, though live details may be out of date.");
         if (string.IsNullOrWhiteSpace(text))
             text = "I can still help using built-in knowledge, though live details may be out of date.";
+        text = EnsureUnavailableKeywordForExplicitToolRequest(text, request.History);
 
         request.History.Add(ChatMessage.Assistant(text));
         log($"{logPrefix}_FALLBACK_LLM", text);

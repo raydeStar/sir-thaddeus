@@ -229,7 +229,8 @@ internal sealed class WorkflowChatRunCoordinator
                 workflowState.LastRetryGateDecision?.IsAllowed,
                 workflowState.LastRetryGateDecision?.ReasonCode,
                 ExtractAssistantSourceCards(selectedResponse),
-                selectedResponse.SuppressSourceCardsUi));
+                selectedResponse.SuppressSourceCardsUi,
+                FormatPlanSummary(selectedResponse.Plan)));
 
         if (workflowState.Envelope.ShowChecklist)
         {
@@ -361,6 +362,22 @@ internal sealed class WorkflowChatRunCoordinator
         if (lower.Contains("memory") || lower.Contains("recall") || lower.Contains("remember"))
             return 0.62;
         return 0.70;
+    }
+
+    private static string? FormatPlanSummary(SirThaddeus.Agent.Planning.TaskPlan? plan)
+    {
+        if (plan is null)
+            return null;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Kind: {plan.TaskKind}  |  Lane: {plan.Lane}");
+        if (plan.RequiredTools.Count > 0)
+            sb.AppendLine($"Tools: {string.Join(", ", plan.RequiredTools)}");
+        for (var i = 0; i < plan.Steps.Count; i++)
+            sb.AppendLine($"  {i + 1}. {plan.Steps[i]}");
+        sb.AppendLine($"Stop: {plan.StopCondition}");
+        sb.Append($"Success: {plan.SuccessCriteria}");
+        return sb.ToString();
     }
 
     private static IReadOnlyList<AssistantSourceCardPayload> ExtractAssistantSourceCards(AgentResponse response)

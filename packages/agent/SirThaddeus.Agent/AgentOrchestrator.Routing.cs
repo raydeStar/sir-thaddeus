@@ -25,6 +25,28 @@ public sealed partial class AgentOrchestrator
         RoutingDecision? FootmanDecision);
 
     /// <summary>
+    /// Runs lane classification before any tool is loaded and logs the result.
+    /// </summary>
+    private async Task<LaneRoutingResult> ClassifyLaneAsync(
+        string userMessage, CancellationToken cancellationToken)
+    {
+        var ctx = new ConversationContext
+        {
+            ConversationId = _currentConversationId,
+            Topic = _dialogueStore.Get().Topic,
+            HasRecentSearchResults = _searchOrchestrator.Session.HasRecentResults(_timeProvider.GetUtcNow())
+        };
+
+        var result = await _laneRouter.ClassifyAsync(userMessage, ctx, cancellationToken);
+
+        LogEvent("LANE_ROUTER",
+            $"lane={result.Lane}, confidence={result.Confidence:F2}, " +
+            $"elapsed_ms={result.ElapsedMs:F1}, rationale={result.Rationale}");
+
+        return result;
+    }
+
+    /// <summary>
     /// Maps a <see cref="RouterOutput"/> back to the legacy
     /// <see cref="ChatIntent"/> enum for code that still uses it
     /// (WebLookup deterministic path).
@@ -99,11 +121,20 @@ public sealed partial class AgentOrchestrator
         Action<string, string> logEvent)
     {
         if (lookupModeHint == LookupModeHint.DeepDive &&
-            IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming))
+            IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerIncoming))
         {
             logEvent(
                 "LOOKUP_MODE_LOCAL_BUSINESS_OVERRIDE",
                 "Forced generic local-business discovery onto the fact-find pipeline.");
+            return LookupModeHint.Fact;
+        }
+
+        if (lookupModeHint == LookupModeHint.DeepDive &&
+            !IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming))
+        {
+            logEvent(
+                "LOOKUP_MODE_DEEPDIVE_SAFETY_DOWNGRADE",
+                "Downgraded a misrouted deep-dive lookup to fact-find because the prompt lacks deep-dive signals.");
             return LookupModeHint.Fact;
         }
 
@@ -265,6 +296,22 @@ public sealed partial class AgentOrchestrator
                 "Normalized misrouted lookup intent to LookupNews for an explicit news request.");
         }
 
+        if (RouteArbitrationPolicy.IsLookupIntent(route.Intent) &&
+            !route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerIncoming) &&
+            !IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerIncoming))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupDeepDive,
+                confidence: Math.Max(route.Confidence, 0.95),
+                needsWeb: true,
+                needsSearch: true,
+                needsBrowser: true);
+
+            LogEvent("ROUTER_DEEPDIVE_NORMALIZATION",
+                "Normalized misrouted lookup intent to LookupDeepDive for an explicit deep-dive request.");
+        }
+
         var shouldNormalizeSelfContainedLookupToChat =
             !webEvidence.ShouldLookup &&
             footmanDecision?.IsAuthoritative != true &&
@@ -336,6 +383,20 @@ public sealed partial class AgentOrchestrator
             LogEvent("LOOKUP_FLOOR_UPGRADE",
                 $"intent={route.Intent}, webScore={webEvidence.Score:0.0}, " +
                 $"webReason={webEvidence.ReasonCode}, shouldLookup={webEvidence.ShouldLookup}");
+        }
+
+        if (!DeepDiveEnabled &&
+            route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase))
+        {
+            route = DefaultRouter.MakeRoute(
+                Intents.LookupFact,
+                confidence: Math.Clamp(Math.Max(route.Confidence, 0.88), 0.88, 0.96),
+                needsWeb: true,
+                needsSearch: true);
+
+            LogEvent(
+                "ROUTER_PROFILE_DEEPDIVE_DOWNGRADE",
+                "Normalized LookupDeepDive to LookupFact because advanced deep-dive is disabled for the active product profile.");
         }
 
         return new RouteResolutionResult(route, webEvidence, footmanDecision);

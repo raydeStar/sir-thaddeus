@@ -2,6 +2,7 @@ using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine.Profiles;
@@ -2866,6 +2867,155 @@ Example page content from the browser.
         Assert.DoesNotContain(mcp.Calls, c =>
             c.Tool.Contains("search", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public async Task FileTask_PermissionDenied_BlocksBeforeExposingFileTools()
+    {
+        var exposedToolSets = new List<IReadOnlyList<ToolDefinition>>();
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools is { Count: > 0 })
+                exposedToolSets.Add(tools);
+
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (system.Contains("request classifier", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"lane":"Conversation","confidence":0.95,"rationale":"Not an explain-lane request."}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "ok",
+                FinishReason = "stop"
+            };
+        });
+
+        var inner = new FakeMcpClient((_, _) => "{}", FakeMcpClient.StandardToolSet);
+        var audit = new TestAuditLogger();
+        var mcp = new AuditedMcpToolClient(inner, audit, new AlwaysDenyGate("Denied by user"), "test-session");
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: new StubRouter(new RouterOutput
+            {
+                Intent = Intents.FileTask,
+                NeedsFileAccess = true,
+                RequiredCapabilities = [ToolCapability.FileRead],
+                Confidence = 1.0
+            }))
+        {
+            MemoryEnabled = false
+        };
+
+        var result = await agent.ProcessAsync("search the repo for TODO comments");
+
+        Assert.True(result.Success);
+        Assert.Contains("file access approval", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(inner.Calls);
+        Assert.Empty(exposedToolSets);
+        Assert.Contains(audit.Events, e =>
+            e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT" &&
+            e.Target == "file_read" &&
+            e.Result == "blocked");
+    }
+
+    [Fact]
+    public async Task ScreenObserve_ExplainLane_UsesGroundedScreenContext()
+    {
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            var system = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+
+            if (system.Contains("Extract the main topic, goal, and optional context", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"Topic":"this page","Goal":"summarize","Context":null}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (system.Contains("already-captured local context", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "This page is a rollout checklist for the baseline profile and it emphasizes disabling the voice host by default.",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (system.Contains("request classifier", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"lane":"Explain","confidence":0.97,"rationale":"Referential explanation request."}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "ok",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient((tool, _) =>
+        {
+            if (tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase) ||
+                tool.Equals("ScreenCapture", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    [Screen Read]
+                    Window: Deployment checklist.pdf
+                    Content Type: Document
+                    Content:
+                    Baseline profile rollout checklist.
+                    Disable the voice host by default.
+                    Keep file access behind approval.
+                    Limitations: none.
+                    """;
+            }
+
+            return "{}";
+        }, FakeMcpClient.StandardToolSet);
+
+        var audit = new TestAuditLogger();
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            audit,
+            "Test assistant.",
+            router: new StubRouter(new RouterOutput
+            {
+                Intent = Intents.ScreenObserve,
+                NeedsScreenRead = true,
+                RequiredCapabilities = [ToolCapability.ScreenCapture],
+                Confidence = 1.0
+            }))
+        {
+            MemoryEnabled = false
+        };
+
+        var result = await agent.ProcessAsync("Can you summarize this page?");
+
+        Assert.True(result.Success);
+        Assert.Contains("rollout checklist", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(mcp.Calls, c => c.Tool.Equals("screen_capture", StringComparison.OrdinalIgnoreCase));
+        Assert.True(result.SuppressSourceCardsUi);
+    }
 }
 
 #endregion
@@ -2962,6 +3112,170 @@ public class MultiIntentSegmentationTests
 
 #endregion
 
+#region ── Tool Contract Normalization ───────────────────────────────────
+
+public class ToolContractNormalizationTests
+{
+    [Fact]
+    public async Task ProcessAsync_WhenExplicitWebTimeoutPromptReturnsOnlyNoResults_NormalizesToTimeoutMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools?.Any(tool => tool.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                llmCallCount++;
+
+                if (llmCallCount == 1)
+                {
+                    return new LlmResponse
+                    {
+                        IsComplete = false,
+                        FinishReason = "tool_calls",
+                        ToolCalls =
+                        [
+                            new ToolCallRequest
+                            {
+                                Id = "call_web",
+                                Function = new FunctionCallDetails
+                                {
+                                    Name = "web_search",
+                                    Arguments = """{"query":"AI policy news","recency":"day"}"""
+                                }
+                            }
+                        ]
+                    };
+                }
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "I cannot execute `web_search` because I am a text-based AI running locally without internet access.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var router = new StubRouter(new RouterOutput
+        {
+            Intent = Intents.LookupSearch,
+            NeedsSearch = true,
+            NeedsWeb = true,
+            Confidence = 1.0
+        });
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            new TestAuditLogger(),
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
+
+        var result = await agent.ProcessAsync("Use web_search for AI policy news and handle timeout gracefully.");
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            "I hit a timeout while running web tools, so I couldn't complete that request right now. Please retry in a moment or narrow the query.",
+            result.Text);
+        Assert.Contains(result.ToolCallsMade, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WhenExplicitRustPromptReturnsOnlyNoResults_NormalizesToUnavailableMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools?.Any(tool => tool.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                llmCallCount++;
+
+                if (llmCallCount == 1)
+                {
+                    return new LlmResponse
+                    {
+                        IsComplete = false,
+                        FinishReason = "tool_calls",
+                        ToolCalls =
+                        [
+                            new ToolCallRequest
+                            {
+                                Id = "call_web",
+                                Function = new FunctionCallDetails
+                                {
+                                    Name = "web_search",
+                                    Arguments = """{"query":"Rust language release notes","recency":"month"}"""
+                                }
+                            }
+                        ]
+                    };
+                }
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "As of 2024, the latest major Rust release is Rust 1.79.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var router = new StubRouter(new RouterOutput
+        {
+            Intent = Intents.LookupSearch,
+            NeedsSearch = true,
+            NeedsWeb = true,
+            Confidence = 1.0
+        });
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            new TestAuditLogger(),
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
+
+        var result = await agent.ProcessAsync("Use web_search to find the latest Rust language release notes.");
+
+        Assert.True(result.Success);
+        Assert.Contains("unavailable", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("latest major Rust release", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("I cannot", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(result.ToolCallsMade, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
+}
+
+#endregion
+
 #region ── Test Doubles ──────────────────────────────────────────────────
 
 /// <summary>
@@ -3041,6 +3355,16 @@ internal sealed class StubGuardrailsCoordinator : IGuardrailsCoordinator
         CancellationToken cancellationToken = default)
         => Task.FromResult<GuardrailsCoordinatorResult?>(null);
 }
+
+    internal sealed class StubRouter : IRouter
+    {
+        private readonly RouterOutput _route;
+
+        public StubRouter(RouterOutput route) => _route = route;
+
+        public Task<RouterOutput> RouteAsync(RouterRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult(_route);
+    }
 
 /// <summary>
 /// Fake MCP tool client with per-tool response routing and realistic

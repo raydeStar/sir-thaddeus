@@ -75,7 +75,7 @@ public static class DeepDiveWebExtractor
         if (sourceItems is { Count: > 0 })
         {
             businessName = InferBusinessNameFromSources(sourceItems);
-            address = InferAddressFromSources([sourceItems[0]]);
+            address = InferAddressFromSources(sourceItems);
         }
 
         foreach (var chunk in textChunks)

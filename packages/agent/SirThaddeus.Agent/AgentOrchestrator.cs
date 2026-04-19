@@ -56,6 +56,11 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly Tools.ToolAliasResolver _toolAliasResolver;
     private readonly IFootmanRouter? _footmanRouter;
     private readonly IAutoMemoryExtractor? _autoMemoryExtractor;
+    private readonly LaneRouter _laneRouter;
+    private readonly Planning.PlanBuilder _planBuilder;
+    private readonly Validation.CompletionValidator _completionValidator;
+    private Validation.RepairLoop _repairLoop;
+    private readonly Lanes.CheckLane _checkLane;
 
     private static readonly AsyncLocal<int> MultiIntentBypassDepth = new();
 
@@ -124,36 +129,6 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private const string OnboardingFollowUpPrompt = OrchestratorPrompts.OnboardingFollowUpPrompt;
 
     private const int MaxHistoryTurns = 12;
-
-    public string? ActiveProfileId { get; set; }
-
-    public bool MemoryEnabled { get; set; } = true;
-
-    public bool PanicModeEnabled { get; set; }
-
-    public bool SafeModeEnabled { get; set; }
-
-    public string? UserLocationHint
-    {
-        get => _userLocationHint;
-        set
-        {
-            _userLocationHint = value;
-            _searchOrchestrator.UserLocationHint = value;
-        }
-    }
-
-    public string? UserTimezone { get; set; }
-
-    public string? PreferredUnits
-    {
-        get => _preferredUnits;
-        set
-        {
-            _preferredUnits = NormalizeUnitPreference(value);
-            _searchOrchestrator.PreferredUnits = _preferredUnits;
-        }
-    }
 
     private enum ChatIntent
     {
@@ -354,6 +329,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         var route = NormalizeRouteForPrompt(routeResolution.Route, lowerIncoming);
         var webEvidence = routeResolution.WebEvidence;
 
+        var laneResult = await ClassifyLaneAsync(userMessage, cancellationToken);
+
         var now = _timeProvider.GetUtcNow();
         var hasRecentSearchContext =
             _searchOrchestrator.Session.LastMode is not null &&
@@ -481,6 +458,13 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         {
             LogEvent("PLACE_CONTEXT_INFERRED", $"{Truncate(userMessage, 80)} -> {Truncate(contextualUserMessage, 120)}");
         }
+
+        var contextualDeterministicPromptResponse = TryBuildDeterministicPromptResponse(
+            contextualUserMessage,
+            toolCallsMade,
+            roundTrips);
+        if (contextualDeterministicPromptResponse is not null)
+            return AttachContextSnapshot(contextualDeterministicPromptResponse, usageBaseline);
 
         if (SafeModeEnabled &&
             (route.NeedsWeb || route.NeedsSearch || RouteArbitrationPolicy.IsLookupIntent(route.Intent)))
@@ -685,17 +669,16 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             var forceLocalBusinessLookupFromFileIntent =
                 route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase) &&
                 IntentFeatureExtractor.LooksLikeLocalBusinessDiscovery(lowerIncoming);
-
             if (forceLocalBusinessLookupFromFileIntent)
-            {
-                LogEvent(
-                    "LOCAL_BUSINESS_FILE_INTENT_OVERRIDE",
-                    "Rerouting local-business prompt from FileTask to web lookup pipeline.");
-            }
+                LogEvent("LOCAL_BUSINESS_FILE_INTENT_OVERRIDE", "Rerouting local-business prompt from FileTask to web lookup pipeline.");
+
+            var laneFastPathResult = await TryExecuteLaneFastPathAsync(contextualUserMessage, route, intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent, laneResult, memoryPackText, toolCallsMade, roundTrips, cancellationToken);
+            if (laneFastPathResult is not null) return AttachContextSnapshot(laneFastPathResult, usageBaseline);
 
             if (intent == ChatIntent.WebLookup || forceLocalBusinessLookupFromFileIntent)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
                 var lookupModeHint = forceLocalBusinessLookupFromFileIntent
                     ? LookupModeHint.Fact
                     : ResolveLookupModeHint(route);
@@ -714,8 +697,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     InjectMemoryIntoHistoryInPlace(_history, memoryPackText);
                 InjectPersonalityAnchorIntoHistoryInPlace(_history, personalityAnchor, personalityTurnTag);
 
+                var lookupExecutionMessage = contextualUserMessage;
+                if (string.Equals(
+                    IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lowerIncoming),
+                    Intents.LookupSearch,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    lookupExecutionMessage = userMessage;
+                    if (!string.Equals(lookupExecutionMessage, contextualUserMessage, StringComparison.Ordinal))
+                    {
+                        LogEvent(
+                            "LOOKUP_EXECUTION_RAW_PROMPT_PRESERVED",
+                            "Preserved explicit lookup-tool phrasing for search execution.");
+                    }
+                }
+
                 var searchResponse = await _searchOrchestrator.ExecuteAsync(
-                    contextualUserMessage,
+                    lookupExecutionMessage,
                     memoryPackText,
                     _history,
                     toolCallsMade,
@@ -737,6 +735,10 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     searchResponse.AllowToolResultPersonalityPresentation);
                 if (!string.Equals(sanitizedSearchText, searchResponse.Text, StringComparison.Ordinal))
                     searchResponse = searchResponse with { Text = sanitizedSearchText };
+                searchResponse = NormalizeExplicitWebNoResultsContractResponse(
+                    contextualUserMessage,
+                    searchResponse,
+                    toolCallsMade);
 
                 if (searchResponse.Success)
                     AppendAssistantMessage(searchResponse.Text);
@@ -755,6 +757,17 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     personalityAnchor, personalityTurnTag,
                     toolCallsMade, roundTrips, usageBaseline,
                     cancellationToken);
+            }
+
+            if (route.Intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase))
+            {
+                var blockedFileAccessResponse = await TryBlockGenericFileAccessIfDeniedAsync(
+                    contextualUserMessage,
+                    toolCallsMade,
+                    roundTrips,
+                    cancellationToken);
+                if (blockedFileAccessResponse is not null)
+                    return AttachContextSnapshot(blockedFileAccessResponse, usageBaseline);
             }
 
             if (!string.IsNullOrWhiteSpace(memoryPackText))
@@ -1029,58 +1042,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
                 if (fileFallbackEligible)
                 {
-                    LogEvent("CHAT_FALLBACK_TO_FILE",
-                        "Chat-only refusal/uncertainty detected — falling back to file tools.");
-
-                    if (TryBuildExplicitFileReadArgs(userMessage, out var fallbackFileReadArgs, out var fallbackFilePath) ||
-                        TryBuildExplicitFileReadArgs(contextualUserMessage, out fallbackFileReadArgs, out fallbackFilePath))
-                    {
-                        return AttachContextSnapshot(
-                            await ExecuteExplicitFileReadAsync(
-                                fallbackFileReadArgs,
-                                fallbackFilePath,
-                                toolCallsMade,
-                                roundTrips,
-                                cancellationToken),
-                            usageBaseline);
-                    }
-
-                    if (TryBuildExplicitFileListArgs(userMessage, out var fallbackFileListArgs, out var fallbackFolderPath) ||
-                        TryBuildExplicitFileListArgs(contextualUserMessage, out fallbackFileListArgs, out fallbackFolderPath))
-                    {
-                        return AttachContextSnapshot(
-                            await ExecuteExplicitFileListAsync(
-                                fallbackFileListArgs,
-                                fallbackFolderPath,
-                                contextualUserMessage,
-                                toolCallsMade,
-                                roundTrips,
-                                cancellationToken),
-                            usageBaseline);
-                    }
-
-                    var fallbackToolsCatalog = await toolDefsTask;
-                    var filePolicy = PolicyGate.Evaluate(new RouterOutput
-                    {
-                        Intent = Intents.FileTask,
-                        NeedsFileAccess = true,
-                        RequiredCapabilities = [ToolCapability.FileRead],
-                        Confidence = 1.0
-                    });
-                    var fileTools = FilterKnowledgeStoreToolsIfNeeded(
-                        PolicyGate.FilterTools(fallbackToolsCatalog, filePolicy),
-                        contextualUserMessage);
-
-                    LogEvent("AGENT_TOOLS_POLICY_FILTERED",
-                        $"{fileTools.Count} file tool(s) exposed for fallback: [{string.Join(", ", fileTools.Select(t => t.Function.Name))}]");
-
-                    var fileToolLoopResponse = await RunToolLoopAsync(
-                        fileTools,
+                    var fileFallbackResponse = await TryHandleChatFallbackToFileAsync(
+                        userMessage,
+                        contextualUserMessage,
+                        toolDefsTask,
                         toolCallsMade,
                         roundTrips,
                         cancellationToken);
-
-                    return AttachContextSnapshot(fileToolLoopResponse, usageBaseline);
+                    return AttachContextSnapshot(fileFallbackResponse, usageBaseline);
                 }
 
                 if (string.IsNullOrWhiteSpace(text))
@@ -1120,17 +1089,27 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 $"{tools.Count} tool(s) from {allTools.Count} total: " +
                 $"[{string.Join(", ", tools.Select(t => t.Function.Name))}]");
 
+            var taskPlan = await BuildTaskPlanAsync(contextualUserMessage, laneResult, tools, cancellationToken);
+
             var toolLoopResponse = await RunToolLoopAsync(
                 tools, toolCallsMade, roundTrips, cancellationToken);
             toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
+            toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
+                contextualUserMessage,
+                toolLoopResponse,
+                toolCallsMade);
+            if (taskPlan is not null)
+                toolLoopResponse = toolLoopResponse with { Plan = taskPlan };
+
+            toolLoopResponse = await ValidateAndMaybeRepairAsync(
+                contextualUserMessage, toolLoopResponse, toolCallsMade, cancellationToken);
+            toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
+                contextualUserMessage,
+                toolLoopResponse,
+                toolCallsMade);
 
             var deterministicMemoryFallback = await TryRunDeterministicMemoryStoreFallbackAsync(
-                route,
-                contextualUserMessage,
-                tools,
-                toolCallsMade,
-                toolLoopResponse,
-                cancellationToken);
+                route, contextualUserMessage, tools, toolCallsMade, toolLoopResponse, cancellationToken);
             if (deterministicMemoryFallback is not null)
                 return AttachContextSnapshot(deterministicMemoryFallback, usageBaseline);
 

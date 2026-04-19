@@ -48,6 +48,19 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             };
         }
 
+        if (HarnessDisallowsMemoryRetrieve())
+        {
+            return new MemoryContextResult
+            {
+                Provenance = new MemoryContextProvenance
+                {
+                    Skipped = true,
+                    Success = false,
+                    Summary = "Memory retrieve disallowed by harness tool policy."
+                }
+            };
+        }
+
         _telemetry?.RecordRetrievalAttempt();
         var start = _timeProvider.GetTimestamp();
         try
@@ -295,6 +308,29 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             part.Length == 0
                 ? ""
                 : char.ToUpperInvariant(part[0]) + part[1..]));
+    }
+
+    private static bool HarnessDisallowsMemoryRetrieve()
+    {
+        var allowedTools = GetHarnessAllowedToolsOverride();
+        if (allowedTools.Count == 0)
+            return false;
+
+        return !allowedTools.Contains(MemoryRetrieveToolName, StringComparer.OrdinalIgnoreCase) &&
+               !allowedTools.Contains(MemoryRetrieveToolNameAlt, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetHarnessAllowedToolsOverride()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        return raw
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string SanitizePackTextForRequest(

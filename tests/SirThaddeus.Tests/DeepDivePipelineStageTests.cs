@@ -28,6 +28,20 @@ public class DeepDivePipelineStageTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData("Rogue Trader", "Trader Joe's in Portland OR", false)]
+    [InlineData("Trader Joe's", "Trader Joe's in Portland OR", true)]
+    [InlineData("Target", "Target in Seattle", true)]
+    [InlineData("Seattle Flowers", "Seattle Flowers", true)]
+    public void ExtractedNameMatchesQuery_RequiresSufficientBusinessTokenOverlap(
+        string extractedName,
+        string cleanedQuery,
+        bool expected)
+    {
+        var result = DeepDiveCoordinator.ExtractedNameMatchesQuery(extractedName, cleanedQuery);
+        Assert.Equal(expected, result);
+    }
+
     // ── Stage 5: Open/closed status computation ───────────────────
 
     [Fact]
@@ -182,6 +196,22 @@ public class DeepDivePipelineStageTests
         Assert.True((bool)method!.Invoke(null, [yelpSource])!);
         Assert.True((bool)method!.Invoke(null, [storeSource])!);
         Assert.True((bool)method!.Invoke(null, [officialSource])!);
+    }
+
+    [Fact]
+    public void BuildDirectPlaceFallbackSources_ReturnsWalmartStoreFinderForCityStateQueries()
+    {
+        var method = typeof(DeepDiveCoordinator).GetMethod(
+            "BuildDirectPlaceFallbackSources",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.NotNull(method);
+
+        var sources = (IReadOnlyList<SourceItem>)method!.Invoke(null, ["Walmart in Portland OR"])!;
+
+        Assert.Single(sources);
+        Assert.Contains("walmart.com/store/finder", sources[0].Url, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Portland%2C%20OR", sources[0].Url, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── Stage 2: Hours parser ─────────────────────────────────────

@@ -62,6 +62,15 @@ public sealed class ToolDefinitionBuilder
                     .ToList();
             }
 
+            var harnessAllowedTools = GetHarnessAllowedToolsOverride();
+            if (harnessAllowedTools.Count > 0)
+            {
+                filteredTools = FilterHarnessAllowedTools(filteredTools, harnessAllowedTools).ToList();
+                logEvent?.Invoke(
+                    "AGENT_TOOLS_HARNESS_FILTER",
+                    $"{filteredTools.Count} harness-allowed tool(s): {string.Join(", ", filteredTools.Select(t => t.Name))}");
+            }
+
             var definitions = filteredTools.Select(t => new ToolDefinition
             {
                 Function = new FunctionDefinition
@@ -91,6 +100,43 @@ public sealed class ToolDefinitionBuilder
             logEvent?.Invoke("AGENT_TOOLS_FAILED", $"MCP tool discovery failed: {ex.Message}");
             return [];
         }
+    }
+
+    internal static IReadOnlyList<McpToolInfo> FilterHarnessAllowedTools(
+        IReadOnlyList<McpToolInfo> tools,
+        IReadOnlyList<string> allowedToolNames)
+    {
+        if (tools.Count == 0 || allowedToolNames.Count == 0)
+            return tools;
+
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var toolName in allowedToolNames)
+        {
+            if (string.IsNullOrWhiteSpace(toolName))
+                continue;
+
+            allowed.Add(toolName.Trim());
+            allowed.Add(AuditedMcpToolClient.Canonicalize(toolName));
+        }
+
+        return tools
+            .Where(tool =>
+                allowed.Contains(tool.Name) ||
+                allowed.Contains(AuditedMcpToolClient.Canonicalize(tool.Name)))
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> GetHarnessAllowedToolsOverride()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        return raw
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static object SanitizeSchemaForLocalLlm(object rawSchema)

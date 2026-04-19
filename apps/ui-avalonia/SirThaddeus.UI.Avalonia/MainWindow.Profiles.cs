@@ -1,10 +1,146 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using SirThaddeus.Contracts;
+using SirThaddeus.UI.Avalonia.ViewModels;
 
 namespace SirThaddeus.UI.Avalonia;
 
 public partial class MainWindow
 {
+    private async void RefreshProfilesButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await RefreshProfilesAsync();
+    }
+
+    private async Task RefreshProfilesAsync()
+    {
+        if (_runtimeApiClient is null)
+        {
+            ProfilesStatusText.Text = "Profiles: runtime not connected";
+            _profileItems.Clear();
+            _personalityItems.Clear();
+            EditProfileButton.IsEnabled = false;
+            DeleteProfileButton.IsEnabled = false;
+            SetActiveProfileButton.IsEnabled = false;
+            EditPersonalityButton.IsEnabled = false;
+            DeletePersonalityButton.IsEnabled = false;
+            SetActivePersonalityButton.IsEnabled = false;
+            return;
+        }
+
+        try
+        {
+            var response = await _runtimeApiClient.GetProfilesAsync(CancellationToken.None);
+
+            _profileItems.Clear();
+            foreach (var profile in response.Profiles)
+            {
+                _profileItems.Add(new ProfileListItemViewModel(profile));
+            }
+
+            _personalityItems.Clear();
+            foreach (var personality in response.Personalities)
+            {
+                _personalityItems.Add(new PersonalityListItemViewModel(personality));
+            }
+
+            ProfilesStatusText.Text = $"Profiles loaded. Active profile: {response.ActiveProfileId ?? "(none)"} | Active personality: {response.ActivePersonalityId}";
+            SelectProfile(response.ActiveProfileId ?? _profileItems.FirstOrDefault()?.ProfileId);
+            SelectPersonality(response.ActivePersonalityId ?? _personalityItems.FirstOrDefault()?.Id);
+            _backendSettings.ApplyActiveIdentity(response.ActiveProfileId, response.ActivePersonalityId);
+
+            var activeProfile = response.Profiles.FirstOrDefault(p => p.IsActive)
+                                ?? response.Profiles.FirstOrDefault();
+            if (activeProfile is not null)
+            {
+                var name = activeProfile.PreferredName;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    name = activeProfile.DisplayName;
+                }
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    ChatMessageItem.UserDisplayName = name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ProfilesStatusText.Text = "Profiles load failed: " + ex.Message;
+        }
+    }
+
+    private void ProfilesList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (ProfilesList.SelectedItem is ProfileListItemViewModel selected)
+        {
+            EditProfileButton.IsEnabled = true;
+            DeleteProfileButton.IsEnabled = true;
+            SetActiveProfileButton.IsEnabled = !selected.IsActive;
+        }
+        else
+        {
+            EditProfileButton.IsEnabled = false;
+            DeleteProfileButton.IsEnabled = false;
+            SetActiveProfileButton.IsEnabled = false;
+        }
+    }
+
+    private void PersonalitiesList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (PersonalitiesList.SelectedItem is PersonalityListItemViewModel selected)
+        {
+            EditPersonalityButton.IsEnabled = true;
+            DeletePersonalityButton.IsEnabled = true;
+            SetActivePersonalityButton.IsEnabled = !selected.IsActive;
+        }
+        else
+        {
+            EditPersonalityButton.IsEnabled = false;
+            DeletePersonalityButton.IsEnabled = false;
+            SetActivePersonalityButton.IsEnabled = false;
+        }
+    }
+
+    private async void SetActiveProfileButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_runtimeApiClient is null || ProfilesList.SelectedItem is not ProfileListItemViewModel selected)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _runtimeApiClient.SetActiveProfileAsync(selected.ProfileId, CancellationToken.None);
+            AppendTranscript($"[system] {result.Message}");
+            await RefreshProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Active profile update failed: " + ex.Message);
+        }
+    }
+
+    private async void SetActivePersonalityButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_runtimeApiClient is null || PersonalitiesList.SelectedItem is not PersonalityListItemViewModel selected)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _runtimeApiClient.SetActivePersonalityAsync(selected.Id, CancellationToken.None);
+            AppendTranscript($"[system] {result.Message}");
+            await RefreshProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendTranscript("[error] Active personality update failed: " + ex.Message);
+        }
+    }
+
     private async void AddProfileButton_Click(object? sender, RoutedEventArgs e)
     {
         if (!EnsureProfilesRuntimeConnected())
@@ -237,4 +373,54 @@ public partial class MainWindow
 
     private static string CreateSuggestedPersonalityId()
         => ($"personality_{Guid.NewGuid():N}")[..20];
+
+    private sealed class ProfileListItemViewModel
+    {
+        public ProfileListItemViewModel(ProfileListItemDto dto)
+        {
+            ProfileId = dto.ProfileId;
+            IsActive = dto.IsActive;
+
+            var displayName = dto.PreferredName;
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                displayName = dto.DisplayName;
+            }
+
+            DisplayName = string.IsNullOrWhiteSpace(displayName)
+                ? dto.ProfileId
+                : displayName;
+
+            Meta = $"Id: {dto.ProfileId} | Kind: {dto.Kind} | Active: {(dto.IsActive ? "yes" : "no")}";
+        }
+
+        public string ProfileId { get; }
+
+        public string DisplayName { get; }
+
+        public string Meta { get; }
+
+        public bool IsActive { get; }
+    }
+
+    private sealed class PersonalityListItemViewModel
+    {
+        public PersonalityListItemViewModel(PersonalityListItemDto dto)
+        {
+            Id = dto.Id;
+            IsActive = dto.IsActive;
+            DisplayName = string.IsNullOrWhiteSpace(dto.Alias)
+                ? dto.DisplayName
+                : $"{dto.Alias} ({dto.DisplayName})";
+            Meta = $"Id: {dto.Id} | Active: {(dto.IsActive ? "yes" : "no")}";
+        }
+
+        public string Id { get; }
+
+        public string DisplayName { get; }
+
+        public string Meta { get; }
+
+        public bool IsActive { get; }
+    }
 }

@@ -14,9 +14,7 @@ function Resolve-SidecarRoot {
 
 function Resolve-PythonPath([string]$SidecarRoot) {
     $candidates = @(
-        (Join-Path $SidecarRoot "runtime\python\python.exe"),
-        (Join-Path $SidecarRoot "..\voice\runtime\python\python.exe"),
-        (Join-Path $SidecarRoot "..\..\voice-backend\runtime\python\python.exe")
+        (Join-Path $SidecarRoot "runtime\python\python.exe")
     )
 
     foreach ($candidate in $candidates) {

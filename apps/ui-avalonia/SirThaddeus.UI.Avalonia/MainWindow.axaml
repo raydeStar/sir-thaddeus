@@ -354,6 +354,26 @@
                             </Expander>
                           </Border>
 
+                          <Border IsVisible="{Binding HasPlanContent}"
+                                  Background="{DynamicResource BackgroundPrimary}"
+                                  CornerRadius="{StaticResource RadiusSm}"
+                                  Padding="12,8"
+                                  Margin="0,0,0,8">
+                            <Expander IsExpanded="{Binding IsPlanExpanded}" Padding="0">
+                              <Expander.Header>
+                                <TextBlock Text="Plan" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextTertiary}"/>
+                              </Expander.Header>
+                              <SelectableTextBlock Text="{Binding PlanContent}"
+                                                   FontSize="12"
+                                                   FontFamily="Cascadia Mono, Consolas, monospace"
+                                                   LineHeight="18"
+                                                   Foreground="{DynamicResource TextSecondary}"
+                                                   Padding="0,6,0,0"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="300"/>
+                            </Expander>
+                          </Border>
+
                           <local:MarkdownTextBlock Markdown="{Binding Content}"
                                                    FontSize="15"
                                                    LineHeight="24"
@@ -1152,7 +1172,14 @@
                     <TextBlock Text="VOICE PIPELINE" Classes="sectionLabel"/>
                     <Border Classes="settingsCard">
                       <StackPanel Spacing="12">
-                        <CheckBox Content="Enable Local VoiceHost" IsChecked="{Binding VoiceHostEnabled}" Classes="settingsCheck"/>
+                        <CheckBox Content="Enable Local VoiceHost"
+                                  IsChecked="{Binding VoiceHostEnabled}"
+                                  IsEnabled="{Binding IsVoiceHostSupportedByProfile}"
+                                  Classes="settingsCheck"/>
+                        <TextBlock Text="{Binding VoiceHostProfileRestrictionText}"
+                                   Classes="hint"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding IsVoiceHostRestrictedByProfile}"/>
                         <StackPanel Spacing="10" IsVisible="{Binding VoiceHostEnabled}">
                           <StackPanel Spacing="4">
                             <TextBlock Text="VoiceHost URL" Classes="hint"/>
@@ -1377,7 +1404,14 @@
                             <TextBlock Text="Local metasearch instance managed by Sir Thaddeus."
                                        Classes="settingsCardDescription"/>
                           </StackPanel>
-                          <CheckBox Content="Auto-start bundled local SearXNG" IsChecked="{Binding SearxngAutoStart}" Classes="settingsCheck"/>
+                          <CheckBox Content="Auto-start bundled local SearXNG"
+                                    IsChecked="{Binding SearxngAutoStart}"
+                                    IsEnabled="{Binding IsSearxngAutoStartSupportedByProfile}"
+                                    Classes="settingsCheck"/>
+                          <TextBlock Text="{Binding SearxngProfileRestrictionText}"
+                                     Classes="hint"
+                                     TextWrapping="Wrap"
+                                     IsVisible="{Binding IsSearxngAutoStartRestrictedByProfile}"/>
                           <StackPanel Spacing="4">
                             <TextBlock Text="Base URL" Classes="hint"/>
                             <TextBox Text="{Binding SearxngBaseUrl}" Classes="chatInput" FontSize="13" Padding="12,10"/>

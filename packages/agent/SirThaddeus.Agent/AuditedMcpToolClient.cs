@@ -79,6 +79,85 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
     }
 
+    /// <summary>
+    /// Runs the permission gate without executing the tool so the
+    /// orchestrator can confirm access before exposing gated tools.
+    /// </summary>
+    public async Task<ToolPermissionResult> PreflightToolPermissionAsync(
+        string toolName,
+        string argumentsJson,
+        CancellationToken cancellationToken = default)
+    {
+        var canonical = Canonicalize(toolName);
+        var redactedInput = ToolCallRedactor.RedactInput(canonical, argumentsJson);
+
+        try
+        {
+            var permission = await _gate.CheckAsync(canonical, argumentsJson, cancellationToken);
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MCP_TOOL_PERMISSION_PREFLIGHT",
+                Target = canonical,
+                Result = permission.Granted ? "granted" : "blocked",
+                PermissionTokenId = permission.TokenId,
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool_name_requested"] = toolName,
+                    ["tool_name_canonical"] = canonical,
+                    ["input_summary"] = redactedInput,
+                    ["permission"] = FormatPermissionStatus(permission),
+                    ["preflight_only"] = true
+                }
+            });
+
+            return permission;
+        }
+        catch (OperationCanceledException)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MCP_TOOL_PERMISSION_PREFLIGHT",
+                Target = canonical,
+                Result = "cancelled",
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool_name_requested"] = toolName,
+                    ["tool_name_canonical"] = canonical,
+                    ["input_summary"] = redactedInput,
+                    ["preflight_only"] = true
+                }
+            });
+
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MCP_TOOL_PERMISSION_PREFLIGHT",
+                Target = canonical,
+                Result = "error",
+                Details = new Dictionary<string, object>
+                {
+                    ["session_id"] = _sessionId,
+                    ["tool_name_requested"] = toolName,
+                    ["tool_name_canonical"] = canonical,
+                    ["input_summary"] = redactedInput,
+                    ["preflight_only"] = true,
+                    ["error_message"] = ex.Message
+                }
+            });
+
+            return ToolPermissionResult.Deny($"Permission check failed — {ex.Message}");
+        }
+    }
+
     /// <inheritdoc />
     public async Task<string> CallToolAsync(
         string toolName, string argumentsJson, CancellationToken cancellationToken = default)

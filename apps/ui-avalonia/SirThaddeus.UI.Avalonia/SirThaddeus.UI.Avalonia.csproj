@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\packages\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
     <ProjectReference Include="..\..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
     <ProjectReference Include="..\..\..\packages\config\SirThaddeus.Config\SirThaddeus.Config.csproj" />
     <ProjectReference Include="..\..\..\packages\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />

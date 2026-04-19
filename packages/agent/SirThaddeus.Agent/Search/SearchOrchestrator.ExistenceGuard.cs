@@ -257,10 +257,11 @@ public sealed partial class SearchOrchestrator
                lower.Contains("the season concludes", StringComparison.Ordinal);
     }
 
-    private AgentResponse? TryBuildExistenceGuardedResponse(
+    private async Task<AgentResponse?> TryBuildExistenceGuardedResponseAsync(
         string userMessage,
         IReadOnlyList<SourceItem> initialSources,
-        List<ToolCallRecord> toolCallsMade)
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
     {
         var queryBundle = BuildExistenceQueryBundle(userMessage);
         if (queryBundle.Count <= 1)
@@ -269,17 +270,54 @@ public sealed partial class SearchOrchestrator
         var evidence = initialSources
             .Where(s => !string.IsNullOrWhiteSpace(s.Url))
             .ToList();
-        const bool addedFollowupEvidence = false;
+        var addedFollowupEvidence = false;
+        var nonexistenceScore = 0;
 
-        if (evidence.Count == 0)
-            return null;
+        var isLikelyNonexistent = evidence.Count > 0 &&
+            IsLikelyNonexistent(userMessage, evidence, out nonexistenceScore);
 
-        if (!IsLikelyNonexistent(userMessage, evidence, out var nonexistenceScore))
+        if (!isLikelyNonexistent)
+        {
+            foreach (var followupQuery in queryBundle.Skip(1))
+            {
+                var followupResult = await CallWebSearchAsync(
+                    followupQuery,
+                    "any",
+                    toolCallsMade,
+                    ct,
+                    originalUserMessage: userMessage,
+                    maxResults: 5);
+
+                var followupSources = ParseSourcesFromToolResult(followupResult);
+                if (followupSources.Count == 0)
+                    continue;
+
+                addedFollowupEvidence = true;
+                foreach (var source in followupSources)
+                {
+                    if (evidence.Any(existing =>
+                        string.Equals(existing.Url, source.Url, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    evidence.Add(source);
+                }
+
+                if (IsLikelyNonexistent(userMessage, evidence, out nonexistenceScore))
+                {
+                    isLikelyNonexistent = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isLikelyNonexistent)
             return null;
 
         var seasonLabel = TryExtractSeasonLabel(userMessage);
         var seasonPhrase = seasonLabel is null ? "the requested installment" : seasonLabel;
-        var text =
+        var text = TryBuildMediaInstallmentFallback(userMessage) ??
             $"Based on available sources, {seasonPhrase} does not exist. " +
             "The evidence indicates it was canceled or never released, so there is no official episode plot to summarize.";
 
