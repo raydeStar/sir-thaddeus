@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Security.Principal;
 using System.Text.Json;
+using Serilog;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Routing;
@@ -9,6 +10,7 @@ using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using SirThaddeus.LlmClient;
+using SirThaddeus.Logging;
 using SirThaddeus.Memory.Sqlite;
 using SirThaddeus.PersonalityEngine.Profiles;
 using SirThaddeus.RuntimeHost;
@@ -19,6 +21,17 @@ if (options.ShowHelp)
     PrintHelp();
     return;
 }
+
+Log.Logger = LoggingBootstrap.BuildSerilogLogger(new LoggingOptions
+{
+    ComponentName = "headless-runtime",
+});
+AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
+AppDomain.CurrentDomain.UnhandledException += (_, _) => Log.CloseAndFlush();
+Log.Information(
+    "HeadlessRuntime starting (serverMode={ServerMode}, toolsEnabled={ToolsEnabled})",
+    options.ServerMode,
+    options.EnableTools);
 
 var load = SettingsManager.LoadWithDiagnostics();
 var settings = load.Settings;
