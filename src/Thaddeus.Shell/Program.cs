@@ -63,15 +63,20 @@ public static class Program
             var compactUrl = $"http://127.0.0.1:{lockFile.Port}/compact";
             var window = new WorkspaceWindow(loggerFactory.CreateLogger<WorkspaceWindow>());
 
-            // Phase 2.4: build (but do not auto-show) the compact panel launcher.
-            // Phase 2.5 will hook it up to the global shortcut. For now an env var
-            // (THADDEUS_COMPACT_AUTOSHOW=1) lets us smoke-test the second window
-            // without yet having the shortcut.
+            // Phase 2.4 builds the compact panel launcher; Phase 2.5 wires it to a
+            // real Windows global shortcut (Ctrl+Shift+Space → toggle). Other OSes
+            // fall back to the stub adapter and the env-var smoke-test path.
             CompactPanelLauncher? compactLauncher = null;
             var autoShowCompact = string.Equals(
                 Environment.GetEnvironmentVariable("THADDEUS_COMPACT_AUTOSHOW"),
                 "1",
                 StringComparison.Ordinal);
+
+            IGlobalShortcutAdapter shortcuts = OperatingSystem.IsWindows()
+                ? new Thaddeus.Shell.Platform.Windows.WindowsGlobalShortcutAdapter(
+                    loggerFactory.CreateLogger<Thaddeus.Shell.Platform.Windows.WindowsGlobalShortcutAdapter>())
+                : new StubGlobalShortcutAdapter(loggerFactory.CreateLogger<StubGlobalShortcutAdapter>());
+            using var _shortcuts = shortcuts;
 
             window.ShowBlocking(workspaceUrl, lockFile.Version, onReady: parent =>
             {
@@ -85,6 +90,24 @@ public static class Program
                 {
                     log.LogInformation("shell.compact.auto_show");
                     compactLauncher.Show(compactUrl);
+                }
+
+                if (shortcuts.IsSupported)
+                {
+                    shortcuts.Triggered += (_, id) =>
+                    {
+                        if (id == "compact-toggle")
+                        {
+                            try { compactLauncher?.Toggle(compactUrl); }
+                            catch (Exception ex) { log.LogWarning(ex, "shell.compact.toggle_failed"); }
+                        }
+                    };
+                    using var registerCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    var ok = shortcuts.RegisterAsync(
+                        "compact-toggle",
+                        new KeyChord("Space", KeyModifiers.Control | KeyModifiers.Shift),
+                        registerCts.Token).GetAwaiter().GetResult();
+                    log.LogInformation("shell.shortcut.register id=compact-toggle ok={Ok}", ok);
                 }
             });
 
