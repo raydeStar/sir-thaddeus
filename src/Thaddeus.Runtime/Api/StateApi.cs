@@ -53,7 +53,10 @@ public static class StateApi
 }
 
 /// <summary>Source-generated JSON context for <see cref="RuntimeStateEvent"/>.</summary>
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    UseStringEnumConverter = true)]
 [JsonSerializable(typeof(RuntimeStateEvent))]
 public partial class StateSnapshotJsonContext : JsonSerializerContext
 {

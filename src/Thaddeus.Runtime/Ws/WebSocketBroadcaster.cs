@@ -19,6 +19,7 @@ public sealed class WebSocketBroadcaster : IHostedService, IAsyncDisposable
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
     };
 
     private readonly IEventBus _bus;
