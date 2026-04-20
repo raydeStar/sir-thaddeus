@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Thaddeus.Runtime.Chat;
+using Thaddeus.Runtime.State;
 using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Api;
@@ -50,7 +51,7 @@ public static class ChatApi
 
         app.MapPost("/api/threads/{id}/messages",
             async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
-                ILoggerFactory loggerFactory, CancellationToken ct) =>
+                RuntimeStateMachine machine, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
                 return Results.BadRequest(new { error = "text is required" });
@@ -64,6 +65,12 @@ public static class ChatApi
             try
             {
                 var updated = await store.AppendMessageAsync(id, message, ct).ConfigureAwait(false);
+
+                // Project chat lifecycle onto the runtime state machine so the shell's
+                // status badge animates Idle -> Thinking -> Idle for typed turns.
+                // Illegal transitions (e.g. user sends a second message mid-reply) are
+                // logged and discarded by the machine; chat persistence still succeeds.
+                machine.TryTransition(StateTrigger.UserTextSubmitted);
 
                 // Kick off the stub assistant on a background task. The HTTP caller
                 // returns immediately with the user message; the assistant reply is
@@ -79,6 +86,11 @@ public static class ChatApi
                     catch (Exception ex)
                     {
                         log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", id);
+                    }
+                    finally
+                    {
+                        // Stub assistant is text-only; close the loop back to Idle.
+                        machine.TryTransition(StateTrigger.PlanTextOnly);
                     }
                 });
 
