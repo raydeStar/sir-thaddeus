@@ -28,9 +28,11 @@ public sealed record ChatMessage(
 /// <param name="CreatedAt">UTC timestamp of thread creation.</param>
 /// <param name="UpdatedAt">UTC timestamp of last message append.</param>
 /// <param name="Messages">Ordered messages, oldest first.</param>
+/// <param name="Pinned">When true, the History UI surfaces the thread above unpinned ones.</param>
 public sealed record ChatThread(
     string Id,
     string Title,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<ChatMessage> Messages);
+    IReadOnlyList<ChatMessage> Messages,
+    bool Pinned = false);

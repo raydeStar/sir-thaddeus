@@ -143,4 +143,60 @@ public class JsonFileThreadStoreTests : IDisposable
 
     private static ChatMessage NewAssistantMessage(string text) =>
         new("msg_" + Guid.NewGuid().ToString("N")[..12], ChatRole.Assistant, text, DateTimeOffset.UtcNow);
+
+    [Fact]
+    public async Task Rename_updates_title_and_persists()
+    {
+        using var store = NewStore();
+        var t = await store.CreateAsync("first", CancellationToken.None);
+
+        var renamed = await store.RenameAsync(t.Id, "  My Project  ", CancellationToken.None);
+
+        Assert.NotNull(renamed);
+        Assert.Equal("My Project", renamed!.Title);
+
+        // Round-trip through a fresh store proves the rename hit disk.
+        using var store2 = NewStore();
+        var loaded = await store2.GetAsync(t.Id, CancellationToken.None);
+        Assert.Equal("My Project", loaded!.Title);
+    }
+
+    [Fact]
+    public async Task Rename_falls_back_to_Untitled_when_blank()
+    {
+        using var store = NewStore();
+        var t = await store.CreateAsync("first", CancellationToken.None);
+
+        var renamed = await store.RenameAsync(t.Id, "   ", CancellationToken.None);
+
+        Assert.Equal("Untitled", renamed!.Title);
+    }
+
+    [Fact]
+    public async Task Rename_returns_null_for_unknown_thread()
+    {
+        using var store = NewStore();
+        var renamed = await store.RenameAsync("th_missing", "x", CancellationToken.None);
+        Assert.Null(renamed);
+    }
+
+    [Fact]
+    public async Task SetPinned_toggles_pin_and_persists()
+    {
+        using var store = NewStore();
+        var t = await store.CreateAsync("first", CancellationToken.None);
+        Assert.False(t.Pinned);
+
+        var pinned = await store.SetPinnedAsync(t.Id, true, CancellationToken.None);
+        Assert.True(pinned!.Pinned);
+
+        // Round-trip persistence.
+        using var store2 = NewStore();
+        var loaded = await store2.GetAsync(t.Id, CancellationToken.None);
+        Assert.True(loaded!.Pinned);
+
+        // Toggle off.
+        var unpinned = await store.SetPinnedAsync(t.Id, false, CancellationToken.None);
+        Assert.False(unpinned!.Pinned);
+    }
 }

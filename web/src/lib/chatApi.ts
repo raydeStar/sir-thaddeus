@@ -55,3 +55,15 @@ export async function deleteThread(id: string): Promise<void> {
     throw new Error(`runtime ${res.status}: ${res.statusText}`);
   }
 }
+
+export async function patchThread(
+  id: string,
+  patch: { title?: string; pinned?: boolean },
+): Promise<ChatThread> {
+  const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return asJson<ChatThread>(res);
+}

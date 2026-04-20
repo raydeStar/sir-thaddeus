@@ -49,6 +49,32 @@ public static class ChatApi
         })
             .WithName("DeleteThread");
 
+        app.MapPatch("/api/threads/{id}", async (string id, PatchThreadRequest? req, IThreadStore store,
+            CancellationToken ct) =>
+        {
+            if (req is null) return Results.BadRequest(new { error = "body required" });
+
+            ChatThread? current = null;
+            if (req.Title is not null)
+            {
+                current = await store.RenameAsync(id, req.Title, ct).ConfigureAwait(false);
+                if (current is null) return Results.NotFound();
+            }
+            if (req.Pinned.HasValue)
+            {
+                current = await store.SetPinnedAsync(id, req.Pinned.Value, ct).ConfigureAwait(false);
+                if (current is null) return Results.NotFound();
+            }
+            if (current is null)
+            {
+                // No-op patch: return the existing thread if it exists.
+                current = await store.GetAsync(id, ct).ConfigureAwait(false);
+                if (current is null) return Results.NotFound();
+            }
+            return Results.Json(current, ChatJsonContext.Default.ChatThread);
+        })
+            .WithName("PatchThread");
+
         app.MapPost("/api/threads/{id}/messages",
             async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
                 RuntimeStateMachine machine, ILoggerFactory loggerFactory, CancellationToken ct) =>
@@ -114,6 +140,9 @@ public static class ChatApi
 /// <summary>Body for POST /api/threads.</summary>
 public sealed record CreateThreadRequest(string? Title);
 
+/// <summary>Body for PATCH /api/threads/{id}. Both fields are optional.</summary>
+public sealed record PatchThreadRequest(string? Title, bool? Pinned);
+
 /// <summary>Body for POST /api/threads/{id}/messages.</summary>
 public sealed record AppendMessageRequest(string Text);
 
@@ -127,13 +156,14 @@ public sealed record ThreadSummary(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     int MessageCount,
-    string? LastMessagePreview)
+    string? LastMessagePreview,
+    bool Pinned)
 {
     public static ThreadSummary From(ChatThread t)
     {
         var last = t.Messages.Count > 0 ? t.Messages[^1].Text : null;
         var preview = last is null ? null : (last.Length > 140 ? last[..140] : last);
-        return new ThreadSummary(t.Id, t.Title, t.CreatedAt, t.UpdatedAt, t.Messages.Count, preview);
+        return new ThreadSummary(t.Id, t.Title, t.CreatedAt, t.UpdatedAt, t.Messages.Count, preview, t.Pinned);
     }
 }
 
@@ -149,6 +179,7 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(ChatMessage))]
 [JsonSerializable(typeof(ThreadListResponse))]
 [JsonSerializable(typeof(ThreadSummary))]
+[JsonSerializable(typeof(PatchThreadRequest))]
 [JsonSerializable(typeof(CreateThreadRequest))]
 [JsonSerializable(typeof(AppendMessageRequest))]
 [JsonSerializable(typeof(AppendMessageResponse))]

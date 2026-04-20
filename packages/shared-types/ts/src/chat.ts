@@ -15,6 +15,7 @@ export interface ChatThread {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  pinned?: boolean;
 }
 
 export interface ThreadSummary {
@@ -24,6 +25,7 @@ export interface ThreadSummary {
   updatedAt: string;
   messageCount: number;
   lastMessagePreview?: string | null;
+  pinned?: boolean;
 }
 
 export interface ThreadListResponse {

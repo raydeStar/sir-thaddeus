@@ -120,6 +120,44 @@ public sealed class JsonFileThreadStore : IThreadStore, IDisposable
         finally { gate.Release(); }
     }
 
+    public async Task<ChatThread?> RenameAsync(string threadId, string newTitle, CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        var trimmed = (newTitle ?? string.Empty).Trim();
+        if (trimmed.Length == 0) trimmed = "Untitled";
+        if (trimmed.Length > 200) trimmed = trimmed[..200];
+
+        var gate = LockFor(threadId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_threads.TryGetValue(threadId, out var current)) return null;
+            if (string.Equals(current.Title, trimmed, StringComparison.Ordinal)) return current;
+            var updated = current with { Title = trimmed };
+            _threads[threadId] = updated;
+            await WriteAsync(updated, ct).ConfigureAwait(false);
+            return updated;
+        }
+        finally { gate.Release(); }
+    }
+
+    public async Task<ChatThread?> SetPinnedAsync(string threadId, bool pinned, CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        var gate = LockFor(threadId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_threads.TryGetValue(threadId, out var current)) return null;
+            if (current.Pinned == pinned) return current;
+            var updated = current with { Pinned = pinned };
+            _threads[threadId] = updated;
+            await WriteAsync(updated, ct).ConfigureAwait(false);
+            return updated;
+        }
+        finally { gate.Release(); }
+    }
+
     private async Task EnsureInitializedAsync(CancellationToken ct)
     {
         if (_initialized) return;
