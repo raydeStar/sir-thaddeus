@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using NAudio.Wave;
+using Serilog;
 using SirThaddeus.Config;
 
 namespace SirThaddeus.UI.Avalonia;
@@ -127,7 +128,12 @@ internal sealed class LocalTextToSpeechPlaybackService : IDisposable
 
         using var reg = cancellationToken.Register(static state =>
         {
-            try { ((WaveOutEvent)state!).Stop(); } catch { }
+            try { ((WaveOutEvent)state!).Stop(); }
+            catch (Exception ex)
+            {
+                Log.ForContext<LocalTextToSpeechPlaybackService>()
+                    .Debug(ex, "WaveOut.Stop threw during cancellation (likely already stopped)");
+            }
         }, output);
 
         output.Init(reader);
@@ -154,7 +160,14 @@ internal sealed class LocalTextToSpeechPlaybackService : IDisposable
     private VoiceSettings GetVoiceSettingsSnapshot()
     {
         try { return _voiceSettingsProvider() ?? new VoiceSettings(); }
-        catch { return new VoiceSettings(); }
+        catch (Exception ex)
+        {
+            // Falling back to defaults when user voice settings can't be read
+            // is user-visible behavior, so surface it at Warning rather than Debug.
+            Log.ForContext<LocalTextToSpeechPlaybackService>()
+                .Warning(ex, "Failed to read voice settings; falling back to defaults");
+            return new VoiceSettings();
+        }
     }
 
     private static string ResolveEffectiveVoiceId(VoiceSettings vs)
@@ -197,7 +210,11 @@ internal sealed class LocalTextToSpeechPlaybackService : IDisposable
                 }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.ForContext<LocalTextToSpeechPlaybackService>()
+                .Debug(ex, "TTS response body was not a parseable JSON-with-audio envelope");
+        }
 
         return null;
     }

@@ -591,7 +591,10 @@ public sealed class VoiceBackendSupervisor : IDisposable
                         File.AppendAllText(logPath, $"[{DateTime.UtcNow:O}] [{level}] {data}{Environment.NewLine}");
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to append to voice-backend debug log at {LogPath}", logPath);
+                }
             }
 
             process.OutputDataReceived += (_, e) =>
