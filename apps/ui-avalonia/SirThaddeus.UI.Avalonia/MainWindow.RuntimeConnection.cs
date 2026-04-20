@@ -44,7 +44,9 @@ public partial class MainWindow
     private async Task<bool> EnsureRuntimeConnectedAsync(
         bool allowStartRuntime,
         bool appendTranscriptOnFailure,
-        bool forceRuntimeLaunch = false)
+        bool forceRuntimeLaunch = false,
+        int waitForReadyRetries = 0,
+        int waitForReadyDelayMs = 300)
     {
         if (_isConnecting)
         {
@@ -82,6 +84,16 @@ public partial class MainWindow
 
                 if ((launch.Status == RuntimeLaunchStatus.Started || launch.Status == RuntimeLaunchStatus.AlreadyRunning) &&
                     await TryConnectWithRetryAsync(runtimeUri, retries: 25, delayMs: 300))
+                {
+                    return true;
+                }
+            }
+            else if (waitForReadyRetries > 0)
+            {
+                // Caller asked us to wait for the runtime to come online (e.g. user
+                // submitted a prompt while LM Studio is still loading). Poll instead
+                // of failing fast.
+                if (await TryConnectWithRetryAsync(runtimeUri, retries: waitForReadyRetries, delayMs: waitForReadyDelayMs))
                 {
                     return true;
                 }

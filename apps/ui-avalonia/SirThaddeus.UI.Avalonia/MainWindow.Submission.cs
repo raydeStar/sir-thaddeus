@@ -36,16 +36,8 @@ public partial class MainWindow
 
     private async Task SubmitPromptAsync(string prompt, bool voiceInitiated)
     {
-        var connected = await EnsureRuntimeConnectedAsync(
-            allowStartRuntime: _uiSettings.AutoStartRuntime,
-            appendTranscriptOnFailure: true);
-        if (!connected || _runtimeApiClient is null)
-        {
-            _pendingUserPrompt = prompt;
-            UpdateComposerState();
-            return;
-        }
-
+        // Show the user message and thinking indicator immediately so the UI
+        // feels responsive while the runtime connection is established.
         _pendingUserPrompt = null;
         PromptBox.Text = string.Empty;
 
@@ -58,15 +50,39 @@ public partial class MainWindow
             UpdateAttachmentUi();
         }
 
+        if (_currentSession.Title == "New Chat")
+        {
+            _currentSession.Title = BuildSessionTitle(prompt);
+            UpdateConversationTitle();
+        }
+
+        _lastUserPrompt = prompt;
+        AppendTranscript($"[user] {prompt}");
+        _currentSession.AddPendingAssistantMessage();
+        ScrollChatToBottom();
+
+        var connected = await EnsureRuntimeConnectedAsync(
+            allowStartRuntime: _uiSettings.AutoStartRuntime,
+            appendTranscriptOnFailure: false,
+            waitForReadyRetries: _uiSettings.AutoStartRuntime ? 0 : 30,
+            waitForReadyDelayMs: 500);
+        if (!connected || _runtimeApiClient is null)
+        {
+            // Don't strand the user with their prompt gone. Restore it so they
+            // can retry once the runtime is ready.
+            _currentSession.ClearPendingAssistantMessage();
+            _currentSession.AddMessage(
+                "system",
+                "Runtime isn't ready yet. If you just started LM Studio (or the headless runtime), give it a moment and try again. Your prompt has been restored.");
+            PromptBox.Text = prompt;
+            PromptBox.CaretIndex = prompt.Length;
+            _pendingUserPrompt = prompt;
+            UpdateComposerState();
+            return;
+        }
+
         try
         {
-            if (_currentSession.Title == "New Chat")
-            {
-                _currentSession.Title = BuildSessionTitle(prompt);
-                UpdateConversationTitle();
-            }
-
-            _lastUserPrompt = prompt;
             _voiceInitiatedRun = voiceInitiated;
             ResetWorkflowProgressUi();
 
@@ -77,7 +93,6 @@ public partial class MainWindow
                 .Select(message => new ChatHistoryMessage(message.Role, message.Content))
                 .ToList();
 
-            AppendTranscript($"[user] {prompt}");
             var run = await _runtimeApiClient.StartRunAsync(
                 runtimePrompt,
                 CancellationToken.None,
@@ -91,7 +106,6 @@ public partial class MainWindow
             }
 
             _assistantBuffersByRunId[run.RunId] = new StringBuilder();
-            _currentSession.AddPendingAssistantMessage();
             UpdateComposerState();
             StartEventStream(run.RunId);
             UpdateComposerState();
@@ -99,6 +113,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _voiceInitiatedRun = false;
+            _currentSession.ClearPendingAssistantMessage();
             AppendTranscript($"[error] {ex.Message}");
             UpdateComposerState();
         }

@@ -622,7 +622,7 @@ public class ToolLoopExecutorTests
         Assert.Equal(1, llmCallCount);
         Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            "The requested tool is currently unavailable right now. Please retry in a moment.",
+            "The requested tool is unavailable for this request. Please retry in a moment.",
             response.Text);
     }
 

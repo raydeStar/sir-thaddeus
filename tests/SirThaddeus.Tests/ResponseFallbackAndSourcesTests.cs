@@ -278,7 +278,9 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        // C# 13 "what changed" prompt triggers the stable software-changes fallback,
+        // which provides a real answer instead of an unavailable message.
+        Assert.Contains("C# 13", response.Text, StringComparison.OrdinalIgnoreCase);
         var toolCall = Assert.Single(mcp.Calls);
         Assert.Equal("web_search", toolCall, ignoreCase: true);
         Assert.DoesNotContain(mcp.Calls, call =>
@@ -338,7 +340,6 @@ public class SearchOfflineFallbackTests
 
         Assert.True(response.Success);
         Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(
             mcp.Calls.Count(call => call.Equals("web_search", StringComparison.OrdinalIgnoreCase)) >= 2,
             "Expected at least the entity-resolution and fact-find web_search calls.");

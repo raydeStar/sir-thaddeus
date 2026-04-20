@@ -8,6 +8,7 @@ using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
+using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Voice;
 using Thaddeus.Runtime.Ws;
@@ -126,6 +127,15 @@ public static class Program
             builder.Services.AddSingleton<ChatTurnPublisher>();
             builder.Services.AddSingleton<StubAssistant>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
+            builder.Services.AddSingleton<ISettingsStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var settingsPath = builder.Configuration.GetValue<string>("Settings:FilePath")
+                    ?? Path.Combine(lockDir, "runtime-settings.json");
+                return new JsonFileSettingsStore(
+                    settingsPath,
+                    sp.GetRequiredService<ILogger<JsonFileSettingsStore>>());
+            });
             builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
@@ -198,6 +208,7 @@ public static class Program
             app.MapRuntimeApi();
             app.MapChatApi();
             app.MapActivityApi();
+            app.MapSettingsApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);

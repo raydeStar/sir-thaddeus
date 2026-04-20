@@ -28,7 +28,6 @@ public partial class MainWindow
         if (show)
         {
             ConversationDrawer.IsVisible = false;
-            ProgressDrawer.IsVisible = false;
         }
     }
 

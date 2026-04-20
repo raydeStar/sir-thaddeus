@@ -17,7 +17,6 @@ public partial class MainWindow
         if (show)
         {
             ActionDrawer.IsVisible = false;
-            ProgressDrawer.IsVisible = false;
         }
     }
 

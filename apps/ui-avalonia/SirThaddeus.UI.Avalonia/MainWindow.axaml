@@ -15,7 +15,7 @@
         KeyDown="Window_KeyDown"
         KeyUp="Window_KeyUp">
 
-  <Grid RowDefinitions="Auto,*,Auto">
+  <Grid RowDefinitions="Auto,*,Auto,Auto">
     <Border Grid.Row="0"
         Height="52"
             Background="{DynamicResource BackgroundPrimary}">
@@ -272,7 +272,6 @@
 
                 <ItemsControl x:Name="ChatMessagesList"
                               HorizontalAlignment="Stretch"
-                              Width="{Binding Bounds.Width, ElementName=ChatSurfaceLayout}"
                               Margin="0,20,0,36"
                               Background="Transparent">
                   <ItemsControl.ItemsPanel>
@@ -1988,83 +1987,7 @@
         </Grid>
       </Grid>
 
-      <!-- ── Progress Drawer (workflow checklist / narration) ── -->
-      <Border x:Name="ProgressDrawer"
-              Grid.Column="1"
-              Width="260"
-              IsVisible="False"
-              Background="{DynamicResource BackgroundSecondary}"
-              BorderBrush="{DynamicResource BorderMuted}"
-              BorderThickness="1,0,0,0">
-        <Grid RowDefinitions="Auto,*">
-          <Grid Grid.Row="0" Margin="12,12,12,8" ColumnDefinitions="*,Auto">
-            <TextBlock Text="Progress" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <Button Grid.Column="1" Content="Close" Classes="headerBtn" Click="CloseProgressDrawerButton_Click"/>
-          </Grid>
-
-          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="12,0,12,12" Spacing="12">
-              <Border Classes="progressRailSummaryCard"
-                      Padding="12,10">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Current run"
-                             Classes="progressRailSectionHeader"/>
-                  <TextBlock x:Name="WorkflowNarrationText"
-                             Text=""
-                             FontSize="13"
-                             FontWeight="SemiBold"
-                             Foreground="{DynamicResource TextPrimary}"
-                             TextWrapping="Wrap"/>
-                  <TextBlock x:Name="WorkflowToolStripText"
-                             Text=""
-                             FontSize="11"
-                             Foreground="{DynamicResource TextSecondary}"
-                             TextWrapping="Wrap"/>
-                </StackPanel>
-              </Border>
-
-              <TextBlock Text="Timeline"
-                         Classes="progressRailSectionHeader"/>
-
-              <ItemsControl x:Name="WorkflowChecklistList">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
-                    <Border Classes="progressRailItemCard"
-                            Margin="0,0,0,6"
-                            Padding="10,9">
-                      <Grid ColumnDefinitions="Auto,*"
-                            ColumnSpacing="10">
-                        <Border Classes="progressRailStateShell"
-                                Width="24"
-                                Height="24">
-                          <TextBlock Text="{Binding StateIcon}"
-                                     FontSize="12"
-                                     HorizontalAlignment="Center"
-                                     VerticalAlignment="Center"
-                                     Foreground="{DynamicResource TextPrimary}"/>
-                        </Border>
-                        <StackPanel Grid.Column="1"
-                                    Spacing="3">
-                          <TextBlock Text="{Binding Title}"
-                                     FontSize="12"
-                                     FontWeight="SemiBold"
-                                     Foreground="{DynamicResource TextPrimary}"
-                                     TextWrapping="Wrap"/>
-                          <TextBlock Text="{Binding StatusNote}"
-                                     IsVisible="{Binding StatusNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                     FontSize="11"
-                                     Foreground="{DynamicResource TextSecondary}"
-                                     TextWrapping="Wrap"/>
-                        </StackPanel>
-                      </Grid>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </ScrollViewer>
-        </Grid>
-      </Border>
+      <!-- ── Progress Drawer removed; replaced by the inline ProgressStrip above the input bar ── -->
 
       <Border x:Name="ActionDrawer"
               Grid.Column="1"
@@ -2319,7 +2242,150 @@
     </Grid>
     </Grid>
 
-    <Border Grid.Row="2" x:Name="InputBar"
+    <Border Grid.Row="2" x:Name="ProgressStrip"
+            IsVisible="False"
+            Background="{DynamicResource BackgroundSecondary}"
+            BorderBrush="{DynamicResource BorderMuted}"
+            BorderThickness="0,1,0,0"
+            Padding="24,8,24,8">
+      <Grid MaxWidth="1120" HorizontalAlignment="Stretch" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+          <Border x:Name="ProgressStripPulse"
+                  Width="22" Height="22" CornerRadius="999"
+                  Background="{DynamicResource AccentPrimary}"
+                  VerticalAlignment="Center">
+            <ic:SymbolIcon Symbol="Sparkle"
+                           FontSize="12"
+                           Foreground="White"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+          </Border>
+
+          <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+            <TextBlock x:Name="WorkflowNarrationText"
+                       Text="Working..."
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimary}"
+                       TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="WorkflowToolStripText"
+                       Text=""
+                       FontSize="11"
+                       Foreground="{DynamicResource TextSecondary}"
+                       TextTrimming="CharacterEllipsis"
+                       IsVisible="False"/>
+          </StackPanel>
+
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Border x:Name="ProgressStripToolBadge"
+                    IsVisible="False"
+                    Background="{DynamicResource BackgroundPrimary}"
+                    CornerRadius="999"
+                    Padding="9,3"
+                    BorderBrush="{DynamicResource BorderMuted}"
+                    BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <ic:SymbolIcon Symbol="Wrench" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+                <TextBlock x:Name="ProgressStripToolBadgeText"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextSecondary}"/>
+              </StackPanel>
+            </Border>
+            <Border x:Name="ProgressStripConfidenceBadge"
+                    IsVisible="False"
+                    Background="{DynamicResource BackgroundPrimary}"
+                    CornerRadius="999"
+                    Padding="9,3"
+                    BorderBrush="{DynamicResource BorderMuted}"
+                    BorderThickness="1">
+              <TextBlock x:Name="ProgressStripConfidenceBadgeText"
+                         FontSize="11"
+                         FontWeight="SemiBold"
+                         Foreground="{DynamicResource TextSecondary}"/>
+            </Border>
+            <Border x:Name="ProgressStripElapsedBadge"
+                    IsVisible="False"
+                    Background="{DynamicResource BackgroundPrimary}"
+                    CornerRadius="999"
+                    Padding="9,3"
+                    BorderBrush="{DynamicResource BorderMuted}"
+                    BorderThickness="1">
+              <TextBlock x:Name="ProgressStripElapsedText"
+                         FontSize="11"
+                         FontWeight="SemiBold"
+                         Foreground="{DynamicResource TextSecondary}"/>
+            </Border>
+          </StackPanel>
+
+          <ToggleButton Grid.Column="3"
+                        x:Name="ProgressStripToggleButton"
+                        Padding="10,4"
+                        MinHeight="0"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        BorderBrush="{DynamicResource BorderMuted}"
+                        BorderThickness="1"
+                        CornerRadius="999"
+                        IsVisible="False"
+                        ToolTip.Tip="Show step timeline">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <TextBlock Text="Steps"
+                         FontSize="11"
+                         FontWeight="SemiBold"
+                         Foreground="{DynamicResource TextSecondary}"/>
+              <ic:SymbolIcon Symbol="ChevronDown"
+                             FontSize="11"
+                             Foreground="{DynamicResource TextSecondary}"/>
+            </StackPanel>
+          </ToggleButton>
+        </Grid>
+
+        <Border Grid.Row="1"
+                IsVisible="{Binding IsChecked, ElementName=ProgressStripToggleButton}"
+                Background="{DynamicResource BackgroundPrimary}"
+                CornerRadius="8"
+                BorderBrush="{DynamicResource BorderMuted}"
+                BorderThickness="1"
+                Padding="12,10"
+                Margin="32,0,0,0">
+          <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="WorkflowChecklistList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:WorkflowChecklistItemViewModel">
+                  <Grid Margin="0,0,0,6" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                    <Border Width="22" Height="22" CornerRadius="999"
+                            Background="{DynamicResource BackgroundSecondary}"
+                            BorderBrush="{DynamicResource BorderMuted}"
+                            BorderThickness="1">
+                      <TextBlock Text="{Binding StateIcon}"
+                                 FontSize="11"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Title}"
+                                 FontSize="12"
+                                 FontWeight="SemiBold"
+                                 Foreground="{DynamicResource TextPrimary}"
+                                 TextWrapping="Wrap"/>
+                      <TextBlock Text="{Binding StatusNote}"
+                                 IsVisible="{Binding StatusNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                 FontSize="11"
+                                 Foreground="{DynamicResource TextSecondary}"
+                                 TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="3" x:Name="InputBar"
             Background="{DynamicResource BackgroundPrimary}"
         BorderBrush="{DynamicResource BorderMuted}"
       Padding="24,8,24,16"

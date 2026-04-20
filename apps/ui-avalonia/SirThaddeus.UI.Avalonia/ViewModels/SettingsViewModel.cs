@@ -1163,11 +1163,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
-    public static string[] PreferredUnitsOptions { get; } = ["imperial", "metric"];
+    public static string[] PreferredUnitsOptionsStatic { get; } = ["imperial", "metric"];
+
+    // Instance accessor so ReflectionBinding (used by x:CompileBindings="False" tabs) can resolve it.
+    public string[] PreferredUnitsOptions => PreferredUnitsOptionsStatic;
 
     public string PreferredUnits
     {
-        get => _appSettings.Weather.PreferredUnits;
+        get => NormalizeUnits(_appSettings.Weather.PreferredUnits);
         set
         {
             if (!string.Equals(_appSettings.Weather.PreferredUnits, value, StringComparison.Ordinal))
@@ -1180,12 +1183,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     // -- MCP Permission ComboBox option sources --
-    public static string[] PermissionOptions { get; } = ["ask", "always", "off"];
-    public static string[] DeveloperOverrideOptions { get; } = ["none", "ask", "always", "off"];
+    public static string[] PermissionOptionsStatic { get; } = ["ask", "always", "off"];
+    public static string[] DeveloperOverrideOptionsStatic { get; } = ["none", "ask", "always", "off"];
+
+    // Instance accessors so ReflectionBinding can resolve them on the DataContext.
+    public string[] PermissionOptions => PermissionOptionsStatic;
+    public string[] DeveloperOverrideOptions => DeveloperOverrideOptionsStatic;
 
     public string McpDeveloperOverride
     {
-        get => _appSettings.Mcp.Permissions.DeveloperOverride;
+        get => NormalizeDeveloperOverride(_appSettings.Mcp.Permissions.DeveloperOverride);
         set
         {
             if (_appSettings.Mcp.Permissions.DeveloperOverride != value)
@@ -1205,7 +1212,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpScreen
     {
-        get => _appSettings.Mcp.Permissions.Screen;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.Screen, "ask");
         set
         {
             if (_appSettings.Mcp.Permissions.Screen != value)
@@ -1225,7 +1232,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpFiles
     {
-        get => _appSettings.Mcp.Permissions.Files;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.Files, "ask");
         set
         {
             if (_appSettings.Mcp.Permissions.Files != value)
@@ -1245,7 +1252,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpSystem
     {
-        get => _appSettings.Mcp.Permissions.System;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.System, "ask");
         set
         {
             if (_appSettings.Mcp.Permissions.System != value)
@@ -1265,7 +1272,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpWeb
     {
-        get => _appSettings.Mcp.Permissions.Web;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.Web, "ask");
         set
         {
             if (_appSettings.Mcp.Permissions.Web != value)
@@ -1285,7 +1292,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpMemoryRead
     {
-        get => _appSettings.Mcp.Permissions.MemoryRead;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.MemoryRead, "always");
         set
         {
             if (_appSettings.Mcp.Permissions.MemoryRead != value)
@@ -1305,7 +1312,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public string McpMemoryWrite
     {
-        get => _appSettings.Mcp.Permissions.MemoryWrite;
+        get => NormalizePermission(_appSettings.Mcp.Permissions.MemoryWrite, "ask");
         set
         {
             if (_appSettings.Mcp.Permissions.MemoryWrite != value)
@@ -1748,7 +1755,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             {
                 Permissions = latest.Mcp.Permissions with
                 {
-                    DeveloperOverride = NormalizePermission(McpDeveloperOverride, latest.Mcp.Permissions.DeveloperOverride),
+                    DeveloperOverride = NormalizeDeveloperOverride(McpDeveloperOverride),
                     Screen = NormalizePermission(McpScreen, latest.Mcp.Permissions.Screen),
                     Files = NormalizePermission(McpFiles, latest.Mcp.Permissions.Files),
                     System = NormalizePermission(McpSystem, latest.Mcp.Permissions.System),
@@ -2385,11 +2392,39 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         var normalized = NormalizeToken(value, fallback);
         return normalized switch
         {
+            "ask" => "ask",
+            "always" => "always",
+            "off" => "off",
+            _ => NormalizeToken(fallback, "ask") switch
+            {
+                "ask" => "ask",
+                "always" => "always",
+                "off" => "off",
+                _ => "ask"
+            }
+        };
+    }
+
+    private static string NormalizeDeveloperOverride(string? value)
+    {
+        var normalized = NormalizeToken(value, "none");
+        return normalized switch
+        {
             "none" => "none",
             "ask" => "ask",
             "always" => "always",
             "off" => "off",
-            _ => NormalizeToken(fallback, "ask")
+            _ => "none"
+        };
+    }
+
+    private static string NormalizeUnits(string? value)
+    {
+        var normalized = NormalizeToken(value, "imperial");
+        return normalized switch
+        {
+            "metric" => "metric",
+            _ => "imperial"
         };
     }
 
