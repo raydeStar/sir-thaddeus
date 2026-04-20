@@ -117,6 +117,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "audit-log", "audit-log", "{
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SirThaddeus.Logging", "packages\logging\SirThaddeus.Logging\SirThaddeus.Logging.csproj", "{95336FE2-11F7-442C-BFB7-619728496451}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SirThaddeus.StartupDiagnostics", "packages\startup-diagnostics\SirThaddeus.StartupDiagnostics\SirThaddeus.StartupDiagnostics.csproj", "{84873290-C65D-46C8-AC53-C2F4F85BC1A8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -499,6 +501,18 @@ Global
 		{95336FE2-11F7-442C-BFB7-619728496451}.Release|x64.Build.0 = Release|Any CPU
 		{95336FE2-11F7-442C-BFB7-619728496451}.Release|x86.ActiveCfg = Release|Any CPU
 		{95336FE2-11F7-442C-BFB7-619728496451}.Release|x86.Build.0 = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|x64.Build.0 = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Debug|x86.Build.0 = Debug|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|x64.ActiveCfg = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|x64.Build.0 = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|x86.ActiveCfg = Release|Any CPU
+		{84873290-C65D-46C8-AC53-C2F4F85BC1A8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
