@@ -56,6 +56,22 @@ function Get-VersionLabel([string]$RawVersion) {
     return ($value -replace '[^0-9A-Za-z\.\-_]', '-')
 }
 
+function Get-AssemblyVersion([string]$VersionLabel) {
+    # MSBuild's -p:Version accepts SemVer. Our tag format is `v1.2.3`;
+    # strip the leading `v` so the assembly version becomes `1.2.3`,
+    # which AssemblyVersion + FileVersion + InformationalVersion all consume.
+    if ([string]::IsNullOrWhiteSpace($VersionLabel)) {
+        return ""
+    }
+
+    $value = $VersionLabel.Trim()
+    if ($value.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $value = $value.Substring(1)
+    }
+
+    return $value
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
@@ -83,6 +99,7 @@ else {
 $selfContainedValue = if ($effectiveSelfContained) { "true" } else { "false" }
 $bundleProfile = if ($LiteBundle.IsPresent) { "lite" } else { "full" }
 $versionLabel = Get-VersionLabel $Version
+$assemblyVersion = Get-AssemblyVersion $versionLabel
 $archiveToken = if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     Get-Date -Format "yyyyMMdd-HHmmss"
 }
@@ -298,6 +315,10 @@ foreach ($project in $projects) {
 
     if (-not [string]::IsNullOrWhiteSpace($targetFramework)) {
         $publishArgs += @("-f", $targetFramework)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+        $publishArgs += @("-p:Version=$assemblyVersion")
     }
 
     $nativePreference = $null

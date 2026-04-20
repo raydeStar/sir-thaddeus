@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
+    <ProjectReference Include="..\..\..\packages\logging\SirThaddeus.Logging\SirThaddeus.Logging.csproj" />
   </ItemGroup>
 
   <!-- Optional bundled backend sidecar (preferred publish layout: ./voice/) -->

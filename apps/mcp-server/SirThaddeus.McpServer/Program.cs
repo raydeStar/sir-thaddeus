@@ -1,14 +1,16 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
+using SirThaddeus.Logging;
 using SirThaddeus.McpServer.Tools;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Logging.AddConsole(consoleLogOptions =>
+// stdio is the MCP transport here, so every log line must go to stderr.
+builder.UseSirThaddeusLogging(new LoggingOptions
 {
-    consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
+    ComponentName = "mcp-server",
+    ConsoleStandardErrorOnly = true,
 });
 
 var mcpBuilder = builder.Services

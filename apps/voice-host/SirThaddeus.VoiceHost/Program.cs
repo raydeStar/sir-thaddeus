@@ -1,19 +1,17 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using SirThaddeus.Logging;
 using SirThaddeus.VoiceHost;
 using SirThaddeus.VoiceHost.Backends;
 using SirThaddeus.VoiceHost.Models;
 
 var options = VoiceHostRuntimeOptions.Parse(args);
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.ClearProviders();
-builder.Logging.AddSimpleConsole(options =>
+builder.UseSirThaddeusLogging(new LoggingOptions
 {
-    options.SingleLine = true;
-    options.TimestampFormat = "HH:mm:ss ";
+    ComponentName = "voice-host",
 });
-builder.Logging.AddDebug();
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {

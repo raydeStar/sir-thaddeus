@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
+using Serilog;
 using SirThaddeus.WebSearch;
 using SmartReader;
 
@@ -354,7 +355,12 @@ public static class ContentExtractor
     private static async Task<string?> SafeAwaitFavicon(Task<string?> faviconTask)
     {
         try { return await faviconTask; }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            Log.ForContext(typeof(ContentExtractor))
+                .Debug(ex, "Favicon extraction failed (non-fatal)");
+            return null;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

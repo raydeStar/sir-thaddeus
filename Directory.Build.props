@@ -1,0 +1,27 @@
+<Project>
+
+  <!--
+    Root-level MSBuild props that apply to every project in the repo
+    (packages/, apps/, tests/, tools/). The packages/Directory.Build.props
+    file extends these for packages-only concerns like XML doc generation.
+  -->
+
+  <PropertyGroup>
+    <!--
+      Version flow:
+
+      - CI tag pushes call `dotnet publish -p:Version=1.2.3` via the
+        packaging scripts, which overrides everything below.
+      - Local dev builds (no -p:Version) fall back to 0.0.0-dev so
+        Assembly.GetName().Version reports a value that is *obviously*
+        not a shipped release ("voice-host version 0.0.0-dev" tells a
+        user they are looking at an uncommitted build).
+
+      VersionPrefix + VersionSuffix compose into Version when neither
+      is set on the command line. They are the idiomatic knobs.
+    -->
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.0</VersionPrefix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == '' AND '$(Version)' == ''">dev</VersionSuffix>
+  </PropertyGroup>
+
+</Project>

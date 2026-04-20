@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Serilog;
 
 namespace SirThaddeus.WebSearch.Providers;
 
@@ -162,7 +163,12 @@ public sealed class SearxngProvider : IWebSearchProvider, IDisposable
     {
         if (string.IsNullOrEmpty(url)) return string.Empty;
         try { return new Uri(url).Host.Replace("www.", ""); }
-        catch { return string.Empty; }
+        catch (Exception ex)
+        {
+            Log.ForContext<SearxngProvider>()
+                .Debug(ex, "Could not parse URL into a Uri while extracting domain: {Url}", url);
+            return string.Empty;
+        }
     }
 
     public void Dispose() => _http.Dispose();

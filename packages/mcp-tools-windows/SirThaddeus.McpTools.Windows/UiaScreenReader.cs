@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Interop.UIAutomationClient;
+using Serilog;
 
 namespace SirThaddeus.McpServer.Tools;
 
@@ -220,8 +221,16 @@ public static class UiaScreenReader
                     break;
             }
         }
-        catch (InvalidOperationException) { }
-        catch (COMException) { }
+        catch (InvalidOperationException ex)
+        {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex, "UI element disappeared mid-walk (InvalidOperationException)");
+        }
+        catch (COMException ex)
+        {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex, "UIA COM call failed during element walk (hresult={HResult:X8})", ex.HResult);
+        }
     }
 
     private static (int Left, int Top, int Right, int Bottom) SafeGetBounds(IUIAutomationElement element)
