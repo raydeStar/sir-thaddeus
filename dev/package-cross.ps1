@@ -75,6 +75,15 @@ function Get-VersionLabel([string]$RawVersion) {
     return ($v -replace '[^0-9A-Za-z\.\-_]', '-')
 }
 
+function Get-AssemblyVersion([string]$VersionLabel) {
+    if ([string]::IsNullOrWhiteSpace($VersionLabel)) { return "" }
+    $v = $VersionLabel.Trim()
+    if ($v.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $v = $v.Substring(1)
+    }
+    return $v
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
@@ -89,6 +98,7 @@ $selfContainedValue = if ($effectiveSelfContained) { "true" } else { "false" }
 $bundleProfile = if ($LiteBundle.IsPresent) { "lite" } else { "full" }
 
 $versionLabel = Get-VersionLabel $Version
+$assemblyVersion = Get-AssemblyVersion $versionLabel
 $archiveToken = if ([string]::IsNullOrWhiteSpace($versionLabel)) {
     (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 } else {
@@ -157,6 +167,10 @@ foreach ($kvp in $projects.GetEnumerator()) {
         "-p:EnableWindowsTargeting=true",
         "-o", $publishDir
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+        $publishArgs += @("-p:Version=$assemblyVersion")
+    }
 
     & dotnet @publishArgs
     if ($LASTEXITCODE -ne 0) {
