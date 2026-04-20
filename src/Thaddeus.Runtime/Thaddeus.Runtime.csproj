@@ -24,4 +24,8 @@
     <PackageReference Include="NUlid" Version="1.7.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Thaddeus.Runtime.Tests" />
+  </ItemGroup>
+
 </Project>

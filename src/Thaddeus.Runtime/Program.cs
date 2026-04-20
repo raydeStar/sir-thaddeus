@@ -79,7 +79,21 @@ public static class Program
             builder.Services.AddSingleton<WebSocketBroadcaster>();
             // Voice providers default to stubs in Phase 2.1; real adapters arrive
             // in Phase 2.2 (whisper.cpp) and Phase 2.3 (Piper) and override these.
-            builder.Services.AddSingleton<ISpeechToTextProvider, StubSpeechToTextProvider>();
+            builder.Services.AddSingleton<IExternalProcessRunner, DefaultExternalProcessRunner>();
+            builder.Services.AddSingleton<WhisperCppOptions>(_ =>
+                builder.Configuration.GetSection("Voice:Stt").Get<WhisperCppOptions>() ?? new WhisperCppOptions());
+            builder.Services.AddSingleton<ISpeechToTextProvider>(sp =>
+            {
+                var opts = sp.GetRequiredService<WhisperCppOptions>();
+                if (string.IsNullOrEmpty(opts.BinaryPath) || string.IsNullOrEmpty(opts.ModelPath))
+                {
+                    return new StubSpeechToTextProvider();
+                }
+                return new WhisperCppSpeechToTextProvider(
+                    opts,
+                    sp.GetRequiredService<IExternalProcessRunner>(),
+                    sp.GetRequiredService<ILogger<WhisperCppSpeechToTextProvider>>());
+            });
             builder.Services.AddSingleton<ITextToSpeechProvider, StubTextToSpeechProvider>();
             builder.Services.AddSingleton<VoiceModeController>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
