@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.cache/
+*.local
+.eslintcache
+
+# tsc -b composite project output
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# TanStack Router auto-generated route tree
+src/routeTree.gen.ts

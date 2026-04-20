@@ -59,7 +59,7 @@ public static class Program
                 return 3;
             }
 
-            var workspaceUrl = $"http://127.0.0.1:{lockFile.Port}/workspace";
+            var workspaceUrl = $"http://127.0.0.1:{lockFile.Port}/";
             var window = new WorkspaceWindow(loggerFactory.CreateLogger<WorkspaceWindow>());
             window.ShowBlocking(workspaceUrl, lockFile.Version);
 

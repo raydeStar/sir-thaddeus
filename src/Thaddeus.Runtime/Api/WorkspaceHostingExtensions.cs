@@ -67,11 +67,31 @@ public static class WorkspaceHostingExtensions
             return context.Response.WriteAsync(html);
         }
 
-        app.MapGet("/", ctx => ServeBootstrap(ctx, "/workspace"));
-        app.MapGet("/index.html", ctx => ServeBootstrap(ctx, "/workspace"));
-        app.MapGet("/workspace", ctx => ServeBootstrap(ctx, "/workspace"));
-        app.MapGet("/workspace/{**rest}", ctx => ServeBootstrap(ctx, "/workspace"));
-        app.MapGet("/compact", ctx => ServeBootstrap(ctx, "/compact"));
+        app.MapGet("/", ctx => ServeBootstrap(ctx, "workspace"));
+        app.MapGet("/index.html", ctx => ServeBootstrap(ctx, "workspace"));
+        app.MapGet("/compact", ctx => ServeBootstrap(ctx, "compact"));
+
+        // SPA fallback. Anything that isn't an /api, /ws, or static asset request and
+        // falls through to the end of the pipeline gets the bootstrap so that the
+        // client-side router can pick the route up. This is required because the web
+        // workspace uses History-API routing for /chat, /settings, /history, etc.
+        app.Use(async (ctx, next) =>
+        {
+            await next();
+
+            if (ctx.Response.HasStarted) return;
+            if (ctx.Response.StatusCode != StatusCodes.Status404NotFound) return;
+            if (!HttpMethods.IsGet(ctx.Request.Method)) return;
+
+            var path = ctx.Request.Path.Value ?? "/";
+            if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase)) return;
+            if (path.StartsWith("/ws", StringComparison.OrdinalIgnoreCase)) return;
+            if (Path.HasExtension(path)) return; // real static asset miss
+
+            // Reset status and serve the bootstrap.
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+            await ServeBootstrap(ctx, "workspace");
+        });
     }
 
     private static string InjectBootstrapMeta(string html, RuntimeOptions opts, string route)
