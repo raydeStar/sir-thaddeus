@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using System.Text.RegularExpressions;
+using Serilog;
 using SirThaddeus.AuditLog;
 
 namespace SirThaddeus.Voice;
@@ -827,11 +828,27 @@ public sealed class VoiceSessionOrchestrator :
             _realtimeTranscriptHintAtUtc = null;
         }
 
-        // Single cleanup path.
-        try { await _playback.StopAsync(CancellationToken.None); } catch { }
-        try { await _capture.AbortCaptureAsync(sessionId ?? "", CancellationToken.None); } catch { }
+        // Single cleanup path — teardown must never throw, but failures
+        // are worth knowing about when diagnosing a session that wouldn't end.
+        try { await _playback.StopAsync(CancellationToken.None); }
+        catch (Exception ex)
+        {
+            Log.ForContext<VoiceSessionOrchestrator>()
+                .Debug(ex, "Playback stop failed during session end");
+        }
+        try { await _capture.AbortCaptureAsync(sessionId ?? "", CancellationToken.None); }
+        catch (Exception ex)
+        {
+            Log.ForContext<VoiceSessionOrchestrator>()
+                .Debug(ex, "Capture abort failed during session end (sessionId={SessionId})", sessionId);
+        }
 
-        try { cts?.Cancel(); } catch { }
+        try { cts?.Cancel(); }
+        catch (Exception ex)
+        {
+            Log.ForContext<VoiceSessionOrchestrator>()
+                .Debug(ex, "Session CTS cancel threw during teardown");
+        }
         cts?.Dispose();
 
         if (CurrentState != VoiceState.Idle)

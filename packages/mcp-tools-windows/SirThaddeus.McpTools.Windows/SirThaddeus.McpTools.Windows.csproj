@@ -18,6 +18,7 @@
     <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
     <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.11" />
+    <PackageReference Include="Serilog" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>
