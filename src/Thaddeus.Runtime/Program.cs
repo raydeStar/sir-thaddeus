@@ -122,6 +122,7 @@ public static class Program
                     threadsDir,
                     sp.GetRequiredService<ILogger<JsonFileThreadStore>>());
             });
+            builder.Services.AddSingleton<ChatTurnPublisher>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService<IpcServer>();
