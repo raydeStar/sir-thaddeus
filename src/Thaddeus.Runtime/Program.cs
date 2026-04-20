@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Serilog;
 using Thaddeus.Runtime.Api;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
@@ -112,6 +113,15 @@ public static class Program
             builder.Services.AddSingleton<PiperOptions>(_ =>
                 builder.Configuration.GetSection("Voice:Tts").Get<PiperOptions>() ?? new PiperOptions());
             builder.Services.AddSingleton<VoiceModeController>();
+            builder.Services.AddSingleton<IThreadStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var threadsDir = builder.Configuration.GetValue<string>("Chat:ThreadsDirectory")
+                    ?? Path.Combine(lockDir, "threads");
+                return new JsonFileThreadStore(
+                    threadsDir,
+                    sp.GetRequiredService<ILogger<JsonFileThreadStore>>());
+            });
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService<IpcServer>();
@@ -181,6 +191,7 @@ public static class Program
             });
 
             app.MapRuntimeApi();
+            app.MapChatApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);
