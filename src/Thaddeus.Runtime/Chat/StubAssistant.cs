@@ -9,7 +9,7 @@ namespace Thaddeus.Runtime.Chat;
 /// as small word-sized deltas, and persists the final assistant message to the
 /// thread store. Real LLM integration replaces this in a later phase.
 /// </summary>
-public sealed class StubAssistant
+public sealed class StubAssistant : IAssistant
 {
     private readonly IThreadStore _store;
     private readonly ChatTurnPublisher _publisher;

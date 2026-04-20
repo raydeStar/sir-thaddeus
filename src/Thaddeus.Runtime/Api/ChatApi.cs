@@ -73,7 +73,7 @@ public static class ChatApi
             .WithName("PatchThread");
 
         app.MapPost("/api/threads/{id}/messages",
-            async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
+            async (string id, AppendMessageRequest? req, IThreadStore store, IAssistant assistant,
                 RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
                 IHostApplicationLifetime lifetime,
                 CancellationToken ct) =>

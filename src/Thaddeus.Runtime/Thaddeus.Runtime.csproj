@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
+    <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>

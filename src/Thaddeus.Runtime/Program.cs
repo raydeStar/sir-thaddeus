@@ -128,6 +128,7 @@ public static class Program
             });
             builder.Services.AddSingleton<ChatTurnPublisher>();
             builder.Services.AddSingleton<StubAssistant>();
+            builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
             builder.Services.AddSingleton<ISettingsStore>(sp =>
             {
