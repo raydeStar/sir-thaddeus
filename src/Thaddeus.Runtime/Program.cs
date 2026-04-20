@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Serilog;
 using Thaddeus.Runtime.Api;
+using Thaddeus.Runtime.Activity;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
@@ -124,6 +125,8 @@ public static class Program
             });
             builder.Services.AddSingleton<ChatTurnPublisher>();
             builder.Services.AddSingleton<StubAssistant>();
+            builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
+            builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService<IpcServer>();
@@ -194,6 +197,7 @@ public static class Program
 
             app.MapRuntimeApi();
             app.MapChatApi();
+            app.MapActivityApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);

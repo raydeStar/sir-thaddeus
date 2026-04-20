@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Thaddeus.Runtime.Activity;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.State;
 using Thaddeus.SharedTypes;
@@ -77,7 +78,8 @@ public static class ChatApi
 
         app.MapPost("/api/threads/{id}/messages",
             async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
-                RuntimeStateMachine machine, ILoggerFactory loggerFactory, CancellationToken ct) =>
+                RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
+                CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
                 return Results.BadRequest(new { error = "text is required" });
@@ -98,25 +100,47 @@ public static class ChatApi
                 // logged and discarded by the machine; chat persistence still succeeds.
                 machine.TryTransition(StateTrigger.UserTextSubmitted);
 
+                // Record an activity-log entry for this turn so it shows up in the
+                // Activity UI immediately. The stub assistant updates it on completion.
+                var activityEntry = activity.Append(new ActivityEntry(
+                    Id: InMemoryActivityLog.NewId(),
+                    Kind: ActivityKind.ChatTurn,
+                    Summary: SummariseUserText(message.Text),
+                    Status: ActivityStatus.Running,
+                    StartedAt: message.CreatedAt,
+                    CompletedAt: null,
+                    ThreadId: id,
+                    Detail: null));
+
                 // Kick off the stub assistant on a background task. The HTTP caller
                 // returns immediately with the user message; the assistant reply is
                 // streamed over /ws and persisted to the store when complete.
                 _ = Task.Run(async () =>
                 {
                     var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
+                    var status = ActivityStatus.Ok;
+                    string? detail = null;
                     try
                     {
-                        await assistant.RespondAsync(id, message.Text, CancellationToken.None)
+                        var reply = await assistant.RespondAsync(id, message.Text, CancellationToken.None)
                             .ConfigureAwait(false);
+                        detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
                     }
                     catch (Exception ex)
                     {
+                        status = ActivityStatus.Failed;
+                        detail = ex.Message;
                         log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", id);
                     }
                     finally
                     {
                         // Stub assistant is text-only; close the loop back to Idle.
                         machine.TryTransition(StateTrigger.PlanTextOnly);
+                        activity.Update(
+                            activityEntry.Id,
+                            status: status,
+                            completedAt: DateTimeOffset.UtcNow,
+                            detail: detail);
                     }
                 });
 
@@ -135,6 +159,12 @@ public static class ChatApi
 
     private static string NewMessageId() =>
         "msg_" + Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 8)).ToLowerInvariant();
+
+    private static string SummariseUserText(string text)
+    {
+        var single = text.ReplaceLineEndings(" ").Trim();
+        return single.Length > 140 ? single[..140] : single;
+    }
 }
 
 /// <summary>Body for POST /api/threads.</summary>
