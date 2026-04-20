@@ -84,8 +84,13 @@ public static class UiaScreenReader
                     : null
             };
         }
-        catch
+        catch (Exception ex)
         {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex,
+                    "UIA flat read failed for {Window} ({Process})",
+                    windowTitle,
+                    processName);
             return UiaReadResult.Empty("Accessibility tree unavailable", windowTitle, processName);
         }
     }
@@ -112,8 +117,10 @@ public static class UiaScreenReader
             {
                 tcs.TrySetResult(ReadForegroundWindowStructured());
             }
-            catch
+            catch (Exception ex)
             {
+                Log.ForContext(typeof(UiaScreenReader))
+                    .Debug(ex, "UIA structured read crashed in STA worker thread");
                 tcs.TrySetResult(UiaStructuredResult.Empty("Accessibility tree unavailable"));
             }
         });
@@ -165,8 +172,13 @@ public static class UiaScreenReader
                     : null
             };
         }
-        catch
+        catch (Exception ex)
         {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex,
+                    "UIA structured read failed for {Window} (pid={Pid})",
+                    windowTitle,
+                    processId);
             return UiaStructuredResult.Empty("Accessibility tree unavailable",
                 windowTitle, processName, processId);
         }
@@ -318,11 +330,15 @@ public static class UiaScreenReader
                     break;
             }
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex, "Legacy flat UIA walk hit InvalidOperationException (element likely vanished)");
         }
-        catch (COMException)
+        catch (COMException ex)
         {
+            Log.ForContext(typeof(UiaScreenReader))
+                .Debug(ex, "Legacy flat UIA walk hit COMException (hresult={HResult:X8})", ex.HResult);
         }
     }
 
