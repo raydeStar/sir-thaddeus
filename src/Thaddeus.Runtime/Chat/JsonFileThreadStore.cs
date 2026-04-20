@@ -117,7 +117,23 @@ public sealed class JsonFileThreadStore : IThreadStore, IDisposable
             }
             return true;
         }
-        finally { gate.Release(); }
+        finally
+        {
+            gate.Release();
+            // Evict the per-thread lock so _locks doesn't grow unbounded over a
+            // long-lived process. Safe: the gate is held until Release above; any
+            // racing caller that already holds the same SemaphoreSlim instance will
+            // observe the dictionary entry gone and request a fresh one next time.
+            if (_locks.TryRemove(threadId, out var removed) && !ReferenceEquals(removed, gate))
+            {
+                // A concurrent caller already replaced the slot; put theirs back.
+                _locks.TryAdd(threadId, removed);
+            }
+            else
+            {
+                gate.Dispose();
+            }
+        }
     }
 
     public async Task<ChatThread?> RenameAsync(string threadId, string newTitle, CancellationToken ct)
