@@ -18,7 +18,9 @@
 
 ---
 
-Sir Thaddeus is a local-first AI copilot designed for **Windows, macOS, and Linux**. It handles chat, voice, desktop tasks, and browsing while keeping permissions explicit and actions visible. It connects to local language models — such as [LM Studio](https://lmstudio.ai/) — and runs entirely under your control.
+Sir Thaddeus is a local-first AI copilot. It handles chat, voice, desktop tasks, and browsing while keeping permissions explicit and actions visible. It connects to local language models — such as [LM Studio](https://lmstudio.ai/) — and runs entirely under your control.
+
+The full desktop experience — voice, global push-to-talk, screen reading, tray — runs on **Windows today**. The cross-platform headless runtime and MCP toolkit also build for **macOS and Linux**, where voice and desktop-automation features are not yet implemented (see [docs/migration/non-transferrable-functionality.md](docs/migration/non-transferrable-functionality.md)).
 
 No telemetry by default. No silent background autonomy. No hidden actions.
 
@@ -69,7 +71,7 @@ Sir Thaddeus does not phone home. Your prompts go to your local model server. Yo
 
 ### Voice and Interface
 
-- **Push-to-talk voice input** with release-to-send behavior
+- **Push-to-talk voice input** with release-to-send behavior *(Windows only)*
 - **Command palette** for keyboard-first workflows
 - **Global STOP kill switch** to halt active execution
 - **Tray-first Windows experience** with local desktop controls
@@ -87,7 +89,7 @@ Sir Thaddeus does not phone home. Your prompts go to your local model server. Yo
 ### Permissioned Tooling via MCP
 
 - **Web search and browser actions**
-- **Screen reading** and active-window context
+- **Screen reading** and active-window context *(Windows only; uses UIAutomation)*
 - **Read-only file listing and reading** with limits
 - **Clipboard read/write** for seamless copy/paste integration
 - **Allowlisted system actions**
