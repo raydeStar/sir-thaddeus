@@ -29,12 +29,17 @@ public sealed record PrivacySettings(
     bool AllowScreenCapture,
     bool LocalOnly);
 
+/// <summary>Application-level flags (onboarding completion, etc.).</summary>
+public sealed record AppFlags(
+    bool OnboardingCompleted);
+
 /// <summary>Top-level settings document.</summary>
 public sealed record SettingsDocument(
     LlmSettings Llm,
     VoiceSettings Voice,
     ShortcutSettings Shortcuts,
-    PrivacySettings Privacy)
+    PrivacySettings Privacy,
+    AppFlags Flags)
 {
     /// <summary>Defaults applied when no settings file exists yet.</summary>
     public static SettingsDocument Defaults() => new(
@@ -53,5 +58,7 @@ public sealed record SettingsDocument(
         Privacy: new PrivacySettings(
             TelemetryEnabled: false,
             AllowScreenCapture: false,
-            LocalOnly: true));
+            LocalOnly: true),
+        Flags: new AppFlags(
+            OnboardingCompleted: false));
 }

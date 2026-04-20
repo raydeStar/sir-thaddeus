@@ -24,9 +24,14 @@ export interface PrivacySettings {
   localOnly: boolean;
 }
 
+export interface AppFlags {
+  onboardingCompleted: boolean;
+}
+
 export interface SettingsDocument {
   llm: LlmSettings;
   voice: VoiceSettings;
   shortcuts: ShortcutSettings;
   privacy: PrivacySettings;
+  flags: AppFlags;
 }
