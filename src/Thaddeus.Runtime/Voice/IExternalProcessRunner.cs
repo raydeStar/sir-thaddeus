@@ -19,11 +19,13 @@ public interface IExternalProcessRunner
 /// <param name="Arguments">Pre-tokenised arguments. The runner is responsible for quoting.</param>
 /// <param name="WorkingDirectory">Optional working directory; defaults to the current process cwd.</param>
 /// <param name="Timeout">Maximum wall-clock time before the runner kills the process tree.</param>
+/// <param name="StandardInput">Optional UTF-8 text written to the process's stdin and then closed.</param>
 public sealed record ProcessSpec(
     string FileName,
     IReadOnlyList<string> Arguments,
     string? WorkingDirectory = null,
-    TimeSpan? Timeout = null);
+    TimeSpan? Timeout = null,
+    string? StandardInput = null);
 
 /// <summary>Captured result of a process invocation.</summary>
 /// <param name="ExitCode">Process exit code; -1 when the runner killed it on timeout.</param>
@@ -47,6 +49,7 @@ public sealed class DefaultExternalProcessRunner : IExternalProcessRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = spec.StandardInput is not null,
             CreateNoWindow = true,
             WorkingDirectory = spec.WorkingDirectory ?? Environment.CurrentDirectory,
         };
@@ -65,6 +68,18 @@ public sealed class DefaultExternalProcessRunner : IExternalProcessRunner
         }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+
+        if (spec.StandardInput is not null)
+        {
+            try
+            {
+                await process.StandardInput.WriteAsync(spec.StandardInput.AsMemory(), ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                process.StandardInput.Close();
+            }
+        }
 
         using var combined = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (spec.Timeout is { } t) combined.CancelAfter(t);

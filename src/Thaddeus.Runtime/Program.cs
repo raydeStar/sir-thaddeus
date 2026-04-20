@@ -94,7 +94,23 @@ public static class Program
                     sp.GetRequiredService<IExternalProcessRunner>(),
                     sp.GetRequiredService<ILogger<WhisperCppSpeechToTextProvider>>());
             });
-            builder.Services.AddSingleton<ITextToSpeechProvider, StubTextToSpeechProvider>();
+            builder.Services.AddSingleton<ITextToSpeechProvider>(sp =>
+            {
+                var opts = sp.GetRequiredService<PiperOptions>();
+                var player = sp.GetRequiredService<IAudioPlayer>();
+                if (string.IsNullOrEmpty(opts.BinaryPath) || string.IsNullOrEmpty(opts.VoiceModelPath) || !player.IsAvailable)
+                {
+                    return new StubTextToSpeechProvider();
+                }
+                return new PiperTextToSpeechProvider(
+                    opts,
+                    sp.GetRequiredService<IExternalProcessRunner>(),
+                    player,
+                    sp.GetRequiredService<ILogger<PiperTextToSpeechProvider>>());
+            });
+            builder.Services.AddSingleton<IAudioPlayer, DefaultAudioPlayer>();
+            builder.Services.AddSingleton<PiperOptions>(_ =>
+                builder.Configuration.GetSection("Voice:Tts").Get<PiperOptions>() ?? new PiperOptions());
             builder.Services.AddSingleton<VoiceModeController>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
