@@ -1,3 +1,4 @@
+using Thaddeus.Runtime.Activity;
 using Thaddeus.Runtime.State;
 using Thaddeus.SharedTypes;
 
@@ -27,6 +28,7 @@ public sealed class VoiceModeController
     private readonly RuntimeStateMachine _stateMachine;
     private readonly ISpeechToTextProvider _stt;
     private readonly ITextToSpeechProvider _tts;
+    private readonly IActivityLog? _activity;
     private readonly ILogger<VoiceModeController> _logger;
     private readonly object _captureLock = new();
     private CaptureSession? _activeCapture;
@@ -37,11 +39,13 @@ public sealed class VoiceModeController
         RuntimeStateMachine stateMachine,
         ISpeechToTextProvider stt,
         ITextToSpeechProvider tts,
-        ILogger<VoiceModeController> logger)
+        ILogger<VoiceModeController> logger,
+        IActivityLog? activity = null)
     {
         _stateMachine = stateMachine;
         _stt = stt;
         _tts = tts;
+        _activity = activity;
         _logger = logger;
     }
 
@@ -67,7 +71,17 @@ public sealed class VoiceModeController
                 _logger.LogWarning("voice.ptt_press.illegal state={State}", _stateMachine.Current);
                 return;
             }
-            _activeCapture = new CaptureSession(DateTimeOffset.UtcNow);
+            var startedAt = DateTimeOffset.UtcNow;
+            var entry = _activity?.Append(new ActivityEntry(
+                Id: InMemoryActivityLog.NewId(),
+                Kind: ActivityKind.VoiceTurn,
+                Summary: "Voice capture…",
+                Status: ActivityStatus.Running,
+                StartedAt: startedAt,
+                CompletedAt: null,
+                ThreadId: null,
+                Detail: null));
+            _activeCapture = new CaptureSession(startedAt, entry?.Id);
         }
     }
 
@@ -96,6 +110,7 @@ public sealed class VoiceModeController
         if (elapsed < MinimumCaptureDuration || capturedPcm.Length == 0)
         {
             _stateMachine.TryTransition(StateTrigger.UserPttReleaseSilent, voiceMode: true);
+            FinishActivity(session.ActivityId, ActivityStatus.Cancelled, summary: "Voice capture (silent)", detail: null);
             return null;
         }
 
@@ -105,6 +120,7 @@ public sealed class VoiceModeController
         {
             _logger.LogWarning("voice.stt.unavailable transcript_skipped=true");
             _stateMachine.TryTransition(StateTrigger.SttDoneEmpty, voiceMode: true);
+            FinishActivity(session.ActivityId, ActivityStatus.Failed, summary: "Voice capture (STT unavailable)", detail: "speech_to_text_provider_unavailable");
             return null;
         }
 
@@ -115,20 +131,24 @@ public sealed class VoiceModeController
             if (string.IsNullOrWhiteSpace(result.Transcript))
             {
                 _stateMachine.TryTransition(StateTrigger.SttDoneEmpty, voiceMode: true);
+                FinishActivity(session.ActivityId, ActivityStatus.Cancelled, summary: "Voice capture (no transcript)", detail: null);
                 return null;
             }
             _stateMachine.TryTransition(StateTrigger.SttDoneTranscript, voiceMode: true);
+            FinishActivity(session.ActivityId, ActivityStatus.Ok, summary: SummariseTranscript(result.Transcript), detail: result.Transcript);
             return result.Transcript;
         }
         catch (OperationCanceledException)
         {
             _stateMachine.TryTransition(StateTrigger.SttDoneEmpty, voiceMode: true);
+            FinishActivity(session.ActivityId, ActivityStatus.Cancelled, summary: "Voice capture (cancelled)", detail: null);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "voice.stt.failed");
             _stateMachine.TryTransition(StateTrigger.SttDoneEmpty, voiceMode: true);
+            FinishActivity(session.ActivityId, ActivityStatus.Failed, summary: "Voice capture (STT error)", detail: ex.Message);
             return null;
         }
     }
@@ -191,5 +211,17 @@ public sealed class VoiceModeController
         return CancellationTokenSource.CreateLinkedTokenSource(external, stopToken);
     }
 
-    private sealed record CaptureSession(DateTimeOffset StartedAt);
+    private void FinishActivity(string? id, ActivityStatus status, string summary, string? detail)
+    {
+        if (_activity is null || id is null) return;
+        _activity.Update(id, status: status, completedAt: DateTimeOffset.UtcNow, summary: summary, detail: detail);
+    }
+
+    private static string SummariseTranscript(string transcript)
+    {
+        var cleaned = transcript.ReplaceLineEndings(" ").Trim();
+        return cleaned.Length <= 140 ? cleaned : cleaned[..140];
+    }
+
+    private sealed record CaptureSession(DateTimeOffset StartedAt, string? ActivityId);
 }

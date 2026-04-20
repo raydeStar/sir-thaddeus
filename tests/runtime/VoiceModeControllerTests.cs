@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Thaddeus.Runtime.Activity;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Voice;
 using Thaddeus.SharedTypes;
@@ -248,5 +249,51 @@ public sealed class VoiceModeControllerTests
             try { await _gate.Task.ConfigureAwait(false); }
             catch (OperationCanceledException) { /* swallow so SpeakAsync returns cleanly */ }
         }
+    }
+
+    [Fact]
+    public async Task Captured_voice_turn_records_ok_activity_entry_with_transcript()
+    {
+        var machine = new RuntimeStateMachine(NullLogger<RuntimeStateMachine>.Instance);
+        var activity = new InMemoryActivityLog(capacity: 16);
+        var controller = new VoiceModeController(
+            machine,
+            new ScriptedStt("hello world"),
+            new StubTextToSpeechProvider(),
+            NullLogger<VoiceModeController>.Instance,
+            activity);
+
+        controller.BeginPushToTalk();
+        await Task.Delay(VoiceModeController.MinimumCaptureDuration + TimeSpan.FromMilliseconds(50));
+        var transcript = await controller.EndPushToTalkAsync(new byte[3200], CancellationToken.None);
+
+        Assert.Equal("hello world", transcript);
+        var entries = activity.List(10);
+        var entry = Assert.Single(entries);
+        Assert.Equal(ActivityKind.VoiceTurn, entry.Kind);
+        Assert.Equal(ActivityStatus.Ok, entry.Status);
+        Assert.Equal("hello world", entry.Summary);
+        Assert.Equal("hello world", entry.Detail);
+        Assert.NotNull(entry.CompletedAt);
+    }
+
+    [Fact]
+    public async Task Silent_release_records_cancelled_activity_entry()
+    {
+        var machine = new RuntimeStateMachine(NullLogger<RuntimeStateMachine>.Instance);
+        var activity = new InMemoryActivityLog(capacity: 16);
+        var controller = new VoiceModeController(
+            machine,
+            new ScriptedStt("never"),
+            new StubTextToSpeechProvider(),
+            NullLogger<VoiceModeController>.Instance,
+            activity);
+
+        controller.BeginPushToTalk();
+        // Release immediately → silent.
+        await controller.EndPushToTalkAsync(new byte[3200], CancellationToken.None);
+
+        var entry = Assert.Single(activity.List(10));
+        Assert.Equal(ActivityStatus.Cancelled, entry.Status);
     }
 }
