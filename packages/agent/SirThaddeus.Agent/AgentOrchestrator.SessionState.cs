@@ -155,10 +155,16 @@ public sealed partial class AgentOrchestrator
         LlmUsageSnapshot? usageBaseline = null)
     {
         var latestUserMessage = _history.LastOrDefault(m => m.Role == "user")?.Content;
+        var normalizationUserMessage = TryGetLatestExplicitLookupUserMessage() ?? latestUserMessage;
+
+        response = NormalizeExplicitWebNoResultsContractResponse(
+            normalizationUserMessage ?? string.Empty,
+            response,
+            response.ToolCallsMade);
         var sanitizedText = _postProcessor.SanitizeFinalResponse(
             response.Text,
             response.ToolCallsMade,
-            latestUserMessage,
+            normalizationUserMessage,
             allowToolResultPersonalityPresentation: response.AllowToolResultPersonalityPresentation);
         if (!string.Equals(sanitizedText, response.Text, StringComparison.Ordinal))
         {
@@ -184,6 +190,29 @@ public sealed partial class AgentOrchestrator
             ContextSnapshot = contextSnapshot,
             TokenUsage = tokenUsage
         };
+    }
+
+    private string? TryGetLatestExplicitLookupUserMessage()
+    {
+        for (var index = _history.Count - 1; index >= 0; index--)
+        {
+            var message = _history[index];
+            if (!string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(message.Content))
+            {
+                continue;
+            }
+
+            if (string.Equals(
+                    IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(message.Content.Trim().ToLowerInvariant()),
+                    Intents.LookupSearch,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return message.Content.Trim();
+            }
+        }
+
+        return null;
     }
 
     private LlmUsageSnapshot? CaptureUsageSnapshot()

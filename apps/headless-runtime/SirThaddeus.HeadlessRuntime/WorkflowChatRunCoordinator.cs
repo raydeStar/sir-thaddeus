@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Workflow;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -100,6 +101,19 @@ internal sealed class WorkflowChatRunCoordinator
         }
 
         var firstConfidence = _confidenceEvaluator.Evaluate(workflowState);
+        if (ExplicitWebNoResultsContractNormalizer.ShouldPreserveResponse(
+                request.Prompt,
+                firstResponse.Text,
+                firstResponse.ToolCallsMade))
+        {
+            firstConfidence = new ConfidenceSnapshot
+            {
+                Score = Math.Max(firstConfidence.Score, 0.85),
+                Band = "High",
+                Summary = "Deterministic explicit web no-results contract response preserved without retry.",
+                ShouldRetry = false
+            };
+        }
         workflowState.LatestConfidence = firstConfidence;
         var selectedConfidence = firstConfidence;
 
@@ -187,6 +201,22 @@ internal sealed class WorkflowChatRunCoordinator
                     ["confidenceBand"] = firstConfidence.Band,
                     ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
                 });
+        }
+
+        var normalizedExplicitLookupContract = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+            request.Prompt,
+            selectedResponse.ToolCallsMade);
+        normalizedExplicitLookupContract ??= ExplicitWebNoResultsContractNormalizer.TryBuildResponseFromFailureText(
+            request.Prompt,
+            selectedResponse.Text);
+        if (!string.IsNullOrWhiteSpace(normalizedExplicitLookupContract) &&
+            string.Equals(
+                IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(request.Prompt.Trim().ToLowerInvariant()),
+                Intents.LookupSearch,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            selectedResponse = selectedResponse with { Text = normalizedExplicitLookupContract };
+            workflowState.DraftAnswer = normalizedExplicitLookupContract;
         }
 
         var completionReason = _completionReasonResolver.Resolve(

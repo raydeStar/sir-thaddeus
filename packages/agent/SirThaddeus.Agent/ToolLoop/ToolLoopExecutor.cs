@@ -224,8 +224,15 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 executedToolNames.All(IsWebFamilyToolName) &&
                 IsExplicitToolInvocationRequest(request.History))
             {
-                const string explicitNoResultsMsg =
-                    "The requested tool is currently unavailable right now. Please retry in a moment.";
+                var latestUserMessage = TryGetExplicitToolInvocationUserMessage(request.History)
+                    ?? request.History
+                        .LastOrDefault(m => m.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
+                        ?.Content;
+                var explicitNoResultsMsg =
+                    ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+                        latestUserMessage,
+                        request.ToolCallsMade)
+                    ?? ExplicitWebNoResultsContractNormalizer.UnavailableMessage;
                 request.History.Add(ChatMessage.Assistant(explicitNoResultsMsg));
                 log("AGENT_EXPLICIT_WEB_NO_RESULTS_FALLBACK", explicitNoResultsMsg);
 
@@ -583,16 +590,26 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
 
     private static bool IsExplicitToolInvocationRequest(IReadOnlyList<ChatMessage> history)
     {
-        var latestUserMessage = history
-            .LastOrDefault(m => m.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
-            ?.Content
-            ?.Trim()
-            .ToLowerInvariant();
+        return TryGetExplicitToolInvocationUserMessage(history) is not null;
+    }
 
-        if (string.IsNullOrWhiteSpace(latestUserMessage))
-            return false;
+    private static string? TryGetExplicitToolInvocationUserMessage(IReadOnlyList<ChatMessage> history)
+    {
+        for (var index = history.Count - 1; index >= 0; index--)
+        {
+            var message = history[index];
+            if (!message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(message.Content))
+            {
+                continue;
+            }
 
-        return IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(latestUserMessage) is not null;
+            var candidate = message.Content.Trim();
+            if (IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(candidate.ToLowerInvariant()) is not null)
+                return candidate;
+        }
+
+        return null;
     }
 
     private static string EnsureUnavailableKeywordForExplicitToolRequest(

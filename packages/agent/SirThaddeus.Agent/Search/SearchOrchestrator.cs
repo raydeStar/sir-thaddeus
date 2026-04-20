@@ -1210,7 +1210,35 @@ public sealed partial class SearchOrchestrator
         }
 
         var latestUserMessage = GetLatestUserMessage(history) ?? userMessage;
+        var explicitLookupUserMessage = TryGetExplicitLookupUserMessage(history);
+        var explicitNoResultsFallback =
+            ExplicitWebNoResultsContractNormalizer.TryBuildResponse(userMessage, toolCallsMade) ??
+            ExplicitWebNoResultsContractNormalizer.TryBuildResponse(explicitLookupUserMessage, toolCallsMade) ??
+            ExplicitWebNoResultsContractNormalizer.TryBuildResponse(latestUserMessage, toolCallsMade);
+        if (!string.IsNullOrWhiteSpace(explicitNoResultsFallback))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "NO_RESULTS_EXPLICIT_WEB_FALLBACK",
+                Result = "shared_contract_fallback",
+                Details = new Dictionary<string, object>
+                {
+                    ["userMessage"] = userMessage
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text = explicitNoResultsFallback,
+                Success = true,
+                ToolCallsMade = toolCallsMade.ToList(),
+                LlmRoundTrips = 0
+            };
+        }
+
         if (!IsExplicitLookupToolInvocationRequest(userMessage) &&
+            !IsExplicitLookupToolInvocationRequest(explicitLookupUserMessage) &&
             !IsExplicitLookupToolInvocationRequest(latestUserMessage))
         {
             var knownLatestVersionAnswer =
@@ -1241,7 +1269,11 @@ public sealed partial class SearchOrchestrator
 
         if (RequiresLiveWebVerification(userMessage, history))
         {
-            if (TryBuildHarnessExplicitWebNoResultsFallback(userMessage, toolCallsMade) is { Length: > 0 } explicitFallback)
+            var harnessExplicitFallback =
+                TryBuildHarnessExplicitWebNoResultsFallback(userMessage, toolCallsMade) ??
+                TryBuildHarnessExplicitWebNoResultsFallback(explicitLookupUserMessage, toolCallsMade) ??
+                TryBuildHarnessExplicitWebNoResultsFallback(latestUserMessage, toolCallsMade);
+            if (harnessExplicitFallback is { Length: > 0 } explicitFallback)
             {
                 _audit.Append(new AuditEvent
                 {
@@ -3455,8 +3487,26 @@ public sealed partial class SearchOrchestrator
             StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string? TryGetExplicitLookupUserMessage(IReadOnlyList<ChatMessage> history)
+    {
+        for (var index = history.Count - 1; index >= 0; index--)
+        {
+            var message = history[index];
+            if (!string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(message.Content))
+            {
+                continue;
+            }
+
+            if (IsExplicitLookupToolInvocationRequest(message.Content))
+                return message.Content.Trim();
+        }
+
+        return null;
+    }
+
     private static string? TryBuildHarnessExplicitWebNoResultsFallback(
-        string userMessage,
+        string? userMessage,
         IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
         var allowedTools = GetHarnessAllowedToolsOverride();

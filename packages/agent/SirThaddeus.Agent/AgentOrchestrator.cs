@@ -736,7 +736,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 if (!string.Equals(sanitizedSearchText, searchResponse.Text, StringComparison.Ordinal))
                     searchResponse = searchResponse with { Text = sanitizedSearchText };
                 searchResponse = NormalizeExplicitWebNoResultsContractResponse(
-                    contextualUserMessage,
+                    userMessage,
                     searchResponse,
                     toolCallsMade);
 
@@ -1095,7 +1095,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                 tools, toolCallsMade, roundTrips, cancellationToken);
             toolLoopResponse = NormalizeMetaToolHealthResponse(toolLoopResponse);
             toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
-                contextualUserMessage,
+                userMessage,
                 toolLoopResponse,
                 toolCallsMade);
             if (taskPlan is not null)
@@ -1104,7 +1104,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
             toolLoopResponse = await ValidateAndMaybeRepairAsync(
                 contextualUserMessage, toolLoopResponse, toolCallsMade, cancellationToken);
             toolLoopResponse = NormalizeExplicitWebNoResultsContractResponse(
-                contextualUserMessage,
+                userMessage,
                 toolLoopResponse,
                 toolCallsMade);
 
@@ -1126,6 +1126,23 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
 
             if (hasWebToolActivity || likelyLookupIntent)
             {
+                var explicitLookupNoResultsFallback = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+                    TryGetLatestExplicitLookupUserMessage() ?? userMessage,
+                    toolCallsMade);
+                if (!string.IsNullOrWhiteSpace(explicitLookupNoResultsFallback))
+                {
+                    LogEvent("AGENT_CANCELLED_EXPLICIT_WEB_CONTRACT", "Recovered with deterministic explicit web no-results contract.");
+                    AppendAssistantMessage(explicitLookupNoResultsFallback);
+
+                    return AttachContextSnapshot(new AgentResponse
+                    {
+                        Text = explicitLookupNoResultsFallback,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = roundTrips
+                    }, usageBaseline);
+                }
+
                 var groundedTimeoutFallback = Search.SearchOrchestrator.TryBuildGroundedTimeoutFallback(
                     contextualUserMessage,
                     toolCallsMade);
