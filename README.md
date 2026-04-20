@@ -26,7 +26,14 @@ No telemetry by default. No silent background autonomy. No hidden actions.
 
 If it acts, you see it. If you press **STOP**, it stops.
 
-**[Privacy policy →](PRIVACY.md)** · **[Security policy →](SECURITY.md)**
+**[Privacy policy →](PRIVACY.md)** · **[Security policy →](SECURITY.md)** · **[v2 hybrid shell →](docs/hybrid-shell.md)**
+
+> **Heads up — v2 hybrid shell (Phase 1) has landed on `task/hybrid-shell-phase1`.**
+> The new default surface is a single self-contained `Thaddeus.Runtime` binary that
+> hosts a React UI + local API. The Avalonia desktop client and headless runtime in
+> `apps/` are retained as the v1 shell for the legacy harness; they print a warning
+> on startup and will be retired in a follow-up phase. See
+> [docs/hybrid-shell.md](docs/hybrid-shell.md) and [docs/packaging.md](docs/packaging.md).
 
 ---
 

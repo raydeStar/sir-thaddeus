@@ -18,6 +18,15 @@ internal static class Program
         });
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
 
+        // ---------------------------------------------------------------
+        // Sir Thaddeus v2 hybrid shell (Phase 1, 2026) supersedes this UI.
+        // The Avalonia desktop client is retained for the v1 harness and
+        // legacy sprint workflows, but new feature work should target the
+        // hybrid runtime: src/Thaddeus.Runtime + web/. See docs/packaging.md.
+        // ---------------------------------------------------------------
+        Log.Warning(
+            "ui-avalonia is the legacy v1 shell; new features live in the hybrid runtime (Thaddeus.Runtime + web/).");
+
         try
         {
             // Run startup diagnostics before Avalonia takes over. A user with a
