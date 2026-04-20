@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.State;
+using Thaddeus.Runtime.Voice;
 using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Api;
@@ -29,6 +30,17 @@ public static class StateApi
             startedAt = opts.StartedAt,
         }))
             .WithName("GetHealth");
+
+        // Phase 2.6 stop-all panic button. Cancels any in-flight STT/TTS and drives
+        // the state machine through Stopping → Idle. The shell hits this endpoint
+        // when the global stop-all shortcut fires; the React workspace can also
+        // call it from the Stop control in the input bar.
+        app.MapPost("/api/stop-all", (VoiceModeController voice, RuntimeStateMachine machine) =>
+        {
+            voice.StopAll();
+            return Results.Ok(new { applied = true, current = machine.Current.ToString() });
+        })
+            .WithName("StopAll");
 
         // Phase 1 debug endpoint — exposed in test mode only. Lets Playwright force
         // the state machine through transitions without hooking real STT/LLM.

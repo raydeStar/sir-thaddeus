@@ -30,6 +30,7 @@ public sealed class VoiceModeController
     private readonly ILogger<VoiceModeController> _logger;
     private readonly object _captureLock = new();
     private CaptureSession? _activeCapture;
+    private CancellationTokenSource _stopAllCts = new();
 
     /// <summary>Wires the controller to its dependencies.</summary>
     public VoiceModeController(
@@ -109,7 +110,8 @@ public sealed class VoiceModeController
 
         try
         {
-            var result = await _stt.TranscribeAsync(capturedPcm, ct).ConfigureAwait(false);
+            using var linked = LinkStopAll(ct);
+            var result = await _stt.TranscribeAsync(capturedPcm, linked.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(result.Transcript))
             {
                 _stateMachine.TryTransition(StateTrigger.SttDoneEmpty, voiceMode: true);
@@ -149,12 +151,44 @@ public sealed class VoiceModeController
 
         try
         {
-            await _tts.SpeakAsync(text, ct).ConfigureAwait(false);
+            using var linked = LinkStopAll(ct);
+            await _tts.SpeakAsync(text, linked.Token).ConfigureAwait(false);
         }
         finally
         {
             _stateMachine.TryTransition(StateTrigger.TtsDone, voiceMode: true);
         }
+    }
+
+    /// <summary>
+    /// Cancels any in-flight STT, TTS, or capture session and drives the state
+    /// machine through Stopping → Idle. Safe to call from any thread, including
+    /// from the global shortcut pump (spec §11.4: stop-all is the panic button).
+    ///
+    /// Subsequent voice operations get a fresh cancellation chain, so a stop
+    /// does not poison future PTT presses.
+    /// </summary>
+    public void StopAll()
+    {
+        _logger.LogInformation("voice.stop_all requested");
+        _stateMachine.TryTransition(StateTrigger.UserStopAll, voiceMode: true);
+
+        var previous = Interlocked.Exchange(ref _stopAllCts, new CancellationTokenSource());
+        try { previous.Cancel(); } catch { /* best effort */ }
+        previous.Dispose();
+
+        lock (_captureLock)
+        {
+            _activeCapture = null;
+        }
+
+        _stateMachine.TryTransition(StateTrigger.StoppingComplete, voiceMode: true);
+    }
+
+    private CancellationTokenSource LinkStopAll(CancellationToken external)
+    {
+        var stopToken = Volatile.Read(ref _stopAllCts).Token;
+        return CancellationTokenSource.CreateLinkedTokenSource(external, stopToken);
     }
 
     private sealed record CaptureSession(DateTimeOffset StartedAt);

@@ -101,13 +101,36 @@ public static class Program
                             try { compactLauncher?.Toggle(compactUrl); }
                             catch (Exception ex) { log.LogWarning(ex, "shell.compact.toggle_failed"); }
                         }
+                        else if (id == "stop-all")
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                                    using var resp = await http.PostAsync(
+                                        $"http://127.0.0.1:{lockFile.Port}/api/stop-all",
+                                        content: null);
+                                    log.LogInformation("shell.stop_all status={Status}", (int)resp.StatusCode);
+                                }
+                                catch (Exception ex)
+                                {
+                                    log.LogWarning(ex, "shell.stop_all.failed");
+                                }
+                            });
+                        }
                     };
                     using var registerCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    var ok = shortcuts.RegisterAsync(
+                    var compactOk = shortcuts.RegisterAsync(
                         "compact-toggle",
                         new KeyChord("Space", KeyModifiers.Control | KeyModifiers.Shift),
                         registerCts.Token).GetAwaiter().GetResult();
-                    log.LogInformation("shell.shortcut.register id=compact-toggle ok={Ok}", ok);
+                    log.LogInformation("shell.shortcut.register id=compact-toggle ok={Ok}", compactOk);
+                    var stopOk = shortcuts.RegisterAsync(
+                        "stop-all",
+                        new KeyChord("Escape", KeyModifiers.Control | KeyModifiers.Shift),
+                        registerCts.Token).GetAwaiter().GetResult();
+                    log.LogInformation("shell.shortcut.register id=stop-all ok={Ok}", stopOk);
                 }
             });
 
