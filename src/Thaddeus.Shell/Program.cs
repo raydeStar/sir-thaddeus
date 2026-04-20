@@ -60,8 +60,35 @@ public static class Program
             }
 
             var workspaceUrl = $"http://127.0.0.1:{lockFile.Port}/";
+            var compactUrl = $"http://127.0.0.1:{lockFile.Port}/compact";
             var window = new WorkspaceWindow(loggerFactory.CreateLogger<WorkspaceWindow>());
-            window.ShowBlocking(workspaceUrl, lockFile.Version);
+
+            // Phase 2.4: build (but do not auto-show) the compact panel launcher.
+            // Phase 2.5 will hook it up to the global shortcut. For now an env var
+            // (THADDEUS_COMPACT_AUTOSHOW=1) lets us smoke-test the second window
+            // without yet having the shortcut.
+            CompactPanelLauncher? compactLauncher = null;
+            var autoShowCompact = string.Equals(
+                Environment.GetEnvironmentVariable("THADDEUS_COMPACT_AUTOSHOW"),
+                "1",
+                StringComparison.Ordinal);
+
+            window.ShowBlocking(workspaceUrl, lockFile.Version, onReady: parent =>
+            {
+                var surface = new PhotinoCompactWindowSurface(
+                    parent,
+                    loggerFactory.CreateLogger<PhotinoCompactWindowSurface>());
+                compactLauncher = new CompactPanelLauncher(
+                    surface,
+                    loggerFactory.CreateLogger<CompactPanelLauncher>());
+                if (autoShowCompact)
+                {
+                    log.LogInformation("shell.compact.auto_show");
+                    compactLauncher.Show(compactUrl);
+                }
+            });
+
+            try { compactLauncher?.Close(); } catch { /* drain */ }
 
             // Window closed → tell the runtime to shut down.
             using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
