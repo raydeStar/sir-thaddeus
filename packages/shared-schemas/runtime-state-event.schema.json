@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thaddeus.local/schemas/runtime-state-event.json",
+  "title": "RuntimeStateEvent",
+  "type": "object",
+  "required": ["state", "timestamp"],
+  "additionalProperties": false,
+  "properties": {
+    "state": { "$ref": "runtime-state.schema.json" },
+    "turnId": { "type": "string" },
+    "threadId": { "type": "string" },
+    "activeToolCall": {
+      "type": "object",
+      "required": ["toolId", "startedAt", "humanSummary"],
+      "additionalProperties": false,
+      "properties": {
+        "toolId": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "humanSummary": { "type": "string" }
+      }
+    },
+    "pendingPermission": {
+      "type": "object",
+      "required": ["requestId", "capability", "humanSummary"],
+      "additionalProperties": false,
+      "properties": {
+        "requestId": { "type": "string" },
+        "capability": { "type": "string" },
+        "humanSummary": { "type": "string" }
+      }
+    },
+    "ttsQueueDepth": { "type": "integer", "minimum": 0 },
+    "inputSource": { "type": "string", "enum": ["voice", "text"] },
+    "lastError": {
+      "type": "object",
+      "required": ["code", "humanSummary", "correlationId"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "humanSummary": { "type": "string" },
+        "correlationId": { "type": "string" }
+      }
+    },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
