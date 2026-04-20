@@ -54,6 +54,8 @@ public static class ChatApi
             CancellationToken ct) =>
         {
             if (req is null) return Results.BadRequest(new { error = "body required" });
+            if (req.Title is null && !req.Pinned.HasValue)
+                return Results.BadRequest(new { error = "patch body must set at least one of title, pinned" });
 
             ChatThread? current = null;
             if (req.Title is not null)
@@ -66,13 +68,7 @@ public static class ChatApi
                 current = await store.SetPinnedAsync(id, req.Pinned.Value, ct).ConfigureAwait(false);
                 if (current is null) return Results.NotFound();
             }
-            if (current is null)
-            {
-                // No-op patch: return the existing thread if it exists.
-                current = await store.GetAsync(id, ct).ConfigureAwait(false);
-                if (current is null) return Results.NotFound();
-            }
-            return Results.Json(current, ChatJsonContext.Default.ChatThread);
+            return Results.Json(current!, ChatJsonContext.Default.ChatThread);
         })
             .WithName("PatchThread");
 
