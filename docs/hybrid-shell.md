@@ -56,6 +56,25 @@ auto-update channel).
 - `tests/runtime/` — runtime xUnit tests (84/84 green at Phase 8.1).
 - `web/tests/e2e/` — Playwright smoke tests (9/9 green at Phase 8.1).
 
+## Security notes
+
+- **Loopback only.** The runtime binds `127.0.0.1:<random-port>`. It is not
+  reachable from other machines on the LAN.
+- **Bearer token on every request.** Every `/api` and `/ws` call requires the
+  per-launch bearer token printed at startup and embedded in the SPA bootstrap
+  meta tags. SPA HTML itself (`GET /`) is the only unauthenticated route.
+- **WebSocket auth uses `?access_token=`.** Browsers cannot set custom headers
+  on WebSocket handshakes, so the bearer rides as a query parameter on `/ws`
+  per [RFC 6750 §2.3](https://datatracker.ietf.org/doc/html/rfc6750#section-2.3).
+  The middleware only honours `access_token` on the `/ws` path; data routes
+  (`/api/*`) require the `Authorization: Bearer …` header.
+- **Logged-URL caveat.** The default ASP.NET Core request log includes the
+  query string, so the per-launch token will appear in `~/.thaddeus/logs/`.
+  This is acceptable because the token rotates on every launch and the log
+  files live on the same machine that printed the token. Operators who do
+  not want the token in logs can set `Serilog__MinimumLevel__Override__Microsoft_AspNetCore=Warning`
+  to suppress request logging entirely.
+
 ## Open items (Phase 9+)
 
 - Cloud STT/TTS providers.
