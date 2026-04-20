@@ -7,6 +7,7 @@ using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
 using Thaddeus.Runtime.State;
+using Thaddeus.Runtime.Voice;
 using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
 
@@ -76,6 +77,11 @@ public static class Program
             builder.Services.AddSingleton<StateSnapshot>();
             builder.Services.AddSingleton<IEventBus, EventBus>();
             builder.Services.AddSingleton<WebSocketBroadcaster>();
+            // Voice providers default to stubs in Phase 2.1; real adapters arrive
+            // in Phase 2.2 (whisper.cpp) and Phase 2.3 (Piper) and override these.
+            builder.Services.AddSingleton<ISpeechToTextProvider, StubSpeechToTextProvider>();
+            builder.Services.AddSingleton<ITextToSpeechProvider, StubTextToSpeechProvider>();
+            builder.Services.AddSingleton<VoiceModeController>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService<IpcServer>();
