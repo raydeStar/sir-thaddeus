@@ -39,6 +39,13 @@ public sealed record LoggingOptions
     public bool EnableConsole { get; init; } = true;
 
     /// <summary>
+    /// Route every console log line to stderr instead of stdout. Set this to
+    /// true for components whose stdout carries a protocol payload (notably
+    /// the MCP server, which uses stdio as transport). Defaults to false.
+    /// </summary>
+    public bool ConsoleStandardErrorOnly { get; init; }
+
+    /// <summary>
     /// Emit a rolling file sink. Defaults to true.
     /// </summary>
     public bool EnableFile { get; init; } = true;

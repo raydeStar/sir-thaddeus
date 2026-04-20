@@ -99,9 +99,18 @@ public static class LoggingBootstrap
 
         if (options.EnableConsole)
         {
-            config = config.WriteTo.Console(
-                restrictedToMinimumLevel: minimumLevel,
-                outputTemplate: ConsoleTemplate);
+            var standardErrorFromLevel = options.ConsoleStandardErrorOnly
+                ? LogEventLevel.Verbose
+                : (LogEventLevel?)null;
+
+            config = standardErrorFromLevel is null
+                ? config.WriteTo.Console(
+                    restrictedToMinimumLevel: minimumLevel,
+                    outputTemplate: ConsoleTemplate)
+                : config.WriteTo.Console(
+                    restrictedToMinimumLevel: minimumLevel,
+                    outputTemplate: ConsoleTemplate,
+                    standardErrorFromLevel: standardErrorFromLevel.Value);
         }
 
         if (options.EnableFile)
