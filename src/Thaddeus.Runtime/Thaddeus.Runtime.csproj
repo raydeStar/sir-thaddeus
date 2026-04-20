@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Thaddeus.Runtime</RootNamespace>
+    <AssemblyName>Thaddeus.Runtime</AssemblyName>
+    <UserSecretsId>thaddeus-runtime-dev</UserSecretsId>
+    <!-- Web SDK turns on static-web-asset and razor compilation by default; we want
+         neither for v1. Static assets are served via UseStaticFiles from wwwroot. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="NUlid" Version="1.7.2" />
+  </ItemGroup>
+
+</Project>
