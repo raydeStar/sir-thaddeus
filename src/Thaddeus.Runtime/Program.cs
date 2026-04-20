@@ -123,6 +123,7 @@ public static class Program
                     sp.GetRequiredService<ILogger<JsonFileThreadStore>>());
             });
             builder.Services.AddSingleton<ChatTurnPublisher>();
+            builder.Services.AddSingleton<StubAssistant>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService<IpcServer>();

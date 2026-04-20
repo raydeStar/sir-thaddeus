@@ -49,7 +49,8 @@ public static class ChatApi
             .WithName("DeleteThread");
 
         app.MapPost("/api/threads/{id}/messages",
-            async (string id, AppendMessageRequest? req, IThreadStore store, CancellationToken ct) =>
+            async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
+                ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
                 return Results.BadRequest(new { error = "text is required" });
@@ -63,6 +64,24 @@ public static class ChatApi
             try
             {
                 var updated = await store.AppendMessageAsync(id, message, ct).ConfigureAwait(false);
+
+                // Kick off the stub assistant on a background task. The HTTP caller
+                // returns immediately with the user message; the assistant reply is
+                // streamed over /ws and persisted to the store when complete.
+                _ = Task.Run(async () =>
+                {
+                    var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
+                    try
+                    {
+                        await assistant.RespondAsync(id, message.Text, CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", id);
+                    }
+                });
+
                 return Results.Json(
                     new AppendMessageResponse(message, updated),
                     ChatJsonContext.Default.AppendMessageResponse,
