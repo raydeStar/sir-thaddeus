@@ -4,3 +4,5 @@ export * from "./runtime-event";
 export * from "./chat";
 export * from "./activity";
 export * from "./settings";
+export * from "./memo";
+export * from "./automation";

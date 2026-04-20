@@ -4,10 +4,12 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Serilog;
 using Thaddeus.Runtime.Api;
 using Thaddeus.Runtime.Activity;
+using Thaddeus.Runtime.Automations;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
+using Thaddeus.Runtime.Memory;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Voice;
@@ -136,6 +138,24 @@ public static class Program
                     settingsPath,
                     sp.GetRequiredService<ILogger<JsonFileSettingsStore>>());
             });
+            builder.Services.AddSingleton<IMemoStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var memosDir = builder.Configuration.GetValue<string>("Memory:Directory")
+                    ?? Path.Combine(lockDir, "memos");
+                return new JsonFileMemoStore(
+                    memosDir,
+                    sp.GetRequiredService<ILogger<JsonFileMemoStore>>());
+            });
+            builder.Services.AddSingleton<IAutomationStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var dir = builder.Configuration.GetValue<string>("Automations:Directory")
+                    ?? Path.Combine(lockDir, "automations");
+                return new JsonFileAutomationStore(
+                    dir,
+                    sp.GetRequiredService<ILogger<JsonFileAutomationStore>>());
+            });
             builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
@@ -209,6 +229,8 @@ public static class Program
             app.MapChatApi();
             app.MapActivityApi();
             app.MapSettingsApi();
+            app.MapMemoryApi();
+            app.MapAutomationsApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);
