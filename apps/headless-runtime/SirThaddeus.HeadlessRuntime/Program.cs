@@ -9,6 +9,7 @@ using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using SirThaddeus.Diagnostics;
 using SirThaddeus.LlmClient;
 using SirThaddeus.Logging;
 using SirThaddeus.Memory.Sqlite;
@@ -35,6 +36,27 @@ Log.Information(
 
 var load = SettingsManager.LoadWithDiagnostics();
 var settings = load.Settings;
+
+// Surface reachability/sanity problems as a single log summary up front so
+// operators see "LLM unreachable" before the user hits a failing prompt.
+foreach (var check in (await StartupDiagnostics.RunAsync(settings)).Checks)
+{
+    switch (check.Status)
+    {
+        case StartupCheckStatus.Ok:
+            Log.Information("[startup] {Check}: ok — {Message}", check.Name, check.Message);
+            break;
+        case StartupCheckStatus.Skipped:
+            Log.Debug("[startup] {Check}: skipped — {Message}", check.Name, check.Message);
+            break;
+        case StartupCheckStatus.Warning:
+            Log.Warning(check.Exception, "[startup] {Check}: warning — {Message}", check.Name, check.Message);
+            break;
+        case StartupCheckStatus.Failed:
+            Log.Error(check.Exception, "[startup] {Check}: failed — {Message}", check.Name, check.Message);
+            break;
+    }
+}
 var personalityStore = new PersonalityProfileStore();
 var profilePreferredName = ResolvePreferredNameFromProfileStore(settings);
 var handles = ResolvePromptHandles(settings, personalityStore, profilePreferredName);

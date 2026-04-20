@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
     <ProjectReference Include="..\..\..\packages\logging\SirThaddeus.Logging\SirThaddeus.Logging.csproj" />
+    <ProjectReference Include="..\..\..\packages\startup-diagnostics\SirThaddeus.StartupDiagnostics\SirThaddeus.StartupDiagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>
