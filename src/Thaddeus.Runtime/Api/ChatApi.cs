@@ -75,6 +75,7 @@ public static class ChatApi
         app.MapPost("/api/threads/{id}/messages",
             async (string id, AppendMessageRequest? req, IThreadStore store, StubAssistant assistant,
                 RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
+                IHostApplicationLifetime lifetime,
                 CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
@@ -116,11 +117,22 @@ public static class ChatApi
                     var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
                     var status = ActivityStatus.Ok;
                     string? detail = null;
+                    // Use ApplicationStopping rather than the request CT (which cancels
+                    // the moment the HTTP handler returns) so shutdown drains the
+                    // assistant cleanly. CancellationToken.None would let work outlive
+                    // process shutdown indefinitely.
+                    var bgCt = lifetime.ApplicationStopping;
                     try
                     {
-                        var reply = await assistant.RespondAsync(id, message.Text, CancellationToken.None)
+                        var reply = await assistant.RespondAsync(id, message.Text, bgCt)
                             .ConfigureAwait(false);
                         detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
+                    }
+                    catch (OperationCanceledException) when (bgCt.IsCancellationRequested)
+                    {
+                        status = ActivityStatus.Failed;
+                        detail = "cancelled by shutdown";
+                        log.LogInformation("stub_assistant.cancelled_by_shutdown thread={ThreadId}", id);
                     }
                     catch (Exception ex)
                     {
