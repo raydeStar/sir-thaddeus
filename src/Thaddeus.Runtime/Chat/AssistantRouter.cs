@@ -106,7 +106,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
 
         return llm =>
         {
-            var fp = $"{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}";
+            var fp = $"{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}";
             lock (gate)
             {
                 if (cached is null || fingerprint != fp)
@@ -115,6 +115,9 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     {
                         BaseUrl = llm.BaseUrl!,
                         Model = llm.ModelId,
+                        MaxTokens = llm.MaxTokens,
+                        ContextWindowTokens = llm.ContextWindowTokens,
+                        Temperature = llm.Temperature,
                     };
                     if (cached is null)
                     {

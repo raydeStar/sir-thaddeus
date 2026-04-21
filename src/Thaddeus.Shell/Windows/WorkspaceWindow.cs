@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Photino.NET;
 using Thaddeus.SharedTypes;
 
@@ -7,8 +8,15 @@ namespace Thaddeus.Shell.Windows;
 /// Owns the main workspace Photino window (1200×800, resizable). The window simply
 /// loads the runtime URL; all product UI lives in the React workspace.
 /// </summary>
-public sealed class WorkspaceWindow
+public sealed class WorkspaceWindow : IWorkspaceWindowSurface
 {
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private const int SwHide = 0;
+    private const int SwShow = 5;
+    private const int SwRestore = 9;
+
     private readonly ILogger<WorkspaceWindow> _logger;
     private PhotinoWindow? _window;
 
@@ -17,6 +25,10 @@ public sealed class WorkspaceWindow
     {
         _logger = logger;
     }
+
+    public bool IsVisible { get; private set; }
+
+    public event WorkspaceWindowClosingHandler? ClosingRequested;
 
     /// <summary>
     /// Shows the workspace window pointing at the supplied URL and blocks until the
@@ -41,6 +53,8 @@ public sealed class WorkspaceWindow
             .SetUseOsDefaultLocation(false)
             .SetUseOsDefaultSize(false)
             .Load(url);
+        _window.WindowClosing += OnClosing;
+        IsVisible = true;
 
         if (onReady is not null)
         {
@@ -52,6 +66,83 @@ public sealed class WorkspaceWindow
         }
 
         _window.WaitForClose();
+        _window = null;
+        IsVisible = false;
         _logger.LogInformation("workspace.window.closed");
+    }
+
+    public void Show()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsWindows() && _window.WindowHandle != IntPtr.Zero)
+        {
+            ShowWindow(_window.WindowHandle, SwShow);
+            ShowWindow(_window.WindowHandle, SwRestore);
+        }
+        else
+        {
+            _window.SetMinimized(false);
+        }
+        IsVisible = true;
+        _logger.LogInformation("workspace.window.shown");
+    }
+
+    public void Hide()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsWindows() && _window.WindowHandle != IntPtr.Zero)
+        {
+            ShowWindow(_window.WindowHandle, SwHide);
+        }
+        else
+        {
+            _window.SetMinimized(true);
+        }
+        IsVisible = false;
+        _logger.LogInformation("workspace.window.hidden");
+    }
+
+    public void Close()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        _logger.LogInformation("workspace.window.close_requested");
+        _window.Close();
+    }
+
+    private bool OnClosing(object? sender, EventArgs e)
+    {
+        if (ClosingRequested is null)
+        {
+            return false;
+        }
+
+        foreach (var handler in ClosingRequested.GetInvocationList().Cast<WorkspaceWindowClosingHandler>())
+        {
+            try
+            {
+                if (handler())
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "workspace.window.close_handler_failed");
+            }
+        }
+
+        return false;
     }
 }

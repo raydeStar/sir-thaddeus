@@ -60,7 +60,7 @@ public static class ScreenContentExtractor
 
     private static readonly HashSet<string> SelfProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "SirThaddeus", "SirThaddeus.UI.Avalonia", "SirThaddeus.Desktop",
+        "SirThaddeus", "Thaddeus.Runtime", "SirThaddeus.HeadlessRuntime", "SirThaddeus.Desktop",
     };
 
     // ─── Framework noise patterns ────────────────────────────────────

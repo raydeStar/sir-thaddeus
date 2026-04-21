@@ -352,8 +352,8 @@ Also add the new `cache` section and the `documentReader` section (if any config
   ### Run (headless)
   dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
 
-  ### Run (Avalonia UI)
-  dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
+  ### Run (hybrid runtime)
+  dotnet run --project src/Thaddeus.Runtime/Thaddeus.Runtime.csproj
   ```
 
 ### 4.4 CONTRIBUTING.md Audit

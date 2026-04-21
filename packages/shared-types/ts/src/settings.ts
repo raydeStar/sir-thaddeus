@@ -5,12 +5,20 @@ export interface LlmSettings {
   modelId: string;
   baseUrl?: string | null;
   apiKey?: string | null;
+  maxTokens: number;
+  contextWindowTokens: number;
+  temperature: number;
 }
 
 export interface VoiceSettings {
   sttProvider: string;
   ttsProvider: string;
   piperVoicePath?: string | null;
+}
+
+export interface AudioSettings {
+  ttsEnabled: boolean;
+  inputGain: number;
 }
 
 export interface ShortcutSettings {
@@ -31,6 +39,7 @@ export interface AppFlags {
 export interface SettingsDocument {
   llm: LlmSettings;
   voice: VoiceSettings;
+  audio: AudioSettings;
   shortcuts: ShortcutSettings;
   privacy: PrivacySettings;
   flags: AppFlags;

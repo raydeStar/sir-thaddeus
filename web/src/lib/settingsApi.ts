@@ -26,3 +26,18 @@ export async function putSettings(doc: SettingsDocument): Promise<SettingsDocume
   });
   return asJson<SettingsDocument>(res);
 }
+
+export interface TestLlmResponse {
+  ok: boolean;
+  message: string;
+  models: string[];
+}
+
+export async function testLlm(input: { baseUrl?: string; apiKey?: string }): Promise<TestLlmResponse> {
+  const res = await runtimeFetch(token(), '/api/settings/test-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<TestLlmResponse>(res);
+}

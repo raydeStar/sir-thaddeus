@@ -22,10 +22,10 @@ Component names currently wired:
 
 | Component             | Entry point                                     |
 | --------------------- | ----------------------------------------------- |
+| `thaddeus-runtime`    | `src/Thaddeus.Runtime/Program.cs`               |
 | `headless-runtime`    | `apps/headless-runtime/.../Program.cs`          |
 | `voice-host`          | `apps/voice-host/.../Program.cs`                |
 | `mcp-server`          | `apps/mcp-server/.../Program.cs`                |
-| `ui-avalonia`         | `apps/ui-avalonia/.../Program.cs`               |
 
 Files roll at midnight UTC and at 32 MB. Fourteen files are retained per
 component; older files are deleted automatically.
@@ -85,7 +85,7 @@ builder.UseSirThaddeusLogging(new LoggingOptions
 Downstream code takes `ILogger<T>` as usual; the MEL abstraction flows
 through the Serilog provider transparently.
 
-For a component **without** a host (e.g. the Avalonia UI):
+For a component **without** a host (e.g. a standalone utility or one-off console process):
 
 ```csharp
 using Serilog;

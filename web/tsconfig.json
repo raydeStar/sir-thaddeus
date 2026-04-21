@@ -14,9 +14,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
       "@thaddeus/shared-types": ["../packages/shared-types/ts/src/index.ts"]
     }
   },

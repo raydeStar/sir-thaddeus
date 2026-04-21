@@ -186,15 +186,13 @@ Write-Section "Publish Artifacts"
 $projects = @(
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj",
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj",
-    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj",
-    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
+    "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj"
 )
 
 $projectStageSubdirs = @{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj" = ""
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = ""
-    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = "headless"
-    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = ""
+    "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj" = ""
 }
 
 $optionalSearxngProject = "apps/searxng/SirThaddeus.Searxng/SirThaddeus.Searxng.csproj"
@@ -207,10 +205,7 @@ $projectFrameworkOverrides = @{
     "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj" = @{
         default = "net10.0"
     }
-    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = @{
-        default = "net10.0"
-    }
-    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj" = @{
+    "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj" = @{
         default = "net10.0"
     }
 }
@@ -347,11 +342,11 @@ foreach ($project in $projects) {
 # -- Structured staging --------------------------------------------------------
 #
 #  ZIP root/
-#   ├── SirThaddeus.UI.Avalonia.exe      ← user double-clicks this
+#   ├── Thaddeus.Runtime.exe             ← user launches this
 #   ├── SirThaddeus.McpServer.exe
 #   ├── SirThaddeus.VoiceHost.exe
 #   ├── README_FIRST_RUN.md
-#   └── bin/                             ← support files (DLLs, assets, voice/)
+#   └── support files (DLLs, assets, voice/, search/)
 #
 
 Write-Section "Stage Artifacts"

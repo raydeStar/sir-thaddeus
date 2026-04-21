@@ -5,23 +5,27 @@ interface PageScaffoldProps {
   title: string;
   subtitle?: string;
   children?: ReactNode;
+  /**
+   * When true, renders the body without the framed surface so screens (like the
+   * chat thread) can take full advantage of the column width.
+   */
+  bare?: boolean;
 }
 
-/**
- * Phase-1 placeholder layout for every route. Real screens land in Phases 2–8 per
- * spec §23 build order. The `data-testid` attributes are stable so Playwright can
- * route between screens once we wire up navigation tests.
- */
-export function PageScaffold({ testId, title, subtitle, children }: PageScaffoldProps) {
+export function PageScaffold({ testId, title, subtitle, children, bare }: PageScaffoldProps) {
   return (
-    <section data-testid={testId} className="mx-auto max-w-3xl px-6 py-10">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-thaddeus-ink">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-slate-600">{subtitle}</p> : null}
+    <section data-testid={testId} className="mx-auto w-full max-w-3xl px-6 py-10 md:px-8 md:py-14">
+      <header className="mb-8">
+        <h1 className="text-3xl font-semibold tracking-tightest text-ink">{title}</h1>
+        {subtitle ? <p className="mt-2 text-sm text-ink-muted">{subtitle}</p> : null}
       </header>
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        {children ?? <p className="text-sm text-slate-500">Coming in a later phase.</p>}
-      </div>
+      {bare ? (
+        <div>{children}</div>
+      ) : (
+        <div className="surface p-6 md:p-8">
+          {children ?? <p className="text-sm text-ink-muted">Coming in a later phase.</p>}
+        </div>
+      )}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide defines a repeatable production deployment workflow for the Avalonia UI runtime.
+This guide defines a repeatable production deployment workflow for the hybrid runtime.
 
 ## 1) Preflight gate (required)
 
@@ -75,7 +75,7 @@ Release packaging now fails if a valid bundled SearXNG payload cannot be staged.
 
 ### Required ZIP contents
 
-- `SirThaddeus.UI.Avalonia.exe` (primary app executable)
+- `Thaddeus.Runtime.exe` (primary app executable)
 - `SirThaddeus.McpServer.exe` (MCP sidecar process)
 - `SirThaddeus.VoiceHost.exe` (voice sidecar process)
 - required runtime DLLs and support files from publish output
@@ -92,7 +92,7 @@ Release packaging now fails if a valid bundled SearXNG payload cannot be staged.
 Run from the publish output folder:
 
 ```powershell
-.\SirThaddeus.UI.Avalonia.exe --headless
+.\Thaddeus.Runtime.exe
 ```
 
 Verify:
@@ -108,7 +108,7 @@ Verify:
 
 Notes:
 
-- Normal user flow is **one-step**: launch `SirThaddeus.UI.Avalonia.exe` only.
+- Normal user flow is **one-step**: launch `Thaddeus.Runtime.exe` only.
 - Do **not** require users to run backend scripts or terminal commands in production.
 
 ## 4) Packaging and release handoff
@@ -137,8 +137,8 @@ Expected release assets:
 
 Every tagged release now builds three packages in parallel:
 
-- `sir-thaddeus-win-x64-<ver>.zip` — Windows (full bundle: UI, voice, SearXNG)
-- `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (headless + Avalonia UI; self-contained, no install needed)
+- `sir-thaddeus-win-x64-<ver>.zip` — Windows (hybrid runtime, voice, MCP, SearXNG)
+- `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (hybrid runtime, MCP, optional VoiceHost)
 - `sir-thaddeus-osx-arm64-<ver>.tar.gz` — macOS Apple Silicon (same; double-click `launch.command`)
 
 Rolling releases now expose the same split by platform:

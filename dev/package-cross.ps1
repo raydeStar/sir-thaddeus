@@ -6,7 +6,7 @@
     Builds a self-contained release package for Linux or macOS.
 
 .DESCRIPTION
-    Publishes the headless runtime, Avalonia UI, and MCP server for the
+    Publishes the hybrid runtime, MCP server, and optional VoiceHost for the
     target RID, stages them, adds launcher scripts, and produces a
     .tar.gz archive + SHA-256 checksum.
 
@@ -133,8 +133,7 @@ Write-Host "  Archive       : $archivePath"
 
 $projects = [ordered]@{
     "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"                   = ""
-    "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj" = "headless"
-    "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"               = ""
+    "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj"                                         = ""
 }
 
 if (-not $LiteBundle.IsPresent) {
@@ -243,17 +242,16 @@ Write-Section "Launcher Scripts"
 
 $targetLinux = $Runtime -in @("linux-x64")
 $targetMacOS = $Runtime -in @("osx-x64", "osx-arm64")
-$uiBinary = "SirThaddeus.UI.Avalonia"  # no .exe on Linux/macOS
+$uiBinary = "Thaddeus.Runtime"  # no .exe on Linux/macOS
 
 if ($targetLinux) {
     $launchContent = (@'
 #!/usr/bin/env bash
 # Sir Thaddeus — Linux launcher
-# Ensures execute permissions and starts the Avalonia UI.
+# Ensures execute permissions and starts the hybrid runtime.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 chmod +x "$SCRIPT_DIR/{{UI}}" 2>/dev/null || true
-chmod +x "$SCRIPT_DIR/headless/SirThaddeus.HeadlessRuntime" 2>/dev/null || true
 chmod +x "$SCRIPT_DIR/SirThaddeus.McpServer" 2>/dev/null || true
 exec "$SCRIPT_DIR/{{UI}}" "$@"
 '@).Replace('{{UI}}', $uiBinary)
@@ -275,7 +273,6 @@ if ($targetMacOS) {
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 chmod +x "$SCRIPT_DIR/{{UI}}" 2>/dev/null || true
-chmod +x "$SCRIPT_DIR/headless/SirThaddeus.HeadlessRuntime" 2>/dev/null || true
 chmod +x "$SCRIPT_DIR/SirThaddeus.McpServer" 2>/dev/null || true
 exec "$SCRIPT_DIR/{{UI}}" "$@"
 '@).Replace('{{UI}}', $uiBinary)
@@ -295,7 +292,6 @@ if (-not $IsWindows_Host) {
 
     $execTargets = @(
         (Join-Path $stageDir $uiBinary),
-        (Join-Path $stageDir "headless/SirThaddeus.HeadlessRuntime"),
         (Join-Path $stageDir "SirThaddeus.McpServer")
     )
 
@@ -326,7 +322,6 @@ Write-Section "Validate Package"
 $requiredEntries = @(
     $uiBinary,
     "SirThaddeus.McpServer",
-    "headless/SirThaddeus.HeadlessRuntime",
     "README_FIRST_RUN.md"
 )
 

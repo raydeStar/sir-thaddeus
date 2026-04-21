@@ -50,20 +50,21 @@ public sealed class JsonFileSettingsStore : ISettingsStore
     public async Task<SettingsDocument> ReplaceAsync(SettingsDocument document, CancellationToken ct)
     {
         if (document is null) throw new ArgumentNullException(nameof(document));
+        var normalized = Normalize(document);
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await WriteAtomicAsync(document, ct).ConfigureAwait(false);
-            _cached = document;
+            await WriteAtomicAsync(normalized, ct).ConfigureAwait(false);
+            _cached = normalized;
         }
         finally { _gate.Release(); }
 
         // Raise the event after lock release so handlers do not run under the gate.
-        Changed?.Invoke(document);
+        Changed?.Invoke(normalized);
         _logger.LogInformation("settings.replaced provider={Provider} model={Model}",
-            document.Llm.Provider, document.Llm.ModelId);
-        return document;
+            normalized.Llm.Provider, normalized.Llm.ModelId);
+        return normalized;
     }
 
     private async Task<SettingsDocument> LoadFromDiskAsync(CancellationToken ct)
@@ -80,7 +81,7 @@ public sealed class JsonFileSettingsStore : ISettingsStore
             var doc = await JsonSerializer
                 .DeserializeAsync<SettingsDocument>(stream, s_jsonOptions, ct)
                 .ConfigureAwait(false);
-            return doc ?? SettingsDocument.Defaults();
+            return Normalize(doc);
         }
         catch (Exception ex)
         {
@@ -104,5 +105,57 @@ public sealed class JsonFileSettingsStore : ISettingsStore
 
         if (File.Exists(_path)) File.Replace(tempPath, _path, destinationBackupFileName: null);
         else File.Move(tempPath, _path);
+    }
+
+    private static SettingsDocument Normalize(SettingsDocument? document)
+    {
+        if (document is null) return SettingsDocument.Defaults();
+
+        var defaults = SettingsDocument.Defaults();
+        var llm = document.Llm ?? defaults.Llm;
+        var voice = document.Voice ?? defaults.Voice;
+        var audio = document.Audio ?? defaults.Audio;
+        var shortcuts = document.Shortcuts ?? defaults.Shortcuts;
+        var privacy = document.Privacy ?? defaults.Privacy;
+        var flags = document.Flags ?? defaults.Flags;
+        var hasLegacyMissingAdvancedLlmFields = llm.MaxTokens <= 0 || llm.ContextWindowTokens <= 0;
+        return document with
+        {
+            Llm = llm with
+            {
+                MaxTokens = llm.MaxTokens > 0 ? llm.MaxTokens : defaults.Llm.MaxTokens,
+                ContextWindowTokens = llm.ContextWindowTokens > 0
+                    ? llm.ContextWindowTokens
+                    : defaults.Llm.ContextWindowTokens,
+                Temperature = llm.Temperature is >= 0 and <= 2
+                    && !(hasLegacyMissingAdvancedLlmFields && llm.Temperature == 0)
+                    ? llm.Temperature
+                    : defaults.Llm.Temperature,
+            },
+            Voice = voice with
+            {
+                SttProvider = string.IsNullOrWhiteSpace(voice.SttProvider)
+                    ? defaults.Voice.SttProvider
+                    : voice.SttProvider,
+                TtsProvider = string.IsNullOrWhiteSpace(voice.TtsProvider)
+                    ? defaults.Voice.TtsProvider
+                    : voice.TtsProvider,
+            },
+            Audio = audio with
+            {
+                InputGain = audio.InputGain is >= 0 and <= 2 ? audio.InputGain : defaults.Audio.InputGain,
+            },
+            Shortcuts = shortcuts with
+            {
+                PushToTalk = string.IsNullOrWhiteSpace(shortcuts.PushToTalk)
+                    ? defaults.Shortcuts.PushToTalk
+                    : shortcuts.PushToTalk,
+                StopAll = string.IsNullOrWhiteSpace(shortcuts.StopAll)
+                    ? defaults.Shortcuts.StopAll
+                    : shortcuts.StopAll,
+            },
+            Privacy = privacy,
+            Flags = flags,
+        };
     }
 }

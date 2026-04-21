@@ -30,9 +30,9 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 > **Heads up — v2 hybrid shell (Phase 1) has landed on `task/hybrid-shell-phase1`.**
 > The new default surface is a single self-contained `Thaddeus.Runtime` binary that
-> hosts a React UI + local API. The Avalonia desktop client and headless runtime in
-> `apps/` are retained as the v1 shell for the legacy harness; they print a warning
-> on startup and will be retired in a follow-up phase. See
+> hosts a React UI + local API. The old Avalonia desktop client has been removed.
+> The legacy terminal runtime in `apps/headless-runtime` remains only for the
+> harness and transitional workflows and will be retired in a follow-up phase. See
 > [docs/hybrid-shell.md](docs/hybrid-shell.md) and [docs/packaging.md](docs/packaging.md).
 
 ---
@@ -124,7 +124,7 @@ Sir Thaddeus does not phone home. Your prompts go to your local model server. Yo
 No cloud account required.
 
 1. Download the latest release from the [Releases page](https://github.com/raydeStar/sir-thaddeus/releases) and unzip the archive
-2. Run `SirThaddeus.exe`  
+2. Run `Thaddeus.Runtime.exe`  
    *Windows SmartScreen may appear — choose **More Info → Run Anyway***
 3. Start [LM Studio](https://lmstudio.ai/) or another OpenAI-compatible local model server
 4. Complete the first-run setup inside the app
@@ -224,9 +224,9 @@ flowchart LR
     Repair[Targeted Repair]
   end
 
-  subgraph frontend [Layer 2: Interface - apps/ui-avalonia + apps/headless-runtime]
-    Tray[System Tray]
-    Overlay[Avalonia UI]
+  subgraph frontend [Layer 2: Interface - src/Thaddeus.Runtime + web + apps/headless-runtime]
+    Overlay[React UI]
+    Runtime[Hybrid Runtime]
     PTT[Audio Input]
     Playback[Audio Playback]
     Palette[Command Palette]
@@ -271,8 +271,8 @@ flowchart LR
   Loop -->|final text| VoiceHost
   VoiceHost -->|audio stream| Playback
 
-  Loop -->|events| Overlay
-  Tray --> Overlay
+  Loop -->|events| Runtime
+  Runtime --> Overlay
 ```
 
 ### Layer Responsibilities
@@ -280,7 +280,7 @@ flowchart LR
 | Layer | Project(s) | Responsibility | Talks to |
 | --- | --- | --- | --- |
 | Layer 1: Loop | `packages/agent` | Route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
-| Layer 2: Interface | `apps/ui-avalonia`, `apps/headless-runtime` | Avalonia UI + terminal runtime entry points | Loop, Voice |
+| Layer 2: Interface | `src/Thaddeus.Runtime`, `web`, `apps/headless-runtime` | Hybrid web runtime + legacy terminal runtime | Loop, Voice |
 | Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
 | Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
 | Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
@@ -295,13 +295,13 @@ flowchart LR
 ```text
 sir-thaddeus/
 |-- apps/
-|   |-- ui-avalonia/
 |   |-- headless-runtime/
 |   |-- voice-host/
 |   |-- voice-backend/
 |   `-- mcp-server/
 |-- assets/
 |-- packages/
+|-- src/
 |-- tests/
 |-- tools/
 |-- Microsoft/
@@ -339,10 +339,10 @@ dotnet test SirThaddeus.sln
 dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
 ```
 
-### Run (Avalonia UI)
+### Run (Hybrid Runtime)
 
 ```bash
-dotnet run --project apps/ui-avalonia/SirThaddeus.UI.Avalonia
+dotnet run --project src/Thaddeus.Runtime
 ```
 
 </details>

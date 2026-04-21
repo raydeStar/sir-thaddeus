@@ -19,7 +19,7 @@ REST + WebSocket API on `127.0.0.1`.
 
 ## What's NOT in v2 yet
 
-These remain in the legacy v1 surface (`apps/ui-avalonia` + `apps/headless-runtime`):
+These remain in the legacy v1 surface (`apps/headless-runtime` and the older harness path):
 
 - The full sprint harness (`tools/SirThaddeus.Harness`) and its stage suites.
 - Push-to-talk system tray + global hotkey ergonomics.
@@ -28,10 +28,9 @@ These remain in the legacy v1 surface (`apps/ui-avalonia` + `apps/headless-runti
 - Diagnostics / audit search panes.
 - Anything that imports `SirThaddeus.Agent.*` or the legacy contracts pipeline.
 
-The v1 apps remain in `SirThaddeus.sln` and continue to build and run; they
-print a startup warning indicating they are the legacy shell. They will be
-formally retired in a follow-up phase once the harness has been re-pointed
-at the hybrid runtime.
+The old Avalonia UI has been removed from the repo. The remaining legacy
+terminal runtime stays only as a transitional harness surface and will be
+retired after the harness fully targets the hybrid runtime.
 
 ## Build & run
 
@@ -82,4 +81,4 @@ auto-update channel).
 - macOS packaging verification (requires Mac host).
 - Default Piper voice bundling.
 - Pro diagnostics surface.
-- Re-point the legacy harness at the hybrid runtime, then retire `apps/ui-avalonia` and `apps/headless-runtime`.
+- Re-point the legacy harness at the hybrid runtime, then retire `apps/headless-runtime`.

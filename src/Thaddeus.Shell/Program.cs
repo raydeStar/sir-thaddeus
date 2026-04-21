@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Thaddeus.Shell.Ipc;
 using Thaddeus.Shell.Platform;
+using Thaddeus.Shell.Platform.Windows;
 using Thaddeus.Shell.Runtime;
 using Thaddeus.Shell.Windows;
 
@@ -32,6 +33,9 @@ public static class Program
 
         var supervisor = new RuntimeProcessSupervisor(loggerFactory.CreateLogger<RuntimeProcessSupervisor>());
         var ipc = new IpcClient(loggerFactory.CreateLogger<IpcClient>());
+        var tray = OperatingSystem.IsWindows()
+            ? (ITrayAdapter)new WindowsTrayAdapter(loggerFactory.CreateLogger<WindowsTrayAdapter>())
+            : new StubTrayAdapter(loggerFactory.CreateLogger<StubTrayAdapter>());
 
         try
         {
@@ -62,6 +66,7 @@ public static class Program
             var workspaceUrl = $"http://127.0.0.1:{lockFile.Port}/";
             var compactUrl = $"http://127.0.0.1:{lockFile.Port}/compact";
             var window = new WorkspaceWindow(loggerFactory.CreateLogger<WorkspaceWindow>());
+            ShellSessionController? shellSession = null;
 
             // Phase 2.4 builds the compact panel launcher; Phase 2.5 wires it to a
             // real Windows global shortcut (Ctrl+Shift+Space → toggle). Other OSes
@@ -71,6 +76,26 @@ public static class Program
                 Environment.GetEnvironmentVariable("THADDEUS_COMPACT_AUTOSHOW"),
                 "1",
                 StringComparison.Ordinal);
+            var startMinimized = string.Equals(
+                Environment.GetEnvironmentVariable("THADDEUS_START_MINIMIZED"),
+                "1",
+                StringComparison.Ordinal);
+
+            async Task RequestStopAllAsync()
+            {
+                try
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                    using var resp = await http.PostAsync(
+                        $"http://127.0.0.1:{lockFile.Port}/api/stop-all",
+                        content: null).ConfigureAwait(false);
+                    log.LogInformation("shell.stop_all status={Status}", (int)resp.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "shell.stop_all.failed");
+                }
+            }
 
             IGlobalShortcutAdapter shortcuts = OperatingSystem.IsWindows()
                 ? new Thaddeus.Shell.Platform.Windows.WindowsGlobalShortcutAdapter(
@@ -86,6 +111,16 @@ public static class Program
                 compactLauncher = new CompactPanelLauncher(
                     surface,
                     loggerFactory.CreateLogger<CompactPanelLauncher>());
+                shellSession = new ShellSessionController(
+                    window,
+                    tray,
+                    RequestStopAllAsync,
+                    loggerFactory.CreateLogger<ShellSessionController>(),
+                    closeCompactWindow: () => compactLauncher?.Close());
+                window.ClosingRequested += shellSession.HandleWorkspaceClosing;
+                using var trayCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                shellSession.InitializeAsync(startMinimized, trayCts.Token).GetAwaiter().GetResult();
+
                 if (autoShowCompact)
                 {
                     log.LogInformation("shell.compact.auto_show");
@@ -103,21 +138,7 @@ public static class Program
                         }
                         else if (id == "stop-all")
                         {
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                                    using var resp = await http.PostAsync(
-                                        $"http://127.0.0.1:{lockFile.Port}/api/stop-all",
-                                        content: null);
-                                    log.LogInformation("shell.stop_all status={Status}", (int)resp.StatusCode);
-                                }
-                                catch (Exception ex)
-                                {
-                                    log.LogWarning(ex, "shell.stop_all.failed");
-                                }
-                            });
+                            _ = RequestStopAllAsync();
                         }
                     };
                     using var registerCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -149,6 +170,7 @@ public static class Program
         }
         finally
         {
+            try { tray.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* drain */ }
             try { ipc.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* drain */ }
             try { supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* drain */ }
         }

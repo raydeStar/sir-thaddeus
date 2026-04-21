@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Diagnose a deployed release build. Run from the directory containing
-    SirThaddeus.UI.Avalonia.exe (the extracted ZIP root).
+    Thaddeus.Runtime.exe (the extracted ZIP root).
 
 .EXAMPLE
     cd C:\path\to\extracted\zip
@@ -24,7 +24,7 @@ function Write-Warn([string]$Msg) { Write-Host "  [WARN] $Msg" -ForegroundColor 
 function Write-Info([string]$Msg) { Write-Host "  $Msg" -ForegroundColor Gray }
 
 function Resolve-UiExecutable([string]$Root) {
-    foreach ($name in @("SirThaddeus.UI.Avalonia.exe")) {
+    foreach ($name in @("Thaddeus.Runtime.exe")) {
         $candidate = Join-Path $Root $name
         if (Test-Path $candidate) { return $candidate }
     }
@@ -67,7 +67,7 @@ if ($uiExecutable) {
     $uiName = [System.IO.Path]::GetFileName($uiExecutable)
     $checks = @(@{ Path = $uiName; Label = "UI executable" }) + $checks
 } else {
-    $checks = @(@{ Path = "SirThaddeus.UI.Avalonia.exe"; Label = "UI executable (expected)" }) + $checks
+    $checks = @(@{ Path = "Thaddeus.Runtime.exe"; Label = "Runtime executable (expected)" }) + $checks
 }
 
 foreach ($check in $checks) {

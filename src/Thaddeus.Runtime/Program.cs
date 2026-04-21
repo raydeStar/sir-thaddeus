@@ -87,35 +87,24 @@ public static class Program
             builder.Services.AddSingleton<IExternalProcessRunner, DefaultExternalProcessRunner>();
             builder.Services.AddSingleton<WhisperCppOptions>(_ =>
                 builder.Configuration.GetSection("Voice:Stt").Get<WhisperCppOptions>() ?? new WhisperCppOptions());
-            builder.Services.AddSingleton<ISpeechToTextProvider>(sp =>
-            {
-                var opts = sp.GetRequiredService<WhisperCppOptions>();
-                if (string.IsNullOrEmpty(opts.BinaryPath) || string.IsNullOrEmpty(opts.ModelPath))
-                {
-                    return new StubSpeechToTextProvider();
-                }
-                return new WhisperCppSpeechToTextProvider(
-                    opts,
+            builder.Services.AddSingleton<StubSpeechToTextProvider>();
+            builder.Services.AddSingleton<WhisperCppSpeechToTextProvider>(sp =>
+                new WhisperCppSpeechToTextProvider(
+                    sp.GetRequiredService<WhisperCppOptions>(),
                     sp.GetRequiredService<IExternalProcessRunner>(),
-                    sp.GetRequiredService<ILogger<WhisperCppSpeechToTextProvider>>());
-            });
-            builder.Services.AddSingleton<ITextToSpeechProvider>(sp =>
-            {
-                var opts = sp.GetRequiredService<PiperOptions>();
-                var player = sp.GetRequiredService<IAudioPlayer>();
-                if (string.IsNullOrEmpty(opts.BinaryPath) || string.IsNullOrEmpty(opts.VoiceModelPath) || !player.IsAvailable)
-                {
-                    return new StubTextToSpeechProvider();
-                }
-                return new PiperTextToSpeechProvider(
-                    opts,
-                    sp.GetRequiredService<IExternalProcessRunner>(),
-                    player,
-                    sp.GetRequiredService<ILogger<PiperTextToSpeechProvider>>());
-            });
+                    sp.GetRequiredService<ILogger<WhisperCppSpeechToTextProvider>>()));
             builder.Services.AddSingleton<IAudioPlayer, DefaultAudioPlayer>();
             builder.Services.AddSingleton<PiperOptions>(_ =>
                 builder.Configuration.GetSection("Voice:Tts").Get<PiperOptions>() ?? new PiperOptions());
+            builder.Services.AddSingleton<StubTextToSpeechProvider>();
+            builder.Services.AddSingleton<PiperTextToSpeechProvider>(sp =>
+                new PiperTextToSpeechProvider(
+                    sp.GetRequiredService<PiperOptions>(),
+                    sp.GetRequiredService<IExternalProcessRunner>(),
+                    sp.GetRequiredService<IAudioPlayer>(),
+                    sp.GetRequiredService<ILogger<PiperTextToSpeechProvider>>()));
+            builder.Services.AddSingleton<ISpeechToTextProvider, SettingsDrivenSpeechToTextProvider>();
+            builder.Services.AddSingleton<ITextToSpeechProvider, SettingsDrivenTextToSpeechProvider>();
             builder.Services.AddSingleton<VoiceModeController>();
             builder.Services.AddSingleton<IThreadStore>(sp =>
             {

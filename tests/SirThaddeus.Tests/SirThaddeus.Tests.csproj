@@ -53,11 +53,4 @@
     </Content>
   </ItemGroup>
 
-    <!-- Compile AttachedDocumentContext directly from the current Avalonia app
-      without pulling in full UI runtime dependencies. -->
-  <ItemGroup>
-      <Compile Include="..\..\apps\ui-avalonia\SirThaddeus.UI.Avalonia\AttachedDocumentContext.cs"
-         Link="Avalonia\AttachedDocumentContext.cs" />
-  </ItemGroup>
-
 </Project>

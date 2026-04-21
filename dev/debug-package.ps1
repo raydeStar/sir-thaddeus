@@ -53,10 +53,10 @@ while ($maxWait -gt 0) {
 
 Write-Host "      Backend logs are now visible in dedicated windows." -ForegroundColor DarkGray
 
-Write-Host "`n[3/3] Starting Packaged UI..." -ForegroundColor Yellow
-$UiExe = Join-Path $StageDir "SirThaddeus.UI.Avalonia.exe"
+Write-Host "`n[3/3] Starting Packaged Runtime..." -ForegroundColor Yellow
+$UiExe = Join-Path $StageDir "Thaddeus.Runtime.exe"
 if (-not (Test-Path $UiExe)) {
-    Write-Host "ERROR: No UI executable found in stage directory." -ForegroundColor Red
+    Write-Host "ERROR: No runtime executable found in stage directory." -ForegroundColor Red
     exit 1
 }
 & "$UiExe"

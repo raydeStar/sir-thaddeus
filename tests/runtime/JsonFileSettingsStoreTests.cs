@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.SharedTypes;
 
@@ -35,7 +36,8 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         var store = NewStore();
         var updated = SettingsDocument.Defaults() with
         {
-            Llm = new LlmSettings("openai", "gpt-4o-mini", "https://api.openai.com", "sk-test"),
+            Llm = new LlmSettings("openai", "gpt-4o-mini", "https://api.openai.com", "sk-test", 4096, 16384, 0.2),
+            Audio = new AudioSettings(false, 1.35),
             Privacy = new PrivacySettings(true, true, false),
         };
 
@@ -74,6 +76,95 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         var doc = await store.GetAsync(CancellationToken.None);
 
         Assert.Equal(SettingsDocument.Defaults(), doc);
+    }
+
+        [Fact]
+        public async Task GetAsync_backfills_new_llm_fields_for_older_files()
+        {
+                var path = Path.Combine(_tempDir, "runtime-settings.json");
+                var legacyLike = """
+                {
+                    "llm": {
+                        "provider": "lmstudio",
+                        "modelId": "auto",
+                        "baseUrl": "http://127.0.0.1:1234/v1",
+                        "apiKey": null
+                    },
+                    "voice": {
+                        "sttProvider": "whisper-cpp",
+                        "ttsProvider": "piper",
+                        "piperVoicePath": null
+                    },
+                    "shortcuts": {
+                        "pushToTalk": "Ctrl+Shift+Space",
+                        "stopAll": "Ctrl+Shift+Esc"
+                    },
+                    "privacy": {
+                        "telemetryEnabled": false,
+                        "allowScreenCapture": false,
+                        "localOnly": true
+                    },
+                    "flags": {
+                        "onboardingCompleted": false
+                    }
+                }
+                """;
+                await File.WriteAllTextAsync(path, legacyLike);
+                var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+                var doc = await store.GetAsync(CancellationToken.None);
+
+                Assert.Equal(SettingsDocument.Defaults().Llm.MaxTokens, doc.Llm.MaxTokens);
+                Assert.Equal(SettingsDocument.Defaults().Llm.ContextWindowTokens, doc.Llm.ContextWindowTokens);
+                Assert.Equal(SettingsDocument.Defaults().Llm.Temperature, doc.Llm.Temperature);
+                Assert.Equal(SettingsDocument.Defaults().Audio.TtsEnabled, doc.Audio.TtsEnabled);
+                Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
+        }
+
+    [Fact]
+    public async Task GetAsync_clamps_invalid_audio_gain()
+    {
+        var path = Path.Combine(_tempDir, "runtime-settings.json");
+        var invalidAudio = """
+        {
+            "llm": {
+                "provider": "lmstudio",
+                "modelId": "auto",
+                "baseUrl": "http://127.0.0.1:1234/v1",
+                "apiKey": null,
+                "maxTokens": 2048,
+                "contextWindowTokens": 8192,
+                "temperature": 0.7
+            },
+            "voice": {
+                "sttProvider": "whisper-cpp",
+                "ttsProvider": "piper",
+                "piperVoicePath": null
+            },
+            "audio": {
+                "ttsEnabled": true,
+                "inputGain": 99
+            },
+            "shortcuts": {
+                "pushToTalk": "Ctrl+Shift+Space",
+                "stopAll": "Ctrl+Shift+Esc"
+            },
+            "privacy": {
+                "telemetryEnabled": false,
+                "allowScreenCapture": false,
+                "localOnly": true
+            },
+            "flags": {
+                "onboardingCompleted": false
+            }
+        }
+        """;
+        await File.WriteAllTextAsync(path, invalidAudio);
+        var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
     }
 
     private JsonFileSettingsStore NewStore() =>

@@ -65,7 +65,17 @@ public class AssistantRouterTests : IDisposable
     }
 
     private static SettingsDocument DocWith(string provider, string? baseUrl = "http://x", string? model = "m")
-        => SettingsDocument.Defaults() with { Llm = new LlmSettings(provider, model ?? string.Empty, baseUrl, null) };
+        => SettingsDocument.Defaults() with
+        {
+            Llm = new LlmSettings(
+                provider,
+                model ?? string.Empty,
+                baseUrl,
+                null,
+                MaxTokens: 2048,
+                ContextWindowTokens: 8192,
+                Temperature: 0.7)
+        };
 
     [Fact]
     public async Task RespondAsync_uses_stub_when_provider_is_stub()

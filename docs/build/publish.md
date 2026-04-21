@@ -1,4 +1,4 @@
-# Build and Publish (Avalonia + Headless)
+# Build and Publish (Hybrid Runtime)
 
 Date: 2026-03-05
 
@@ -24,9 +24,9 @@ dotnet test tests/SirThaddeus.Tests/SirThaddeus.Tests.csproj -m:1 -v m
 ./dev/release-package.ps1
 ```
 
-Default behavior is now **full bundled Windows packaging**:
+Default behavior is now **full bundled packaging**:
 
-- includes Avalonia, the packaged headless runtime, bundled VoiceHost assets, and the bundled SearXNG sidecar
+- includes the hybrid runtime, bundled VoiceHost assets, and the bundled SearXNG sidecar
 - is intended to work as an offline-friendly Windows zip without Docker or a preinstalled local toolchain
 - fails the Release build if a valid `search/` payload cannot be staged
 
@@ -44,15 +44,14 @@ Outputs:
 - Archive checksums: `artifacts/release/sir-thaddeus-win-x64-<version>-<profile>.zip.sha256.txt`
 - Package contents checksum manifest: `artifacts/release/sir-thaddeus-win-x64-<version>-<profile>-contents.sha256.txt`
 
-Primary UI executable in package root:
+Primary executable in package root:
 
-- `SirThaddeus.UI.Avalonia.exe`
+- `Thaddeus.Runtime.exe`
 
 Also included:
 
 - `SirThaddeus.McpServer.exe`
 - `SirThaddeus.VoiceHost.exe`
-- `headless/SirThaddeus.HeadlessRuntime.exe`
 
 ## Package smoke validation
 
@@ -65,7 +64,7 @@ The smoke gate validates:
 - Required executables and assets are present
 - Bundled `uv` + Python + wheelhouse can create a venv and install voice dependencies offline
 - VoiceHost health endpoint responds
-- UI shell launches in smoke mode
+- Hybrid runtime launches cleanly
 - Zip and checksum sidecars stay in sync when run against a packaged archive
 
 ## Cross-platform local packaging
@@ -90,7 +89,7 @@ Outputs go to `artifacts/release/sir-thaddeus-<rid>-<version>-<profile>.*`.
 
 ## Local runner modes
 
-Start Avalonia UI flow:
+Start hybrid runtime flow:
 
 ```powershell
 ./dev/localrunner.ps1
@@ -108,9 +107,9 @@ Every tagged release and manual promote now builds **full + lite packages for ea
 
 | Package | Runner | Format | Contents |
 |---|---|---|---|
-| `sir-thaddeus-win-x64-<ver>-full.zip` + `...-lite.zip` | `windows-latest` | zip | Full: UI + Headless + MCP + VoiceHost + SearXNG + bundled voice/Python; Lite: reduced optional bundled payloads |
-| `sir-thaddeus-linux-x64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `ubuntu-latest` | tar.gz | Full: UI + Headless + MCP + VoiceHost + launcher; Lite: UI + Headless + MCP + launcher |
-| `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `macos-latest` | tar.gz | Full: UI + Headless + MCP + VoiceHost + launcher; Lite: UI + Headless + MCP + launcher |
+| `sir-thaddeus-win-x64-<ver>-full.zip` + `...-lite.zip` | `windows-latest` | zip | Full: Runtime + MCP + VoiceHost + SearXNG + bundled voice/Python; Lite: reduced optional bundled payloads |
+| `sir-thaddeus-linux-x64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `ubuntu-latest` | tar.gz | Full: Runtime + MCP + VoiceHost + launcher; Lite: Runtime + MCP + launcher |
+| `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `macos-latest` | tar.gz | Full: Runtime + MCP + VoiceHost + launcher; Lite: Runtime + MCP + launcher |
 
 All three end up as GitHub Release assets.
 
