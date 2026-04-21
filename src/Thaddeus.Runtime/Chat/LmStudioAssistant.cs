@@ -71,7 +71,12 @@ public sealed class LmStudioAssistant : IAssistant
         "automation (e.g. 'remind me tomorrow at 9 about the meeting', " +
         "'every weekday at 8:15 AM check the weather'), call the " +
         "propose_automation tool with a short name, the ordered steps, and a " +
-        "schedule. Do not try to set reminders with other tools. " +
+        "schedule. Use 'one-shot' only for a single future time. For recurring " +
+        "requests like 'every day', 'daily', 'every weekday', 'every Monday', " +
+        "or 'every month', use a cron schedule instead of one-shot. Do not try " +
+        "to set reminders with other tools. When the user gave an explicit " +
+        "cadence or time, do not omit the schedule. For example, 'every day at " +
+        "9 AM' should be a cron schedule like '0 9 * * *', not manual. " +
 
         // ── Using tool RESULTS (small-model failure mode) ────────────────
         // Small local models sometimes call a second tool and forget to use
@@ -138,7 +143,7 @@ public sealed class LmStudioAssistant : IAssistant
         string fullReply;
         try
         {
-            fullReply = await RunToolLoopAsync(threadId, messageId, llmMessages, toolDefs, ct)
+            fullReply = await RunToolLoopAsync(threadId, messageId, userText, llmMessages, toolDefs, ct)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -213,6 +218,7 @@ public sealed class LmStudioAssistant : IAssistant
     private async Task<string> RunToolLoopAsync(
         string threadId,
         string messageId,
+        string userText,
         List<LlmChatMessage> llmMessages,
         IReadOnlyList<ToolDefinition> toolDefs,
         CancellationToken ct)
@@ -284,7 +290,7 @@ public sealed class LmStudioAssistant : IAssistant
                     // a short confirmation back to the model so it knows the
                     // card is up and it doesn't need to call the tool again.
                     var (summary, proposalError) = await ProposeAutomationTool.HandleAsync(
-                        args, threadId, messageId, activityId, _publisher, ct)
+                        args, threadId, messageId, activityId, _publisher, userText, ct)
                         .ConfigureAwait(false);
                     resultText = summary;
                     ok = proposalError is null;
