@@ -1,8 +1,15 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { PageScaffold } from '../components/PageScaffold';
-import { deleteAutomation, getAutomation, runAutomation } from '../lib/automationsApi';
-import type { Automation } from '@thaddeus/shared-types';
+import { ToolPicker } from '../components/ToolPicker';
+import { SchedulePicker } from '../components/SchedulePicker';
+import {
+  deleteAutomation,
+  getAutomation,
+  runAutomation,
+  updateAutomation,
+} from '../lib/automationsApi';
+import type { Automation, AutomationSchedule } from '@thaddeus/shared-types';
 
 export const Route = createFileRoute('/automations/$id')({
   component: AutomationRoute,
@@ -10,8 +17,10 @@ export const Route = createFileRoute('/automations/$id')({
 
 function AutomationRoute() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const [item, setItem] = useState<Automation | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [savingTools, setSavingTools] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -30,8 +39,8 @@ function AutomationRoute() {
     setBusy(true);
     setError(null);
     try {
-      await runAutomation(id);
-      await load();
+      const result = await runAutomation(id);
+      void navigate({ to: '/chat/$threadId', params: { threadId: result.threadId } });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -50,10 +59,40 @@ function AutomationRoute() {
     }
   };
 
+  // Debounced allowlist save: update local state instantly, persist on change.
+  const onAllowedToolsChange = async (next: string[]) => {
+    if (!item) return;
+    const prior = item;
+    setItem({ ...item, allowedTools: next });
+    setSavingTools(true);
+    try {
+      const updated = await updateAutomation(id, { allowedTools: next });
+      setItem(updated);
+    } catch (e) {
+      setError((e as Error).message);
+      setItem(prior);
+    } finally {
+      setSavingTools(false);
+    }
+  };
+
+  const onScheduleChange = async (next: AutomationSchedule) => {
+    if (!item) return;
+    const prior = item;
+    setItem({ ...item, schedule: next });
+    try {
+      const updated = await updateAutomation(id, { schedule: next });
+      setItem(updated);
+    } catch (e) {
+      setError((e as Error).message);
+      setItem(prior);
+    }
+  };
+
   if (item === undefined) {
     return (
       <PageScaffold testId="route-automation-detail" title="Loading…">
-        <p className="text-sm italic text-slate-500" data-testid="automation-detail-loading">
+        <p className="text-sm italic text-ink-subtle" data-testid="automation-detail-loading">
           Loading…
         </p>
       </PageScaffold>
@@ -62,10 +101,10 @@ function AutomationRoute() {
   if (item === null) {
     return (
       <PageScaffold testId="route-automation-detail" title="Not found">
-        <p className="text-sm text-red-600" data-testid="automation-detail-error">
+        <p className="text-sm text-rose-500" data-testid="automation-detail-error">
           {error ?? 'Automation not found.'}
         </p>
-        <Link to="/automations" className="text-sm underline">
+        <Link to="/automations" className="text-sm text-ink-muted underline hover:text-ink">
           Back to automations
         </Link>
       </PageScaffold>
@@ -78,28 +117,44 @@ function AutomationRoute() {
       title={item.name}
       subtitle={item.description || 'No description.'}
     >
-      <div className="mb-3 text-xs text-slate-500" data-testid="automation-detail-meta">
+      <div className="mb-3 text-xs text-ink-muted" data-testid="automation-detail-meta">
         {item.steps.length} step{item.steps.length === 1 ? '' : 's'}
         {item.lastRunAt ? ` · last run ${new Date(item.lastRunAt).toLocaleString()}` : ' · never run'}
         {item.enabled ? '' : ' · disabled'}
+        {savingTools ? <span className="ml-2 text-accent">· saving…</span> : null}
       </div>
-      <ol className="mb-4 list-decimal space-y-1 pl-5 text-sm text-slate-700" data-testid="automation-detail-steps">
+      <ol className="mb-6 list-decimal space-y-1 pl-5 text-sm text-ink" data-testid="automation-detail-steps">
         {item.steps.map((s, i) => (
           <li key={i}>{s}</li>
         ))}
       </ol>
+
+      <div className="mb-6 border-t border-line pt-6">
+        <ToolPicker
+          value={item.allowedTools ?? []}
+          onChange={onAllowedToolsChange}
+          automationName={item.name}
+          automationDescription={item.description}
+          steps={item.steps}
+        />
+      </div>
+
+      <div className="mb-6 border-t border-line pt-6">
+        <SchedulePicker value={item.schedule} onChange={onScheduleChange} />
+      </div>
+
       {error ? (
-        <p data-testid="automation-detail-error" className="mb-3 text-sm text-red-600">
+        <p data-testid="automation-detail-error" className="mb-3 text-sm text-rose-500">
           {error}
         </p>
       ) : null}
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           data-testid="automation-detail-run"
           onClick={() => void onRun()}
           disabled={!item.enabled || busy}
-          className="rounded-md bg-thaddeus-ink px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? 'Running…' : 'Run now'}
         </button>
@@ -108,11 +163,11 @@ function AutomationRoute() {
           data-testid="automation-detail-delete"
           onClick={() => void onDelete()}
           disabled={busy}
-          className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50"
+          className="rounded-full border border-rose-500/30 px-3 py-1.5 text-sm text-rose-500 transition hover:bg-rose-500/10 disabled:opacity-50"
         >
           Delete
         </button>
-        <Link to="/automations" className="self-center text-sm text-slate-500 underline">
+        <Link to="/automations" className="text-sm text-ink-muted underline hover:text-ink">
           Back
         </Link>
       </div>

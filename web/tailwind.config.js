@@ -1,35 +1,38 @@
+import typography from '@tailwindcss/typography';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Warm-neutral palette, Apple/Anthropic sensibility. Single accent.
+        // Semantic tokens mapped to CSS variables. Dark-mode palette lives in
+        // globals.css and is driven by prefers-color-scheme so nothing else
+        // has to change when the OS flips themes.
         canvas: {
-          DEFAULT: '#FAFAF7',
-          raised: '#FFFFFF',
-          sunken: '#F5F4F0',
+          DEFAULT: 'var(--color-canvas)',
+          raised: 'var(--color-canvas-raised)',
+          sunken: 'var(--color-canvas-sunken)',
         },
         ink: {
-          DEFAULT: '#161514',
-          muted: '#6E6B65',
-          subtle: '#9C988F',
+          DEFAULT: 'var(--color-ink)',
+          muted: 'var(--color-ink-muted)',
+          subtle: 'var(--color-ink-subtle)',
         },
         line: {
-          DEFAULT: '#ECEAE3',
-          strong: '#DAD7CE',
+          DEFAULT: 'var(--color-line)',
+          strong: 'var(--color-line-strong)',
         },
         accent: {
-          DEFAULT: '#1F1E1C',
-          soft: '#F0EDE5',
-          ring: '#1F1E1C',
+          DEFAULT: 'var(--color-accent)',
+          soft: 'var(--color-accent-soft)',
+          ring: 'var(--color-accent-ring)',
         },
-        // Legacy keys kept so older code doesn't break mid-refactor.
         thaddeus: {
-          ink: '#161514',
-          mist: '#F5F4F0',
-          accent: '#1F1E1C',
-          warn: '#B91C1C',
+          ink: 'var(--color-ink)',
+          mist: 'var(--color-canvas-sunken)',
+          accent: 'var(--color-accent)',
+          warn: '#F87171',
         },
       },
       fontFamily: {
@@ -59,7 +62,7 @@ export default {
         tightest: '-0.02em',
       },
       boxShadow: {
-        soft: '0 1px 2px rgba(20, 18, 14, 0.04), 0 0 0 1px rgba(20, 18, 14, 0.04)',
+        soft: '0 1px 2px rgba(20, 18, 14, 0.04), 0 0 0 1px rgba(20, 18, 14, 0.06)',
         lift: '0 6px 24px -8px rgba(20, 18, 14, 0.12), 0 2px 6px rgba(20, 18, 14, 0.04)',
       },
       borderRadius: {
@@ -68,5 +71,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [typography],
 };

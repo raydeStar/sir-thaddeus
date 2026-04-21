@@ -41,3 +41,72 @@ export async function testLlm(input: { baseUrl?: string; apiKey?: string }): Pro
   });
   return asJson<TestLlmResponse>(res);
 }
+
+export interface AudioDeviceInfo {
+  deviceNumber: number;
+  productName: string;
+  displayName: string;
+}
+
+export interface AudioDevicesResponse {
+  inputs: AudioDeviceInfo[];
+  outputs: AudioDeviceInfo[];
+}
+
+export async function getAudioDevices(): Promise<AudioDevicesResponse> {
+  const res = await runtimeFetch(token(), '/api/audio/devices');
+  return asJson<AudioDevicesResponse>(res);
+}
+
+export interface PiperVoiceEntry {
+  voiceId: string;
+  displayName: string;
+  gender: string;
+  quality: string;
+  isInstalled: boolean;
+}
+
+export interface PiperVoicesResponse {
+  voices: PiperVoiceEntry[];
+}
+
+export async function getPiperVoices(): Promise<PiperVoicesResponse> {
+  const res = await runtimeFetch(token(), '/api/voice/piper-voices');
+  return asJson<PiperVoicesResponse>(res);
+}
+
+export interface VoiceHostHealthResponse {
+  ok: boolean;
+  message: string;
+  body?: string | null;
+  elapsedMs: number;
+}
+
+export async function checkVoiceHostHealth(): Promise<VoiceHostHealthResponse> {
+  const res = await runtimeFetch(token(), '/api/voice/host-health');
+  return asJson<VoiceHostHealthResponse>(res);
+}
+
+export interface RuntimeInfo {
+  version: string;
+  port: number;
+  pid: number;
+  startedAt: string;
+  uptimeMs: number;
+  lockFilePath: string;
+  parentPid: number | null;
+  managedByShell: boolean;
+  testMode: boolean;
+}
+
+export async function getRuntimeInfo(): Promise<RuntimeInfo> {
+  const res = await runtimeFetch(token(), '/api/runtime-info');
+  return asJson<RuntimeInfo>(res);
+}
+
+export async function stopRuntime(): Promise<void> {
+  const res = await runtimeFetch(token(), '/api/runtime/stop', { method: 'POST' });
+  if (!res.ok && res.status !== 202) {
+    throw new Error(`runtime ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+  }
+}

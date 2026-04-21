@@ -30,17 +30,16 @@ function ChatListRoute() {
       testId="route-chat"
       title="Chat"
       subtitle="Your conversations with Sir Thaddeus."
-      bare
     >
-      <div className="mb-5 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-ink-subtle" data-testid="chat-thread-count">
+      <div className="mb-8 flex items-center justify-between">
+        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle" data-testid="chat-thread-count">
           {threads.length} {threads.length === 1 ? 'conversation' : 'conversations'}
         </span>
         <button
           type="button"
           onClick={onNew}
           data-testid="chat-new-thread"
-          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
         >
           <Plus className="h-4 w-4" strokeWidth={2} />
           New chat
@@ -49,7 +48,7 @@ function ChatListRoute() {
 
       {loading ? <p className="text-sm text-ink-muted">Loading…</p> : null}
       {error ? (
-        <p className="text-sm text-rose-600" data-testid="chat-error">
+        <p className="text-sm text-rose-500" data-testid="chat-error">
           {error}
         </p>
       ) : null}
@@ -57,7 +56,7 @@ function ChatListRoute() {
       {!loading && threads.length === 0 ? (
         <div
           data-testid="chat-empty"
-          className="surface flex flex-col items-center gap-3 px-6 py-14 text-center"
+          className="flex flex-col items-center gap-3 py-20 text-center"
         >
           <p className="text-base font-medium text-ink">No conversations yet</p>
           <p className="max-w-sm text-sm text-ink-muted">
@@ -66,7 +65,7 @@ function ChatListRoute() {
           <button
             type="button"
             onClick={onNew}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             <Plus className="h-4 w-4" strokeWidth={2} />
             New chat
@@ -76,7 +75,7 @@ function ChatListRoute() {
 
       {threads.length > 0 ? (
         <ul
-          className="surface divide-y divide-line overflow-hidden"
+          className="divide-y divide-line"
           data-testid="chat-thread-list"
         >
           {threads.map((t) => (
@@ -84,11 +83,13 @@ function ChatListRoute() {
               <Link
                 to="/chat/$threadId"
                 params={{ threadId: t.id }}
-                className="block px-4 py-3 transition hover:bg-canvas-sunken"
+                className="block py-4 transition-colors hover:text-accent"
                 data-testid={`chat-thread-${t.id}`}
               >
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="truncate text-sm font-medium text-ink">{t.title}</span>
+                  <span className="truncate text-[15px] font-medium text-ink group-hover:text-accent">
+                    {t.title || 'Untitled conversation'}
+                  </span>
                   <span className="shrink-0 text-[11px] text-ink-subtle">
                     {new Date(t.updatedAt).toLocaleString(undefined, {
                       month: 'short',
@@ -101,7 +102,7 @@ function ChatListRoute() {
                 {t.lastMessagePreview ? (
                   <p className="mt-1 line-clamp-1 text-sm text-ink-muted">{t.lastMessagePreview}</p>
                 ) : (
-                  <p className="mt-1 text-sm italic text-ink-subtle">empty thread</p>
+                  <p className="mt-1 text-sm text-ink-subtle">Empty thread</p>
                 )}
               </Link>
             </li>

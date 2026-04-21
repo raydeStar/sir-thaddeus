@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { PageScaffold } from '../components/PageScaffold';
 import { getDiagnostics } from '../lib/activityApi';
 import type { DiagnosticsResponse } from '@thaddeus/shared-types';
@@ -38,18 +39,19 @@ function DiagnosticsRoute() {
           type="button"
           data-testid="diagnostics-refresh"
           onClick={() => setTick((n) => n + 1)}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft"
         >
+          <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
           Refresh
         </button>
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" data-testid="diagnostics-error">
+        <p className="text-sm text-rose-500" data-testid="diagnostics-error">
           {error}
         </p>
       ) : !data ? (
-        <p className="text-sm italic text-slate-500" data-testid="diagnostics-loading">
+        <p className="text-sm italic text-ink-subtle" data-testid="diagnostics-loading">
           Loading…
         </p>
       ) : (
@@ -85,8 +87,8 @@ function DiagnosticsRoute() {
 function Row({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
     <>
-      <dt className="font-medium text-slate-700">{label}</dt>
-      <dd data-testid={testId} className="text-slate-600 break-all">
+      <dt className="font-medium text-ink">{label}</dt>
+      <dd data-testid={testId} className="text-ink-muted break-all">
         {value}
       </dd>
     </>

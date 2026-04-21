@@ -21,13 +21,13 @@ function CompactRoute() {
   }, [connect, disconnect]);
 
   return (
-    <section data-testid="route-compact" className="flex h-full items-center justify-center bg-thaddeus-mist p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
+    <section data-testid="route-compact" className="flex h-full items-center justify-center bg-canvas-sunken p-4">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-canvas-raised p-6">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-thaddeus-ink">Sir Thaddeus</p>
+          <p className="text-sm font-medium text-ink">Sir Thaddeus</p>
           <RuntimeStateBadge />
         </div>
-        <p className="mt-4 text-xs text-slate-500">Press your global shortcut to start a quick interaction.</p>
+        <p className="mt-4 text-xs text-ink-muted">Press your global shortcut to start a quick interaction.</p>
       </div>
     </section>
   );

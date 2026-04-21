@@ -39,24 +39,24 @@ function ActivityEntryRoute() {
       title={entry?.summary ?? `Activity ${entryId}`}
       subtitle={entry ? `${entry.kind} · ${entry.status}` : 'Loading…'}
     >
-      <div className="mb-4 text-sm">
-        <Link to="/activity" className="text-thaddeus-ink underline">
+      <div className="mb-6 text-sm">
+        <Link to="/activity" className="text-ink-muted hover:text-accent">
           ← Back to activity
         </Link>
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" data-testid="activity-entry-error">
+        <p className="text-sm text-rose-500" data-testid="activity-entry-error">
           {error}
         </p>
       ) : !entry ? (
-        <p className="text-sm italic text-slate-500" data-testid="activity-entry-loading">
+        <p className="text-sm text-ink-muted" data-testid="activity-entry-loading">
           Loading…
         </p>
       ) : (
         <dl
           data-testid="activity-entry-detail"
-          className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm"
+          className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 text-sm"
         >
           <Field label="Id" value={entry.id} testId="activity-entry-id" />
           <Field label="Kind" value={entry.kind} testId="activity-entry-kind" />
@@ -69,12 +69,12 @@ function ActivityEntryRoute() {
           />
           {entry.threadId ? (
             <>
-              <dt className="font-medium text-slate-700">Thread</dt>
+              <dt className="text-ink-muted">Thread</dt>
               <dd>
                 <Link
                   to="/chat/$threadId"
                   params={{ threadId: entry.threadId }}
-                  className="text-thaddeus-ink underline"
+                  className="text-ink hover:text-accent"
                   data-testid="activity-entry-thread-link"
                 >
                   {entry.threadId}
@@ -84,10 +84,10 @@ function ActivityEntryRoute() {
           ) : null}
           {entry.detail ? (
             <>
-              <dt className="font-medium text-slate-700">Detail</dt>
+              <dt className="text-ink-muted">Detail</dt>
               <dd
                 data-testid="activity-entry-detail-text"
-                className="whitespace-pre-wrap text-slate-600"
+                className="whitespace-pre-wrap text-ink"
               >
                 {entry.detail}
               </dd>
@@ -102,8 +102,8 @@ function ActivityEntryRoute() {
 function Field({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
     <>
-      <dt className="font-medium text-slate-700">{label}</dt>
-      <dd data-testid={testId} className="text-slate-600">
+      <dt className="text-ink-muted">{label}</dt>
+      <dd data-testid={testId} className="text-ink">
         {value}
       </dd>
     </>

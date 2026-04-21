@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { RuntimeState, RuntimeStateEvent, RuntimeEvent } from '@thaddeus/shared-types';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
+import { publishWsEvent } from '../lib/wsEvents';
 
 /**
  * Zustand store mirroring the runtime's authoritative state, fed by the WebSocket
@@ -43,9 +44,17 @@ export const useRuntimeStore = create<RuntimeStoreState>((set) => ({
     socket.addEventListener('message', (msg) => {
       try {
         const evt = JSON.parse(msg.data as string) as RuntimeEvent<RuntimeStateEvent>;
+        // Runtime-state slice lives here; everything else goes on the bus.
         if (evt.type === 'runtime.state' && evt.payload) {
           set({ state: evt.payload.state, lastEvent: evt.payload });
         }
+        publishWsEvent({
+          type: evt.type,
+          id: evt.id,
+          timestamp: evt.timestamp,
+          correlationId: evt.correlationId ?? null,
+          payload: evt.payload,
+        });
       } catch {
         // ignore malformed frames; the runtime is the authority
       }

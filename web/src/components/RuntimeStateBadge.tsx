@@ -10,7 +10,7 @@ const stateLabels: Record<string, { label: string; tone: string; dot: string }> 
   Speaking: { label: 'Speaking', tone: 'text-ink', dot: 'bg-emerald-500' },
   Paused: { label: 'Paused', tone: 'text-ink-muted', dot: 'bg-ink-subtle' },
   Stopping: { label: 'Stopping', tone: 'text-ink-muted', dot: 'bg-rose-500' },
-  Error: { label: 'Error', tone: 'text-rose-600', dot: 'bg-rose-500' },
+  Error: { label: 'Error', tone: 'text-rose-500', dot: 'bg-rose-500' },
 };
 
 /** Quiet status pill that mirrors the runtime's authoritative state. */

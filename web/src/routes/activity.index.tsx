@@ -25,21 +25,21 @@ function ActivityRoute() {
       subtitle="Chat turns, voice turns, and automation runs from this runtime."
     >
       {error ? (
-        <p className="mb-3 text-sm text-red-600" data-testid="activity-error">
+        <p className="mb-3 text-sm text-rose-500" data-testid="activity-error">
           {error}
         </p>
       ) : null}
 
       {loading && entries.length === 0 ? (
-        <p className="text-sm italic text-slate-500" data-testid="activity-loading">
+        <p className="text-sm text-ink-muted" data-testid="activity-loading">
           Loading…
         </p>
       ) : entries.length === 0 ? (
-        <p className="text-sm italic text-slate-500" data-testid="activity-empty">
+        <p className="text-sm text-ink-muted" data-testid="activity-empty">
           No activity yet. Send a message to populate the log.
         </p>
       ) : (
-        <ul data-testid="activity-list" className="divide-y divide-slate-100">
+        <ul data-testid="activity-list" className="divide-y divide-line">
           {entries.map((entry) => (
             <ActivityRow key={entry.id} entry={entry} />
           ))}
@@ -55,18 +55,20 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
       data-testid={`activity-row-${entry.id}`}
       data-status={entry.status}
       data-kind={entry.kind}
-      className="py-3"
+      className="group py-3.5"
     >
       <Link
         to="/activity/$entryId"
         params={{ entryId: entry.id }}
-        className="flex items-start justify-between gap-3 hover:bg-slate-50"
+        className="flex items-start justify-between gap-3 transition-colors hover:text-accent"
       >
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-thaddeus-ink">{entry.summary}</p>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <p className="truncate text-[15px] font-medium text-ink group-hover:text-accent">
+            {entry.summary}
+          </p>
+          <p className="mt-0.5 text-xs text-ink-muted">
             <span data-testid={`activity-row-${entry.id}-kind`}>{entry.kind}</span>
-            {' · '}
+            <span className="mx-1.5">·</span>
             <time dateTime={entry.startedAt}>{formatTime(entry.startedAt)}</time>
           </p>
         </div>
@@ -77,29 +79,30 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
 }
 
 function StatusBadge({ status }: { status: ActivityStatus }) {
-  const tone = badgeTone(status);
+  const { dot, label } = badgeTone(status);
   return (
     <span
       data-testid={`activity-status-${status}`}
-      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-[11px] font-medium text-ink-muted"
     >
-      {status}
+      <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
+      {label}
     </span>
   );
 }
 
-function badgeTone(status: ActivityStatus): string {
+function badgeTone(status: ActivityStatus): { dot: string; label: string } {
   switch (status) {
     case 'Running':
-      return 'bg-amber-100 text-amber-800';
+      return { dot: 'bg-amber-500', label: status };
     case 'Ok':
-      return 'bg-emerald-100 text-emerald-800';
+      return { dot: 'bg-emerald-500', label: status };
     case 'Failed':
-      return 'bg-red-100 text-red-800';
+      return { dot: 'bg-rose-500', label: status };
     case 'Cancelled':
-      return 'bg-slate-200 text-slate-700';
+      return { dot: 'bg-ink-subtle', label: status };
     default:
-      return 'bg-slate-100 text-slate-700';
+      return { dot: 'bg-ink-subtle', label: String(status) };
   }
 }
 

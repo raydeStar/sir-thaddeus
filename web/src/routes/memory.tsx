@@ -8,6 +8,9 @@ export const Route = createFileRoute('/memory')({
   component: MemoryRoute,
 });
 
+const inputCls =
+  'block w-full rounded-xl border border-line bg-canvas-raised px-3 py-2 text-sm text-ink placeholder:text-ink-subtle shadow-soft focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+
 function MemoryRoute() {
   const [memos, setMemos] = useState<Memo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,14 +76,18 @@ function MemoryRoute() {
       title="Memory"
       subtitle="Saved facts, preferences, and context. You stay in control."
     >
-      <form onSubmit={onCreate} data-testid="memo-create-form" className="mb-6 space-y-2 rounded-md border border-slate-200 p-3">
+      <form
+        onSubmit={onCreate}
+        data-testid="memo-create-form"
+        className="mb-10 space-y-3 rounded-2xl border border-line bg-canvas-raised p-5"
+      >
         <input
           type="text"
           data-testid="memo-create-title"
           placeholder="Title"
           value={draftTitle}
           onChange={(e) => setDraftTitle(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          className={inputCls}
         />
         <textarea
           data-testid="memo-create-body"
@@ -88,7 +95,7 @@ function MemoryRoute() {
           value={draftBody}
           onChange={(e) => setDraftBody(e.target.value)}
           rows={3}
-          className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          className={inputCls}
         />
         <input
           type="text"
@@ -96,52 +103,58 @@ function MemoryRoute() {
           placeholder="Comma-separated tags"
           value={draftTags}
           onChange={(e) => setDraftTags(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          className={inputCls}
         />
         <button
           type="submit"
           data-testid="memo-create-submit"
           disabled={busy || !draftTitle.trim()}
-          className="rounded-md bg-thaddeus-ink px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? 'Saving…' : 'Add memo'}
         </button>
       </form>
 
       {error ? (
-        <p data-testid="memo-error" className="mb-3 text-sm text-red-600">
+        <p data-testid="memo-error" className="mb-3 text-sm text-rose-500">
           {error}
         </p>
       ) : null}
 
       {memos === null ? (
-        <p className="text-sm italic text-slate-500" data-testid="memo-loading">
+        <p className="text-sm italic text-ink-subtle" data-testid="memo-loading">
           Loading…
         </p>
       ) : memos.length === 0 ? (
-        <p className="text-sm text-slate-500" data-testid="memo-empty">
+        <p className="text-sm text-ink-muted" data-testid="memo-empty">
           No memos yet. Add one above.
         </p>
       ) : (
         <ul data-testid="memo-list" className="space-y-3">
           {memos.map((m) => (
-            <li key={m.id} data-testid={`memo-item-${m.id}`} className="rounded-md border border-slate-200 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-thaddeus-ink">
+            <li
+              key={m.id}
+              data-testid={`memo-item-${m.id}`}
+              className="rounded-2xl border border-line bg-canvas-raised p-5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-ink">
                     {m.pinned ? '📌 ' : ''}
                     {m.title}
                   </h3>
                   {m.tags.length > 0 ? (
-                    <p className="text-xs text-slate-500">{m.tags.map((t) => `#${t}`).join(' ')}</p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      {m.tags.map((t) => `#${t}`).join(' ')}
+                    </p>
                   ) : null}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
                     data-testid={`memo-pin-${m.id}`}
                     onClick={() => void onTogglePin(m)}
-                    className="rounded-md border border-slate-300 px-2 py-0.5 text-xs"
+                    className="rounded-full border border-line bg-canvas-raised px-2.5 py-1 text-xs text-ink-muted transition hover:bg-accent-soft hover:text-ink"
                   >
                     {m.pinned ? 'Unpin' : 'Pin'}
                   </button>
@@ -149,14 +162,14 @@ function MemoryRoute() {
                     type="button"
                     data-testid={`memo-delete-${m.id}`}
                     onClick={() => void onDelete(m)}
-                    className="rounded-md border border-red-300 px-2 py-0.5 text-xs text-red-700"
+                    className="rounded-full border border-rose-500/30 px-2.5 py-1 text-xs text-rose-500 transition hover:bg-rose-500/10"
                   >
                     Delete
                   </button>
                 </div>
               </div>
               {m.body ? (
-                <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{m.body}</pre>
+                <pre className="mt-2 whitespace-pre-wrap text-xs text-ink-muted">{m.body}</pre>
               ) : null}
             </li>
           ))}
