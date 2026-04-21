@@ -118,6 +118,11 @@ public sealed class JsonFileSettingsStore : ISettingsStore
         var shortcuts = document.Shortcuts ?? defaults.Shortcuts;
         var privacy = document.Privacy ?? defaults.Privacy;
         var flags = document.Flags ?? defaults.Flags;
+        var location = document.Location ?? defaults.Location!;
+        var limits = document.Limits ?? defaults.Limits!;
+        var uiPrefs = document.UiPrefs ?? defaults.UiPrefs!;
+        var permissions = document.Permissions ?? defaults.Permissions!;
+        var files = document.Files ?? defaults.Files!;
         var hasLegacyMissingAdvancedLlmFields = llm.MaxTokens <= 0 || llm.ContextWindowTokens <= 0;
         return document with
         {
@@ -156,6 +161,78 @@ public sealed class JsonFileSettingsStore : ISettingsStore
             },
             Privacy = privacy,
             Flags = flags,
+            Location = location with
+            {
+                PreferredUnits = string.IsNullOrWhiteSpace(location.PreferredUnits)
+                    ? defaults.Location!.PreferredUnits
+                    : location.PreferredUnits,
+            },
+            Limits = limits with
+            {
+                MaxToolCallsPerTurn = limits.MaxToolCallsPerTurn > 0
+                    ? limits.MaxToolCallsPerTurn
+                    : defaults.Limits!.MaxToolCallsPerTurn,
+                MaxToolCallsPerSession = limits.MaxToolCallsPerSession > 0
+                    ? limits.MaxToolCallsPerSession
+                    : defaults.Limits!.MaxToolCallsPerSession,
+                MaxWebPullsPerTurn = limits.MaxWebPullsPerTurn > 0
+                    ? limits.MaxWebPullsPerTurn
+                    : defaults.Limits!.MaxWebPullsPerTurn,
+                MaxFileOpsPerMinute = limits.MaxFileOpsPerMinute > 0
+                    ? limits.MaxFileOpsPerMinute
+                    : defaults.Limits!.MaxFileOpsPerMinute,
+            },
+            UiPrefs = uiPrefs,
+            Permissions = permissions with
+            {
+                DeveloperOverride = NormalizeOverride(permissions.DeveloperOverride),
+                Screen = NormalizePolicy(permissions.Screen, defaults.Permissions!.Screen),
+                Files = NormalizePolicy(permissions.Files, defaults.Permissions!.Files),
+                System = NormalizePolicy(permissions.System, defaults.Permissions!.System),
+                Web = NormalizePolicy(permissions.Web, defaults.Permissions!.Web),
+                MemoryRead = NormalizePolicy(permissions.MemoryRead, defaults.Permissions!.MemoryRead),
+                MemoryWrite = NormalizePolicy(permissions.MemoryWrite, defaults.Permissions!.MemoryWrite),
+            },
+            Files = files with
+            {
+                AllowedRoots = NormalizeAllowedRoots(files.AllowedRoots),
+                MaxDefaultCharsPerRead = files.MaxDefaultCharsPerRead > 0
+                    ? files.MaxDefaultCharsPerRead
+                    : defaults.Files!.MaxDefaultCharsPerRead,
+            },
         };
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedRoots(IReadOnlyList<string>? roots)
+    {
+        if (roots is null || roots.Count == 0) return Array.Empty<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>(roots.Count);
+        foreach (var raw in roots)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            try
+            {
+                var full = Path.GetFullPath(raw.Trim());
+                if (seen.Add(full)) result.Add(full);
+            }
+            catch
+            {
+                // Skip malformed paths silently — the UI validates on write.
+            }
+        }
+        return result;
+    }
+
+    private static string NormalizePolicy(string? value, string fallback)
+    {
+        var v = (value ?? "").Trim().ToLowerInvariant();
+        return v is "off" or "ask" or "always" ? v : fallback;
+    }
+
+    private static string NormalizeOverride(string? value)
+    {
+        var v = (value ?? "").Trim().ToLowerInvariant();
+        return v is "none" or "off" or "ask" or "always" ? v : "none";
     }
 }

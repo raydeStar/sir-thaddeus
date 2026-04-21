@@ -23,45 +23,17 @@ public static class FileTools
     };
     private static readonly DocumentReaderFactory DocumentReaderFactory = new();
 
-    [McpServerTool, Description("Read the contents of a file at the specified path.")]
+    [McpServerTool, Description(
+        "Read a local file and return clean text. Auto-detects format by " +
+        "extension and routes through the right reader: PDF and DOCX get " +
+        "layout-aware text extraction; XLSX and CSV come back as tab-separated " +
+        "rows; RTF is stripped to plain text; Markdown and .txt pass through. " +
+        "Any other text-based file (JSON, YAML, source code, logs) is read " +
+        "as UTF-8. Output is a small JSON envelope with format metadata + " +
+        "the text content, truncated at a character cap.")]
     public static async Task<string> FileRead(
         [Description("Absolute or relative path to the file")] string path,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return "Error: path is required.";
-
-        try
-        {
-            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
-            if (resolutionError is not null)
-                return resolutionError;
-
-            var fullPath = resolvedPath!;
-            var accessError = ValidatePathAccess(fullPath);
-            if (accessError is not null)
-                return accessError;
-
-            if (!File.Exists(fullPath))
-                return $"Error: File not found at '{fullPath}'.";
-
-            var info = new FileInfo(fullPath);
-            if (info.Length > 1_048_576) // 1 MB safety limit
-                return $"Error: File is too large ({info.Length:N0} bytes). Max is 1 MB.";
-
-            var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
-            return content;
-        }
-        catch (Exception ex)
-        {
-            return $"Error reading file: {ex.Message}";
-        }
-    }
-
-    [McpServerTool, Description("Read and extract text from local document formats: PDF, DOCX, XLSX, CSV, RTF, Markdown, and plain text.")]
-    public static async Task<string> DocumentRead(
-        [Description("Absolute or relative path to the local document")] string path,
-        [Description("Maximum number of characters to return (default from settings, fallback 4000)")] int maxChars = 0,
+        [Description("Maximum characters returned before truncation (default from settings, fallback 4000)")] int maxChars = 0,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -84,16 +56,28 @@ public static class FileTools
             if (!File.Exists(fullPath))
                 return $"Error: File not found at '{fullPath}'.";
 
-            var allowedExtensions = ParseAllowedExtensionsEnv(
-                "ST_DOCUMENT_READER_ALLOWED_EXTENSIONS",
-                [".pdf", ".docx", ".xlsx", ".csv", ".rtf", ".md", ".txt"]);
-            var extension = Path.GetExtension(fullPath).ToLowerInvariant();
-            if (!allowedExtensions.Contains(extension))
-                return $"Error: Extension '{extension}' is not allowed. Allowed: {string.Join(", ", allowedExtensions)}";
-
             var info = new FileInfo(fullPath);
-            if (info.Length > 10_485_760) // 10 MB safety limit
+            if (info.Length > 10_485_760) // 10 MB safety limit — covers typical docs.
                 return $"Error: File is too large ({info.Length:N0} bytes). Max is 10 MB.";
+
+            // Optional env-backed extension allowlist. When unset, every
+            // extension is allowed — the reader factory falls back to a
+            // plain-UTF-8 read for unknown types, which keeps source-code
+            // and config-file reads working. Set the env var to constrain.
+            var allowlistRaw = Environment.GetEnvironmentVariable("ST_DOCUMENT_READER_ALLOWED_EXTENSIONS");
+            if (!string.IsNullOrWhiteSpace(allowlistRaw))
+            {
+                var allowedExtensions = ParseAllowedExtensionsEnv(
+                    "ST_DOCUMENT_READER_ALLOWED_EXTENSIONS",
+                    // Broad defaults if the env is set but empty after parsing.
+                    [".pdf", ".docx", ".xlsx", ".csv", ".rtf", ".md", ".txt",
+                     ".json", ".yaml", ".yml", ".xml", ".html", ".htm",
+                     ".log", ".ini", ".toml", ".env",
+                     ".cs", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".rb", ".sh", ".ps1"]);
+                var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+                if (!allowedExtensions.Contains(extension))
+                    return $"Error: Extension '{extension}' is not allowed by settings. Allowed: {string.Join(", ", allowedExtensions)}";
+            }
 
             var content = await DocumentReaderFactory.ReadAsync(fullPath, cancellationToken);
             var truncated = DocumentTruncator.TruncateWithNotice(content.TextContent, maxChars);
@@ -112,7 +96,7 @@ public static class FileTools
         }
         catch (Exception ex)
         {
-            return $"Error reading document: {ex.Message}";
+            return $"Error reading file: {ex.Message}";
         }
     }
 
@@ -178,7 +162,7 @@ public static class FileTools
         if (!TryGetPreview(previewId, "file_read", out var preview))
             return BuildError("preview_not_found_or_expired");
 
-        var result = await FileRead(preview!.FullPath, cancellationToken);
+        var result = await FileRead(preview!.FullPath, maxChars: 0, cancellationToken);
         return JsonSerializer.Serialize(new
         {
             ok = !result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase),

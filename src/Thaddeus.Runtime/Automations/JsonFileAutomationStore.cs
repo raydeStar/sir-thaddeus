@@ -55,6 +55,8 @@ public sealed class JsonFileAutomationStore : IAutomationStore, IDisposable
         string description,
         IReadOnlyList<string> steps,
         bool enabled,
+        IReadOnlyList<string>? allowedTools,
+        AutomationSchedule? schedule,
         CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -68,7 +70,9 @@ public sealed class JsonFileAutomationStore : IAutomationStore, IDisposable
             Enabled: enabled,
             CreatedAt: now,
             UpdatedAt: now,
-            LastRunAt: null);
+            LastRunAt: null,
+            AllowedTools: NormalizeAllowedTools(allowedTools),
+            Schedule: ScheduleMath.Normalize(schedule, now));
 
         var gate = LockFor(item.Id);
         await gate.WaitAsync(ct).ConfigureAwait(false);
@@ -89,6 +93,8 @@ public sealed class JsonFileAutomationStore : IAutomationStore, IDisposable
         string? description,
         IReadOnlyList<string>? steps,
         bool? enabled,
+        IReadOnlyList<string>? allowedTools,
+        AutomationSchedule? schedule,
         CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -97,12 +103,47 @@ public sealed class JsonFileAutomationStore : IAutomationStore, IDisposable
         try
         {
             if (!_items.TryGetValue(id, out var current)) return null;
+            var now = DateTimeOffset.UtcNow;
             var updated = current with
             {
                 Name = name is not null ? NormalizeName(name) : current.Name,
                 Description = description ?? current.Description,
                 Steps = steps is not null ? NormalizeSteps(steps) : current.Steps,
                 Enabled = enabled ?? current.Enabled,
+                // AllowedTools uses null to mean "don't change"; empty array
+                // means "clear the allowlist" — the caller distinguishes.
+                AllowedTools = allowedTools is not null
+                    ? NormalizeAllowedTools(allowedTools)
+                    : current.AllowedTools,
+                Schedule = schedule is not null
+                    ? ScheduleMath.Normalize(schedule, now)
+                    : current.Schedule,
+                UpdatedAt = now,
+            };
+            _items[id] = updated;
+            await WriteAsync(updated, ct).ConfigureAwait(false);
+            return updated;
+        }
+        finally { gate.Release(); }
+    }
+
+    public async Task<Automation?> RecordScheduleFiredAsync(string id, DateTimeOffset firedAt, CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        var gate = LockFor(id);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_items.TryGetValue(id, out var current) || current.Schedule is null) return null;
+            var rolled = ScheduleMath.RecordFired(current.Schedule, firedAt);
+            // One-shot transitions to "off" — also flip the automation's
+            // enabled flag if that was the intent (one-shot implies run once).
+            var nextEnabled = current.Enabled && rolled.Kind != "off" || current.Enabled;
+            // Actually: keep Enabled as-is. One-shot firing just clears NextRunAt.
+            var updated = current with
+            {
+                Schedule = rolled,
+                LastRunAt = firedAt,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             _items[id] = updated;
@@ -212,6 +253,17 @@ public sealed class JsonFileAutomationStore : IAutomationStore, IDisposable
         return steps
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Select(s => s.Trim())
+            .Take(64)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedTools(IReadOnlyList<string>? tools)
+    {
+        if (tools is null) return Array.Empty<string>();
+        return tools
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(64)
             .ToArray();
     }

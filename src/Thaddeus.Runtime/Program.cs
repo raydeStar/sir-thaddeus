@@ -12,9 +12,12 @@ using Thaddeus.Runtime.Ipc;
 using Thaddeus.Runtime.Memory;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
+using Thaddeus.Runtime.Tools;
 using Thaddeus.Runtime.Voice;
 using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
+using SirThaddeus.Agent;
+using SirThaddeus.AuditLog;
 
 namespace Thaddeus.Runtime;
 
@@ -146,6 +149,23 @@ public static class Program
                     dir,
                     sp.GetRequiredService<ILogger<JsonFileAutomationStore>>());
             });
+            builder.Services.AddSingleton<AutomationRunner>();
+            builder.Services.AddHostedService<AutomationScheduler>();
+            // MCP tool client. Spawns the SirThaddeus.McpServer child process,
+            // handshakes asynchronously, and exposes IMcpToolClient to the
+            // assistant. Registered as singleton + hosted so DI consumers get
+            // the same instance and shutdown disposes the child cleanly.
+            var auditPath = Path.Combine(
+                Path.GetDirectoryName(options.LockFilePath)!, "logs", "audit.jsonl");
+            Directory.CreateDirectory(Path.GetDirectoryName(auditPath)!);
+            builder.Services.AddSingleton<IAuditLogger>(_ => new JsonLineAuditLogger(auditPath));
+            builder.Services.AddSingleton<McpClientHost>();
+            builder.Services.AddSingleton<IMcpToolClient>(sp => sp.GetRequiredService<McpClientHost>());
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<McpClientHost>());
+
+            // Gate that wraps every MCP call with the user's permission policy.
+            builder.Services.AddSingleton<ToolPermissionGate>();
+
             builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
@@ -221,6 +241,9 @@ public static class Program
             app.MapSettingsApi();
             app.MapMemoryApi();
             app.MapAutomationsApi();
+            app.MapAudioApi();
+            app.MapVoiceApi();
+            app.MapPermissionsApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);

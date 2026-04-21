@@ -27,6 +27,8 @@ public sealed class JsonFileAutomationStoreTests : IDisposable
             "Summarise yesterday's notes",
             new[] { "  list yesterday's memos  ", "", "summarise into 5 bullets" },
             enabled: true,
+            allowedTools: null,
+            schedule: null,
             CancellationToken.None);
 
         Assert.StartsWith("auto_", auto.Id);
@@ -44,7 +46,7 @@ public sealed class JsonFileAutomationStoreTests : IDisposable
     public async Task RecordRun_stamps_LastRunAt()
     {
         var store = NewStore();
-        var auto = await store.CreateAsync("x", "", new[] { "go" }, true, CancellationToken.None);
+        var auto = await store.CreateAsync("x", "", new[] { "go" }, true, allowedTools: null, schedule: null, CancellationToken.None);
 
         var stamped = await store.RecordRunAsync(auto.Id, CancellationToken.None);
 
@@ -57,9 +59,9 @@ public sealed class JsonFileAutomationStoreTests : IDisposable
     public async Task Update_partial_keeps_unchanged_fields()
     {
         var store = NewStore();
-        var auto = await store.CreateAsync("orig", "desc", new[] { "a", "b" }, true, CancellationToken.None);
+        var auto = await store.CreateAsync("orig", "desc", new[] { "a", "b" }, true, allowedTools: null, schedule: null, CancellationToken.None);
 
-        var updated = await store.UpdateAsync(auto.Id, name: "renamed", description: null, steps: null, enabled: false, CancellationToken.None);
+        var updated = await store.UpdateAsync(auto.Id, name: "renamed", description: null, steps: null, enabled: false, allowedTools: null, schedule: null, CancellationToken.None);
 
         Assert.NotNull(updated);
         Assert.Equal("renamed", updated!.Name);
@@ -72,9 +74,9 @@ public sealed class JsonFileAutomationStoreTests : IDisposable
     public async Task List_orders_recent_first()
     {
         var store = NewStore();
-        var a = await store.CreateAsync("A", "", new[] { "s" }, true, CancellationToken.None);
+        var a = await store.CreateAsync("A", "", new[] { "s" }, true, allowedTools: null, schedule: null, CancellationToken.None);
         await Task.Delay(15);
-        var b = await store.CreateAsync("B", "", new[] { "s" }, true, CancellationToken.None);
+        var b = await store.CreateAsync("B", "", new[] { "s" }, true, allowedTools: null, schedule: null, CancellationToken.None);
 
         var list = await store.ListAsync(CancellationToken.None);
         Assert.Equal(new[] { b.Id, a.Id }, list.Select(x => x.Id).ToArray());
@@ -84,7 +86,7 @@ public sealed class JsonFileAutomationStoreTests : IDisposable
     public async Task Delete_removes_and_returns_false_second_time()
     {
         var store = NewStore();
-        var auto = await store.CreateAsync("temp", "", new[] { "s" }, true, CancellationToken.None);
+        var auto = await store.CreateAsync("temp", "", new[] { "s" }, true, allowedTools: null, schedule: null, CancellationToken.None);
 
         Assert.True(await store.DeleteAsync(auto.Id, CancellationToken.None));
         Assert.False(await store.DeleteAsync(auto.Id, CancellationToken.None));

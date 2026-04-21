@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Hosting;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Voice;
@@ -30,6 +31,40 @@ public static class StateApi
             startedAt = opts.StartedAt,
         }))
             .WithName("GetHealth");
+
+        // Enriched info for the Settings > General "System Status" card. Tells the
+        // UI whether this runtime was spawned by a managing shell (ParentPid != null)
+        // so the controls can show "Managed runtime: running" vs "Unmanaged".
+        app.MapGet("/api/runtime-info", (Hosting.RuntimeOptions opts) =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            return Results.Json(new
+            {
+                version = opts.Version,
+                port = opts.Port,
+                pid = opts.Pid,
+                startedAt = opts.StartedAt,
+                uptimeMs = (long)(now - opts.StartedAt).TotalMilliseconds,
+                lockFilePath = opts.LockFilePath,
+                parentPid = opts.ParentPid,
+                managedByShell = opts.ParentPid.HasValue,
+                testMode = opts.TestMode,
+            });
+        })
+            .WithName("GetRuntimeInfo");
+
+        // Graceful shutdown trigger. The shell already drives shutdown via IPC; this
+        // exposes the same capability to the web UI's "Stop managed runtime" button.
+        app.MapPost("/api/runtime/stop", (IHostApplicationLifetime lifetime) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(150).ConfigureAwait(false);
+                lifetime.StopApplication();
+            });
+            return Results.Accepted(value: new { status = "stopping" });
+        })
+            .WithName("StopRuntime");
 
         // Phase 2.6 stop-all panic button. Cancels any in-flight STT/TTS and drives
         // the state machine through Stopping → Idle. The shell hits this endpoint

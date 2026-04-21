@@ -16,6 +16,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
     <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <!-- MCP tool-calling stack. Agent gives us IMcpToolClient; RuntimeHost gives
+         us the stdio client + the MCP server path resolver. AuditLog is a
+         transitive requirement of StdioMcpToolClient. -->
+    <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
+    <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
+    <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +29,8 @@
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="NUlid" Version="1.7.2" />
+    <!-- Cron parser used by the automation scheduler. Handles DST + IANA timezones. -->
+    <PackageReference Include="Cronos" Version="0.11.0" />
   </ItemGroup>
 
   <ItemGroup>
