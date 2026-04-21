@@ -692,6 +692,156 @@ public class ToolLoopExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenSuccessfulWebResultsAreFollowedByUnavailableDraft_RetriesSynthesisWithoutTools()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"microservices vs monolith"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            if (llmCallCount == 2)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "For a 5-developer startup, a monolith is usually the better starting point because deployment complexity and debugging stay simpler, while microservices pay off later when independent scalability matters.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 3 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Compare microservices vs monolithic architecture for a 5-developer startup.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, llmCallCount);
+        Assert.DoesNotContain("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("monolith", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("startup", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenSuccessfulWebResultsAreFollowedByTimeoutDraft_RetriesSynthesisWithoutTools()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            if (llmCallCount == 1)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = """{"query":"microservices vs monolith"}"""
+                            }
+                        }
+                    ]
+                };
+            }
+
+            if (llmCallCount == 2)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "For a small startup, start with a monolith unless you already have strong operational need for independent service scaling, because deployment and debugging remain much simpler.",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 3 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Compare microservices vs monolithic architecture for a 5-developer startup.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, llmCallCount);
+        Assert.DoesNotContain("timeout", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("monolith", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("startup", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenExplicitWebToolTimesOutWithPlainTextError_ReturnsDeterministicTimeoutMessage()
     {
         var llmCallCount = 0;

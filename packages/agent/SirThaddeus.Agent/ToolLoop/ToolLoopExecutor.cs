@@ -68,6 +68,18 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             if (response.IsComplete || response.ToolCalls is not { Count: > 0 })
             {
                 var text = request.SanitizeAssistantText(response.Content ?? "[No response]");
+
+                if (ShouldRepairBrokenWebSynthesis(text, request.ToolCallsMade, request.History))
+                {
+                    var repairedResponse = await TryRepairSuccessfulWebSynthesisAsync(
+                        request,
+                        roundTrips,
+                        log,
+                        cancellationToken);
+                    if (repairedResponse is not null)
+                        return repairedResponse;
+                }
+
                 request.History.Add(ChatMessage.Assistant(text));
                 log("AGENT_RESPONSE", text);
 
@@ -586,6 +598,103 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                normalized.Contains("resolve_timezone", StringComparison.Ordinal) ||
                normalized.Contains("time_now", StringComparison.Ordinal) ||
                normalized.Contains("holidays_", StringComparison.Ordinal);
+    }
+
+    private static bool ShouldRepairBrokenWebSynthesis(
+        string text,
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        IReadOnlyList<ChatMessage> history)
+    {
+        if (!IsBrokenWebOutcomeAssistantText(text))
+            return false;
+
+        var webCalls = toolCallsMade.Where(call => IsWebFamilyToolName(call.ToolName)).ToList();
+        if (webCalls.Count == 0)
+            return false;
+
+        var latestUserMessage = history
+            .LastOrDefault(message =>
+                message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(message.Content))
+            ?.Content;
+        if (!string.IsNullOrWhiteSpace(latestUserMessage) &&
+            IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(
+                latestUserMessage.Trim().ToLowerInvariant()))
+        {
+            return true;
+        }
+
+        return webCalls.Any(call =>
+            IsWebFamilyToolName(call.ToolName) &&
+            call.Success &&
+            !LooksLikeStructuredError(call.Result) &&
+            !LooksLikeNoResultsPayload(call.Result));
+    }
+
+    private static bool IsBrokenWebOutcomeAssistantText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim();
+        return string.Equals(
+                   trimmed,
+                   ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                   StringComparison.Ordinal) ||
+               string.Equals(
+                   trimmed,
+                   ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                   StringComparison.Ordinal) ||
+               trimmed.StartsWith(
+                   "The requested tool is currently unavailable right now.",
+                   StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(
+                   "I hit a timeout while running web tools",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<AgentResponse?> TryRepairSuccessfulWebSynthesisAsync(
+        ToolLoopExecutionRequest request,
+        int roundTrips,
+        Action<string, string> log,
+        CancellationToken cancellationToken)
+    {
+        var repairMessages = request.History.ToList();
+        repairMessages.Insert(0, ChatMessage.System(
+            "You already have successful web tool results in the conversation history. " +
+            "A prior draft incorrectly claimed the tool was unavailable. " +
+            "Ignore that mistake and answer using the retrieved tool results already present. " +
+            "Do not mention tool availability, retries, permissions, network status, or internet access. " +
+            "Do not call tools."));
+
+        LlmResponse repairedDraft;
+        try
+        {
+            repairedDraft = await _llm.ChatAsync(repairMessages, tools: null, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            log("AGENT_WEB_SYNTHESIS_REPAIR_FAILED", ex.Message);
+            return null;
+        }
+
+        var repairedText = request.SanitizeAssistantText(repairedDraft.Content ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(repairedText) ||
+            IsBrokenWebOutcomeAssistantText(repairedText))
+        {
+            log("AGENT_WEB_SYNTHESIS_REPAIR_SKIPPED", "Repair draft remained empty or unavailable-like.");
+            return null;
+        }
+
+        request.History.Add(ChatMessage.Assistant(repairedText));
+        log("AGENT_WEB_SYNTHESIS_REPAIRED", repairedText);
+        return new AgentResponse
+        {
+            Text = repairedText,
+            Success = true,
+            ToolCallsMade = request.ToolCallsMade,
+            LlmRoundTrips = roundTrips + 1
+        };
     }
 
     private static bool IsExplicitToolInvocationRequest(IReadOnlyList<ChatMessage> history)
