@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
+using SirThaddeus.Agent;
 using SirThaddeus.LlmClient;
 using Thaddeus.Runtime.Settings;
+using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
 using RuntimeChatMessage = Thaddeus.SharedTypes.ChatMessage;
 
@@ -34,11 +36,13 @@ public sealed class AssistantRouter : IAssistant, IDisposable
     public AssistantRouter(
         ISettingsStore settings,
         StubAssistant stub,
+        IMcpToolClient mcp,
+        ToolPermissionGate gate,
         IThreadStore store,
         ChatTurnPublisher publisher,
         ILoggerFactory loggerFactory)
         : this(settings, stub,
-              CreateDefaultFactory(store, publisher, loggerFactory),
+              CreateDefaultFactory(mcp, gate, store, publisher, loggerFactory),
               loggerFactory.CreateLogger<AssistantRouter>())
     {
     }
@@ -98,16 +102,16 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         || string.IsNullOrWhiteSpace(llm.ModelId);
 
     private static Func<LlmSettings, IAssistant> CreateDefaultFactory(
-        IThreadStore store, ChatTurnPublisher publisher, ILoggerFactory loggerFactory)
+        IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher, ILoggerFactory loggerFactory)
     {
-        var gate = new object();
+        var cacheLock = new object();
         LmStudioClient? cached = null;
         string? fingerprint = null;
 
         return llm =>
         {
             var fp = $"{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}";
-            lock (gate)
+            lock (cacheLock)
             {
                 if (cached is null || fingerprint != fp)
                 {
@@ -130,7 +134,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     fingerprint = fp;
                 }
                 return new LmStudioAssistant(
-                    cached, store, publisher,
+                    cached, mcp, gate, store, publisher,
                     loggerFactory.CreateLogger<LmStudioAssistant>());
             }
         };

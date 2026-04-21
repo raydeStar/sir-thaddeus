@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using SirThaddeus.Agent;
 using SirThaddeus.LlmClient;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
+using Thaddeus.Runtime.Settings;
+using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
 using Xunit;
 using LlmChatMessage = SirThaddeus.LlmClient.ChatMessage;
@@ -46,6 +49,27 @@ public class LmStudioAssistantTests : IDisposable
             => Task.FromResult<string?>("fake");
     }
 
+    private sealed class FakeMcpClient : IMcpToolClient
+    {
+        public Task<string> CallToolAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
+        public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<McpToolInfo>>(Array.Empty<McpToolInfo>());
+    }
+
+    private sealed class FakeSettingsStore : ISettingsStore
+    {
+        private SettingsDocument _doc = SettingsDocument.Defaults();
+        public Task<SettingsDocument> GetAsync(CancellationToken ct) => Task.FromResult(_doc);
+        public Task<SettingsDocument> ReplaceAsync(SettingsDocument document, CancellationToken ct)
+        {
+            _doc = document;
+            Changed?.Invoke(document);
+            return Task.FromResult(document);
+        }
+        public event Action<SettingsDocument>? Changed;
+    }
+
     private (JsonFileThreadStore store, LmStudioAssistant assistant, List<RuntimeEvent<object?>> captured, FakeLlmClient fake)
         NewSut(string reply = "hello world from model", Exception? throwOnCall = null)
     {
@@ -53,7 +77,9 @@ public class LmStudioAssistantTests : IDisposable
         var bus = new EventBus(NullLogger<EventBus>.Instance);
         var publisher = new ChatTurnPublisher(bus);
         var fake = new FakeLlmClient { Reply = reply, Throw = throwOnCall };
-        var assistant = new LmStudioAssistant(fake, store, publisher, NullLogger<LmStudioAssistant>.Instance)
+        var mcp = new FakeMcpClient();
+        var gate = new ToolPermissionGate(new FakeSettingsStore(), bus, NullLogger<ToolPermissionGate>.Instance);
+        var assistant = new LmStudioAssistant(fake, mcp, gate, store, publisher, NullLogger<LmStudioAssistant>.Instance)
         {
             DeltaDelay = TimeSpan.Zero,
         };

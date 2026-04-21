@@ -91,6 +91,21 @@ public static class ChatApi
             {
                 var updated = await store.AppendMessageAsync(id, message, ct).ConfigureAwait(false);
 
+                // Auto-title: if the thread is still stamped with the placeholder and
+                // this is the first user turn, derive a short title from the message.
+                // Users can still rename explicitly via PATCH /api/threads/{id}; we
+                // only ever overwrite the placeholder, never a user-picked title.
+                if (string.Equals(updated.Title, ChatThreadDefaults.UntitledTitle, StringComparison.Ordinal)
+                    && updated.Messages.Count(m => m.Role == ChatRole.User) == 1)
+                {
+                    var derived = ChatThreadDefaults.DeriveTitleFromFirstMessage(message.Text);
+                    if (derived.Length > 0)
+                    {
+                        var renamed = await store.RenameAsync(id, derived, ct).ConfigureAwait(false);
+                        if (renamed is not null) updated = renamed;
+                    }
+                }
+
                 // Project chat lifecycle onto the runtime state machine so the shell's
                 // status badge animates Idle -> Thinking -> Idle for typed turns.
                 // Illegal transitions (e.g. user sends a second message mid-reply) are

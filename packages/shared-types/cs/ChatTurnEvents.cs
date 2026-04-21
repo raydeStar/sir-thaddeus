@@ -15,6 +15,16 @@ public static class ChatTurnEvents
     public const string Delta = "chat.turn.delta";
     /// <summary>Emitted when an assistant turn finishes (successfully or not).</summary>
     public const string Complete = "chat.turn.complete";
+    /// <summary>Emitted when a tool call begins executing inside a turn.</summary>
+    public const string ToolStarted = "chat.tool.started";
+    /// <summary>Emitted when a tool call finishes (success, error, or denied).</summary>
+    public const string ToolCompleted = "chat.tool.completed";
+    /// <summary>
+    /// Emitted when the assistant calls the virtual <c>propose_automation</c>
+    /// tool. The UI intercepts this to render an inline editable confirmation
+    /// card instead of a plain tool-result pill.
+    /// </summary>
+    public const string AutomationProposed = "chat.automation.proposed";
 }
 
 /// <summary>Payload for <see cref="ChatTurnEvents.Start"/>.</summary>
@@ -35,3 +45,69 @@ public sealed record ChatTurnComplete(
     string FinalText,
     DateTimeOffset CompletedAt,
     bool Cancelled);
+
+/// <summary>Payload for <see cref="ChatTurnEvents.ToolStarted"/>.</summary>
+/// <param name="ActivityId">Unique id for this tool run (matches the completed event).</param>
+/// <param name="ThreadId">Thread the turn belongs to.</param>
+/// <param name="MessageId">Id of the assistant message that triggered the tool call.</param>
+/// <param name="Tool">Registered tool name the model called.</param>
+/// <param name="Group">Policy group (Web, Files, Screen, …) for UI grouping and icons.</param>
+/// <param name="ArgsPreview">Short pretty-printed argument preview (safe for display).</param>
+/// <param name="StartedAt">UTC timestamp the call began.</param>
+public sealed record ChatToolStarted(
+    string ActivityId,
+    string ThreadId,
+    string MessageId,
+    string Tool,
+    string Group,
+    string ArgsPreview,
+    DateTimeOffset StartedAt);
+
+/// <summary>Payload for <see cref="ChatTurnEvents.ToolCompleted"/>.</summary>
+/// <param name="ActivityId">Matches the started event.</param>
+/// <param name="ThreadId">Thread the turn belongs to.</param>
+/// <param name="MessageId">Id of the assistant message that triggered the call.</param>
+/// <param name="Tool">Registered tool name.</param>
+/// <param name="Ok">True when the tool returned normally; false on error or deny.</param>
+/// <param name="DurationMs">Wall-clock time from start to finish.</param>
+/// <param name="ResultSnippet">Short preview of the tool's output (truncated). Null on error/deny.</param>
+/// <param name="Error">Human-readable error or denial reason. Null on success.</param>
+/// <param name="CompletedAt">UTC timestamp the call returned.</param>
+public sealed record ChatToolCompleted(
+    string ActivityId,
+    string ThreadId,
+    string MessageId,
+    string Tool,
+    bool Ok,
+    long DurationMs,
+    string? ResultSnippet,
+    string? Error,
+    DateTimeOffset CompletedAt);
+
+/// <summary>
+/// Payload for <see cref="ChatTurnEvents.AutomationProposed"/>. Carries the
+/// model's proposed automation in structured form so the chat UI can render
+/// an editable confirmation card with Create / Cancel. The proposal is
+/// <em>not</em> persisted — the UI writes it to the automation store only
+/// if the user clicks Create.
+/// </summary>
+/// <param name="ProposalId">Stable id for this proposal (matches the tool call activity).</param>
+/// <param name="ThreadId">Thread the proposal belongs to.</param>
+/// <param name="MessageId">Assistant message that triggered the proposal.</param>
+/// <param name="Name">Proposed automation name.</param>
+/// <param name="Description">Optional short description.</param>
+/// <param name="Steps">Ordered prompts the automation will run when fired.</param>
+/// <param name="Schedule">
+/// Parsed/normalized schedule. Null means the model did not ask for a
+/// recurring or one-shot trigger — the UI will default to "run on demand".
+/// </param>
+/// <param name="ProposedAt">UTC timestamp the proposal was emitted.</param>
+public sealed record ChatAutomationProposed(
+    string ProposalId,
+    string ThreadId,
+    string MessageId,
+    string Name,
+    string? Description,
+    IReadOnlyList<string> Steps,
+    AutomationSchedule? Schedule,
+    DateTimeOffset ProposedAt);

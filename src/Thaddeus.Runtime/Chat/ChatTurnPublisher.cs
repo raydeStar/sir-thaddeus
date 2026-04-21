@@ -42,4 +42,51 @@ public sealed class ChatTurnPublisher
             new ChatTurnComplete(threadId, messageId, finalText, DateTimeOffset.UtcNow, cancelled),
             correlationId: messageId,
             ct);
+
+    public Task PublishToolStartedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        string group,
+        string argsPreview,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.ToolStarted,
+            new ChatToolStarted(activityId, threadId, messageId, tool, group, argsPreview, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
+
+    public Task PublishToolCompletedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        bool ok,
+        long durationMs,
+        string? resultSnippet,
+        string? error,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.ToolCompleted,
+            new ChatToolCompleted(activityId, threadId, messageId, tool, ok, durationMs,
+                resultSnippet, error, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
+    public Task PublishAutomationProposedAsync(
+        string proposalId,
+        string threadId,
+        string messageId,
+        string name,
+        string? description,
+        IReadOnlyList<string> steps,
+        AutomationSchedule? schedule,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.AutomationProposed,
+            new ChatAutomationProposed(
+                proposalId, threadId, messageId, name, description, steps, schedule,
+                DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
 }

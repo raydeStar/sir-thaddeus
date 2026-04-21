@@ -59,7 +59,7 @@ public sealed class JsonFileThreadStore : IThreadStore, IDisposable
         var id = NewId(now);
         var thread = new ChatThread(
             Id: id,
-            Title: string.IsNullOrWhiteSpace(title) ? "New conversation" : title.Trim(),
+            Title: string.IsNullOrWhiteSpace(title) ? ChatThreadDefaults.UntitledTitle : title.Trim(),
             CreatedAt: now,
             UpdatedAt: now,
             Messages: Array.Empty<ChatMessage>());
