@@ -21,12 +21,23 @@ test('create, run, and delete an automation', async ({ page, context }) => {
   await expect(page.getByTestId('route-automation-detail')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('automation-detail-steps').locator('li')).toHaveCount(2);
 
-  // Run it; the meta line should update with a "last run" timestamp on reload.
+  // Run it; the app now navigates into the execution thread so the user can
+  // watch the run live, then the list reflects the recorded last-run state.
   await page.getByTestId('automation-detail-run').click();
-  await expect(page.getByTestId('automation-detail-meta')).toContainText('last run', { timeout: 5_000 });
+  await expect(page.getByTestId('route-chat-thread')).toBeVisible({ timeout: 10_000 });
+  await page.goto(`${baseUrl}/automations`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('route-automations')).toBeVisible();
+  const item = page
+    .getByTestId('automation-list')
+    .locator('li')
+    .filter({ hasText: name })
+    .first();
+  await expect(item).toContainText('last run', { timeout: 10_000 });
 
   // Delete and confirm we land back at the list.
+  await item.getByRole('link', { name }).click();
+  await expect(page.getByTestId('route-automation-detail')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('automation-detail-delete').click();
-  await page.waitForURL((u) => u.pathname.endsWith('/automations'), { timeout: 5_000 });
+  await page.waitForURL((u) => u.pathname.endsWith('/automations'), { timeout: 10_000 });
   await expect(page.getByText(name)).toHaveCount(0);
 });

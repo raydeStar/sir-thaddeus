@@ -41,11 +41,16 @@ test.describe('chat smoke', () => {
     await expect(streaming).toBeVisible({ timeout: 10_000 });
 
     // Eventually the streaming bubble is replaced by a persisted assistant
-    // message and disappears. The reply must echo the user's text.
+    // message and disappears. With the real assistant enabled, the exact
+    // wording is nondeterministic, so assert on a non-empty reply instead of
+    // the old echo-stub text.
     await expect(streaming).toBeHidden({ timeout: 15_000 });
-    await expect(page.getByTestId('chat-message-list')).toContainText('You said: "hello"', {
-      timeout: 5_000,
-    });
+    await expect(page.getByTestId('chat-message-list')).toContainText('hello', { timeout: 5_000 });
+    const assistantMessages = page
+      .getByTestId('chat-message-list')
+      .locator('[data-role="assistant"]');
+    await expect(assistantMessages).toHaveCount(1, { timeout: 5_000 });
+    await expect(assistantMessages.first()).not.toHaveText(/^\s*$/);
 
     // The state badge should have ticked Thinking during the turn and returned
     // to Idle once the assistant finished.

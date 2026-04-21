@@ -18,16 +18,18 @@ test.describe('settings smoke', () => {
     await expect(page.getByTestId('settings-form')).toBeVisible({ timeout: 10_000 });
 
     // Change a few fields across sections.
-    const modelInput = page.getByTestId('settings-llm-model');
-    await modelInput.fill('llama3.1:70b');
-
     const pttInput = page.getByTestId('settings-shortcut-ptt');
     await pttInput.fill('Ctrl+Alt+Space');
 
     const localOnly = page.getByTestId('settings-privacy-local-only');
     const wasChecked = await localOnly.isChecked();
-    if (wasChecked) await localOnly.uncheck();
-    else await localOnly.check();
+    const localOnlySwitch = page.getByRole('switch', { name: 'Local-only mode' });
+    await localOnlySwitch.scrollIntoViewIfNeeded();
+    await localOnlySwitch.click();
+
+    await page.getByTestId('settings-tab-models').click();
+    const modelInput = page.getByTestId('settings-llm-model');
+    await modelInput.fill('llama3.1:70b');
 
     // Save.
     await page.getByTestId('settings-save').click();
@@ -36,9 +38,10 @@ test.describe('settings smoke', () => {
     // Reload and verify.
     await page.reload();
     await expect(page.getByTestId('settings-form')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('settings-llm-model')).toHaveValue('llama3.1:70b');
     await expect(page.getByTestId('settings-shortcut-ptt')).toHaveValue('Ctrl+Alt+Space');
     if (wasChecked) await expect(page.getByTestId('settings-privacy-local-only')).not.toBeChecked();
     else await expect(page.getByTestId('settings-privacy-local-only')).toBeChecked();
+    await page.getByTestId('settings-tab-models').click();
+    await expect(page.getByTestId('settings-llm-model')).toHaveValue('llama3.1:70b');
   });
 });
