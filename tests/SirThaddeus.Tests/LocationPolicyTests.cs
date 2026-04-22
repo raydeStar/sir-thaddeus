@@ -37,7 +37,8 @@ public sealed class LocationPolicyTests
         var repoRoot = FindRepoRoot();
         var roots = new[]
         {
-            Path.Combine(repoRoot, "apps", "ui-avalonia"),
+            Path.Combine(repoRoot, "src"),
+            Path.Combine(repoRoot, "web"),
             Path.Combine(repoRoot, "packages", "local-tools"),
             Path.Combine(repoRoot, "apps", "mcp-server")
         };
@@ -68,8 +69,7 @@ public sealed class LocationPolicyTests
                 if (!allowedExtensions.Contains(Path.GetExtension(file)))
                     continue;
 
-                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
-                    file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                if (IsIgnoredSourcePath(file))
                 {
                     continue;
                 }
@@ -88,6 +88,28 @@ public sealed class LocationPolicyTests
         Assert.True(
             violations.Count == 0,
             "Forbidden geolocation API references found:\n" + string.Join("\n", violations));
+    }
+
+    private static bool IsIgnoredSourcePath(string file)
+    {
+        var ignoredSegments = new[]
+        {
+            "bin",
+            "obj",
+            "node_modules",
+            "dist",
+            "build"
+        };
+
+        foreach (var segment in ignoredSegments)
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}{segment}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string FindRepoRoot()

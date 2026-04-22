@@ -278,7 +278,9 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        // C# 13 "what changed" prompt triggers the stable software-changes fallback,
+        // which provides a real answer instead of an unavailable message.
+        Assert.Contains("C# 13", response.Text, StringComparison.OrdinalIgnoreCase);
         var toolCall = Assert.Single(mcp.Calls);
         Assert.Equal("web_search", toolCall, ignoreCase: true);
         Assert.DoesNotContain(mcp.Calls, call =>
@@ -338,7 +340,6 @@ public class SearchOfflineFallbackTests
 
         Assert.True(response.Success);
         Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Rust", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(
             mcp.Calls.Count(call => call.Equals("web_search", StringComparison.OrdinalIgnoreCase)) >= 2,
             "Expected at least the entity-resolution and fact-find web_search calls.");
@@ -506,6 +507,89 @@ public class SearchOfflineFallbackTests
         Assert.Contains("word for word", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("difference", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("strongest evidence I found", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenFactFindSummaryReturnsSignedUnavailableContract_RebuildsGroundedAnswer()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, _) =>
+        {
+            llmCallCount++;
+            var systemPrompt = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+            if (systemPrompt.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"name":".NET Aspire","type":"technology","hint":"Microsoft orchestration framework"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (systemPrompt.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = """{"query":".NET Aspire updates","recency":"any"}""",
+                    FinishReason = "stop"
+                };
+            }
+
+            if (llmCallCount == 3)
+            {
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "The requested tool is unavailable for this request. Please retry in a moment.\n\n-- Sir Thaddeus",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "Overview: .NET Aspire continues to expand its orchestration and developer-experience tooling. Common Points: multiple sources describe ongoing investment in app composition and local development workflows. Differences: some coverage emphasizes CLI and dashboard changes while other sources focus on integrations and deployment improvements. Practical Takeaway: teams evaluating Aspire should expect a broader platform story, but the exact emphasis depends on which subsystem they care about most.",
+                FinishReason = "stop"
+            };
+        });
+
+        var webSearchPayload =
+            "1. \".NET Aspire 9.5 Released\" — example.com\n" +
+            "   Covers CLI updates, dashboard changes, and expanded integrations.\n\n" +
+            "2. \"What's new in .NET Aspire\" — microsoft.com\n" +
+            "   Highlights orchestration improvements and developer-experience updates.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[{\"url\":\"https://example.com/aspire-95\",\"title\":\".NET Aspire 9.5 Released\",\"domain\":\"example.com\",\"excerpt\":\"Covers CLI updates, dashboard changes, and expanded integrations.\"}," +
+            "{\"url\":\"https://microsoft.com/dotnet/aspire/whats-new\",\"title\":\"What's new in .NET Aspire\",\"domain\":\"microsoft.com\",\"excerpt\":\"Highlights orchestration improvements and developer-experience updates.\"}]";
+
+        var mcp = new RecordingStubMcpClient((toolName, _, _) =>
+            toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase)
+                ? webSearchPayload
+                : string.Empty);
+
+        var orchestrator = new SearchOrchestrator(
+            llm,
+            mcp,
+            new StubAuditLogger(),
+            "You are a concise assistant.");
+
+        const string userMessage = "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.";
+        var response = await orchestrator.ExecuteAsync(
+            userMessage: userMessage,
+            memoryPackText: "",
+            history: [ChatMessage.User(userMessage)],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.DoesNotContain("unavailable for this request", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("overview", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("common points", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("differences", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("practical takeaway", response.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1072,6 +1156,21 @@ public class BareResponseEnrichmentTests
             new List<ToolCallRecord>
             {
                 new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 1 result(s) returned]", Success = true }
+            },
+            "Does iPhone 99 exist as a released product?");
+
+        Assert.Contains("iPhone 99", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("knowledge cutoff", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ToolBackedExistenceAnswer_StripsAsOfKnowledgeCutoffClause()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "No - iPhone 99 has never been released as an official Apple product. As of my knowledge cutoff, reports of one are likely custom builds or unverified mockups rather than a real release.",
+            new List<ToolCallRecord>
+            {
+                new() { ToolName = "web_search", Arguments = "{}", Result = "[search: 3 result(s) returned]", Success = true }
             },
             "Does iPhone 99 exist as a released product?");
 

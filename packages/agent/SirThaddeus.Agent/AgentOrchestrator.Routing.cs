@@ -316,8 +316,7 @@ public sealed partial class AgentOrchestrator
             !webEvidence.ShouldLookup &&
             footmanDecision?.IsAuthoritative != true &&
             IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lowerIncoming) &&
-            (route.Intent.Equals(Intents.LookupDeepDive, StringComparison.OrdinalIgnoreCase) ||
-             route.Confidence > 0.90);
+            RouteArbitrationPolicy.IsLookupIntent(route.Intent);
 
         if (!route.Intent.Equals(Intents.ChatOnly, StringComparison.OrdinalIgnoreCase) &&
             !route.Intent.Equals(Intents.UtilityDeterministic, StringComparison.OrdinalIgnoreCase) &&

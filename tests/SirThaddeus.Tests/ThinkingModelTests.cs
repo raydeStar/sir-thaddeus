@@ -566,6 +566,201 @@ public class NonThinkingModelRegressionTests
         Assert.Equal("42.", result);
     }
 
+    // ── Bare harmony channel leaks (<channel>thought <channel>…) ──────
+
+    // ── Automation-run refusal loop collapse ───────────────────────────
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_NoRefusals_LeftAlone()
+    {
+        var input = "I fetched amazon.com and summarized it.\n\nSwitch 2 status: released.";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_RefusalsAfterContent_Dropped()
+    {
+        // Real content first, then the model loops with "I can't..." apologies.
+        // Only the real content should survive.
+        var input =
+            "I fetched amazon.com and saw the storefront.\n\n" +
+            "I can't open a new tab or window for you directly. " +
+            "However, I can help you search…\n\n" +
+            "I can't navigate a specific URL or tab for you directly, " +
+            "but if you'd like, I can use web_search to find information.";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.Equal("I fetched amazon.com and saw the storefront.", result);
+    }
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_AllRefusals_ReplacedWithTerseNote()
+    {
+        var input =
+            "I can't directly open websites for you. However, I can help search.\n\n" +
+            "Would you like me to look up current details about Amazon?\n\n" +
+            "I can't wait for you, but I'll check up on the latest developments.";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.Equal("_(step completed, but the model declined to use its tools)_", result);
+    }
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_RefusalBeforeContent_DropsRefusalKeepsContent()
+    {
+        // Leading refusals are dropped entirely — even one. The user only
+        // needs to see the real output from the step.
+        var input =
+            "I can't physically open a browser window.\n\n" +
+            "But here's what I found: Switch 2 released in 2025, $449.";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.DoesNotContain("I can't physically open", result);
+        Assert.Contains("But here's what I found", result);
+        Assert.Contains("Switch 2 released", result);
+    }
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_SingleParagraphRefusal_ReplacedWithTerseNote()
+    {
+        // The observed step-2 case: one long refusal paragraph claiming the
+        // tool "doesn't work on external URLs", emitted seconds after the
+        // tool actually ran. No paragraph split, used to slip through.
+        var input =
+            "I cannot access external URLs through browser_navigate. This tool only " +
+            "fetches web pages for reading within the current session and doesn't " +
+            "allow navigation to arbitrary URLs like Amazon listings. I can help " +
+            "with other tasks using my available tools instead of browsing the " +
+            "internet. What would you like me to work on?";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.Equal(AssistantResponseSanitizer.AutomationRefusalPlaceholder, result);
+    }
+
+    [Fact]
+    public void CollapseAutomationRefusalLoop_LeadingRefusalAndTrailingOffer_OnlyContentSurvives()
+    {
+        // The observed step-3 case: refusal → useful product info → "If
+        // you'd like me to check other sources…" offer.
+        var input =
+            "I cannot fetch that specific Amazon listing URL because browser_navigate " +
+            "only works for URLs I've fetched or searched through internally—it " +
+            "doesn't allow access to external links like Amazon.\n\n" +
+            "However, from my earlier research about the PlayStation 5 listing:\n\n" +
+            "- Product: Battlefield 6 (for PlayStation 5)\n" +
+            "- Price: $240.99\n\n" +
+            "If you'd like me to check other sources for this product information, " +
+            "I can do that instead.";
+        var result = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(input);
+        Assert.DoesNotContain("I cannot fetch", result);
+        Assert.DoesNotContain("If you'd like me to", result);
+        Assert.Contains("However, from my earlier research", result);
+        Assert.Contains("Battlefield 6", result);
+    }
+
+    // ── Automation-run search-recency fallback ─────────────────────────
+
+    [Fact]
+    public void ApplySearchRecencyDefault_OmittedRecency_InjectsWeek()
+    {
+        var input = "{\"query\":\"nintendo switch 2 price\",\"maxResults\":5}";
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(input);
+        Assert.Contains("\"recency\":\"week\"", result);
+        Assert.Contains("\"query\":\"nintendo switch 2 price\"", result);
+        Assert.Contains("\"maxResults\":5", result);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_ExplicitAny_PromotedToWeek()
+    {
+        var input = "{\"query\":\"test\",\"recency\":\"any\"}";
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(input);
+        Assert.Contains("\"recency\":\"week\"", result);
+        Assert.DoesNotContain("\"any\"", result);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_ExplicitDay_Preserved()
+    {
+        // The model asked for a narrower window; don't widen it.
+        var input = "{\"query\":\"todays market close\",\"recency\":\"day\"}";
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(input);
+        Assert.Contains("\"recency\":\"day\"", result);
+        Assert.DoesNotContain("\"week\"", result);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_ExplicitMonth_Preserved()
+    {
+        var input = "{\"query\":\"tax deadlines\",\"recency\":\"month\"}";
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(input);
+        Assert.Contains("\"recency\":\"month\"", result);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_EmptyJson_InjectsWeek()
+    {
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault("{}");
+        Assert.Contains("\"recency\":\"week\"", result);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_NullOrBlank_InjectsWeekIntoObject()
+    {
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(null);
+        Assert.Contains("\"recency\":\"week\"", result);
+
+        var result2 = AutomationToolArgsRewriter.ApplySearchRecencyDefault("   ");
+        Assert.Contains("\"recency\":\"week\"", result2);
+    }
+
+    [Fact]
+    public void ApplySearchRecencyDefault_MalformedJson_ReturnsInputUnchanged()
+    {
+        // Don't silently rewrite garbage — let the tool surface a parse error.
+        var input = "this is not json";
+        var result = AutomationToolArgsRewriter.ApplySearchRecencyDefault(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void StripRawTemplateTokens_BareHarmonyPair_StripsMarkersKeepsBody()
+    {
+        // Some gpt-oss builds leak the harmony format with the pipes
+        // missing. The body after the markers is the real reply and must
+        // survive the scrub.
+        var input = "<channel>thought <channel>I have navigated to Amazon. "
+                  + "What would you like me to find or do there?";
+        var result = OrchestratorMessageHelpers.StripRawTemplateTokens(input);
+        Assert.Equal(
+            "I have navigated to Amazon. What would you like me to find or do there?",
+            result);
+    }
+
+    [Fact]
+    public void StripRawTemplateTokens_BareHarmonySingle_StripsMarker()
+    {
+        var input = "<channel>final The answer is 42.";
+        var result = OrchestratorMessageHelpers.StripRawTemplateTokens(input);
+        Assert.Equal("The answer is 42.", result);
+    }
+
+    [Fact]
+    public void StripRawTemplateTokens_BareChannelNoKnownLabel_LeftAlone()
+    {
+        // Don't over-reach: legitimate content mentioning <channel> without
+        // a harmony channel label (thought/analysis/etc.) must pass through.
+        var input = "My YouTube <channel> got 1M subscribers this week.";
+        var result = OrchestratorMessageHelpers.StripRawTemplateTokens(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void StripRawTemplateTokens_MultipleBareHarmonyLeaks_AllStripped()
+    {
+        var input = "<channel>thought <channel>Step 1 done.\n\n"
+                  + "<channel>analysis <channel>Step 2 in progress.";
+        var result = OrchestratorMessageHelpers.StripRawTemplateTokens(input);
+        Assert.Equal("Step 1 done.\n\nStep 2 in progress.", result);
+    }
+
     [Fact]
     public async Task NonThinkingModel_ContentWithQuotedThinkTag_StripsIt()
     {

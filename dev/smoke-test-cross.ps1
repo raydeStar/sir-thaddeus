@@ -109,14 +109,14 @@ $exeSuffix = ""  # No .exe on Linux/macOS
 
 Write-Section "File Structure Checks"
 
-# Headless runtime (in headless/ subdirectory per package-cross.ps1)
-$headlessBinary = Join-Path $testDir "headless/SirThaddeus.HeadlessRuntime$exeSuffix"
-if (Test-Path $headlessBinary) {
-    $sizeMB = [math]::Round((Get-Item $headlessBinary).Length / 1MB, 1)
-    Pass "SirThaddeus.HeadlessRuntime present (${sizeMB} MB)"
+# Hybrid runtime
+$runtimeBinary = Join-Path $testDir "Thaddeus.Runtime$exeSuffix"
+if (Test-Path $runtimeBinary) {
+    $sizeMB = [math]::Round((Get-Item $runtimeBinary).Length / 1MB, 1)
+    Pass "Thaddeus.Runtime present (${sizeMB} MB)"
 }
 else {
-    Fail "SirThaddeus.HeadlessRuntime missing (expected headless/SirThaddeus.HeadlessRuntime)"
+    Fail "Thaddeus.Runtime missing"
 }
 
 # MCP Server
@@ -130,13 +130,13 @@ else {
 }
 
 # UI binary
-$uiBinary = Join-Path $testDir "SirThaddeus.UI.Avalonia$exeSuffix"
+$uiBinary = Join-Path $testDir "Thaddeus.Runtime$exeSuffix"
 if (Test-Path $uiBinary) {
     $sizeMB = [math]::Round((Get-Item $uiBinary).Length / 1MB, 1)
-    Pass "SirThaddeus.UI.Avalonia present (${sizeMB} MB)"
+    Pass "Thaddeus.Runtime present (${sizeMB} MB)"
 }
 else {
-    Fail "SirThaddeus.UI.Avalonia missing"
+    Fail "Thaddeus.Runtime missing"
 }
 
 # README_FIRST_RUN.md

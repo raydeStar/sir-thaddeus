@@ -29,6 +29,15 @@ Log.Logger = LoggingBootstrap.BuildSerilogLogger(new LoggingOptions
 });
 AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
 AppDomain.CurrentDomain.UnhandledException += (_, _) => Log.CloseAndFlush();
+
+// ---------------------------------------------------------------
+// Sir Thaddeus v2 hybrid shell (Phase 1, 2026) supersedes this host.
+// The headless runtime is retained for the v1 harness and legacy
+// sprint workflows, but new feature work should target the hybrid
+// runtime: src/Thaddeus.Runtime + web/. See docs/packaging.md.
+// ---------------------------------------------------------------
+Log.Warning(
+    "headless-runtime is the legacy v1 host; new features live in the hybrid runtime (Thaddeus.Runtime + web/).");
 Log.Information(
     "HeadlessRuntime starting (serverMode={ServerMode}, toolsEnabled={ToolsEnabled})",
     options.ServerMode,

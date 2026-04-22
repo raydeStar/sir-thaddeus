@@ -1,0 +1,172 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
+using Thaddeus.Runtime.Settings;
+using Thaddeus.SharedTypes;
+
+namespace Thaddeus.Runtime.Tests;
+
+public sealed class JsonFileSettingsStoreTests : IDisposable
+{
+    private readonly string _tempDir;
+
+    public JsonFileSettingsStoreTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "thaddeus-settings-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
+    }
+
+    [Fact]
+    public async Task GetAsync_returns_defaults_when_file_missing()
+    {
+        var store = NewStore();
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        var defaults = SettingsDocument.Defaults();
+        Assert.Equal(defaults, doc);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_persists_and_round_trips()
+    {
+        var store = NewStore();
+        var updated = SettingsDocument.Defaults() with
+        {
+            Llm = new LlmSettings("openai", "gpt-4o-mini", "https://api.openai.com", "sk-test", 4096, 16384, 0.2),
+            Audio = new AudioSettings(false, 1.35),
+            Privacy = new PrivacySettings(true, true, false),
+        };
+
+        await store.ReplaceAsync(updated, CancellationToken.None);
+
+        // New store reads the same path and sees the changes.
+        var fresh = NewStore();
+        var roundTripped = await fresh.GetAsync(CancellationToken.None);
+        Assert.Equal(updated, roundTripped);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_raises_changed_event()
+    {
+        var store = NewStore();
+        SettingsDocument? observed = null;
+        store.Changed += d => observed = d;
+
+        var updated = SettingsDocument.Defaults() with
+        {
+            Shortcuts = new ShortcutSettings("Ctrl+Alt+Space", "Ctrl+Alt+Esc"),
+        };
+        await store.ReplaceAsync(updated, CancellationToken.None);
+
+        Assert.NotNull(observed);
+        Assert.Equal(updated.Shortcuts, observed!.Shortcuts);
+    }
+
+    [Fact]
+    public async Task GetAsync_returns_defaults_on_corrupt_file()
+    {
+        var path = Path.Combine(_tempDir, "runtime-settings.json");
+        await File.WriteAllTextAsync(path, "{ this isn't valid json");
+        var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        Assert.Equal(SettingsDocument.Defaults(), doc);
+    }
+
+        [Fact]
+        public async Task GetAsync_backfills_new_llm_fields_for_older_files()
+        {
+                var path = Path.Combine(_tempDir, "runtime-settings.json");
+                var legacyLike = """
+                {
+                    "llm": {
+                        "provider": "lmstudio",
+                        "modelId": "auto",
+                        "baseUrl": "http://127.0.0.1:1234/v1",
+                        "apiKey": null
+                    },
+                    "voice": {
+                        "sttProvider": "whisper-cpp",
+                        "ttsProvider": "piper",
+                        "piperVoicePath": null
+                    },
+                    "shortcuts": {
+                        "pushToTalk": "Ctrl+Shift+Space",
+                        "stopAll": "Ctrl+Shift+Esc"
+                    },
+                    "privacy": {
+                        "telemetryEnabled": false,
+                        "allowScreenCapture": false,
+                        "localOnly": true
+                    },
+                    "flags": {
+                        "onboardingCompleted": false
+                    }
+                }
+                """;
+                await File.WriteAllTextAsync(path, legacyLike);
+                var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+                var doc = await store.GetAsync(CancellationToken.None);
+
+                Assert.Equal(SettingsDocument.Defaults().Llm.MaxTokens, doc.Llm.MaxTokens);
+                Assert.Equal(SettingsDocument.Defaults().Llm.ContextWindowTokens, doc.Llm.ContextWindowTokens);
+                Assert.Equal(SettingsDocument.Defaults().Llm.Temperature, doc.Llm.Temperature);
+                Assert.Equal(SettingsDocument.Defaults().Audio.TtsEnabled, doc.Audio.TtsEnabled);
+                Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
+        }
+
+    [Fact]
+    public async Task GetAsync_clamps_invalid_audio_gain()
+    {
+        var path = Path.Combine(_tempDir, "runtime-settings.json");
+        var invalidAudio = """
+        {
+            "llm": {
+                "provider": "lmstudio",
+                "modelId": "auto",
+                "baseUrl": "http://127.0.0.1:1234/v1",
+                "apiKey": null,
+                "maxTokens": 2048,
+                "contextWindowTokens": 8192,
+                "temperature": 0.7
+            },
+            "voice": {
+                "sttProvider": "whisper-cpp",
+                "ttsProvider": "piper",
+                "piperVoicePath": null
+            },
+            "audio": {
+                "ttsEnabled": true,
+                "inputGain": 99
+            },
+            "shortcuts": {
+                "pushToTalk": "Ctrl+Shift+Space",
+                "stopAll": "Ctrl+Shift+Esc"
+            },
+            "privacy": {
+                "telemetryEnabled": false,
+                "allowScreenCapture": false,
+                "localOnly": true
+            },
+            "flags": {
+                "onboardingCompleted": false
+            }
+        }
+        """;
+        await File.WriteAllTextAsync(path, invalidAudio);
+        var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
+    }
+
+    private JsonFileSettingsStore NewStore() =>
+        new(Path.Combine(_tempDir, "runtime-settings.json"), NullLogger<JsonFileSettingsStore>.Instance);
+}

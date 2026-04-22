@@ -80,11 +80,22 @@ public static class WebSearchTools
     [McpServerTool, Description(
         "Searches the web and returns rich summaries of the top results. " +
         "Automatically fetches and reads the top pages. Use this for any " +
-        "question that needs current information: news, facts, prices, etc.")]
+        "question that needs current information: news, facts, prices, etc. " +
+        "IMPORTANT: set recency='day' for news or live events, recency='week' " +
+        "for prices, product availability, stock status, sports scores, or " +
+        "anything that changes rapidly. Only leave recency='any' for stable " +
+        "reference knowledge (definitions, historical facts, how-to). Stale " +
+        "results from old 'Black Friday 2024' style pages are a common failure " +
+        "mode when recency is omitted.")]
     public static async Task<string> WebSearch(
         [Description("The search query")] string query,
         [Description("Number of results to fetch, 1 to 20, default 5")] int maxResults = 5,
-        [Description("Recency filter: day, week, month, or any (default)")] string recency = "any",
+        [Description(
+            "Recency filter: 'day' = last 24h (news, live events), 'week' = " +
+            "last 7 days (prices, stock, availability, current listings), " +
+            "'month' = last 30 days, 'any' = no age limit (reference knowledge " +
+            "only — DO NOT use for prices, availability, or news).")]
+        string recency = "any",
         [Description("Search category: general (default) or news")] string categories = "general",
         CancellationToken cancellationToken = default)
     {

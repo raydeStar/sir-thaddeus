@@ -553,6 +553,8 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        // Absolute rejects — explicit tool invocations or requests for
+        // live/local data never qualify as self-contained reasoning.
         if (TryGetExplicitToolInvocationIntent(lower) is not null ||
             LooksLikeScreenRequest(lower) ||
             LooksLikeFileRequest(lower) ||
@@ -560,16 +562,58 @@ public static class IntentFeatureExtractor
             LooksLikeBrowseRequest(lower) ||
             LooksLikeMemoryWriteRequest(lower) ||
             LooksLikeExplicitNewsLookup(lower) ||
-            LooksLikeDeepDiveLookup(lower) ||
-            LooksLikeLocalBusinessDiscovery(lower) ||
-            LooksLikeFactLookup(lower) ||
-            LooksLikeWebSearchRequest(lower))
+            LooksLikeLocalBusinessDiscovery(lower))
         {
             return false;
         }
 
         if (LooksLikeLogicPuzzlePrompt(lower))
             return true;
+
+        var hasComparisonCue =
+            lower.Contains("compare ", StringComparison.Ordinal) ||
+            lower.Contains(" versus ", StringComparison.Ordinal) ||
+            lower.Contains(" vs ", StringComparison.Ordinal) ||
+            lower.Contains("tradeoff", StringComparison.Ordinal) ||
+            lower.Contains("trade-off", StringComparison.Ordinal) ||
+            lower.Contains("pros and cons", StringComparison.Ordinal) ||
+            lower.Contains("advantages and disadvantages", StringComparison.Ordinal) ||
+            lower.Contains("recommendation for", StringComparison.Ordinal) ||
+            lower.Contains("which architecture", StringComparison.Ordinal);
+
+        var hasLiveDataCue =
+            lower.Contains("today", StringComparison.Ordinal) ||
+            lower.Contains("right now", StringComparison.Ordinal) ||
+            lower.Contains("currently", StringComparison.Ordinal) ||
+            lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("recent", StringComparison.Ordinal) ||
+            lower.Contains("this week", StringComparison.Ordinal) ||
+            lower.Contains("this month", StringComparison.Ordinal) ||
+            lower.Contains("price", StringComparison.Ordinal) ||
+            lower.Contains("pricing", StringComparison.Ordinal) ||
+            lower.Contains("stock", StringComparison.Ordinal) ||
+            lower.Contains("reviews", StringComparison.Ordinal) ||
+            lower.Contains("review", StringComparison.Ordinal) ||
+            lower.Contains("amazon", StringComparison.Ordinal) ||
+            lower.Contains("walmart", StringComparison.Ordinal) ||
+            lower.Contains("ebay", StringComparison.Ordinal) ||
+            lower.Contains("etsy", StringComparison.Ordinal);
+
+        // A clear comparison/tradeoff prompt is self-contained even when it
+        // contains softly-web-ish words like "recommend" — an architecture
+        // comparison does not need live data. Check this BEFORE the
+        // web-lookup / fact-lookup rejects so those don't swallow it.
+        if (hasComparisonCue && !hasLiveDataCue)
+            return true;
+
+        // Now fall through to the heuristic rejects that can be overridden
+        // by a strong comparison signal above.
+        if (LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeFactLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
 
         var startsWithKnowledgeCue =
             lower.StartsWith("explain ", StringComparison.Ordinal) ||

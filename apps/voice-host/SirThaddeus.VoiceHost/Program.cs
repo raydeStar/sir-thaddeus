@@ -436,8 +436,11 @@ static string ResolveVoiceId(VoiceHostTtsRequest payload, string configuredVoice
 app.MapPost("/api/piper/download", async (
     HttpContext httpContext,
     VoiceBackendSupervisor backendSupervisor,
+    ILoggerFactory loggerFactory,
     CancellationToken cancellationToken) =>
 {
+    var logger = loggerFactory.CreateLogger("VoiceHost.PiperDownload");
+
     var ensure = await backendSupervisor.EnsureRunningAsync(cancellationToken);
     if (!ensure.Success)
     {
@@ -473,13 +476,18 @@ app.MapPost("/api/piper/download", async (
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
-            Console.Error.WriteLine($"[VoiceHost] Piper download proxy got {(int)response.StatusCode} from backend: {responseBody[..Math.Min(responseBody.Length, 300)]}");
+        {
+            logger.LogWarning(
+                "Piper download proxy got {StatusCode} from backend: {ResponseSnippet}",
+                (int)response.StatusCode,
+                responseBody[..Math.Min(responseBody.Length, 300)]);
+        }
 
         return Results.Content(responseBody, "application/json", Encoding.UTF8, (int)response.StatusCode);
     }
     catch (HttpRequestException ex)
     {
-        Console.Error.WriteLine($"[VoiceHost] Piper download proxy failed (backend unreachable): {ex.Message}");
+        logger.LogError(ex, "Piper download proxy failed (backend unreachable at {BackendUri})", backendUri);
         return Results.Json(new
         {
             error = $"Voice backend unreachable at {backendUri}: {ex.Message}",
@@ -488,7 +496,7 @@ app.MapPost("/api/piper/download", async (
     }
     catch (TaskCanceledException)
     {
-        Console.Error.WriteLine("[VoiceHost] Piper download proxy timed out (10 min).");
+        logger.LogWarning("Piper download proxy timed out (10 min)");
         return Results.Json(new
         {
             error = "Download request to voice backend timed out (10 min limit).",

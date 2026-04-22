@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Thaddeus.Runtime</RootNamespace>
+    <AssemblyName>Thaddeus.Runtime</AssemblyName>
+    <UserSecretsId>thaddeus-runtime-dev</UserSecretsId>
+    <!-- Web SDK turns on static-web-asset and razor compilation by default; we want
+         neither for v1. Static assets are served via UseStaticFiles from wwwroot. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
+    <ProjectReference Include="..\..\packages\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
+    <!-- MCP tool-calling stack. Agent gives us IMcpToolClient; RuntimeHost gives
+         us the stdio client + the MCP server path resolver. AuditLog is a
+         transitive requirement of StdioMcpToolClient. -->
+    <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
+    <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
+    <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="NUlid" Version="1.7.2" />
+    <!-- Cron parser used by the automation scheduler. Handles DST + IANA timezones. -->
+    <PackageReference Include="Cronos" Version="0.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Thaddeus.Runtime.Tests" />
+  </ItemGroup>
+
+  <!--
+    Auto-sync the React bundle from web/dist into wwwroot/ before the build.
+
+    Behavior:
+      - Skipped when SkipWebBuild=true (CI / fast inner loops).
+      - If web/dist is missing, runs `npm run build` in ../../web first
+        (uses npm.cmd on Windows). When SkipNpmBuild=true, just copies whatever
+        is in web/dist as-is and warns if it's stale.
+      - Always mirrors web/dist into wwwroot, deleting any stale files in
+        wwwroot/assets first so old hashed bundles don't accumulate.
+
+    Triggered by anything that runs the Build target, including dotnet test.
+    Safe to no-op (Inputs/Outputs gates re-run).
+  -->
+  <PropertyGroup>
+    <WebSourceDir>$(MSBuildThisFileDirectory)..\..\web</WebSourceDir>
+    <WebDistDir>$(WebSourceDir)\dist</WebDistDir>
+    <WwwrootDir>$(MSBuildThisFileDirectory)wwwroot</WwwrootDir>
+    <NpmCommand Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))'=='True'">npm.cmd</NpmCommand>
+    <NpmCommand Condition="'$(NpmCommand)'==''">npm</NpmCommand>
+  </PropertyGroup>
+
+  <Target Name="BuildWebBundle" BeforeTargets="BeforeBuild" Condition="'$(SkipWebBuild)' != 'true'">
+    <Message Importance="high" Text="[hybrid-shell] Web auto-sync: SkipNpmBuild=$(SkipNpmBuild) WebDistDir=$(WebDistDir)" />
+    <Exec Command="$(NpmCommand) run build"
+          WorkingDirectory="$(WebSourceDir)"
+          Condition="!Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' != 'true'" />
+    <Warning Text="[hybrid-shell] web/dist/index.html missing and SkipNpmBuild=true — runtime will serve a stale or empty bundle."
+             Condition="!Exists('$(WebDistDir)\index.html')" />
+  </Target>
+
+  <Target Name="SyncWebBundle" AfterTargets="BuildWebBundle" BeforeTargets="BeforeBuild" Condition="'$(SkipWebBuild)' != 'true' And Exists('$(WebDistDir)\index.html')">
+    <ItemGroup>
+      <_WebDistFiles Include="$(WebDistDir)\**\*.*" />
+      <_StaleWwwrootAssets Include="$(WwwrootDir)\assets\**\*.*" />
+    </ItemGroup>
+    <Delete Files="@(_StaleWwwrootAssets)" Condition="'@(_StaleWwwrootAssets)' != ''" />
+    <Copy SourceFiles="@(_WebDistFiles)"
+          DestinationFiles="@(_WebDistFiles->'$(WwwrootDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="[hybrid-shell] Synced @(_WebDistFiles->Count()) files from web/dist -> wwwroot/" />
+  </Target>
+
+</Project>

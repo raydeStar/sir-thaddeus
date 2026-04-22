@@ -1,3 +1,4 @@
+using Serilog;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -157,8 +158,13 @@ public sealed class FrontmatterParser
                 Type = ExtractString(raw, "type") ?? "note"
             };
         }
-        catch
+        catch (Exception ex)
         {
+            // A non-YAML file (plain markdown, mis-quoted YAML, etc.) legitimately
+            // has no frontmatter — this is expected. Debug-level log keeps the
+            // failure traceable without spamming.
+            Log.ForContext(typeof(FrontmatterParser))
+                .Debug(ex, "Frontmatter YAML failed to parse; treating as no-frontmatter");
             return null;
         }
     }

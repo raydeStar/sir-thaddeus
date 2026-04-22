@@ -1,7 +1,7 @@
 ---
 name: 'Harness Iteration Framework'
 description: 'Reusable workflow for running the full Sir Thaddeus E2E harness, breaking failures into stages, and iterating on product fixes with fast feedback.'
-applyTo: 'tools/SirThaddeus.Harness/**,tools/SirThaddeus.Harness/StageSuites/**,packages/agent/**,apps/headless-runtime/**,apps/ui-avalonia/**,tests/SirThaddeus.Tests/Integration/**'
+applyTo: 'tools/SirThaddeus.Harness/**,tools/SirThaddeus.Harness/StageSuites/**,packages/agent/**,apps/headless-runtime/**,src/Thaddeus.Runtime/**,web/**,tests/SirThaddeus.Tests/Integration/**'
 ---
 
 # Harness Iteration Framework
@@ -126,8 +126,8 @@ Fix the narrowest product seam that explains the failure class.
 Preferred targets:
 
 - `packages/agent/` for route, fallback, grounding, synthesis, tool incorporation
-- `apps/headless-runtime/` for event transport, sandbox behavior, runtime execution issues
-- `apps/ui-avalonia/` only when the product defect is in desktop rendering or interaction
+- `apps/headless-runtime/` for legacy runtime transport and sandbox behavior
+- `src/Thaddeus.Runtime/` and `web/` for hybrid runtime and browser interaction defects
 
 Avoid:
 

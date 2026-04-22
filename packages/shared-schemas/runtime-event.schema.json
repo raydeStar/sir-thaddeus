@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thaddeus.local/schemas/runtime-event.json",
+  "title": "RuntimeEvent",
+  "description": "Envelope for every event broadcast over WebSocket and IPC.",
+  "type": "object",
+  "required": ["type", "id", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Dotted namespace, e.g. runtime.state, permission.granted."
+    },
+    "id": { "type": "string", "description": "ULID." },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "correlationId": { "type": "string" },
+    "payload": {}
+  }
+}

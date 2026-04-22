@@ -190,6 +190,30 @@ public class RouterTests
         Assert.True(route.NeedsSearch);
     }
 
+    [Fact]
+    public async Task RouteAsync_SelfContainedArchitectureComparison_RoutesToChatOnly()
+    {
+        var llmCalls = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCalls++;
+            return new LlmResponse { IsComplete = true, Content = "lookup", FinishReason = "stop" };
+        });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "Compare microservices vs monolithic architecture. Cover scalability, deployment complexity, team structure, and debugging difficulty. Give your recommendation for a startup with 5 developers.",
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.ChatOnly, route.Intent);
+        Assert.False(route.NeedsWeb);
+        Assert.False(route.NeedsSearch);
+        Assert.Equal(0, llmCalls);
+    }
+
     [Theory]
     [InlineData("deep dive on portland floral hours and reviews")]
     [InlineData("what time does Portland Floral open and close?")]

@@ -14,9 +14,10 @@ flowchart LR
     Repair[Targeted Repair]
   end
 
-  subgraph frontend [Layer 2: Interface - apps/ui-avalonia + apps/headless-runtime]
-    Overlay[Avalonia UI]
-    Headless[Headless Runtime]
+  subgraph frontend [Layer 2: Interface - src/Thaddeus.Runtime + web + apps/headless-runtime]
+    Overlay[React UI]
+    Runtime[Hybrid Runtime]
+    Headless[Legacy Terminal Runtime]
     Palette[Command Palette]
   end
 

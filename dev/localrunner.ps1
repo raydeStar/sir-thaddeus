@@ -90,7 +90,7 @@ function Stop-ExistingInstances {
     param([string]$RepoRootPath)
 
     Write-Host "`n[0/5] Stopping any existing instances of Sir Thaddeus..." -ForegroundColor Yellow
-    $processesToKill = @("SirThaddeus.McpServer", "SirThaddeus.VoiceHost", "SirThaddeus.HeadlessRuntime", "SirThaddeus.UI.Avalonia")
+    $processesToKill = @("SirThaddeus.McpServer", "SirThaddeus.VoiceHost", "SirThaddeus.HeadlessRuntime", "Thaddeus.Runtime")
     foreach ($procName in $processesToKill) {
         $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
         if ($procs) {
@@ -294,6 +294,77 @@ function Test-HttpUrlReachable {
     }
 }
 
+function Get-RuntimeLockInfo {
+    param([string]$LockPath)
+
+    if (-not (Test-Path $LockPath)) {
+        return $null
+    }
+
+    try {
+        $lock = Get-Content $LockPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+
+    if ($null -eq $lock -or
+        $null -eq $lock.pid -or [int]$lock.pid -le 0 -or
+        $null -eq $lock.port -or [int]$lock.port -le 0 -or
+        [string]::IsNullOrWhiteSpace([string]$lock.token)) {
+        return $null
+    }
+
+    return $lock
+}
+
+function Test-FreshHybridRuntimeStarted {
+    param(
+        [string]$LockPath,
+        [long]$PreviousTicks,
+        [int]$TimeoutMs = 5000
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $LockPath) {
+            $currentTicks = (Get-Item $LockPath).LastWriteTimeUtc.Ticks
+            if ($currentTicks -gt $PreviousTicks) {
+                $lock = Get-RuntimeLockInfo -LockPath $LockPath
+                if ($null -ne $lock) {
+                    $proc = Get-Process -Id ([int]$lock.pid) -ErrorAction SilentlyContinue
+                    if ($null -ne $proc) {
+                        try {
+                            $runtimeInfo = Invoke-RestMethod \
+                                -Uri ("http://127.0.0.1:{0}/api/runtime-info" -f [int]$lock.port) \
+                                -Headers @{ Authorization = "Bearer $($lock.token)" } \
+                                -TimeoutSec 2 \
+                                -ErrorAction Stop
+
+                            if ($null -ne $runtimeInfo) {
+                                return [pscustomobject]@{
+                                    Started = $true
+                                    Lock = $lock
+                                }
+                            }
+                        }
+                        catch {
+                            # Lock may be fresh before the API is fully ready; keep polling.
+                        }
+                    }
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    return [pscustomobject]@{
+        Started = $false
+        Lock = $null
+    }
+}
+
 function Write-SearxngStartupExpectation {
     param(
         [bool]$IsTerminalMode,
@@ -417,24 +488,76 @@ $ProjectPath = if ($TerminalMode) {
     Join-Path $RepoRoot "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj"
 }
 else {
-    Join-Path $RepoRoot "apps/ui-avalonia/SirThaddeus.UI.Avalonia/SirThaddeus.UI.Avalonia.csproj"
+    Join-Path $RepoRoot "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj"
 }
 
 if ($TerminalMode) {
     Write-Host "      Mode: terminal (headless runtime)" -ForegroundColor Cyan
 }
 else {
-    Write-Host "      Mode: Avalonia UI" -ForegroundColor Cyan
+    Write-Host "      Mode: hybrid web runtime (browser UI)" -ForegroundColor Cyan
 }
 Write-SearxngStartupExpectation -IsTerminalMode:$TerminalMode -IsToolsRequested:$ToolsRequested -RuntimeInfo $SearxngRuntimeInfo -SidecarStatus $SearxngSidecarStatus
 
 # Keep startup snappy: rely on normal incremental build.
 Invoke-ProjectBuild -ProjectPath $ProjectPath -Label "startup project"
 
+# Browser-launch watcher: when the hybrid runtime writes ~/.thaddeus/runtime.lock,
+# open the user's default browser at the bound URL. The bootstrap endpoint there
+# injects the per-session bearer token into the SPA, so no extra plumbing is
+# needed. We snapshot the lock file's pre-existing mtime and only fire when a
+# fresh write appears, so a stale lock left behind by a crashed run is ignored.
+$browserJob = $null
+if (-not $TerminalMode) {
+    $lockPath = Join-Path $env:USERPROFILE ".thaddeus\runtime.lock"
+    $previousWriteTicks = if (Test-Path $lockPath) {
+        (Get-Item $lockPath).LastWriteTimeUtc.Ticks
+    } else {
+        0
+    }
+
+    $browserJob = Start-Job -ScriptBlock {
+        param($LockPath, $PreviousTicks)
+
+        $deadline = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-Path $LockPath) {
+                $current = (Get-Item $LockPath).LastWriteTimeUtc.Ticks
+                if ($current -gt $PreviousTicks) {
+                    try {
+                        $lock = Get-Content $LockPath -Raw | ConvertFrom-Json
+                        if ($null -ne $lock -and $lock.port -gt 0) {
+                            $url = "http://127.0.0.1:$($lock.port)/"
+                            Start-Process $url
+                            return
+                        }
+                    } catch {
+                        # Lock not fully written yet; loop again.
+                    }
+                }
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    } -ArgumentList $lockPath, $previousWriteTicks
+}
+
 try {
     & dotnet run --project $ProjectPath --no-build -- $ForwardArgs
+
+    $startupExitCode = $LASTEXITCODE
+    if (-not $TerminalMode -and $startupExitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($lockPath)) {
+        $runtimeStatus = Test-FreshHybridRuntimeStarted -LockPath $lockPath -PreviousTicks $previousWriteTicks
+        if ($runtimeStatus.Started) {
+            Write-Host "      Runtime reported healthy on port $($runtimeStatus.Lock.port); normalizing startup exit code." -ForegroundColor DarkYellow
+            $startupExitCode = 0
+        }
+    }
 }
 finally {
+    if ($null -ne $browserJob) {
+        Stop-Job -Job $browserJob -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $browserJob -Force -ErrorAction SilentlyContinue | Out-Null
+    }
     if ($DebugMode) {
         Write-Host "`n[DEBUG] Cleaning up background service windows..." -ForegroundColor DarkGray
         if ($null -ne $voiceHostProcess) { Stop-Process -Id $voiceHostProcess.Id -Force -ErrorAction SilentlyContinue }
@@ -442,5 +565,5 @@ finally {
     }
 }
 
-exit $LASTEXITCODE
+exit $startupExitCode
 

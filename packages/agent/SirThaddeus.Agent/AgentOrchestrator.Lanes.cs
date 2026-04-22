@@ -134,6 +134,25 @@ public sealed partial class AgentOrchestrator
                 return null;
             }
 
+            searchResponse = NormalizeExplicitWebNoResultsContractResponse(
+                userMessage,
+                searchResponse,
+                toolCallsMade);
+
+            if (string.Equals(
+                searchResponse.Text,
+                ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                StringComparison.Ordinal) ||
+                string.Equals(
+                    searchResponse.Text,
+                    ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                    StringComparison.Ordinal))
+            {
+                LogEvent("CHECK_LANE_CONTRACT_NORMALIZED", "Returning normalized explicit web no-results response.");
+                AppendAssistantMessage(searchResponse.Text);
+                return searchResponse with { LlmRoundTrips = roundTrips + 1 };
+            }
+
             // Step 3: Format with source citation + confidence caveat.
             var formattedResponse = await _checkLane.FormatResponseAsync(
                 userMessage, extraction, searchResponse.Text, cancellationToken);
@@ -213,6 +232,25 @@ public sealed partial class AgentOrchestrator
             {
                 LogEvent("EXPLAIN_LANE_SEARCH_FAILED", "Search returned no results — falling through.");
                 return null;
+            }
+
+            searchResponse = NormalizeExplicitWebNoResultsContractResponse(
+                userMessage,
+                searchResponse,
+                toolCallsMade);
+
+            if (string.Equals(
+                searchResponse.Text,
+                ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                StringComparison.Ordinal) ||
+                string.Equals(
+                    searchResponse.Text,
+                    ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                    StringComparison.Ordinal))
+            {
+                LogEvent("EXPLAIN_LANE_CONTRACT_NORMALIZED", "Returning normalized explicit web no-results response.");
+                AppendAssistantMessage(searchResponse.Text);
+                return searchResponse with { LlmRoundTrips = roundTrips + 1 };
             }
 
                 var formattedResponse = await _explainLane.FormatSearchSummaryAsync(

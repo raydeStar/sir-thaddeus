@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Serilog;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Search;
@@ -198,8 +199,16 @@ public sealed partial class AgentOrchestrator
                                 Success = true
                             });
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            // Utility-continuation MCP tool calls are best-effort: the
+                            // user-facing response has already been composed, and a
+                            // failure here only affects the ToolCallRecord list. Log
+                            // so it is debuggable, but do not propagate.
+                            Log.ForContext<AgentOrchestrator>()
+                                .Warning(ex,
+                                    "Utility continuation MCP call failed (tool={Tool})",
+                                    utilityResult.McpToolName);
                         }
                     },
                     BuildInlineResponse = BuildInlineUtilityResponse,

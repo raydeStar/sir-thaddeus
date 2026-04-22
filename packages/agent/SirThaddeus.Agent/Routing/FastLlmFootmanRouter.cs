@@ -18,8 +18,10 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
     private readonly Action<string, string>? _logEvent;
     private readonly TimeSpan _timeout;
 
-    /// <summary>Max tokens for the Footman response — keep it tight.</summary>
-    private const int MaxResponseTokens = 120;
+    /// <summary>Max tokens for the Footman response. The JSON envelope is
+    /// ~80-100 chars / ~35 tokens; 64 gives headroom without letting a
+    /// chatty model run on.</summary>
+    private const int MaxResponseTokens = 64;
 
     public FastLlmFootmanRouter(
         ILlmClient llm,
@@ -28,7 +30,10 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _logEvent = logEvent;
-        _timeout = timeout ?? TimeSpan.FromMilliseconds(3000);
+        // 8 s tolerates an LM Studio model swap (unload primary, load a
+        // small 2B gatekeeper, first-token) on single-GPU setups. Warm
+        // subsequent calls still complete in a few hundred ms.
+        _timeout = timeout ?? TimeSpan.FromMilliseconds(8000);
     }
 
     public async Task<RoutingDecision> RouteAsync(
@@ -38,6 +43,20 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
     {
         var requestId = Guid.NewGuid().ToString("N")[..12];
         var sw = Stopwatch.StartNew();
+
+        // Deterministic fast-path: some prompts are cheap to classify from
+        // heuristics alone. Skipping the LLM call here saves the gatekeeper
+        // round-trip (often hundreds of ms to seconds on small-model setups)
+        // and avoids cold-start swap latency entirely for the common cases.
+        // Only fires on conservative, high-confidence signals — a miss here
+        // just falls through to the LLM, same as before.
+        var deterministic = TryDeterministicRoute(features, requestId);
+        if (deterministic is not null)
+        {
+            _logEvent?.Invoke("FOOTMAN_FAST_PATH",
+                $"requestId={requestId} state={deterministic.NextState} reason={deterministic.ReasonCode}");
+            return deterministic;
+        }
 
         try
         {
@@ -87,6 +106,30 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
         }
     }
 
+    // ── Fast-path classification ──────────────────────────────────────
+
+    /// <summary>
+    /// Returns a deterministic routing decision when the user message
+    /// matches a high-confidence heuristic (greeting, logic puzzle, explicit
+    /// screen/file/system request, etc.). Returning null means "fall through
+    /// to the LLM classifier." Every short-circuit is phrased as 'Chat with
+    /// no tools' or a specific single-family state, never a full Fallback —
+    /// so a heuristic miss can only cost a few tools, not the whole turn.
+    /// </summary>
+    internal static RoutingDecision? TryDeterministicRoute(RoutingFeatures features, string requestId)
+    {
+        // Pure social / acknowledgement — no tools ever needed.
+        if (features.IsGreeting)
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.Chat, "heuristic_greeting");
+
+        // Logic puzzles, riddles, and reasoning traps — tools would only
+        // distract. Primary model handles with the logic-puzzle scaffold.
+        if (features.IsLogicPuzzle)
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.Chat, "heuristic_logic_puzzle");
+
+        return null;
+    }
+
     // ── Prompt Construction ──────────────────────────────────────────
 
     private static IReadOnlyList<ChatMessage> BuildPrompt(
@@ -103,7 +146,7 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
     private static string BuildSystemPrompt(string requestId, RoutingFeatures features)
     {
         return
-$@"You are Footman, a fast routing classifier. Given a user message and pre-computed signals, output ONLY a single JSON object. No markdown, no explanation, no text outside the JSON.
+$@"You are Footman, a fast router. Output ONLY a single JSON object.
 
 Schema (all fields required):
 {{
@@ -116,27 +159,26 @@ Schema (all fields required):
   ""reasonCode"": ""<code>""
 }}
 
-Valid nextState values: Chat, SearchFact, SearchNews, SearchDeepDive, ScreenObserve, FileTask, SystemTask, MemoryWrite, MemoryRead, BrowseOnce, UtilityDeterministic, Fallback
-Valid contextPolicy values: None, LastAssistantOnly, LastTurns, ChatSessionSnapshot, ScreenSnapshot
+nextState: Chat | SearchFact | SearchNews | SearchDeepDive | ScreenObserve | FileTask | SystemTask | MemoryWrite | MemoryRead | BrowseOnce | UtilityDeterministic | Fallback
+contextPolicy: None | LastAssistantOnly | LastTurns | ChatSessionSnapshot | ScreenSnapshot
+reasonCode (pick one, don't invent): heuristic_chat | fact_lookup | news_lookup | deep_dive | screen_request | file_request | system_command | memory_write | memory_read | browse_request | utility_query | opinion_advice | low_confidence | footman_abstain
 
-Rules:
-- If the message is a greeting or casual chat → Chat
-- If the message asks for current facts, prices, weather, people, events → SearchFact
-- If the message asks for news or headlines → SearchNews
-- If the message asks for a deep dive, briefing, or business hours+reviews → SearchDeepDive
-- If the message asks to look at screen, screenshot, or observe → ScreenObserve
-- If the message asks to read/write files → FileTask
-- If the message asks to run a command or launch a program → SystemTask
-- If the message asks to remember, store, note, update, or correct information → MemoryWrite
-- If the message asks to recall stored information → MemoryRead
-- If the message contains a URL or asks to browse/navigate → BrowseOnce
-- If the message is a math problem, conversion, time query, or logic puzzle → Chat (no tools needed)
-- If the user supplies all necessary facts and asks for an opinion, advice, or judgment (e.g. 'X is 50m away, should I walk or drive?') → Chat (no lookup needed; reason from what was given)
-- If uncertain, set abstain=true and nextState=Fallback
-- Set confidence honestly. Below 0.60 triggers automatic fallback.
+Routing:
+- greeting / casual / asking you to reason from given facts (""X is 50m away, walk or drive?"") → Chat
+- current facts, prices, weather, people, events → SearchFact
+- news / headlines → SearchNews
+- deep dive, briefing, business hours+reviews → SearchDeepDive
+- look at screen / screenshot → ScreenObserve
+- read/write files → FileTask
+- run command / launch program → SystemTask
+- remember / save / correct info → MemoryWrite
+- recall saved info → MemoryRead
+- URL or browse/navigate → BrowseOnce
+- math, unit conversion, time, logic puzzle → Chat
+- uncertain → abstain=true, nextState=Fallback
+Confidence < 0.60 auto-falls back.
 
-Pre-computed signals for this message:
-{features.ToPromptSummary()}";
+Signals: {features.ToPromptSummary()}";
     }
 
     // ── Parse + Validate ─────────────────────────────────────────────

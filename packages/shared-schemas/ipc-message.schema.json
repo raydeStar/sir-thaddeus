@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thaddeus.local/schemas/ipc-message.json",
+  "title": "IpcMessage",
+  "description": "NDJSON envelope used between the shell and the runtime over named pipe / Unix domain socket.",
+  "type": "object",
+  "required": ["id", "type"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Caller-supplied request ID. Responses reference the same id."
+    },
+    "type": {
+      "type": "string",
+      "description": "Message type. Examples: hello, hello.ack, shutdown, ping, pong, event, control.stop_all."
+    },
+    "payload": {},
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

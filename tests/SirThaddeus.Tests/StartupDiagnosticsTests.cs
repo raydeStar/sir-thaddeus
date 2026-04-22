@@ -78,6 +78,44 @@ public sealed class StartupDiagnosticsTests
     }
 
     [Fact]
+    public async Task VoiceHostDisabled_MarksCheckSkipped()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { BaseUrl = "" },
+            Voice = new VoiceSettings { VoiceHostEnabled = false },
+        };
+
+        var report = await StartupDiagnostics.RunAsync(settings, perCheckTimeout: TimeSpan.FromSeconds(1));
+
+        var voiceCheck = report.Checks.Single(c => c.Name == "voicehost.reachable");
+        Assert.Equal(StartupCheckStatus.Skipped, voiceCheck.Status);
+    }
+
+    [Fact]
+    public async Task VoiceHostEnabledButUnreachable_MarksCheckWarning()
+    {
+        // VoiceHost is launched on demand in practice, so an unreachable
+        // probe should surface as a Warning, not a hard Failed.
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { BaseUrl = "" },
+            Voice = new VoiceSettings
+            {
+                VoiceHostEnabled = true,
+                VoiceHostBaseUrl = $"http://127.0.0.1:{GetLikelyUnusedPort()}",
+            },
+        };
+
+        var report = await StartupDiagnostics.RunAsync(settings, perCheckTimeout: TimeSpan.FromSeconds(1));
+
+        var voiceCheck = report.Checks.Single(c => c.Name == "voicehost.reachable");
+        Assert.Equal(StartupCheckStatus.Warning, voiceCheck.Status);
+        // Warnings must not promote the whole report to Failed.
+        Assert.NotEqual(StartupCheckStatus.Failed, report.Worst);
+    }
+
+    [Fact]
     public async Task LogsWritableCheck_PassesOnDefaultEnvironment()
     {
         var settings = new AppSettings

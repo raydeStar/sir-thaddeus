@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thaddeus.local/schemas/runtime-state.json",
+  "title": "RuntimeState",
+  "description": "Top-level runtime state machine values. Both shell and workspace consume these. The runtime is the sole producer.",
+  "type": "string",
+  "enum": [
+    "Idle",
+    "Listening",
+    "Transcribing",
+    "Thinking",
+    "AwaitingPermission",
+    "ExecutingTools",
+    "Speaking",
+    "Paused",
+    "Error",
+    "Stopping"
+  ]
+}

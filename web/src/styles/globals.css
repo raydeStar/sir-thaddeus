@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+
+    /* Light palette — warm, paper-like. Terracotta accent used sparingly. */
+    --color-canvas: #FBFAF7;
+    --color-canvas-raised: #FFFFFF;
+    --color-canvas-sunken: #F5F3EE;
+    --color-ink: #1C1B19;
+    --color-ink-muted: #6E6B65;
+    --color-ink-subtle: #B0ACA2;
+    --color-line: #EDEAE3;
+    --color-line-strong: #D9D5CB;
+    --color-accent: #D97757;
+    --color-accent-soft: #FAEDE4;
+    --color-accent-ring: #D97757;
+    --color-danger: #C65D52;
+    --scrollbar-thumb: rgba(22, 21, 20, 0.08);
+    --scrollbar-thumb-hover: rgba(22, 21, 20, 0.18);
+    --focus-ring: rgba(217, 119, 87, 0.45);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      /* Dark palette — near-black, slightly warm. Terracotta brightened for contrast. */
+      --color-canvas: #0E0E0D;
+      --color-canvas-raised: #161615;
+      --color-canvas-sunken: #090908;
+      --color-ink: #ECECE7;
+      --color-ink-muted: #9A988F;
+      --color-ink-subtle: #66645F;
+      --color-line: #242321;
+      --color-line-strong: #3A3833;
+      --color-accent: #E89069;
+      --color-accent-soft: #2A1C14;
+      --color-accent-ring: #E89069;
+      --color-danger: #E06B60;
+      --scrollbar-thumb: rgba(236, 236, 231, 0.08);
+      --scrollbar-thumb-hover: rgba(236, 236, 231, 0.18);
+      --focus-ring: rgba(232, 144, 105, 0.55);
+    }
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Subtle kern + optical-sizing hint so larger headings feel weighty without being heavy. */
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  h1 {
+    letter-spacing: -0.025em;
+  }
+  h2,
+  h3 {
+    letter-spacing: -0.015em;
+  }
+}
+
+@layer components {
+  /* Pill primary action. Only CTA that carries accent color — used for Save, Send, Create. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  /* Ghost button for secondary actions. Lives on canvas, reveals on hover. */
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-ink-muted transition hover:bg-accent-soft hover:text-ink;
+  }
+
+  /* Quiet bordered button for tertiary actions (Refresh, Test, etc.). */
+  .btn-quiet {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink transition hover:bg-accent-soft hover:border-line-strong disabled:opacity-50;
+  }
+
+  /* Low-chrome container. No shadow — just a barely-there bg wash + thin hairline.
+     Intentionally minimal so pages feel composed of content, not boxes. */
+  .surface {
+    @apply rounded-2xl border border-line bg-canvas-raised;
+  }
+
+  /* Flat group — no box at all, just rhythm. Use this most of the time. */
+  .group-quiet {
+    @apply space-y-4;
+  }
+
+  /* Base text input styling, reused everywhere. */
+  .field-input {
+    @apply block w-full rounded-xl border border-line bg-canvas-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle focus:border-accent-ring focus:outline-none focus:ring-2 focus:ring-accent/20;
+  }
+
+  /* Prose variant for assistant chat messages. Pulls tokens from CSS vars
+     so light + dark palettes both look right without an `.invert` toggle.
+     The defaults (`prose` + `prose-sm`) are overridden just enough to match
+     the calm typographic rhythm of the rest of the app. */
+  .prose-thaddeus {
+    @apply text-[15px] leading-[1.65] text-ink;
+  }
+  .prose-thaddeus > *:first-child { margin-top: 0; }
+  .prose-thaddeus > *:last-child { margin-bottom: 0; }
+
+  .prose-thaddeus p { @apply my-4; }
+  .prose-thaddeus h1 { @apply mt-6 mb-3 text-[22px] font-semibold tracking-tight; }
+  .prose-thaddeus h2 { @apply mt-6 mb-3 text-[18px] font-semibold tracking-tight; }
+  .prose-thaddeus h3 { @apply mt-5 mb-2 text-[16px] font-semibold; }
+  .prose-thaddeus h4 { @apply mt-4 mb-2 text-[15px] font-semibold; }
+  .prose-thaddeus strong { @apply font-semibold text-ink; }
+  .prose-thaddeus em { @apply italic; }
+  .prose-thaddeus a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  .prose-thaddeus a:hover { opacity: 0.85; }
+  .prose-thaddeus ul { @apply my-4 list-disc pl-6; }
+  .prose-thaddeus ol { @apply my-4 list-decimal pl-6; }
+  .prose-thaddeus li { @apply my-1; }
+  .prose-thaddeus li > p { @apply my-1; }
+  .prose-thaddeus li::marker { color: var(--color-ink-subtle); }
+
+  /* Inline code */
+  .prose-thaddeus :not(pre) > code {
+    @apply rounded px-1.5 py-0.5 font-mono text-[0.875em];
+    background: var(--color-canvas-sunken);
+    color: var(--color-ink);
+  }
+
+  /* Block code */
+  .prose-thaddeus pre {
+    @apply my-4 overflow-x-auto rounded-xl border border-line p-4 font-mono text-[13px] leading-[1.55];
+    background: var(--color-canvas-sunken);
+  }
+  .prose-thaddeus pre code { background: transparent; padding: 0; color: var(--color-ink); }
+
+  .prose-thaddeus blockquote {
+    @apply my-4 border-l-2 pl-4 italic;
+    border-color: var(--color-line-strong);
+    color: var(--color-ink-muted);
+  }
+  .prose-thaddeus hr {
+    @apply my-6 border-0;
+    border-top: 1px solid var(--color-line);
+  }
+  .prose-thaddeus table {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+  .prose-thaddeus th, .prose-thaddeus td {
+    @apply border-b px-3 py-2 text-left;
+    border-color: var(--color-line);
+  }
+  .prose-thaddeus th {
+    @apply font-semibold text-ink;
+    background: var(--color-canvas-sunken);
+  }
+}

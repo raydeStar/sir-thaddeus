@@ -17,7 +17,7 @@ public sealed class ScreenContentExtractorTests
     [InlineData("WindowsTerminal", "", "Terminal")]
     [InlineData("powershell", "", "Terminal")]
     [InlineData("Calculator", "", "Math")]
-    [InlineData("SirThaddeus.UI.Avalonia", "", "Self")]
+    [InlineData("Thaddeus.Runtime", "", "Self")]
     [InlineData("unknown", "", "Unknown")]
     [InlineData("unknown", "Project - Visual Studio Code", "Code")]
     [InlineData("unknown", "report.pdf - Adobe Reader", "Document")]
@@ -118,7 +118,7 @@ public sealed class ScreenContentExtractorTests
         };
 
         var result = ScreenContentExtractor.Extract(
-            "Sir Thaddeus", "SirThaddeus.UI.Avalonia", 999, nodes, null, null);
+            "Sir Thaddeus", "Thaddeus.Runtime", 999, nodes, null, null);
 
         Assert.Equal("Self", result.ContentType);
         Assert.Contains("own application window", result.ReadableContent);

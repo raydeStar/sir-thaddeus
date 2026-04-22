@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "runtime",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/Thaddeus.Runtime/Thaddeus.Runtime.csproj",
+        "-c",
+        "Debug",
+        "--no-build"
+      ],
+      "port": 59998
+    }
+  ]
+}

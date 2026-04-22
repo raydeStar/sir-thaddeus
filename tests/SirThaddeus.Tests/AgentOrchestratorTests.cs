@@ -1,4 +1,4 @@
-using SirThaddeus.Agent;
+﻿using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
 using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
@@ -11,18 +11,18 @@ using Xunit.Abstractions;
 
 namespace SirThaddeus.Tests;
 
-// ─────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Agent Orchestrator Tests
 //
 // Covers: LLM-based intent classification, search query + recency
-// extraction, self-dialogue truncation, and the overall classify →
-// tool → interpret flow.
+// extraction, self-dialogue truncation, and the overall classify â†’
+// tool â†’ interpret flow.
 //
 // All tests use a FakeLlmClient to control model responses without
 // any real LLM dependency, and TestAuditLogger to avoid file I/O.
-// ─────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-#region ── Intent Classification ──────────────────────────────────────────
+#region â”€â”€ Intent Classification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class IntentClassificationTests
 {
@@ -30,9 +30,9 @@ public class IntentClassificationTests
     public IntentClassificationTests(ITestOutputHelper output) => _output = output;
 
     [Theory]
-    [InlineData("chat", false)]  // Casual → no tool calls
-    [InlineData("search", true)]   // WebLookup → web_search tool
-    [InlineData("tool", true)]   // Tooling → tool call loop
+    [InlineData("chat", false)]  // Casual â†’ no tool calls
+    [InlineData("search", true)]   // WebLookup â†’ web_search tool
+    [InlineData("tool", true)]   // Tooling â†’ tool call loop
     public async Task ClassifiesIntent_BasedOnLlmResponse(string llmReply, bool expectsToolCall)
     {
         using var t = TestTimer.Start(_output, $"ClassifiesIntent({llmReply})");
@@ -170,7 +170,7 @@ public class IntentClassificationTests
 
         var result = await agent.ProcessAsync("tell me a joke");
 
-        // Should succeed — classification failure falls back to casual
+        // Should succeed â€” classification failure falls back to casual
         Assert.True(result.Success);
         var agentTools1 = result.ToolCallsMade
             .Where(t => t.ToolName != "MemoryRetrieve").ToList();
@@ -204,7 +204,7 @@ public class IntentClassificationTests
 
 #endregion
 
-#region ── Search Query + Recency Extraction ─────────────────────────────
+#region â”€â”€ Search Query + Recency Extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class SearchQueryExtractionTests
 {
@@ -221,10 +221,10 @@ public class SearchQueryExtractionTests
             callIndex++;
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
 
-            // Call 1 = classification → "search"
+            // Call 1 = classification â†’ "search"
             if (sysMsg.Contains("Classify")) return "search";
 
-            // Call 2 = query extraction → "stock market | day"
+            // Call 2 = query extraction â†’ "stock market | day"
             if (sysMsg.Contains("QUERY") && sysMsg.Contains("RECENCY"))
                 return "stock market | day";
 
@@ -270,7 +270,7 @@ public class SearchQueryExtractionTests
         var agent = new AgentOrchestrator(llm, mcp, audit, "Test assistant.");
 
         // Message must NOT trigger Tier-1 deterministic heuristics so
-        // the LLM classifier → search pipeline path is exercised.
+        // the LLM classifier â†’ search pipeline path is exercised.
         var result = await agent.ProcessAsync("quantum computing interests me as a field of study");
 
         Assert.True(result.Success);
@@ -292,7 +292,7 @@ public class SearchQueryExtractionTests
     public async Task RecencyFallback_DetectsKeywords_WhenLlmSkipped(
         string shortQuery, string expectedRecency)
     {
-        // New pipeline: EntityResolver → QueryBuilder → web_search → summary.
+        // New pipeline: EntityResolver â†’ QueryBuilder â†’ web_search â†’ summary.
         // The QueryBuilder should pick up recency from the LLM or fall back
         // to detecting temporal markers in the user message.
         var llm = new FakeLlmClient((messages, tools) =>
@@ -302,12 +302,12 @@ public class SearchQueryExtractionTests
             if (sysMsg.Contains("Classify")) return new LlmResponse
             { IsComplete = true, Content = "search", FinishReason = "stop" };
 
-            // Entity extraction → no entity for generic queries
+            // Entity extraction â†’ no entity for generic queries
             if (sysMsg.Contains("entity extractor", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse
                 { IsComplete = true, Content = """{"name":"","type":"none","hint":""}""", FinishReason = "stop" };
 
-            // Query construction → return the query with expected recency
+            // Query construction â†’ return the query with expected recency
             if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse
                 { IsComplete = true, Content = $"{{\"query\":\"{shortQuery}\",\"recency\":\"{expectedRecency}\"}}", FinishReason = "stop" };
@@ -334,7 +334,7 @@ public class SearchQueryExtractionTests
 
 #endregion
 
-#region ── Full Flow: Classify → Tool → Interpret ────────────────────────
+#region â”€â”€ Full Flow: Classify â†’ Tool â†’ Interpret â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class AgentFlowTests
 {
@@ -345,7 +345,7 @@ public class AgentFlowTests
     public async Task WebLookup_CallsToolThenSummarizes()
     {
         using var t = TestTimer.Start(_output, "WebLookup_CallsToolThenSummarizes");
-        // New pipeline: entity extraction → query construction → web_search → summary.
+        // New pipeline: entity extraction â†’ query construction â†’ web_search â†’ summary.
         var llmCalls = new List<string>();
 
         var llm = new FakeLlmClient((messages, tools) =>
@@ -385,7 +385,7 @@ public class AgentFlowTests
 
         Assert.True(result.Success);
 
-        // Pipeline stages: entity → query → summarize
+        // Pipeline stages: entity â†’ query â†’ summarize
         Assert.Contains("entity", llmCalls);
         Assert.Contains("query", llmCalls);
         Assert.Contains("summarize", llmCalls);
@@ -472,7 +472,7 @@ public class AgentFlowTests
     {
         // New pipeline: QueryBuilder validates query tokens against user message.
         // If LLM returns junk that fails validation, fallback uses topic extraction.
-        // "thadds" is in the user message so it passes validation — we verify
+        // "thadds" is in the user message so it passes validation â€” we verify
         // the flow completes and a search runs.
         var llm = new FakeLlmClient((messages, tools) =>
         {
@@ -485,7 +485,7 @@ public class AgentFlowTests
                 return new LlmResponse
                 { IsComplete = true, Content = """{"name":"","type":"none","hint":""}""", FinishReason = "stop" };
 
-            // Query builder returns query — validation allows tokens from user message
+            // Query builder returns query â€” validation allows tokens from user message
             if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse
                 { IsComplete = true, Content = """{"query":"headlines look up","recency":"day"}""", FinishReason = "stop" };
@@ -508,7 +508,7 @@ public class AgentFlowTests
             c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
 
         Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
-        // Query should be useful — contain topic-related terms, not just assistant filler
+        // Query should be useful â€” contain topic-related terms, not just assistant filler
         Assert.Contains("headlines", webSearch.Args, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -633,7 +633,7 @@ public class AgentFlowTests
                 return new LlmResponse
                 { IsComplete = true, Content = """{"name":"Super Bowl","type":"Topic","hint":"NFL championship game"}""", FinishReason = "stop" };
 
-            // The LLM might guess a year — but QueryBuilder validates
+            // The LLM might guess a year â€” but QueryBuilder validates
             if (sysMsg.Contains("search query builder", StringComparison.OrdinalIgnoreCase))
                 return new LlmResponse
                 { IsComplete = true, Content = """{"query":"most recent super bowl winner","recency":"any"}""", FinishReason = "stop" };
@@ -714,7 +714,7 @@ public class AgentFlowTests
     /// <summary>
     /// The extraction LLM receives full conversation context so it can
     /// resolve the actual topic even when the user message is full of
-    /// filler. With proper context the model produces a real query —
+    /// filler. With proper context the model produces a real query â€”
     /// no deterministic filler-stripping needed on the primary path.
     /// </summary>
     [Fact]
@@ -770,11 +770,11 @@ public class AgentFlowTests
 
         Assert.False(string.IsNullOrWhiteSpace(webSearch.Tool));
 
-        // Query comes straight from the model — should be the topic
+        // Query comes straight from the model â€” should be the topic
         Assert.Contains("stock market", webSearch.Args, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"Well\"", webSearch.Args, StringComparison.Ordinal);
 
-        // Recency: model set "day" and user said "today" — should be "day"
+        // Recency: model set "day" and user said "today" â€” should be "day"
         Assert.Contains("\"recency\":\"day\"", webSearch.Args, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -843,7 +843,7 @@ public class AgentFlowTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Hey, I've run the calculation.\n\n59 ÷ 365 = 0.161\n\nSo that's the result.",
+                Content = "Hey, I've run the calculation.\n\n59 Ã· 365 = 0.161\n\nSo that's the result.",
                 FinishReason = "stop"
             };
         });
@@ -863,7 +863,7 @@ public class AgentFlowTests
         var result = await agent.ProcessAsync("Why are you such a fatty McFat fat?");
 
         Assert.True(result.Success);
-        Assert.DoesNotContain("59 ÷ 365", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("59 Ã· 365", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("respectful", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.NotEmpty(audit.GetByAction("AGENT_OFFTOPIC_CALC_REWRITE"));
     }
@@ -1130,7 +1130,7 @@ public class AgentFlowTests
 
         var result = await agent.ProcessAsync("");
 
-        // Empty messages are rejected early — no LLM or tool calls
+        // Empty messages are rejected early â€” no LLM or tool calls
         Assert.False(result.Success);
         Assert.Empty(result.ToolCallsMade);
         Assert.Contains("Empty", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -1214,7 +1214,7 @@ public class AgentFlowTests
 
 #endregion
 
-#region ── Memory Retrieval Audit ──────────────────────────────────────────
+#region â”€â”€ Memory Retrieval Audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class MemoryRetrievalAuditTests
 {
@@ -1272,7 +1272,7 @@ public class MemoryRetrievalAuditTests
             return "Just chatting.";
         });
 
-        // Empty pack — no content retrieved
+        // Empty pack â€” no content retrieved
         const string emptyPackJson = """
             {
                 "facts": 0, "events": 0, "chunks": 0,
@@ -1338,7 +1338,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" â€” address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1412,7 +1412,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" â€” address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1505,7 +1505,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" â€” address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1597,7 +1597,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 0, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" â€” address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1690,7 +1690,7 @@ public class MemoryRetrievalAuditTests
                 "facts": 1, "events": 0, "chunks": 0, "nuggets": 0,
                 "hasProfile": true, "onboardingNeeded": false,
                 "notes": "", "citations": [],
-                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" — address them by name naturally.",
+                "packText": "[PROFILE]\nName: Sample User\n[/PROFILE]\nYou know this user as \"Sample\" â€” address them by name naturally.",
                 "hasContent": true
             }
             """;
@@ -1717,7 +1717,7 @@ public class MemoryRetrievalAuditTests
 
 #endregion
 
-#region ── Tool Loop Tests ────────────────────────────────────────────────
+#region â”€â”€ Tool Loop Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// <summary>
 /// Exercises the actual tool-calling code path: LLM returns tool calls,
@@ -1733,7 +1733,7 @@ public class ToolLoopTests
     public async Task ToolLoop_ProcessesSingleToolCall()
     {
         using var t = TestTimer.Start(_output, "ToolLoop_SingleToolCall");
-        // LLM flow: classify → tool_call → final text
+        // LLM flow: classify â†’ tool_call â†’ final text
         var toolRequested = false;
         var llm = new FakeLlmClient((messages, tools) =>
         {
@@ -1914,7 +1914,7 @@ public class ToolLoopTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "I wasn't able to store that — it seems the tool hit an error.",
+                Content = "I wasn't able to store that â€” it seems the tool hit an error.",
                 FinishReason = "stop"
             };
         });
@@ -1947,14 +1947,14 @@ public class ToolLoopTests
     [Fact]
     public async Task ToolLoop_RespectsMaxRoundTrips()
     {
-        // LLM keeps requesting tools indefinitely — should bail at the safety cap
+        // LLM keeps requesting tools indefinitely â€” should bail at the safety cap
         var llm = new FakeLlmClient((messages, tools) =>
         {
             var sysMsg = messages.FirstOrDefault(m => m.Role == "system")?.Content ?? "";
             if (sysMsg.Contains("Classify"))
                 return new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" };
 
-            // Always request another tool call — never finish
+            // Always request another tool call â€” never finish
             return new LlmResponse
             {
                 IsComplete = false,
@@ -2194,12 +2194,12 @@ public class ToolLoopTests
 
 #endregion
 
-#region ── Policy-Driven Tool Filtering Tests ─────────────────────────────
+#region â”€â”€ Policy-Driven Tool Filtering Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// <summary>
 /// Verifies that the policy gate correctly controls which tools the
 /// LLM sees based on classified intent. These tests exercise the
-/// full pipeline: classify → route → policy → filter → execute.
+/// full pipeline: classify â†’ route â†’ policy â†’ filter â†’ execute.
 /// </summary>
 public class PolicyFilteringTests
 {
@@ -2211,7 +2211,7 @@ public class PolicyFilteringTests
     {
         using var t = TestTimer.Start(_output, "CasualChat_SkipsToolLoop");
         // Chat-only intent: UseToolLoop = false, no tools at all.
-        // The LLM should receive NO tools — not even memory tools.
+        // The LLM should receive NO tools â€” not even memory tools.
         IReadOnlyList<ToolDefinition>? toolsSeen = null;
 
         var llm = new FakeLlmClient((messages, tools) =>
@@ -2256,9 +2256,9 @@ public class PolicyFilteringTests
     [Fact]
     public async Task MemoryWriteIntent_OnlyExposesMemoryTools()
     {
-        // "Remember that..." → LooksLikeMemoryWriteRequest heuristic
-        // → bypasses LLM classifier → routes to memory_write intent
-        // → only memory tools exposed
+        // "Remember that..." â†’ LooksLikeMemoryWriteRequest heuristic
+        // â†’ bypasses LLM classifier â†’ routes to memory_write intent
+        // â†’ only memory tools exposed
         IReadOnlyList<ToolDefinition>? toolsSeen = null;
         var toolCallMade = false;
 
@@ -2301,7 +2301,7 @@ public class PolicyFilteringTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Got it — I'll remember that.",
+                Content = "Got it â€” I'll remember that.",
                 FinishReason = "stop"
             };
         });
@@ -2323,7 +2323,7 @@ public class PolicyFilteringTests
         Assert.True(result.Success);
         Assert.NotNull(toolsSeen);
 
-        // Should only have memory tools — NOT screen_capture etc.
+        // Should only have memory tools â€” NOT screen_capture etc.
         var toolNames = toolsSeen!.Select(t => t.Function.Name).ToHashSet();
         Assert.Contains("memory_store_facts", toolNames);
         Assert.DoesNotContain("screen_capture", toolNames);
@@ -2340,8 +2340,8 @@ public class PolicyFilteringTests
     [Fact]
     public async Task ScreenRequest_DeterministicCapture_CallsScreenToolDirectly()
     {
-        // "What can you see on my screen?" → screen_observe intent
-        // → deterministic path: screen_capture called directly via MCP,
+        // "What can you see on my screen?" â†’ screen_observe intent
+        // â†’ deterministic path: screen_capture called directly via MCP,
         //   result injected as context, LLM describes what it sees.
         var llm = new FakeLlmClient((messages, tools) =>
         {
@@ -2526,7 +2526,7 @@ public class PolicyFilteringTests
 
         var screenReport = """
 [Screen Read]
-Window: Code — "Visual Studio Code"
+Window: Code â€” "Visual Studio Code"
 Content Type: Code
 
 Content:
@@ -2573,7 +2573,7 @@ README.md open with a checklist and the words screen capture enabled.
 
         var screenReport = """
 [Screen Read]
-Window: Browser — Example
+Window: Browser â€” Example
 Content Type: WebPage
 
 Content:
@@ -3020,7 +3020,7 @@ Example page content from the browser.
 
 #endregion
 
-#region ── Multi-Intent Segmentation ───────────────────────────────────────
+#region â”€â”€ Multi-Intent Segmentation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class MultiIntentSegmentationTests
 {
@@ -3112,7 +3112,7 @@ public class MultiIntentSegmentationTests
 
 #endregion
 
-#region ── Tool Contract Normalization ───────────────────────────────────
+#region â”€â”€ Tool Contract Normalization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 public class ToolContractNormalizationTests
 {
@@ -3272,11 +3272,87 @@ public class ToolContractNormalizationTests
             call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task ProcessAsync_WhenRouterReturnsGeneralToolForExplicitTimeoutPrompt_StillNormalizesToTimeoutMessage()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            if (tools?.Any(tool => tool.Function.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                llmCallCount++;
+
+                if (llmCallCount == 1)
+                {
+                    return new LlmResponse
+                    {
+                        IsComplete = false,
+                        FinishReason = "tool_calls",
+                        ToolCalls =
+                        [
+                            new ToolCallRequest
+                            {
+                                Id = "call_web",
+                                Function = new FunctionCallDetails
+                                {
+                                    Name = "web_search",
+                                    Arguments = """{"query":"AI policy news","recency":"day"}"""
+                                }
+                            }
+                        ]
+                    };
+                }
+
+                return new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "I cannot execute web_search because I am a local-first assistant without internet access.",
+                    FinishReason = "stop"
+                };
+            }
+
+            return new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 0 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var router = new StubRouter(new RouterOutput
+        {
+            Intent = Intents.GeneralTool,
+            Confidence = 1.0
+        });
+
+        var agent = new AgentOrchestrator(
+            llm,
+            mcp,
+            new TestAuditLogger(),
+            "Test assistant.",
+            router: router,
+            memoryContextProvider: new StubMemoryContextProvider(),
+            guardrailsCoordinator: new StubGuardrailsCoordinator());
+
+        var result = await agent.ProcessAsync("Use web_search for AI policy news and handle timeout gracefully.");
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+            result.Text);
+        Assert.Contains(result.ToolCallsMade, call =>
+            call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
+    }
+
 }
 
 #endregion
 
-#region ── Test Doubles ──────────────────────────────────────────────────
+#region â”€â”€ Test Doubles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// <summary>
 /// Fake LLM client that supports both text and tool-call responses.
@@ -3294,7 +3370,7 @@ internal sealed class FakeLlmClient : ILlmClient
 {
     private readonly Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> _respond;
 
-    // ── Text-only constructors (backwards compatible) ──────────────
+    // â”€â”€ Text-only constructors (backwards compatible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public FakeLlmClient(Func<IReadOnlyList<ChatMessage>, string> respond)
         : this((msgs, _) => new LlmResponse
@@ -3308,7 +3384,7 @@ internal sealed class FakeLlmClient : ILlmClient
     public FakeLlmClient(string fixedResponse)
         : this(_ => fixedResponse) { }
 
-    // ── Full-control constructor (can return tool calls) ──────────
+    // â”€â”€ Full-control constructor (can return tool calls) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public FakeLlmClient(
         Func<IReadOnlyList<ChatMessage>, IReadOnlyList<ToolDefinition>?, LlmResponse> respond)
@@ -3377,12 +3453,12 @@ internal sealed class FakeMcpClient : IMcpToolClient
 
     public List<(string Tool, string Args)> Calls { get; } = [];
 
-    // ── Simple constructor: fixed return for all tools ─────────────
+    // â”€â”€ Simple constructor: fixed return for all tools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public FakeMcpClient(string returnValue)
         : this((_, _) => returnValue, []) { }
 
-    // ── Routing constructor: per-tool response logic ──────────────
+    // â”€â”€ Routing constructor: per-tool response logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public FakeMcpClient(
         Func<string, string, string> toolHandler,
@@ -3405,7 +3481,7 @@ internal sealed class FakeMcpClient : IMcpToolClient
         return Task.FromResult(_availableTools);
     }
 
-    // ── Helpers for building realistic tool lists ──────────────────
+    // â”€â”€ Helpers for building realistic tool lists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// A representative set of MCP tools matching what the real server

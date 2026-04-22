@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thaddeus.local/schemas/lock-file.json",
+  "title": "RuntimeLockFile",
+  "description": "Contents of ~/.thaddeus/runtime.lock written by the runtime on startup. File mode must be 0600.",
+  "type": "object",
+  "required": ["pid", "port", "token", "version", "startedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "pid": { "type": "integer" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "token": {
+      "type": "string",
+      "description": "Base64url-encoded 256-bit bearer token. Rotated on every runtime start."
+    },
+    "version": {
+      "type": "string",
+      "description": "Runtime semantic version. Used by the shell during the IPC hello handshake."
+    },
+    "ipcEndpoint": {
+      "type": "string",
+      "description": "OS-specific transport address. Named pipe name on Windows, UDS path on macOS/Linux."
+    },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "sidecarPids": {
+      "type": "array",
+      "description": "PIDs of long-lived child processes the runtime owns (e.g. whisper, piper). Used to kill stale sidecars on next start.",
+      "items": { "type": "integer" }
+    }
+  }
+}

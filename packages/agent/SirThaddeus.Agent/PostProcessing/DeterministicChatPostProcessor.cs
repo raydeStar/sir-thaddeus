@@ -201,6 +201,11 @@ public sealed class DeterministicChatPostProcessor
                 sanitized = newsRecovery;
             }
 
+            if (TryBuildExplicitWebToolUnavailableGuard(sanitized, latestUserMessage, toolCallsMade) is { Length: > 0 } unavailableGuard)
+            {
+                sanitized = unavailableGuard;
+            }
+
             sanitized = StripInlineToolCapabilityClauses(sanitized);
 
             var strippedToolingLeak = StripToolingLeakParagraphs(sanitized);
@@ -968,6 +973,7 @@ public sealed class DeterministicChatPostProcessor
         {
             @",?\s*though\s+i\s+cannot\s+verify[^,.;)]*",
             @",?\s*but\s+i\s+cannot\s+verify[^,.;)]*",
+            @",?\s*as\s+of\s+my\s+knowledge\s+cutoff\b[^,.;)]*",
             @"\s+up\s+to\s+my\s+knowledge\s+cutoff\b",
             @"\s+based\s+on\s+my\s+knowledge\s+cutoff\b",
             @"\s+according\s+to\s+my\s+knowledge\s+cutoff\b",
@@ -1051,10 +1057,128 @@ public sealed class DeterministicChatPostProcessor
             if (string.IsNullOrWhiteSpace(location))
                 location = query.Trim();
 
+            // If the tool result actually contains real headline rows
+            // ("1. \"Title\" — source"), prefer rebuilding a real list
+            // over telling the user the summary was empty.
+            var headlines = ExtractHeadlinesFromSearchResult(call.Result);
+            if (headlines.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("Here are the top ");
+                sb.Append(location);
+                sb.AppendLine(" local news headlines:");
+                for (var i = 0; i < headlines.Count && i < 5; i++)
+                {
+                    sb.Append(i + 1);
+                    sb.Append(". ");
+                    sb.AppendLine(headlines[i]);
+                }
+                return sb.ToString().TrimEnd();
+            }
+
             return $"I checked {location} local news, but the returned summary came back empty before it listed the headlines. If you want, I can rerun it on a narrower topic like schools, city government, or public safety.";
         }
 
         return null;
+    }
+
+    private static List<string> ExtractHeadlinesFromSearchResult(string? result)
+    {
+        var headlines = new List<string>();
+        if (string.IsNullOrWhiteSpace(result))
+            return headlines;
+
+        // Drop the SOURCES_JSON tail so we only parse the LLM-facing list.
+        var body = result;
+        var sourcesIdx = body.IndexOf("<!-- SOURCES_JSON -->", StringComparison.Ordinal);
+        if (sourcesIdx >= 0)
+            body = body[..sourcesIdx];
+
+        // Match WebSearchTools.FormatResults rows: `1. "Title" — Source`
+        var matches = Regex.Matches(
+            body,
+            "(?m)^\\s*\\d+\\.\\s+\"(?<title>[^\"]{3,300})\"\\s*[—\\-–]\\s*(?<source>[^\\n]+)$");
+        foreach (Match m in matches)
+        {
+            var title = m.Groups["title"].Value.Trim();
+            var source = m.Groups["source"].Value.Trim();
+            // Trim the optional " (published ...)" suffix from source line.
+            var publishedIdx = source.IndexOf(" (published ", StringComparison.Ordinal);
+            if (publishedIdx >= 0)
+                source = source[..publishedIdx].Trim();
+            if (title.Length == 0)
+                continue;
+
+            headlines.Add(string.IsNullOrWhiteSpace(source)
+                ? title
+                : $"{title} — {source}");
+        }
+
+        return headlines;
+    }
+
+    private static string? TryBuildExplicitWebToolUnavailableGuard(
+        string sanitized,
+        string? latestUserMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (string.IsNullOrWhiteSpace(latestUserMessage))
+            return null;
+
+        // Only fire when the user explicitly named a web/lookup tool to invoke.
+        var explicitIntent = IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(
+            latestUserMessage.Trim().ToLowerInvariant());
+        if (!string.Equals(explicitIntent, Intents.LookupSearch, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var webCalls = toolCallsMade
+            .Where(c => c.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
+                        c.ToolName.Equals("WebSearch", StringComparison.OrdinalIgnoreCase) ||
+                        c.ToolName.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) ||
+                        c.ToolName.Equals("BrowserNavigate", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (webCalls.Count == 0)
+            return null;
+
+        // Every executed web call must be a no-results / empty / error payload.
+        // Otherwise the response may legitimately summarize partial data.
+        foreach (var call in webCalls)
+        {
+            if (!IsNoResultsLikePayload(call.Result))
+                return null;
+        }
+
+        var normalized = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+            latestUserMessage,
+            webCalls);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (string.Equals(sanitized.Trim(), normalized, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return normalized;
+    }
+
+    private static bool IsNoResultsLikePayload(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return true;
+
+        var trimmed = payload.Trim();
+        if (trimmed.StartsWith("No results found for ", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (trimmed.StartsWith("[search:", StringComparison.OrdinalIgnoreCase) &&
+            trimmed.Contains("0 result", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Intentionally do NOT treat structured tool errors (timeout / unavailable / etc.)
+        // as no-results here. Those carry semantically important keywords that downstream
+        // executor paths and the LLM's offline reasoning are responsible for surfacing.
+        // Hijacking them with a generic "unavailable" message strips required keywords
+        // such as "timeout".
+
+        return false;
     }
 
     private static string KeepLeadingOrderedListBlock(string text)

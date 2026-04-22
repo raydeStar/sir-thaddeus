@@ -369,13 +369,41 @@ public static class ContentExtractor
 
     private static HttpClient CreateHttpClient(int timeoutSecs)
     {
-        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSecs) };
+        // Auto-decompress so sites that require gzip/brotli/deflate (Amazon
+        // being a notable one — it 403s plain-identity requests) still
+        // deliver content.
+        var handler = new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            AllowAutoRedirect = true,
+        };
+        var http = new HttpClient(handler, disposeHandler: true)
+        {
+            Timeout = TimeSpan.FromSeconds(timeoutSecs)
+        };
 
+        // Mimic a current Chrome fetch closely enough that anti-bot front
+        // doors (Amazon, Walmart, Target, etc.) return the real page instead
+        // of a 403. A vanilla HttpClient identifies itself too unambiguously
+        // and gets rejected in under a second — that's what produced the
+        // 200ms "failed fetch" the user saw on the PS5 automation.
         http.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
         http.DefaultRequestHeaders.Accept.ParseAdd(
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif," +
+            "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
+        http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        http.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, deflate, br");
+        http.DefaultRequestHeaders.Add("Sec-Ch-Ua",
+            "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"");
+        http.DefaultRequestHeaders.Add("Sec-Ch-Ua-Mobile", "?0");
+        http.DefaultRequestHeaders.Add("Sec-Ch-Ua-Platform", "\"Windows\"");
+        http.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
+        http.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
+        http.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
+        http.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
+        http.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
 
         return http;
     }

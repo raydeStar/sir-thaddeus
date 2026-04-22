@@ -6,7 +6,7 @@ This package is a self-contained Windows build. You do not need to install the .
 
 1. **Download** the release ZIP from the [Releases](https://github.com/raydeStar/sir-thaddeus/releases) page.
 2. **Unzip** to a local folder, for example `C:\Apps\SirThaddeus\`.
-3. **Run** `SirThaddeus.UI.Avalonia.exe`.
+3. **Run** `Thaddeus.Runtime.exe`.
 
 That's it. Everything else happens automatically.
 

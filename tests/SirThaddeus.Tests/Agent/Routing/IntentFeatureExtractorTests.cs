@@ -152,4 +152,15 @@ public class IntentFeatureExtractorTests
 
         Assert.False(result);
     }
+
+    [Fact]
+    public void LooksLikeSelfContainedKnowledgeOrReasoningPrompt_ArchitectureComparison_ReturnsTrue()
+    {
+        var lower = "Compare microservices vs monolithic architecture. Cover scalability, deployment complexity, team structure, and debugging difficulty. Give your recommendation for a startup with 5 developers."
+            .ToLowerInvariant();
+
+        var result = IntentFeatureExtractor.LooksLikeSelfContainedKnowledgeOrReasoningPrompt(lower);
+
+        Assert.True(result);
+    }
 }

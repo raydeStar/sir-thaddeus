@@ -1,7 +1,7 @@
-# Runtime IPC Contract (Phase 1 Draft)
+# Runtime IPC Contract (Hybrid Runtime Draft)
 
 Date: 2026-03-05  
-Status: Draft for Avalonia migration Pass 2
+Status: Draft for the hybrid runtime web client
 
 ## Scope
 

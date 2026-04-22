@@ -1401,7 +1401,11 @@ public sealed class DriftResistanceTests
             "Tell me a joke.",
             "What is an API?",
             "Can you help me debug something?",
-            "What's the weather like?",
+            // Intentionally NOT "What's the weather like?" — weather prompts
+            // are routed to a deterministic utility handler that skips the
+            // LLM call entirely, which would drop the personality block from
+            // this turn even though drift resistance is not being violated.
+            "What makes a good mentor?",
             "Explain SOLID principles.",
             "Do you remember what we talked about first?",
             "What is containerization?",

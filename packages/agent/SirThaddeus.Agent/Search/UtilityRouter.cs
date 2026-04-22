@@ -387,6 +387,18 @@ public static class UtilityRouter
             // — fall back to the user's profile location.
             location = userLocationHint.Trim();
         }
+        else if (WeatherBarePattern.IsMatch(message))
+        {
+            // Bare weather query but no profile location set — return a friendly
+            // direct answer instead of silently dropping the request.
+            return new UtilityResult
+            {
+                Category = "weather_no_location",
+                Answer = "I don't know where you are yet, so I can't pull up the weather. " +
+                         "You can either tell me a place (e.g. \"weather in Seattle\") " +
+                         "or set your default location in **Settings → Location**."
+            };
+        }
         else
         {
             return null;

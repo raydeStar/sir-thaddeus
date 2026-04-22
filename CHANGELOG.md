@@ -1,5 +1,95 @@
 # Changelog
 
+## 2026-04-19 — Production Coherence (observability, diagnostics, permission proofs)
+
+This release is connective-tissue work: the features were already here,
+but the pieces that prove they actually work — logs, startup checks,
+permission-model tests, version-in-binary — were missing or scattered.
+
+### Observability
+
+- **New `SirThaddeus.Logging` package** (Serilog as an
+  `Microsoft.Extensions.Logging` provider). Every component now writes
+  rolling daily JSON log files under
+  `%LocalAppData%\SirThaddeus\logs\{component}\` plus a human console
+  sink. The `mcp-server` component routes its console output to stderr
+  because stdout is the MCP stdio transport.
+- **All four entry points wired** — `headless-runtime`, `voice-host`,
+  `mcp-server`, and `ui-avalonia` all bootstrap through the shared
+  module. Environment override: `SIRTHADDEUS_LOG_LEVEL`.
+- **Silent `catch { }` blocks replaced with logged catches** across
+  `SearxngProvider`, `ContentExtractor`, `UiaScreenReader` (five sites),
+  `VoiceSessionOrchestrator`, `LocalTextToSpeechPlaybackService`,
+  `VoiceBackendSupervisor`, `FrontmatterParser`, and
+  `AgentOrchestrator.ContinuityAndUtility`. Each preserves its existing
+  fallback behavior but now emits a Debug/Warning log line with the
+  originating exception so tail-the-logs triage actually works.
+- **`VoiceHost` ad-hoc `Console.Error.WriteLine` calls** in the piper
+  download proxy were replaced with structured `ILogger` calls via
+  `ILoggerFactory` injection on the endpoint lambda.
+- **`docs/observability.md`** documents paths, format, levels, triage
+  snippets, and the "no silent catch" policy.
+
+### Startup diagnostics
+
+- **New `SirThaddeus.StartupDiagnostics` module** with three advisory,
+  non-blocking checks:
+  - `llm.reachable` — probes `{baseUrl}/v1/models` with a 2s timeout;
+    any HTTP response proves something is listening. Empty baseUrl →
+    Skipped.
+  - `voicehost.reachable` — probes the VoiceHost `/health` endpoint;
+    Skipped when `VoiceHostEnabled=false`, Warning (not Failed) when
+    the port is closed, because VoiceHost is typically launched on
+    demand.
+  - `logs.writable` — verifies `%LocalAppData%\SirThaddeus\logs\` is
+    writable, because an unwritable path is a common "the app is
+    silent" root cause.
+- **Wired into `headless-runtime` and `ui-avalonia`** so Ok / Warning /
+  Failed results show up in the startup log before the chat window
+  opens or the first prompt arrives. Diagnostics failures are caught
+  and downgraded so they never block startup.
+
+### Permission-model proof
+
+- **Six integration tests** in
+  `tests/SirThaddeus.Tests/Agent/Policy/PermissionEnforcementIntegrationTests.cs`
+  that exercise the real enforcement paths in
+  `AuditedMcpToolClient` and `EnforcingToolRunner`:
+  - gate denial blocks tool execution and audits the reason,
+  - gate grant allows tool execution,
+  - a broker-issuing gate's token id flows into the audit trail,
+  - a token that has expired mid-loop is rejected before the tool
+    runs,
+  - `RevokeAll` (the STOP-ALL path) invalidates active tokens and
+    emits a `PERMISSION_REVOKE_ALL` audit event,
+  - missing-token calls are rejected without touching the broker.
+
+### Release hygiene
+
+- **Root `Directory.Build.props`** gives local dev builds a SemVer of
+  `0.0.0-dev` so `Assembly.GetName().Version` reports an obviously
+  non-release value; `dotnet publish -p:Version=1.2.3` overrides it.
+- **`dev/release-package.ps1` and `dev/package-cross.ps1`** now parse
+  the incoming tag (handling `refs/tags/vX.Y.Z`), strip the leading
+  `v`, and thread the version into every `dotnet publish` call, so a
+  v1.2.3 release actually ships binaries with `FileVersion 1.2.3.0`
+  and `InformationalVersion "1.2.3+<commit>"`.
+
+### Documentation / honesty pass
+
+- **README** no longer claims Windows/macOS/Linux parity. Windows is
+  named as the full-experience platform; the cross-platform headless
+  runtime and MCP toolkit are called out separately. `Push-to-talk`
+  and `UIAutomation screen reading` feature bullets are tagged
+  *(Windows only)*.
+
+### Verified
+
+- `dotnet build SirThaddeus.sln` — 0 errors, 5 pre-existing warnings.
+- Full test suite — **2,190 pass, 0 fail, 0 skip** (2,145 main + 45
+  Windows). Added tests: 4 startup-diagnostics unit tests, 6 permission
+  integration tests.
+
 ## 2026-03-16 — Avalonia Runtime + Production Hardening
 
 ### Highlights
