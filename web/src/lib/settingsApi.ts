@@ -42,6 +42,20 @@ export async function testLlm(input: { baseUrl?: string; apiKey?: string }): Pro
   return asJson<TestLlmResponse>(res);
 }
 
+export interface GatekeeperStatusResponse {
+  configured: boolean;
+  ok: boolean;
+  modelId: string | null;
+  baseUrl: string | null;
+  reusingPrimary: boolean;
+  message: string;
+}
+
+export async function getGatekeeperStatus(): Promise<GatekeeperStatusResponse> {
+  const res = await runtimeFetch(token(), '/api/settings/gatekeeper-status');
+  return asJson<GatekeeperStatusResponse>(res);
+}
+
 export interface AudioDeviceInfo {
   deviceNumber: number;
   productName: string;

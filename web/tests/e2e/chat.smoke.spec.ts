@@ -9,6 +9,10 @@ import { test, expect } from '@playwright/test';
  * the test-mode lock dir, not the user's real ~/.thaddeus.
  */
 test.describe('chat smoke', () => {
+  // Cold-start on a large local model can push past the global 30s test
+  // budget — override so the first chat turn has room to warm up.
+  test.setTimeout(90_000);
+
   test('user can send a message and receive a streamed assistant reply', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL;
     const token = process.env.RUNTIME_TOKEN;
@@ -43,8 +47,9 @@ test.describe('chat smoke', () => {
     // Eventually the streaming bubble is replaced by a persisted assistant
     // message and disappears. With the real assistant enabled, the exact
     // wording is nondeterministic, so assert on a non-empty reply instead of
-    // the old echo-stub text.
-    await expect(streaming).toBeHidden({ timeout: 15_000 });
+    // the old echo-stub text. Timeout is generous to cover cold-start model
+    // load on the first chat turn (large local LLMs can take 20-30s warmup).
+    await expect(streaming).toBeHidden({ timeout: 60_000 });
     await expect(page.getByTestId('chat-message-list')).toContainText('hello', { timeout: 5_000 });
     const assistantMessages = page
       .getByTestId('chat-message-list')

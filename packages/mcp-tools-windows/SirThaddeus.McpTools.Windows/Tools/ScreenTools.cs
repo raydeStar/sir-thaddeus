@@ -42,6 +42,13 @@ public static class ScreenTools
     private const int MaxOcrChars = 8_000;
     private const int MaxPageChars = 6_000;
 
+    // Hard deadline for a single ScreenCapture call. Covers the worst case
+    // where UIA, a browser content fetch, and OCR all get stuck (e.g.
+    // Amazon returning 503 while a PDF viewer refuses to expose its tree).
+    // Previously observed: the call sat for >30 minutes before the user
+    // killed the runtime — this cap replaces that with a graceful error.
+    private static readonly TimeSpan ScreenCaptureHardDeadline = TimeSpan.FromSeconds(30);
+
     private static readonly HashSet<string> BrowserProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "firefox", "brave", "opera", "vivaldi",
@@ -66,6 +73,31 @@ public static class ScreenTools
             "only when the user explicitly asks about the whole monitor."
         )] string target = "active_window",
         CancellationToken cancellationToken = default)
+    {
+        // Layered reader stages can individually hang (UIA on a non-responsive
+        // window, browser fetch on a slow 503, OCR on a huge image). Wrap the
+        // whole call in a linked CTS so no single stage can wedge the tool.
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadlineCts.CancelAfter(ScreenCaptureHardDeadline);
+
+        try
+        {
+            return await ScreenCaptureCoreAsync(target, deadlineCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (deadlineCts.IsCancellationRequested &&
+                                                 !cancellationToken.IsCancellationRequested)
+        {
+            // Our internal deadline fired, not the caller's. Return a short
+            // error string so the model can continue the turn instead of
+            // hanging on a stuck tool call.
+            return $"Error: Screen capture timed out after {ScreenCaptureHardDeadline.TotalSeconds:0}s. " +
+                   "The active window or page content took too long to read.";
+        }
+    }
+
+    private static async Task<string> ScreenCaptureCoreAsync(
+        string target,
+        CancellationToken cancellationToken)
     {
         WindowInfo? windowInfo = null;
         int screenW = 0, screenH = 0;

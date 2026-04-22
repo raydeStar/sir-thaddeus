@@ -31,6 +31,15 @@ test.describe('settings smoke', () => {
     const modelInput = page.getByTestId('settings-llm-model');
     await modelInput.fill('llama3.1:70b');
 
+    // The gatekeeper status banner must render (regardless of reachability).
+    // Its `data-state` is one of: active / unreachable / not-configured —
+    // any value is fine here; we just want to confirm the banner is wired
+    // to the status endpoint and shows up in the UI.
+    const gkBanner = page.getByTestId('settings-gatekeeper-status');
+    await expect(gkBanner).toBeVisible({ timeout: 5_000 });
+    const gkState = await gkBanner.getAttribute('data-state');
+    expect(['active', 'unreachable', 'not-configured']).toContain(gkState);
+
     // Save.
     await page.getByTestId('settings-save').click();
     await expect(page.getByTestId('settings-saved')).toBeVisible({ timeout: 5_000 });

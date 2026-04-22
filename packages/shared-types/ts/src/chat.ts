@@ -52,8 +52,30 @@ export interface ChatTurnComplete {
   cancelled: boolean;
 }
 
+export interface ChatUserMessageAppended {
+  threadId: string;
+  messageId: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface ChatFootmanDecision {
+  threadId: string;
+  messageId: string;
+  nextState: string;
+  confidence: number;
+  abstain: boolean;
+  reasonCode: string;
+  toolsKept: number;
+  toolsTotal: number;
+  elapsedMs: number;
+  decidedAt: string;
+}
+
 export const ChatTurnEventTypes = {
   Start: "chat.turn.start",
   Delta: "chat.turn.delta",
   Complete: "chat.turn.complete",
+  UserMessageAppended: "chat.user.message",
+  FootmanDecision: "chat.footman.decision",
 } as const;

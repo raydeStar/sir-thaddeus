@@ -29,6 +29,7 @@ public sealed class AutomationRunner
     private readonly IAssistant _assistant;
     private readonly IActivityLog _activity;
     private readonly ToolPermissionGate _gate;
+    private readonly ChatTurnPublisher _publisher;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<AutomationRunner> _logger;
 
@@ -37,6 +38,7 @@ public sealed class AutomationRunner
         IAssistant assistant,
         IActivityLog activity,
         ToolPermissionGate gate,
+        ChatTurnPublisher publisher,
         IHostApplicationLifetime lifetime,
         ILogger<AutomationRunner> logger)
     {
@@ -44,6 +46,7 @@ public sealed class AutomationRunner
         _assistant = assistant;
         _activity = activity;
         _gate = gate;
+        _publisher = publisher;
         _lifetime = lifetime;
         _logger = logger;
     }
@@ -106,6 +109,15 @@ public sealed class AutomationRunner
                     Text: step,
                     CreatedAt: DateTimeOffset.UtcNow);
                 await _threads.AppendMessageAsync(threadId, userMessage, bgCt).ConfigureAwait(false);
+
+                // Notify the UI that a user message was appended. Without
+                // this broadcast the web chat store never sees steps 2..N —
+                // it only has whatever messages were in the thread at the
+                // time of the initial fetch, and no WS event tells it a new
+                // user bubble arrived.
+                await _publisher.PublishUserMessageAppendedAsync(
+                    threadId, userMessage.Id, userMessage.Text, userMessage.CreatedAt, bgCt)
+                    .ConfigureAwait(false);
 
                 // Let the assistant handle the step. Tool calls, permissions,
                 // and streaming flow through the same pipeline as a normal chat.

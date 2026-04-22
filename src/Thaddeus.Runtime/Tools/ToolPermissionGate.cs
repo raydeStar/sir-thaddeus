@@ -88,6 +88,15 @@ public sealed class ToolPermissionGate
     }
 
     /// <summary>
+    /// Returns true if the given thread is executing inside an automation run
+    /// (i.e. a <see cref="RegisterThreadAllowlist"/> scope is active on it).
+    /// Callers use this to suppress chat-only virtual tools (e.g.
+    /// <c>propose_automation</c>) whose UI makes no sense during a run.
+    /// </summary>
+    public bool IsAutomationRunThread(string threadId)
+        => !string.IsNullOrEmpty(threadId) && _threadAllowlists.ContainsKey(threadId);
+
+    /// <summary>
     /// Registers an explicit allowlist of tool names for all tool calls made
     /// within the given thread. Used by the automation runner to pre-approve
     /// the tools the user selected when creating the automation. Overwrites

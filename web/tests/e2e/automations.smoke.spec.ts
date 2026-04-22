@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// Cold-start on a large local model can push past the global 30s budget
+// when both automation steps need to finish streaming.
+test.setTimeout(90_000);
+
 test('create, run, and delete an automation', async ({ page, context }) => {
   const baseUrl = process.env.RUNTIME_BASE_URL!;
   const token = process.env.RUNTIME_TOKEN!;
@@ -25,6 +29,15 @@ test('create, run, and delete an automation', async ({ page, context }) => {
   // watch the run live, then the list reflects the recorded last-run state.
   await page.getByTestId('automation-detail-run').click();
   await expect(page.getByTestId('route-chat-thread')).toBeVisible({ timeout: 10_000 });
+
+  // Both step texts should eventually render as user bubbles in the run
+  // thread. Previously only step 1 was shown because the server appended
+  // subsequent user messages without a WS broadcast, so the chat store
+  // never knew they existed.
+  const threadList = page.getByTestId('chat-message-list');
+  await expect(threadList).toContainText('do a thing', { timeout: 10_000 });
+  await expect(threadList).toContainText('then another', { timeout: 30_000 });
+
   await page.goto(`${baseUrl}/automations`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('route-automations')).toBeVisible();
   const item = page

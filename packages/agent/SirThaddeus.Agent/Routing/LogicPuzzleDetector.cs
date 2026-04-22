@@ -176,9 +176,17 @@ internal static class LogicPuzzleDetector
             lower.Contains("bury", StringComparison.Ordinal))
             return true;
 
-        // Car wash + walk/drive goal inference
-        if (lower.Contains("car wash", StringComparison.Ordinal) &&
-            Regex.IsMatch(lower, @"\b(?:walk|drive)\b.*?\bor\b.*?\b(?:walk|drive)\b", RegexOptions.IgnoreCase))
+        // Car + wash + walk/drive goal-inference trap. Catches:
+        //   "You're going to the car wash, should I walk or drive?"
+        //   "The car is dirty and needs to be washed. Walk or drive?"
+        //   "Wash my car — should I walk or drive?"
+        // The puzzle is the same in every phrasing: you need the car to
+        // wash it, so walking defeats the goal regardless of distance.
+        var hasCar = Regex.IsMatch(lower, @"\bcar\b");
+        var hasWash = Regex.IsMatch(lower, @"\bwash(?:ed|es|ing)?\b");
+        var hasWalkDriveChoice =
+            Regex.IsMatch(lower, @"\b(?:walk|drive)\b.*?\bor\b.*?\b(?:walk|drive)\b");
+        if (hasCar && hasWash && hasWalkDriveChoice)
             return true;
 
         return false;

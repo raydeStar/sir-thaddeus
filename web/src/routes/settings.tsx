@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
   Check,
@@ -27,11 +27,13 @@ import {
   checkVoiceHostHealth,
   getRuntimeInfo,
   stopRuntime,
+  getGatekeeperStatus,
   type TestLlmResponse,
   type AudioDevicesResponse,
   type PiperVoiceEntry,
   type VoiceHostHealthResponse,
   type RuntimeInfo,
+  type GatekeeperStatusResponse,
 } from '../lib/settingsApi';
 import { readRuntimeMetadata } from '../lib/runtime';
 import type {
@@ -145,6 +147,7 @@ function SettingsRoute() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestLlmResponse | null>(null);
+  const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('general');
 
   useEffect(() => {
@@ -166,6 +169,57 @@ function SettingsRoute() {
       cancelled = true;
     };
   }, []);
+
+  // Probe the LLM endpoint on mount once settings have loaded so the Model
+  // (and Gatekeeper model) fields render as dropdowns without requiring the
+  // user to click "Test connection" first. Stays a silent probe — no error
+  // toast if LM Studio isn't running; we just fall back to the text input.
+  useEffect(() => {
+    if (!doc || testResult || testing) return;
+    if (!doc.llm.baseUrl) return;
+    let cancelled = false;
+    setTesting(true);
+    testLlm({ baseUrl: doc.llm.baseUrl, apiKey: doc.llm.apiKey ?? undefined })
+      .then((result) => {
+        if (!cancelled) setTestResult(result);
+      })
+      .catch(() => {
+        /* silent probe — user can click Test connection for details */
+      })
+      .finally(() => {
+        if (!cancelled) setTesting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Only re-run when the baseUrl actually changes (e.g. provider switch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.llm.baseUrl]);
+
+  // Refresh the gatekeeper status whenever any gatekeeper-relevant setting
+  // changes. The server endpoint reads from the persisted settings, so this
+  // lags a freshly-edited-but-unsaved value — intentional, the indicator
+  // reflects what the runtime is actually using right now.
+  useEffect(() => {
+    let cancelled = false;
+    getGatekeeperStatus()
+      .then((s) => {
+        if (!cancelled) setGatekeeperStatus(s);
+      })
+      .catch(() => {
+        /* best-effort — leave existing status in place on transient errors */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    doc?.llm.gatekeeperModelId,
+    doc?.llm.gatekeeperBaseUrl,
+    doc?.llm.baseUrl,
+    doc?.llm.modelId,
+    doc?.llm.reusePrimaryForGatekeeperOnSharedEndpoint,
+    savedAt,
+  ]);
 
   const preset = useMemo(
     () => (doc ? findPreset(doc.llm.provider, doc.llm.baseUrl) : PROVIDER_PRESETS[0]),
@@ -263,6 +317,7 @@ function SettingsRoute() {
                 onTest={onTest}
                 testing={testing}
                 testResult={testResult}
+                gatekeeperStatus={gatekeeperStatus}
               />
             ) : null}
             {activeTab === 'audio' ? <AudioTab doc={doc} setDoc={setDoc} /> : null}
@@ -484,6 +539,7 @@ function ModelsTab({
   onTest,
   testing,
   testResult,
+  gatekeeperStatus,
 }: {
   doc: SettingsDocument;
   setDoc: (d: SettingsDocument) => void;
@@ -492,6 +548,7 @@ function ModelsTab({
   onTest: () => void;
   testing: boolean;
   testResult: TestLlmResponse | null;
+  gatekeeperStatus: GatekeeperStatusResponse | null;
 }) {
   return (
     <div className="space-y-6" role="tabpanel" aria-labelledby="settings-tab-models">
@@ -563,38 +620,37 @@ function ModelsTab({
         </div>
 
         <Field label="Model">
-          {testResult?.ok && testResult.models.length > 0 ? (
-            <Select
-              testId="settings-llm-model"
-              value={doc.llm.modelId}
-              onChange={(v) => setDoc({ ...doc, llm: { ...doc.llm, modelId: v } })}
-              options={[
-                ...(preset.id === 'lmstudio'
-                  ? [{ value: 'auto', label: 'auto (currently loaded)' }]
-                  : []),
-                ...testResult.models.map((m) => ({ value: m, label: m })),
-                ...(testResult.models.includes(doc.llm.modelId) || doc.llm.modelId === 'auto'
-                  ? []
-                  : [{ value: doc.llm.modelId, label: `${doc.llm.modelId} (saved)` }]),
-              ]}
-            />
-          ) : (
-            <input
-              data-testid="settings-llm-model"
-              type="text"
-              value={doc.llm.modelId}
-              placeholder={preset.modelPlaceholder}
-              onChange={(e) => setDoc({ ...doc, llm: { ...doc.llm, modelId: e.target.value } })}
-              className={inputCls}
-            />
-          )}
+          <ModelCombobox
+            testId="settings-llm-model"
+            value={doc.llm.modelId}
+            onChange={(v) => setDoc({ ...doc, llm: { ...doc.llm, modelId: v } })}
+            placeholder={preset.modelPlaceholder}
+            options={buildModelOptions(
+              testResult?.models ?? [],
+              doc.llm.modelId,
+              preset.id === 'lmstudio' ? { value: 'auto', label: 'auto (currently loaded)' } : null,
+            )}
+          />
         </Field>
       </Section>
 
       <Section
         title="Verification model (gatekeeper)"
-        description="Optional smaller model used for verification. Falls back to the primary endpoint when left blank."
+        description="Small fast model used to pre-classify each turn so the primary model only sees the tools that make sense for what you asked. Falls back to the primary endpoint when the base URL is blank."
       >
+        {gatekeeperStatus ? <GatekeeperStatusBanner status={gatekeeperStatus} /> : null}
+        <Toggle
+          testId="settings-gatekeeper-enabled"
+          label="Enable gatekeeper"
+          description="Turn off to send every tool to the primary model on every turn. Model ID + base URL are preserved when disabled."
+          checked={doc.llm.gatekeeperEnabled ?? true}
+          onChange={(v) =>
+            setDoc({
+              ...doc,
+              llm: { ...doc.llm, gatekeeperEnabled: v },
+            })
+          }
+        />
         <Field label="Gatekeeper base URL">
           <input
             data-testid="settings-gatekeeper-base-url"
@@ -611,18 +667,14 @@ function ModelsTab({
           />
         </Field>
         <Field label="Gatekeeper model ID">
-          <input
-            data-testid="settings-gatekeeper-model-id"
-            type="text"
+          <ModelCombobox
+            testId="settings-gatekeeper-model-id"
             value={doc.llm.gatekeeperModelId ?? ''}
-            placeholder="qwen3.5-2b"
-            onChange={(e) =>
-              setDoc({
-                ...doc,
-                llm: { ...doc.llm, gatekeeperModelId: e.target.value || null },
-              })
+            onChange={(v) =>
+              setDoc({ ...doc, llm: { ...doc.llm, gatekeeperModelId: v || null } })
             }
-            className={inputCls}
+            placeholder="qwen3.5-2b"
+            options={buildModelOptions(testResult?.models ?? [], doc.llm.gatekeeperModelId ?? '')}
           />
         </Field>
         <Toggle
@@ -1749,6 +1801,242 @@ function Toggle({
         onChange={(e) => onChange(e.target.checked)}
         className="sr-only"
       />
+    </div>
+  );
+}
+
+/**
+ * Builds the option list for {@link ModelCombobox}. Unions the server-returned
+ * model ids with the currently-saved value (so edits survive even if the
+ * server can't be reached right now). When `currentValue` isn't in the
+ * available list we mark it `(saved)` so the user can tell what was persisted
+ * before the probe. Optional leading fixed entry (e.g. "auto") goes first.
+ */
+function buildModelOptions(
+  available: ReadonlyArray<string>,
+  currentValue: string,
+  fixedFirst: { value: string; label: string } | null = null,
+): ReadonlyArray<{ value: string; label: string }> {
+  const opts: { value: string; label: string }[] = [];
+  if (fixedFirst) opts.push(fixedFirst);
+  const seen = new Set<string>(opts.map((o) => o.value));
+  for (const m of available) {
+    if (seen.add(m)) opts.push({ value: m, label: m });
+  }
+  if (currentValue && !seen.has(currentValue)) {
+    opts.push({ value: currentValue, label: `${currentValue} (saved)` });
+  }
+  return opts;
+}
+
+/**
+ * Text input + custom dropdown list. Always lets the user type a freeform id,
+ * and on focus (or chevron click) shows every known option regardless of what
+ * is currently in the field. Typed text filters the list, but a zero-match
+ * filter falls back to showing all options so the user can always discover
+ * what is available.
+ *
+ * Tests interact with this via `fill()` on the input element, same as a
+ * plain text field — the dropdown is a pure UX affordance.
+ */
+function ModelCombobox({
+  testId,
+  value,
+  onChange,
+  placeholder,
+  options,
+}: {
+  testId: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  // `query` = text the user is actively typing for filtering. `null` means
+  // "not filtering" → show all options. Reset to `null` on open/close so the
+  // dropdown always starts by showing the full list.
+  const [query, setQuery] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = `${testId}-listbox`;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery(null);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const visibleOptions = useMemo(() => {
+    if (query === null || query === '') return options;
+    const q = query.toLowerCase();
+    const matches = options.filter(
+      (o) => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q),
+    );
+    return matches.length > 0 ? matches : options;
+  }, [options, query]);
+
+  const commitSelection = (v: string) => {
+    onChange(v);
+    setQuery(null);
+    setActiveIndex(-1);
+    setOpen(false);
+  };
+
+  const openDropdown = () => {
+    setQuery(null);
+    setActiveIndex(-1);
+    setOpen(true);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) {
+        openDropdown();
+        return;
+      }
+      setActiveIndex((i) => Math.min(visibleOptions.length - 1, i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) {
+        openDropdown();
+        return;
+      }
+      setActiveIndex((i) => Math.max(0, i - 1));
+    } else if (e.key === 'Enter') {
+      if (open && activeIndex >= 0 && activeIndex < visibleOptions.length) {
+        e.preventDefault();
+        commitSelection(visibleOptions[activeIndex].value);
+      }
+    } else if (e.key === 'Escape') {
+      if (open) {
+        e.preventDefault();
+        setOpen(false);
+        setQuery(null);
+      }
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <input
+        data-testid={testId}
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={
+          open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined
+        }
+        value={query ?? value}
+        placeholder={placeholder}
+        onFocus={openDropdown}
+        onChange={(e) => {
+          const next = e.target.value;
+          setQuery(next);
+          onChange(next);
+          setOpen(true);
+          setActiveIndex(-1);
+        }}
+        onKeyDown={onKeyDown}
+        className={`${inputCls} pr-9`}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Toggle model list"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          if (open) {
+            setOpen(false);
+            setQuery(null);
+          } else {
+            openDropdown();
+          }
+        }}
+        className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-ink-subtle hover:text-ink"
+      >
+        <ChevronDown
+          className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`}
+          strokeWidth={1.75}
+        />
+      </button>
+      {open && visibleOptions.length > 0 ? (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-xl border border-line bg-canvas-raised py-1 text-sm shadow-soft"
+        >
+          {visibleOptions.map((o, idx) => {
+            const isActive = idx === activeIndex;
+            const isSelected = o.value === value;
+            return (
+              <li
+                key={o.value}
+                id={`${listId}-opt-${idx}`}
+                role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setActiveIndex(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commitSelection(o.value);
+                }}
+                className={`cursor-pointer px-3.5 py-1.5 text-ink ${
+                  isActive ? 'bg-accent-soft' : ''
+                } ${isSelected ? 'font-medium' : ''}`}
+              >
+                {o.label}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function GatekeeperStatusBanner({ status }: { status: GatekeeperStatusResponse }) {
+  let icon: ReactNode;
+  let toneCls: string;
+  let state: string;
+
+  if (!status.configured) {
+    icon = <CircleDot className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />;
+    toneCls = 'text-ink-muted';
+    state = 'not-configured';
+  } else if (status.ok) {
+    icon = <CircleDot className="h-3.5 w-3.5" strokeWidth={2} />;
+    toneCls = 'text-emerald-600 dark:text-emerald-400';
+    state = 'active';
+  } else {
+    icon = <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />;
+    toneCls = 'text-rose-500';
+    state = 'unreachable';
+  }
+
+  const reuseNote = status.reusingPrimary
+    ? ' · reusing primary client (single-GPU setup)'
+    : '';
+
+  return (
+    <div
+      className={`mb-4 inline-flex items-center gap-1.5 text-xs font-medium ${toneCls}`}
+      data-testid="settings-gatekeeper-status"
+      data-ok={status.ok}
+      data-state={state}
+    >
+      {icon}
+      <span>{status.message}{reuseNote}</span>
     </div>
   );
 }

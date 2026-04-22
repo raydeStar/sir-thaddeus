@@ -876,11 +876,23 @@ internal static partial class OrchestratorMessageHelpers
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex AbusiveUserTurnRegex();
 
+    // Bare-bracket variant of the harmony channel marker. Some model builds
+    // emit `<channel>thought <channel>...` or `<channel>final<message>...`
+    // — essentially the harmony format with the pipes stripped out. Unlike
+    // the pipe-wrapped form, the content AFTER these tags is usually the
+    // real reply, so we keep it and remove just the markers.
+    private static readonly Regex BareHarmonyLeakRegex = new(
+        @"<(?:channel|message|start|end)>\s*(?:thought|analysis|commentary|final|message|assistant|user|system)\b\s*(?:<(?:channel|message|start|end)>\s*)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
     /// Strips raw chat-template tokens that small models sometimes emit
     /// when they try to make function calls outside the API's tool-call
     /// mechanism. These appear as literal text like:
     ///   &lt;|start|&gt;assistant&lt;|channel|&gt;commentary to=functions.fetch_url...
+    ///
+    /// Also handles the bare-bracket variant (&lt;channel&gt;thought &lt;channel&gt;...)
+    /// that some gpt-oss / harmony builds leak when the tokenizer drops the pipes.
     ///
     /// If the entire response is template garbage, returns a graceful
     /// fallback message. If only part is contaminated, strips the
@@ -890,6 +902,16 @@ internal static partial class OrchestratorMessageHelpers
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
+
+        // Pass 1 — strip bare harmony leaks while preserving the trailing
+        // content. Do this before the pipe-token check so a mixed response
+        // with just bare tags (no pipes) still gets cleaned.
+        if (BareHarmonyLeakRegex.IsMatch(text))
+        {
+            text = BareHarmonyLeakRegex.Replace(text, string.Empty).TrimStart();
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+        }
 
         // Detect template token patterns from common model formats
         // (Mistral, Llama, ChatML, etc.)

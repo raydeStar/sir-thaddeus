@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.ToolLoop;
@@ -78,6 +80,30 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                         cancellationToken);
                     if (repairedResponse is not null)
                         return repairedResponse;
+
+                    if (!IsExplicitToolInvocationRequest(request.History))
+                    {
+                        var latestUserMessage = request.History
+                            .LastOrDefault(message =>
+                                message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+                                !string.IsNullOrWhiteSpace(message.Content))
+                            ?.Content?.Trim() ?? string.Empty;
+                        var systemPrompt = request.History
+                            .FirstOrDefault(message =>
+                                message.Role.Equals("system", StringComparison.OrdinalIgnoreCase) &&
+                                !string.IsNullOrWhiteSpace(message.Content))
+                            ?.Content ?? string.Empty;
+
+                        return await OfflineWebReasoningResponder.BuildAsync(
+                            _llm,
+                            systemPrompt,
+                            latestUserMessage,
+                            memoryPackText: string.Empty,
+                            history: request.History,
+                            toolCallsMade: request.ToolCallsMade,
+                            failureReason: "tool_unavailable",
+                            cancellationToken);
+                    }
                 }
 
                 request.History.Add(ChatMessage.Assistant(text));
@@ -641,8 +667,14 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                    trimmed,
                    ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
                    StringComparison.Ordinal) ||
+               trimmed.StartsWith(
+                   ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                   StringComparison.Ordinal) ||
                string.Equals(
                    trimmed,
+                   ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                   StringComparison.Ordinal) ||
+               trimmed.StartsWith(
                    ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
                    StringComparison.Ordinal) ||
                trimmed.StartsWith(
@@ -659,13 +691,39 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         Action<string, string> log,
         CancellationToken cancellationToken)
     {
-        var repairMessages = request.History.ToList();
-        repairMessages.Insert(0, ChatMessage.System(
-            "You already have successful web tool results in the conversation history. " +
-            "A prior draft incorrectly claimed the tool was unavailable. " +
-            "Ignore that mistake and answer using the retrieved tool results already present. " +
-            "Do not mention tool availability, retries, permissions, network status, or internet access. " +
-            "Do not call tools."));
+        var latestUserMessage = request.History
+            .LastOrDefault(message =>
+                message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(message.Content))
+            ?.Content?.Trim();
+
+        var successfulWebCalls = request.ToolCallsMade
+            .Where(call =>
+                IsWebFamilyToolName(call.ToolName) &&
+                call.Success &&
+                !LooksLikeStructuredError(call.Result) &&
+                !LooksLikeNoResultsPayload(call.Result))
+            .TakeLast(6)
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(latestUserMessage) || successfulWebCalls.Count == 0)
+        {
+            log("AGENT_WEB_SYNTHESIS_REPAIR_SKIPPED", "Missing user request or successful web results.");
+            return null;
+        }
+
+        var repairInput = BuildFocusedWebRepairInput(latestUserMessage, successfulWebCalls);
+        var repairMessages = new List<ChatMessage>
+        {
+            ChatMessage.System(
+                "You already have successful web tool results. " +
+                "A prior draft incorrectly claimed the tool was unavailable. " +
+                "Ignore that mistake and answer the user's request using only the retrieved results below. " +
+                "Preserve the user's requested format and structure. " +
+                "Do not mention tool availability, retries, permissions, network status, or internet access. " +
+                "Do not call tools."),
+            ChatMessage.User(repairInput)
+        };
 
         LlmResponse repairedDraft;
         try
@@ -695,6 +753,36 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             ToolCallsMade = request.ToolCallsMade,
             LlmRoundTrips = roundTrips + 1
         };
+    }
+
+    private static string BuildFocusedWebRepairInput(
+        string userRequest,
+        IReadOnlyList<ToolCallRecord> successfulWebCalls)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("User request:");
+        sb.AppendLine(userRequest);
+        sb.AppendLine();
+        sb.AppendLine("Retrieved web tool results:");
+
+        foreach (var call in successfulWebCalls)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Tool: {call.ToolName}");
+            if (!string.IsNullOrWhiteSpace(call.Arguments))
+            {
+                sb.AppendLine("Arguments:");
+                sb.AppendLine(call.Arguments.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(call.Result))
+            {
+                sb.AppendLine("Result:");
+                sb.AppendLine(call.Result.Trim());
+            }
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static bool IsExplicitToolInvocationRequest(IReadOnlyList<ChatMessage> history)
@@ -742,6 +830,12 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         string logPrefix,
         CancellationToken cancellationToken)
     {
+        var latestUserMessage = request.History
+            .LastOrDefault(m =>
+                m.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(m.Content))
+            ?.Content?.Trim();
+
         var fallbackMessages = request.History
             .Where(m => m.Role is "system" or "user" or "assistant")
             .ToList();
@@ -778,6 +872,38 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         var text = request.SanitizeAssistantText(
             fallbackResponse.Content ??
             "I can still help using built-in knowledge, though live details may be out of date.");
+
+        if (!IsExplicitToolInvocationRequest(request.History) &&
+            IsBrokenWebOutcomeAssistantText(text) &&
+            !string.IsNullOrWhiteSpace(latestUserMessage))
+        {
+            try
+            {
+                var minimalFallbackResponse = await _llm.ChatAsync(
+                    [
+                        ChatMessage.System(
+                            "Live tool-backed lookup is unavailable for this turn. " +
+                            "Answer the user's request with your best non-real-time knowledge only. " +
+                            "Do not mention tools, permissions, network status, retries, or internet access. " +
+                            "Preserve the user's requested format."),
+                        ChatMessage.User(latestUserMessage)
+                    ],
+                    tools: null,
+                    cancellationToken);
+
+                var minimalText = request.SanitizeAssistantText(minimalFallbackResponse.Content ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(minimalText) &&
+                    !IsBrokenWebOutcomeAssistantText(minimalText))
+                {
+                    text = minimalText;
+                }
+            }
+            catch
+            {
+                // Fall back to the first offline draft below.
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(text))
             text = "I can still help using built-in knowledge, though live details may be out of date.";
         text = EnsureUnavailableKeywordForExplicitToolRequest(text, request.History);

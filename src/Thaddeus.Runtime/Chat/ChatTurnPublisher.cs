@@ -73,6 +73,37 @@ public sealed class ChatTurnPublisher
                 resultSnippet, error, DateTimeOffset.UtcNow),
             correlationId: messageId,
             ct);
+    public Task PublishUserMessageAppendedAsync(
+        string threadId,
+        string messageId,
+        string text,
+        DateTimeOffset createdAt,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.UserMessageAppended,
+            new ChatUserMessageAppended(threadId, messageId, text, createdAt),
+            correlationId: messageId,
+            ct);
+
+    public Task PublishFootmanDecisionAsync(
+        string threadId,
+        string messageId,
+        string nextState,
+        double confidence,
+        bool abstain,
+        string reasonCode,
+        int toolsKept,
+        int toolsTotal,
+        long elapsedMs,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.FootmanDecision,
+            new ChatFootmanDecision(
+                threadId, messageId, nextState, confidence, abstain, reasonCode,
+                toolsKept, toolsTotal, elapsedMs, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
+
     public Task PublishAutomationProposedAsync(
         string proposalId,
         string threadId,

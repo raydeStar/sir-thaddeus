@@ -553,6 +553,8 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
+        // Absolute rejects — explicit tool invocations or requests for
+        // live/local data never qualify as self-contained reasoning.
         if (TryGetExplicitToolInvocationIntent(lower) is not null ||
             LooksLikeScreenRequest(lower) ||
             LooksLikeFileRequest(lower) ||
@@ -560,10 +562,7 @@ public static class IntentFeatureExtractor
             LooksLikeBrowseRequest(lower) ||
             LooksLikeMemoryWriteRequest(lower) ||
             LooksLikeExplicitNewsLookup(lower) ||
-            LooksLikeDeepDiveLookup(lower) ||
-            LooksLikeLocalBusinessDiscovery(lower) ||
-            LooksLikeFactLookup(lower) ||
-            LooksLikeWebSearchRequest(lower))
+            LooksLikeLocalBusinessDiscovery(lower))
         {
             return false;
         }
@@ -600,8 +599,21 @@ public static class IntentFeatureExtractor
             lower.Contains("ebay", StringComparison.Ordinal) ||
             lower.Contains("etsy", StringComparison.Ordinal);
 
+        // A clear comparison/tradeoff prompt is self-contained even when it
+        // contains softly-web-ish words like "recommend" — an architecture
+        // comparison does not need live data. Check this BEFORE the
+        // web-lookup / fact-lookup rejects so those don't swallow it.
         if (hasComparisonCue && !hasLiveDataCue)
             return true;
+
+        // Now fall through to the heuristic rejects that can be overridden
+        // by a strong comparison signal above.
+        if (LooksLikeDeepDiveLookup(lower) ||
+            LooksLikeFactLookup(lower) ||
+            LooksLikeWebSearchRequest(lower))
+        {
+            return false;
+        }
 
         var startsWithKnowledgeCue =
             lower.StartsWith("explain ", StringComparison.Ordinal) ||

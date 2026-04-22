@@ -294,6 +294,77 @@ function Test-HttpUrlReachable {
     }
 }
 
+function Get-RuntimeLockInfo {
+    param([string]$LockPath)
+
+    if (-not (Test-Path $LockPath)) {
+        return $null
+    }
+
+    try {
+        $lock = Get-Content $LockPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+
+    if ($null -eq $lock -or
+        $null -eq $lock.pid -or [int]$lock.pid -le 0 -or
+        $null -eq $lock.port -or [int]$lock.port -le 0 -or
+        [string]::IsNullOrWhiteSpace([string]$lock.token)) {
+        return $null
+    }
+
+    return $lock
+}
+
+function Test-FreshHybridRuntimeStarted {
+    param(
+        [string]$LockPath,
+        [long]$PreviousTicks,
+        [int]$TimeoutMs = 5000
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $LockPath) {
+            $currentTicks = (Get-Item $LockPath).LastWriteTimeUtc.Ticks
+            if ($currentTicks -gt $PreviousTicks) {
+                $lock = Get-RuntimeLockInfo -LockPath $LockPath
+                if ($null -ne $lock) {
+                    $proc = Get-Process -Id ([int]$lock.pid) -ErrorAction SilentlyContinue
+                    if ($null -ne $proc) {
+                        try {
+                            $runtimeInfo = Invoke-RestMethod \
+                                -Uri ("http://127.0.0.1:{0}/api/runtime-info" -f [int]$lock.port) \
+                                -Headers @{ Authorization = "Bearer $($lock.token)" } \
+                                -TimeoutSec 2 \
+                                -ErrorAction Stop
+
+                            if ($null -ne $runtimeInfo) {
+                                return [pscustomobject]@{
+                                    Started = $true
+                                    Lock = $lock
+                                }
+                            }
+                        }
+                        catch {
+                            # Lock may be fresh before the API is fully ready; keep polling.
+                        }
+                    }
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    return [pscustomobject]@{
+        Started = $false
+        Lock = $null
+    }
+}
+
 function Write-SearxngStartupExpectation {
     param(
         [bool]$IsTerminalMode,
@@ -472,6 +543,15 @@ if (-not $TerminalMode) {
 
 try {
     & dotnet run --project $ProjectPath --no-build -- $ForwardArgs
+
+    $startupExitCode = $LASTEXITCODE
+    if (-not $TerminalMode -and $startupExitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($lockPath)) {
+        $runtimeStatus = Test-FreshHybridRuntimeStarted -LockPath $lockPath -PreviousTicks $previousWriteTicks
+        if ($runtimeStatus.Started) {
+            Write-Host "      Runtime reported healthy on port $($runtimeStatus.Lock.port); normalizing startup exit code." -ForegroundColor DarkYellow
+            $startupExitCode = 0
+        }
+    }
 }
 finally {
     if ($null -ne $browserJob) {
@@ -485,5 +565,5 @@ finally {
     }
 }
 
-exit $LASTEXITCODE
+exit $startupExitCode
 

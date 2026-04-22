@@ -9,6 +9,11 @@
  * Also smoke-tests /diagnostics by asserting the runtime status panel renders.
  */
 test.describe('activity smoke', () => {
+  // The first chat turn in a fresh runtime can include model warmup on a
+  // large local LLM, which pushes past the default 30s budget. Give the
+  // turn-completion assertions below enough room.
+  test.setTimeout(90_000);
+
   test('chat turn appears in the activity log and reaches Ok', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL;
     const token = process.env.RUNTIME_TOKEN;
@@ -38,10 +43,12 @@ test.describe('activity smoke', () => {
     const list = page.getByTestId('activity-list');
     await expect(list).toBeVisible({ timeout: 10_000 });
 
-    // First row should be a ChatTurn that ends up Ok.
+    // First row should be a ChatTurn that ends up Ok. The activity row
+    // flips from Running -> Ok when the assistant finishes — on a cold
+    // local LLM this can take much longer than 15s, so we give it room.
     const firstRow = list.locator('li').first();
     await expect(firstRow).toHaveAttribute('data-kind', 'ChatTurn');
-    await expect(firstRow).toHaveAttribute('data-status', 'Ok', { timeout: 15_000 });
+    await expect(firstRow).toHaveAttribute('data-status', 'Ok', { timeout: 60_000 });
 
     // Drill into the detail view and confirm the metadata renders.
     await firstRow.locator('a').click();

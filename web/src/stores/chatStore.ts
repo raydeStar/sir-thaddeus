@@ -5,6 +5,7 @@ import type {
   ChatTurnComplete,
   ChatTurnDelta,
   ChatTurnStart,
+  ChatUserMessageAppended,
   RuntimeEvent,
   ThreadSummary,
 } from '@thaddeus/shared-types';
@@ -143,6 +144,33 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   ingestEvent: (evt) => {
+    if (evt.type === ChatTurnEventTypes.UserMessageAppended) {
+      // A user message was appended server-side (e.g. an automation step).
+      // The HTTP-POST path already renders the bubble optimistically, so we
+      // dedupe by id here — only insert if this message isn't in the thread
+      // already.
+      const p = evt.payload as ChatUserMessageAppended;
+      if (p.threadId !== get().activeThreadId) return;
+      set((s) => {
+        const thread = s.activeThread;
+        if (!thread) return {};
+        if (thread.messages.some((m) => m.id === p.messageId)) return {};
+        const appended: ChatMessage = {
+          id: p.messageId,
+          role: 'user',
+          text: p.text,
+          createdAt: p.createdAt,
+        };
+        return {
+          activeThread: {
+            ...thread,
+            messages: [...thread.messages, appended],
+            updatedAt: p.createdAt,
+          },
+        };
+      });
+      return;
+    }
     if (evt.type === ChatTurnEventTypes.Start) {
       const p = evt.payload as ChatTurnStart;
       if (p.threadId !== get().activeThreadId) return;

@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowUp } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { ToolActivityPills } from '../components/ToolActivityPills';
+import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
 import { ProposalCard } from '../components/ProposalCard';
 import { useProposalsStore } from '../stores/proposalsStore';
 
@@ -215,6 +216,7 @@ function MessageRow({ role, text, messageId, streaming, testId }: MessageRowProp
       data-role={role}
       data-streaming={streaming ? 'true' : undefined}
     >
+      {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
       {messageId && hasProposal ? <ProposalCard messageId={messageId} /> : null}
       <Markdown>{text}</Markdown>

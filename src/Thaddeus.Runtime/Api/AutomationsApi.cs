@@ -85,12 +85,57 @@ public static class AutomationsApi
 
             var system =
                 "You translate a one-sentence user goal into an automation that " +
-                "Sir Thaddeus can run. Output a concise title (<=60 chars), a " +
-                "short description, and 2–6 ordered steps. Each step is a single " +
-                "instruction phrased as if the user is asking the assistant (e.g. " +
-                "'Check the weather in Olympia, WA'). Steps should be concrete and " +
-                "executable — prefer one clear action per step. Do not include " +
-                "meta-commentary, explanations, or step numbers. " +
+                "Sir Thaddeus can run unattended. Output a concise title " +
+                "(<=60 chars), a short description, and 2–6 ordered steps.\n\n" +
+
+                "The assistant runs headless on the user's machine. When an " +
+                "automation fires, NO HUMAN is watching. The assistant has ONLY " +
+                "these capabilities:\n" +
+                "  • web_search — search the web and read results\n" +
+                "  • browser_navigate — fetch a specific URL and read the page\n" +
+                "  • screen_capture — read the user's current screen (rarely useful in automations)\n" +
+                "  • file_read / file_list — read local files\n" +
+                "  • memory tools — recall / save long-term notes\n" +
+                "  • utility tools — weather, time, places, calculator, holidays, " +
+                "currency, clipboard\n\n" +
+
+                "Every step must be executable with ONE of those capabilities. " +
+                "NEVER produce steps that require the assistant to:\n" +
+                "  • open a browser tab / window / switch tabs\n" +
+                "  • click buttons, fill forms, or type into pages\n" +
+                "  • wait / sleep / pause for a duration\n" +
+                "  • ask the user for input or confirmation\n" +
+                "  • use a physical camera / microphone / printer\n\n" +
+
+                "Phrase each step as a concrete instruction to the assistant " +
+                "(e.g. 'Search Amazon for Nintendo Switch 2 listings and report " +
+                "the top result's price and availability.'). Prefer single, " +
+                "testable actions per step. No step numbers, no meta-commentary, " +
+                "no hedging.\n\n" +
+
+                "Examples of good drafts:\n" +
+                "  Goal: \"Check the weather in Olympia WA\"\n" +
+                "    name: \"Olympia weather check\"\n" +
+                "    steps: [\"Check the current weather in Olympia, WA and " +
+                "report temperature, conditions, and precipitation chance.\"]\n\n" +
+                "  Goal: \"Check Amazon for Nintendo Switch 2\"\n" +
+                "    name: \"Amazon: Switch 2 availability\"\n" +
+                "    steps: [\n" +
+                "      \"Use web_search to find the current Amazon listing for " +
+                "'Nintendo Switch 2' and capture the URL.\",\n" +
+                "      \"Fetch that Amazon listing URL with browser_navigate and " +
+                "extract the product title, price, and 'in stock' status.\",\n" +
+                "      \"Summarize: product name, price, stock status, and link.\"\n" +
+                "    ]\n\n" +
+                "  Goal: \"Morning briefing\"\n" +
+                "    name: \"Morning briefing\"\n" +
+                "    steps: [\n" +
+                "      \"Check the current weather in my saved location.\",\n" +
+                "      \"Search the web for the top 3 news headlines today.\",\n" +
+                "      \"Combine into a short morning briefing (weather first, " +
+                "then headlines).\"\n" +
+                "    ]\n\n" +
+
                 "You MUST respond by calling the draft_automation function.";
 
             var defs = new[]

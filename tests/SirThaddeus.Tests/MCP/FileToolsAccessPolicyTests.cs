@@ -19,7 +19,7 @@ public sealed class FileToolsAccessPolicyTests
             ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
         });
 
-        var result = await FileTools.FileRead(filePath, CancellationToken.None);
+        var result = await FileTools.FileRead(filePath, cancellationToken: CancellationToken.None);
 
         Assert.Equal("Error: File access is disabled in settings.", result);
     }
@@ -39,13 +39,13 @@ public sealed class FileToolsAccessPolicyTests
             ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
         });
 
-        var result = await FileTools.FileRead(deniedFile, CancellationToken.None);
+        var result = await FileTools.FileRead(deniedFile, cancellationToken: CancellationToken.None);
 
         Assert.StartsWith("Error: Access denied.", result, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task DocumentRead_AllowsFilesInsideConfiguredRoot()
+    public async Task FileRead_AllowsFilesInsideConfiguredRoot()
     {
         var allowedRoot = CreateTempDirectory();
         var filePath = Path.Combine(allowedRoot, "inside.txt");
@@ -59,7 +59,7 @@ public sealed class FileToolsAccessPolicyTests
             ["ST_DOCUMENT_READER_MAX_DEFAULT_CHARS"] = "4000"
         });
 
-        var result = await FileTools.DocumentRead(filePath, cancellationToken: CancellationToken.None);
+        var result = await FileTools.FileRead(filePath, cancellationToken: CancellationToken.None);
 
         Assert.Contains("\"ok\":true", result, StringComparison.Ordinal);
         Assert.Contains("alpha beta gamma", result, StringComparison.Ordinal);
@@ -97,9 +97,11 @@ public sealed class FileToolsAccessPolicyTests
             ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
         });
 
-        var result = await FileTools.FileRead("note.txt", CancellationToken.None);
+        var result = await FileTools.FileRead("note.txt", cancellationToken: CancellationToken.None);
 
-        Assert.Equal("hello from allowed root", result);
+        // FileRead returns a JSON envelope with extracted text content.
+        Assert.Contains("\"ok\":true", result, StringComparison.Ordinal);
+        Assert.Contains("hello from allowed root", result, StringComparison.Ordinal);
     }
 
     private static string CreateTempDirectory()

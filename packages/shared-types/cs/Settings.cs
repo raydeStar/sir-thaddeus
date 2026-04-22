@@ -16,7 +16,8 @@ public sealed record LlmSettings(
     double Temperature,
     string? GatekeeperBaseUrl = null,
     string? GatekeeperModelId = null,
-    bool ReusePrimaryForGatekeeperOnSharedEndpoint = true);
+    bool ReusePrimaryForGatekeeperOnSharedEndpoint = true,
+    bool GatekeeperEnabled = true);
 
 /// <summary>Voice provider configuration.</summary>
 public sealed record VoiceSettings(

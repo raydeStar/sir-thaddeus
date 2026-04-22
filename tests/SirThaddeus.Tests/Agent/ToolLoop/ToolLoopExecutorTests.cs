@@ -767,6 +767,76 @@ public class ToolLoopExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenSuccessfulWebResultsAreFollowedBySignedUnavailableDraft_RetriesSynthesisWithoutTools()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((messages, tools) =>
+        {
+            llmCallCount++;
+            return llmCallCount switch
+            {
+                1 => new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_web",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "web_search",
+                                Arguments = "{\"query\":\"recent .NET Aspire updates\"}"
+                            }
+                        }
+                    ]
+                },
+                2 => new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "The requested tool is unavailable for this request. Please retry in a moment.\n\n-- Sir Thaddeus"
+                },
+                3 => new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "Overview: .NET Aspire keeps improving the app-model and dashboard story. Differences: some sources emphasize orchestration and deployment while others focus on developer experience. Practical takeaway: for a startup team, adopt Aspire when you want opinionated local orchestration without jumping straight to a full platform rewrite."
+                },
+                _ => throw new InvalidOperationException("Unexpected extra LLM call")
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (_, _) => "[search: 3 result(s) returned]",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var request = new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.")
+            ],
+            Tools = [MakeToolDefinition("web_search")],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 4,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "WebLookup" },
+            SanitizeAssistantText = static s => s
+        };
+
+        var response = await executor.ExecuteAsync(request);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, llmCallCount);
+        Assert.DoesNotContain("unavailable for this request", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("overview", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("differences", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("practical takeaway", response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenSuccessfulWebResultsAreFollowedByTimeoutDraft_RetriesSynthesisWithoutTools()
     {
         var llmCallCount = 0;

@@ -973,6 +973,7 @@ public sealed class DeterministicChatPostProcessor
         {
             @",?\s*though\s+i\s+cannot\s+verify[^,.;)]*",
             @",?\s*but\s+i\s+cannot\s+verify[^,.;)]*",
+            @",?\s*as\s+of\s+my\s+knowledge\s+cutoff\b[^,.;)]*",
             @"\s+up\s+to\s+my\s+knowledge\s+cutoff\b",
             @"\s+based\s+on\s+my\s+knowledge\s+cutoff\b",
             @"\s+according\s+to\s+my\s+knowledge\s+cutoff\b",

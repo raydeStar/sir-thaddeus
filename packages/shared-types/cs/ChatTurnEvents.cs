@@ -25,6 +25,23 @@ public static class ChatTurnEvents
     /// card instead of a plain tool-result pill.
     /// </summary>
     public const string AutomationProposed = "chat.automation.proposed";
+
+    /// <summary>
+    /// Emitted when a user message is appended server-side (not via the
+    /// chat HTTP POST the UI already knows about) — e.g. each step of an
+    /// automation run posts the step text as a user message. Without this
+    /// event the UI never renders steps 2..N because it only saw step 1 in
+    /// the initial thread fetch.
+    /// </summary>
+    public const string UserMessageAppended = "chat.user.message";
+
+    /// <summary>
+    /// Emitted when the footman (gatekeeper) pre-classifies a turn and
+    /// narrows the tool list handed to the primary model. The UI renders
+    /// this as a compact chip above the assistant reply so the user can
+    /// see that the gatekeeper actually ran and what it decided.
+    /// </summary>
+    public const string FootmanDecision = "chat.footman.decision";
 }
 
 /// <summary>Payload for <see cref="ChatTurnEvents.Start"/>.</summary>
@@ -111,3 +128,42 @@ public sealed record ChatAutomationProposed(
     IReadOnlyList<string> Steps,
     AutomationSchedule? Schedule,
     DateTimeOffset ProposedAt);
+
+/// <summary>
+/// Payload for <see cref="ChatTurnEvents.UserMessageAppended"/>. Lets the web
+/// chat store insert a user message that was appended by the server (e.g. an
+/// automation step) into the active thread's rendered messages.
+/// </summary>
+public sealed record ChatUserMessageAppended(
+    string ThreadId,
+    string MessageId,
+    string Text,
+    DateTimeOffset CreatedAt);
+
+/// <summary>
+/// Payload for <see cref="ChatTurnEvents.FootmanDecision"/>. Reports the
+/// footman's routing verdict plus the before/after tool counts so the UI
+/// can show "kept N of M tools" and the reason code (heuristic_greeting,
+/// low_confidence, footman_timeout, …) without re-running the classifier.
+/// </summary>
+/// <param name="ThreadId">Thread the turn belongs to.</param>
+/// <param name="MessageId">Id of the assistant message this decision gates.</param>
+/// <param name="NextState">The footman's chosen agent state (e.g. "WebResearch", "Fallback").</param>
+/// <param name="Confidence">Footman's confidence in the decision (0.0–1.0).</param>
+/// <param name="Abstain">True when the footman explicitly abstained.</param>
+/// <param name="ReasonCode">Machine-readable rationale (e.g. "heuristic_greeting", "low_confidence").</param>
+/// <param name="ToolsKept">Number of tools the primary model received after filtering.</param>
+/// <param name="ToolsTotal">Number of tools before footman filtering.</param>
+/// <param name="ElapsedMs">Wall-clock time spent in the footman call.</param>
+/// <param name="DecidedAt">UTC timestamp the decision was emitted.</param>
+public sealed record ChatFootmanDecision(
+    string ThreadId,
+    string MessageId,
+    string NextState,
+    double Confidence,
+    bool Abstain,
+    string ReasonCode,
+    int ToolsKept,
+    int ToolsTotal,
+    long ElapsedMs,
+    DateTimeOffset DecidedAt);

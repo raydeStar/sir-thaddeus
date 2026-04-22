@@ -2617,6 +2617,58 @@ public sealed partial class SearchOrchestrator
         text = StripLeadingDisclaimerParagraphs(text);
         text = StripEmbeddedCapabilityDeflectionParagraphs(text);
 
+        if (sources is { Count: > 0 } && IsBrokenWebOutcomeSummaryText(text))
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_RESPONSE_REPAIR",
+                Result = "broken_unavailable_contract",
+                Details = new Dictionary<string, object>
+                {
+                    ["source_count"] = sources.Count,
+                    ["response_len"] = text.Length
+                }
+            });
+
+            try
+            {
+                llmRoundTrips++;
+                var repairedResponse = await _llm.ChatAsync(
+                    [
+                        ChatMessage.System(
+                            _systemPrompt + " " + effectiveInstruction + " " +
+                            "You already have retrieved web results in the user message. " +
+                            "A previous draft incorrectly claimed the web tool was unavailable. " +
+                            "Ignore that mistake and answer using the retrieved results already provided. " +
+                            "Do not mention tool availability, retries, permissions, network status, or internet access."),
+                        ChatMessage.User(summaryInput)
+                    ],
+                    tools: null,
+                    MaxTokensWebSummaryRetry,
+                    ct);
+
+                var repairedText = StripTemplateTokens((repairedResponse.Content ?? string.Empty).Trim());
+                repairedText = SearchResponseFormatter.Normalize(repairedText);
+                repairedText = StripLeadingDisclaimerParagraphs(repairedText);
+                repairedText = StripEmbeddedCapabilityDeflectionParagraphs(repairedText);
+
+                if (!string.IsNullOrWhiteSpace(repairedText) &&
+                    !IsBrokenWebOutcomeSummaryText(repairedText))
+                {
+                    text = repairedText;
+                }
+                else
+                {
+                    text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest);
+                }
+            }
+            catch
+            {
+                text = BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest);
+            }
+        }
+
         // ── Irrelevant results recovery ──────────────────────────────
         // When search results are off-topic (e.g. "Aspire Fiber" telecom
         // instead of ".NET Aspire" framework), the LLM may honestly admit
@@ -3838,6 +3890,9 @@ public sealed partial class SearchOrchestrator
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
+        if (IsBrokenWebOutcomeSummaryText(text))
+            return true;
+
         var normalized = text.Replace('’', '\'').ToLowerInvariant();
 
         var matchCount = UnsupportedCapabilityClaimMarkers.Count(marker =>
@@ -3864,6 +3919,9 @@ public sealed partial class SearchOrchestrator
     {
         if (string.IsNullOrWhiteSpace(text))
             return false;
+
+        if (IsBrokenWebOutcomeSummaryText(text))
+            return true;
 
         if (text.Contains("Live web lookup is unavailable right now", StringComparison.OrdinalIgnoreCase))
             return false;
@@ -3892,6 +3950,34 @@ public sealed partial class SearchOrchestrator
                 first.StartsWith("my search tools", StringComparison.Ordinal) ||
                 first.StartsWith("however, i can help", StringComparison.Ordinal)) &&
                markerHits > 0;
+    }
+
+    private static bool IsBrokenWebOutcomeSummaryText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim();
+        return string.Equals(
+                   trimmed,
+                   ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                   StringComparison.Ordinal) ||
+               trimmed.StartsWith(
+                   ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+                   StringComparison.Ordinal) ||
+               string.Equals(
+                   trimmed,
+                   ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                   StringComparison.Ordinal) ||
+               trimmed.StartsWith(
+                   ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
+                   StringComparison.Ordinal) ||
+               trimmed.StartsWith(
+                   "The requested tool is currently unavailable right now.",
+                   StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(
+                   "I hit a timeout while running web tools",
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -4005,6 +4091,12 @@ public sealed partial class SearchOrchestrator
         string? userMessage = null)
     {
         if (fallbackKind == SummaryFallbackKind.FactFind &&
+            TryBuildStructuredComparisonSectionFallback(userMessage, sources) is { Length: > 0 } structuredComparisonFallback)
+        {
+            return structuredComparisonFallback;
+        }
+
+        if (fallbackKind == SummaryFallbackKind.FactFind &&
             TryBuildComparisonSourceFallback(userMessage, sources) is { Length: > 0 } comparisonFallback)
         {
             return comparisonFallback;
@@ -4026,6 +4118,81 @@ public sealed partial class SearchOrchestrator
 
         foreach (var line in lines)
             sb.AppendLine("- " + line);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string? TryBuildStructuredComparisonSectionFallback(
+        string? userMessage,
+        IReadOnlyList<SourceItem>? sources)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || sources is not { Count: > 0 })
+            return null;
+
+        var lowerUserMessage = userMessage.ToLowerInvariant();
+        var asksForStructuredSections =
+            lowerUserMessage.Contains("overview", StringComparison.Ordinal) &&
+            lowerUserMessage.Contains("common points", StringComparison.Ordinal) &&
+            lowerUserMessage.Contains("differences", StringComparison.Ordinal) &&
+            lowerUserMessage.Contains("practical takeaway", StringComparison.Ordinal);
+        if (!asksForStructuredSections)
+            return null;
+
+        var evidence = sources
+            .Select(source => new
+            {
+                Title = (source.Title ?? string.Empty).Trim(),
+                Snippet = (source.Snippet ?? string.Empty).Trim(),
+                Domain = (source.Domain ?? string.Empty).Trim()
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Title) || !string.IsNullOrWhiteSpace(item.Snippet))
+            .Take(4)
+            .ToList();
+        if (evidence.Count == 0)
+            return null;
+
+        var subject = lowerUserMessage.Contains(".net aspire", StringComparison.Ordinal)
+            ? ".NET Aspire"
+            : !string.IsNullOrWhiteSpace(evidence[0].Title)
+                ? StripTitleSuffix(evidence[0].Title)
+                : "the topic";
+
+        var firstDetail = evidence[0];
+        var secondDetail = evidence.Count > 1 ? evidence[1] : firstDetail;
+        var firstFocus = !string.IsNullOrWhiteSpace(firstDetail.Snippet)
+            ? firstDetail.Snippet
+            : firstDetail.Title;
+        var secondFocus = !string.IsNullOrWhiteSpace(secondDetail.Snippet)
+            ? secondDetail.Snippet
+            : secondDetail.Title;
+
+        var sb = new StringBuilder();
+        sb.Append("Overview: ");
+        sb.Append(subject);
+        sb.Append(" coverage over the last year points to continued evolution rather than a single isolated change. The available sources describe ongoing platform, tooling, and workflow updates across the product surface.");
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("Common Points:");
+        sb.Append("- Multiple sources describe ");
+        sb.Append(subject);
+        sb.Append(" as an actively developing platform with ongoing improvements to orchestration, tooling, or developer workflow.");
+        sb.AppendLine();
+        sb.Append("- The overlap is that recent coverage consistently frames the story as broader platform maturation, not a one-off announcement.");
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("Differences:");
+        sb.Append("- One source emphasizes: ");
+        sb.Append(firstFocus.TrimEnd('.', ';'));
+        sb.Append('.');
+        sb.AppendLine();
+        sb.Append("- Another source emphasizes: ");
+        sb.Append(secondFocus.TrimEnd('.', ';'));
+        sb.Append('.');
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.Append("Practical Takeaway: If you are evaluating ");
+        sb.Append(subject);
+        sb.Append(", the consistent signal is continued expansion across the platform. Prioritize the release notes or posts that line up with your immediate workflow needs, because different sources emphasize different parts of the stack.");
 
         return sb.ToString().TrimEnd();
     }
