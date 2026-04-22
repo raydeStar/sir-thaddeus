@@ -1,7 +1,14 @@
 using Microsoft.Extensions.Logging;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Guardrails;
+using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Validation;
+using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
@@ -41,9 +48,10 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         ToolPermissionGate gate,
         IThreadStore store,
         ChatTurnPublisher publisher,
+        IAuditLogger audit,
         ILoggerFactory loggerFactory)
         : this(settings, stub,
-              CreateDefaultFactory(mcp, gate, store, publisher, loggerFactory),
+              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory),
               loggerFactory.CreateLogger<AssistantRouter>())
     {
     }
@@ -103,12 +111,22 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         || string.IsNullOrWhiteSpace(llm.ModelId);
 
     private static Func<SettingsDocument, IAssistant> CreateDefaultFactory(
-        IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher, ILoggerFactory loggerFactory)
+        IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher,
+        IAuditLogger audit, ILoggerFactory loggerFactory)
     {
         var cacheLock = new object();
         LmStudioClient? cached = null;
         LmStudioClient? gatekeeperCached = null;
         IFootmanRouter? footmanCached = null;
+        IPersonalityRuntime? personalityCached = null;
+        IMemoryContextProvider? memoryProviderCached = null;
+        ISearchFallbackExecutor? searchFallbackCached = null;
+        ReasoningGuardrailsPipeline? guardrailsCached = null;
+        CompletionValidator? validatorCached = null;
+        RepairLoop? repairCached = null;
+        // Dialogue state survives settings rebuilds — it's per-thread
+        // conversation context, not per-client wiring.
+        IDialogueStateAccessor dialogueAccessor = new ThreadScopedDialogueStateAccessor();
         string? fingerprint = null;
         string? gatekeeperFingerprint = null;
 
@@ -138,6 +156,14 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                         cached.UpdateOptions(options);
                     }
                     fingerprint = fp;
+
+                    // Guardrails, validator, and repair loop are all
+                    // pinned to the primary LLM client. When the primary
+                    // rebuilds, drop the cached pipeline so the next turn
+                    // rewires against the refreshed client.
+                    guardrailsCached = null;
+                    validatorCached = null;
+                    repairCached = null;
                 }
 
                 // Gatekeeper client + footman router, rebuilt only when
@@ -177,6 +203,50 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                 }
 
                 var loc = doc.Location;
+
+                // Personality runtime: constructed lazily on first turn
+                // build-out so the profile is only loaded when a chat
+                // actually runs. Settings doc doesn't have a profile-id
+                // field yet, so we pass empty and the store falls back
+                // to the built-in default.
+                var personalityRuntime = personalityCached ??= new PersonalityRuntime(
+                    activeProfileId: string.Empty,
+                    profilesDirectory: SirThaddeus.Config.SettingsManager.GetPersonalityProfilesDirectory());
+
+                // Memory context provider reads facts from the MCP
+                // memory tools. Requires a gatekeeper LLM client for
+                // the smart intent classifier — use whichever LLM we
+                // have warm (the gatekeeper when configured, else the
+                // primary; either works for the light classification
+                // prompt the provider issues).
+                var classifierLlm = gatekeeperCached ?? cached;
+                var memoryProvider = memoryProviderCached ??= new MemoryContextProvider(
+                    mcp,
+                    audit,
+                    new SmartIntentClassifier(classifierLlm, audit));
+
+                // Search fallback: retries refusal-shaped drafts via the
+                // SearchOrchestrator. The orchestrator owns no session
+                // state — safe to cache across turns. Uses a minimal
+                // base prompt (the orchestrator supplies its own
+                // instruction blocks at call time).
+                var searchFallback = searchFallbackCached ??= new SearchFallbackExecutor(
+                    new SearchOrchestrator(cached, mcp, audit,
+                        "You are Sir Thaddeus, a helpful local-first assistant."));
+
+                // Reasoning-guardrails pipeline: first-principles scaffold
+                // for reasoning-shaped prompts. Constructed lazily against
+                // the primary client — rebuilt by the fingerprint branch
+                // above when the client refreshes.
+                var guardrails = guardrailsCached ??= new ReasoningGuardrailsPipeline(cached, audit);
+
+                // Completion validator + repair loop: catches inadequate
+                // drafts (refusals after tool work, unaddressed user asks)
+                // and runs one focused repair pass. Shares the primary
+                // client for both passes.
+                var validator = validatorCached ??= new CompletionValidator(cached);
+                var repair = repairCached ??= new RepairLoop(cached, validator);
+
                 return new LmStudioAssistant(
                     cached, mcp, gate, store, publisher,
                     loggerFactory.CreateLogger<LmStudioAssistant>())
@@ -184,6 +254,13 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     Footman = footmanCached,
                     LocationHint = string.IsNullOrWhiteSpace(loc?.ManualLocation) ? null : loc!.ManualLocation,
                     PreferredUnits = string.IsNullOrWhiteSpace(loc?.PreferredUnits) ? null : loc!.PreferredUnits,
+                    PersonalityRuntime = personalityRuntime,
+                    MemoryContextProvider = memoryProvider,
+                    SearchFallbackExecutor = searchFallback,
+                    GuardrailsPipeline = guardrails,
+                    CompletionValidator = validator,
+                    CompletionRepairLoop = repair,
+                    DialogueStateAccessor = dialogueAccessor,
                 };
             }
         };

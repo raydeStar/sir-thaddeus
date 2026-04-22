@@ -1,10 +1,15 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Guardrails;
+using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Validation;
 using SirThaddeus.LlmClient;
+using SirThaddeus.PersonalityEngine;
 using Thaddeus.Runtime.Chat.Pipeline;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
@@ -63,6 +68,67 @@ public sealed class LmStudioAssistant : IAssistant
     /// units when the tool result is ambiguous. Null falls through.
     /// </summary>
     public string? PreferredUnits { get; init; }
+
+    /// <summary>
+    /// Personality runtime used by <c>PersonalityInjectionStep</c> to wrap
+    /// the base system prompt with tone / formality / warmth modifiers
+    /// and to inject few-shot examples. Null leaves the pipeline without
+    /// a personality step (the base system prompt is used verbatim).
+    /// </summary>
+    public IPersonalityRuntime? PersonalityRuntime { get; init; }
+
+    /// <summary>
+    /// Optional memory-context provider for <c>MemoryContextStep</c>.
+    /// When set, the pipeline prepends a [REMEMBERED CONTEXT] block with
+    /// facts relevant to the current turn. Null = no memory read.
+    /// </summary>
+    public IMemoryContextProvider? MemoryContextProvider { get; init; }
+
+    /// <summary>
+    /// Optional fire-and-forget memory extractor for
+    /// <c>AutoMemoryExtractStep</c>. Captures user + assistant chunks
+    /// and runs structured fact extraction in the background.
+    /// Null = no memory writes.
+    /// </summary>
+    public IAutoMemoryExtractor? AutoMemoryExtractor { get; init; }
+
+    /// <summary>
+    /// Optional search-fallback executor for <c>SearchFallbackStep</c>.
+    /// Replaces refusal-shaped drafts with a search-backed retry. Null =
+    /// weak drafts pass through unchanged.
+    /// </summary>
+    public ISearchFallbackExecutor? SearchFallbackExecutor { get; init; }
+
+    /// <summary>
+    /// Optional reasoning-guardrails pipeline for <c>GuardrailsStep</c>.
+    /// When set, questions that match the guardrails detector get a
+    /// first-principles breakdown + synthesized answer before the tool
+    /// loop runs. Null = guardrails step is a no-op.
+    /// </summary>
+    public ReasoningGuardrailsPipeline? GuardrailsPipeline { get; init; }
+
+    /// <summary>
+    /// Optional completion validator for <c>CompletionValidationStep</c>.
+    /// When paired with <see cref="CompletionRepairLoop"/>, inadequate
+    /// drafts get one targeted repair attempt before the composer
+    /// finalizes the response.
+    /// </summary>
+    public CompletionValidator? CompletionValidator { get; init; }
+
+    /// <summary>
+    /// Optional repair loop paired with <see cref="CompletionValidator"/>.
+    /// Null disables repair (validator can still run diagnostically).
+    /// </summary>
+    public RepairLoop? CompletionRepairLoop { get; init; }
+
+    /// <summary>
+    /// Optional per-conversation dialogue-state accessor for
+    /// <c>DialogueStateStep</c>. UI runtime should use a
+    /// <see cref="ThreadScopedDialogueStateAccessor"/> so each chat
+    /// thread keeps its own topic / location / time-scope context.
+    /// Null = dialogue-state step is a no-op.
+    /// </summary>
+    public IDialogueStateAccessor? DialogueStateAccessor { get; init; }
 
     /// <summary>Most recent N messages from the thread to send as history.</summary>
     public int HistoryTurns { get; init; } = 16;
@@ -390,14 +456,81 @@ public sealed class LmStudioAssistant : IAssistant
             // terminate the turn before any LLM round-trip or feature
             // extraction. Non-matches fall through unchanged.
             new UtilityFastPathStep(),
+
+            // Benign fallback: canned replies for a tight set of trivial
+            // prompts (greetings, classic-reasoning probes). Only fires
+            // when the prompt isn't tool-eligible, so legitimate tool
+            // requests are never stolen.
+            new BenignFallbackStep(),
+
+            // Personality wraps the base system prompt. No-op when
+            // PersonalityRuntime is null (desktop runtime sans profile).
+            new PersonalityInjectionStep(PersonalityRuntime),
+
             new FeatureExtractorStep(),
             new LogicPuzzleScaffoldStep(),
+
+            // Memory context injects [REMEMBERED CONTEXT]. Also sets
+            // TurnContext.IsNewUser from the provider's onboarding
+            // signal so the next step can fire on cold starts. No-op
+            // when MemoryContextProvider is null.
+            new MemoryContextStep(MemoryContextProvider),
+
+            // Onboarding injection: appends the cold-introduction
+            // suffix when the memory provider signals no profile facts
+            // are known yet. No-op on warm users / when memory is off.
+            new OnboardingInjectionStep(ctx => ctx.IsNewUser
+                ? OnboardingMode.Cold
+                : OnboardingMode.NotNeeded),
+
+            // Dialogue state: appends a [CONVERSATION CONTEXT] block
+            // with the previous turn's topic / location / time-scope so
+            // the model can resolve follow-ups ("what about tomorrow?")
+            // without the user re-stating context. No-op on fresh
+            // threads.
+            new DialogueStateStep(DialogueStateAccessor),
+
             new FootmanRouterStep(
                 Footman,
                 sink,
                 alwaysAllowToolNames: new[] { ProposeAutomationTool.ToolName }),
+
+            // Guardrails: first-principles scaffold for reasoning-heavy
+            // questions. Terminates the turn with a synthesized answer
+            // when the detector fires; no-op otherwise.
+            new GuardrailsStep(GuardrailsPipeline),
+
             toolLoop,
             new PostProcessStep(sanitize, "PostProcess:Sanitize"),
+
+            // Completion validation + repair: checks the post-processed
+            // draft actually answered the question; runs one targeted
+            // repair if the validator flags a miss. No-op when either
+            // collaborator is null.
+            new CompletionValidationStep(CompletionValidator, CompletionRepairLoop),
+
+            // Search fallback: replaces refusal drafts with a retry when
+            // user prompt has web-lookup signals. No-op when executor null.
+            new SearchFallbackStep(
+                SearchFallbackExecutor,
+                buildRequest: ctx =>
+                {
+                    var draft = ctx.AssistantDraft ?? string.Empty;
+                    if (!AgentOrchestrator.HasRefusalOrUncertaintySignals(draft, draft))
+                        return null;
+                    return new SearchFallbackRequest
+                    {
+                        UserMessage = ctx.UserText ?? string.Empty,
+                        History = ctx.LlmMessages.ToList(),
+                        ToolCallsMade = ctx.ToolCallsMade.ToList(),
+                        HasRefusalOrUncertaintySignals = true,
+                    };
+                }),
+
+            // Fire-and-forget user + assistant memory writes. No-op when
+            // AutoMemoryExtractor is null.
+            new AutoMemoryExtractStep(AutoMemoryExtractor),
+
             new ResponseComposerStep(),
         });
     }

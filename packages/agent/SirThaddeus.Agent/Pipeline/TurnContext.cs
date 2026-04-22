@@ -60,4 +60,14 @@ public sealed record TurnContext
     /// tool-loop step appends calls; final <see cref="AgentResponse"/>
     /// inherits this list.</summary>
     public IReadOnlyList<ToolCallRecord> ToolCallsMade { get; init; } = [];
+
+    /// <summary>
+    /// True when the user is new/unknown — no profile facts stored.
+    /// Populated by <c>MemoryContextStep</c> from the provider's
+    /// <see cref="SirThaddeus.Agent.Memory.MemoryContextResult.OnboardingNeeded"/>
+    /// signal, and consumed by <c>OnboardingInjectionStep</c> to decide
+    /// whether to inject the warm-introduction suffix. Defaults to false
+    /// — runtimes without a memory provider never trigger onboarding.
+    /// </summary>
+    public bool IsNewUser { get; init; }
 }

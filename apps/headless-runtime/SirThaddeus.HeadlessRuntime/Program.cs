@@ -4,11 +4,14 @@ using System.Security.Principal;
 using System.Text.Json;
 using Serilog;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Validation;
 using SirThaddeus.PersonalityEngine;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -314,6 +317,21 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         searchFallback = new SearchFallbackExecutor(searchOrchestrator);
     }
 
+    // 2K pipeline-only services — these all share the primary LLM and
+    // don't need per-turn configuration, so construct once per
+    // orchestrator build.
+    //
+    // - Dialogue state: CLI uses the singleton adapter over the legacy
+    //   DialogueStateStore so harness runs see the same topic/location
+    //   carryover the legacy orchestrator produced.
+    // - Guardrails: first-principles scaffold for reasoning-shaped prompts.
+    // - Validator + repair loop: catches inadequate drafts and runs one
+    //   focused repair pass.
+    var dialogueAccessor = new SingletonDialogueStateAccessor(new DialogueStateStore());
+    var guardrails = new ReasoningGuardrailsPipeline(llm, audit);
+    var completionValidator = new CompletionValidator(llm);
+    var repairLoop = new RepairLoop(llm, completionValidator);
+
     var pipeline = new ChatPipeline(new ITurnStep[]
     {
         // Safety boundary runs FIRST. High-risk illicit-instruction
@@ -325,6 +343,11 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // LLM or personality wrapping.
         new UtilityFastPathStep(),
 
+        // Benign fallback: canned replies for trivial benign prompts
+        // (greetings, hash-table probes). Only fires when the prompt
+        // isn't tool-eligible.
+        new BenignFallbackStep(),
+
         // Personality wraps the base system prompt. Sits early so every
         // subsequent injection (logic-puzzle scaffold, memory, onboarding)
         // appends on top of the personality-framed prompt.
@@ -334,7 +357,9 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         new LogicPuzzleScaffoldStep(),
 
         // Memory context injects [REMEMBERED CONTEXT] block for the LLM.
-        // No-op when memoryProvider is null (memory disabled in settings).
+        // Also sets TurnContext.IsNewUser from the provider's onboarding
+        // signal so the next step can fire on cold starts. No-op when
+        // memoryProvider is null (memory disabled in settings).
         new MemoryContextStep(memoryProvider, ctx => new MemoryContextRequest
         {
             UserMessage = ctx.UserText ?? string.Empty,
@@ -343,9 +368,36 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             ActiveProfileId = currentSettings.ActiveProfileId,
         }),
 
+        // Onboarding injection: appends the cold-introduction suffix
+        // when the memory provider signals no profile facts are known
+        // yet. No-op on warm users / when memory is off.
+        new OnboardingInjectionStep(ctx => ctx.IsNewUser
+            ? OnboardingMode.Cold
+            : OnboardingMode.NotNeeded),
+
+        // Dialogue state: appends [CONVERSATION CONTEXT] with carry-over
+        // topic/location/time. Read-only — writes happen inside the
+        // legacy context anchoring service (still on the orchestrator
+        // for now). Singleton accessor matches the v1 store semantics.
+        new DialogueStateStep(dialogueAccessor),
+
         new FootmanRouterStep(footmanRouter, sink),
+
+        // Guardrails: short-circuits the turn with a first-principles
+        // scaffold when the prompt looks reasoning-shaped. Runs after
+        // the footman so it can still see the narrowed tool view, but
+        // before the tool loop so a clean scaffold answer beats a
+        // half-loop.
+        new GuardrailsStep(guardrails),
+
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),
+
+        // Completion validation + targeted repair: catches refusal-ish
+        // or incomplete drafts after sanitize and runs one focused
+        // repair pass. Fail-open — validator/repair exceptions don't
+        // abort the turn.
+        new CompletionValidationStep(completionValidator, repairLoop),
 
         // Search fallback: runs after sanitizer so the refusal check
         // sees the final draft. Builds the full request including

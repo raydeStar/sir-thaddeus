@@ -197,7 +197,14 @@ internal static partial class OrchestratorMessageHelpers
         return null;
     }
 
-    internal static string? TryBuildEarlyDeterministicBenignFallback(string? userMessage)
+    /// <summary>
+    /// Builds a deterministic reply for common benign prompts (trivial
+    /// greetings, classic-reasoning follow-ups, etc.) before the
+    /// orchestrator enters its full routing pass. Public so the
+    /// pipeline's <c>BenignFallbackStep</c> can terminate those turns
+    /// before any LLM call. Returns null when no fallback applies.
+    /// </summary>
+    public static string? TryBuildEarlyDeterministicBenignFallback(string? userMessage)
     {
         var lower = userMessage?.Trim().ToLowerInvariant() ?? string.Empty;
         if (lower.Length == 0)
