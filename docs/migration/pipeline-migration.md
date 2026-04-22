@@ -1,6 +1,6 @@
 # Pipeline Migration — AI Handoff Log
 
-**Status:** Phase 2K complete. UI and CLI pipelines are now at **parity — 17 steps each**: safety boundary → utility fast-path → benign fallback → personality injection → feature extractor → logic-puzzle scaffold → memory context → onboarding injection → **dialogue state** → footman router → **guardrails** → tool loop → post-process → **completion validation** → search fallback → auto-memory extract → response composer. Default CLI behavior unchanged (`ST_RUNTIME_USE_PIPELINE=1` opt-in); legacy `AgentOrchestrator` still authoritative until harness validates the pipeline. Safe to ship / push at any point between phases.
+**Status:** Phase 2K complete. UI and CLI pipelines are now at **parity — 17 steps each**: safety boundary → utility fast-path → benign fallback → personality injection → feature extractor → logic-puzzle scaffold → memory context → onboarding injection → **dialogue state** → footman router → **guardrails** → tool loop → post-process → **completion validation** → search fallback → auto-memory extract → response composer. **Pipeline is now default ON** — set `ST_RUNTIME_USE_PIPELINE=0` to force the legacy `AgentOrchestrator` (kept for harness A/B comparisons). Safe to ship / push at any point between phases.
 
 **Purpose of this doc:** Any AI or contributor picking this up mid-stream should be able to read this file once and continue. Each phase ends with updates here. Keep it terse — it's a ledger, not prose.
 
@@ -218,8 +218,9 @@ The following orchestrator behaviors don't yet have pipeline steps. Each surface
 - **Slot extraction + tool planner** — legacy builds a deterministic tool plan before calling the LLM. Pipeline is reactive (LLM picks tools). May affect tool-contract suite. (2K.3 deferred — footman already narrows per turn.)
 - **Dialogue state write-side / context anchoring** — the read-side lands in 2K.4 (`DialogueStateStep` injects `[CONVERSATION CONTEXT]`). The legacy `ContextAnchoringService` still does the WRITE side (state patches from tool results + context lock). Port is in place so the write-side can move into a follow-up step without touching the read step.
 - **Multi-intent bypass + conversation segmentation + lane router** — legacy-only. Low priority; add steps if harness flags them.
-- **2D.4 — Harness full pass.** Not started. Run: `$env:ST_RUNTIME_USE_PIPELINE = "1"; ./dev/harness.ps1 --suite smoke --judge none` first, then `--suite reasoning`, then `--all`. Expect gaps in suites that rely on orchestrator-only behaviors (search orchestrator, deep-dive, slot extraction, dialogue state, guardrails post-processor) — each becomes a focused "add step X" PR.
-- **2D.5 — Retire AgentOrchestrator.** Not started. Gated on harness pass with the flag on.
+- **2K.7 — Pipeline default ON.** Shipped. `ST_RUNTIME_USE_PIPELINE` flag semantics inverted: pipeline is now default; set the env var to `"0"` to force the legacy path for A/B comparisons. Legacy `AgentOrchestrator` branch stays wired until 2D.5.
+- **2D.4 — Harness full pass.** Not started. Run: `./dev/harness.ps1 --suite smoke --judge none` first (no env var needed now — pipeline is default), then `--suite reasoning`, then `--all`. Legacy A/B: `$env:ST_RUNTIME_USE_PIPELINE = "0"; ...`. Expect gaps in the areas listed under "Known gaps" below — each becomes a focused "add step X" PR.
+- **2D.5 — Retire AgentOrchestrator.** Not started. Gated on harness pass against the pipeline default.
 
 ---
 

@@ -206,15 +206,13 @@ if (toolsAvailable && settings.Memory.Enabled)
         }));
 }
 
-// Feature flag read once at startup. When set, the CLI uses the new
-// pipeline-backed orchestrator (IHeadlessAgent implementation that
-// delegates to SirThaddeus.Agent.Pipeline.ChatPipeline). Left off by
-// default so the harness keeps validating the legacy AgentOrchestrator
-// until the migration is fully verified.
-var usePipelineBackend = string.Equals(
-    Environment.GetEnvironmentVariable("ST_RUNTIME_USE_PIPELINE"),
-    "1",
-    StringComparison.Ordinal);
+// Feature flag read once at startup. The pipeline-backed orchestrator
+// (IHeadlessAgent implementation that delegates to
+// SirThaddeus.Agent.Pipeline.ChatPipeline) is the default as of 2K.
+// Set ST_RUNTIME_USE_PIPELINE=0 to force the legacy AgentOrchestrator
+// (kept for harness A/B comparisons until the legacy path is retired).
+var pipelineFlag = Environment.GetEnvironmentVariable("ST_RUNTIME_USE_PIPELINE");
+var usePipelineBackend = !string.Equals(pipelineFlag, "0", StringComparison.Ordinal);
 
 IHeadlessAgent BuildOrchestrator(AppSettings currentSettings)
 {
