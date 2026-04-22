@@ -20,7 +20,7 @@ using SirThaddeus.PersonalityEngine.Profiles;
 
 namespace SirThaddeus.Agent;
 
-public sealed partial class AgentOrchestrator : IAgentOrchestrator
+public sealed partial class AgentOrchestrator : IHeadlessAgent
 {
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;

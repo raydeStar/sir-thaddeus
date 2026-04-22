@@ -12,7 +12,7 @@ internal static partial class RuntimeApiServer
     private static void MapRunEndpoints(
         WebApplication app,
         ConcurrentDictionary<string, RunState> runs,
-        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings, IHeadlessAgent> buildOrchestrator,
         Func<AppSettings> getSettings,
         ApiPermissionGate? permissionGate,
         Action<AppSettings> persistSettings,
@@ -139,7 +139,7 @@ internal static partial class RuntimeApiServer
     private static Task ExecuteChatRunAsync(
         ChatRequest request,
         RunState runState,
-        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings, IHeadlessAgent> buildOrchestrator,
         Func<AppSettings> getSettings,
         IAuditLogger audit)
     {

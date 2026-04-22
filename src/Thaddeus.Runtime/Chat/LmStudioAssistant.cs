@@ -378,10 +378,17 @@ public sealed class LmStudioAssistant : IAssistant
 
         return new ChatPipeline(new ITurnStep[]
         {
-            // Utility fast-path runs FIRST. Deterministic matches (unit
-            // conversion, percent-of, simple arithmetic, classic reasoning
-            // tripwires) terminate the turn before any LLM round-trip or
-            // feature extraction. Non-matches fall through unchanged.
+            // Safety boundary runs FIRST. High-risk illicit-instruction
+            // prompts get a canned safe-redirect response before any
+            // other step touches the turn — no LLM, no memory read, no
+            // tool loop. Matches the legacy orchestrator's line 182-192
+            // safety short-circuit byte-for-byte.
+            new SafetyBoundaryStep(),
+
+            // Utility fast-path. Deterministic matches (unit conversion,
+            // percent-of, simple arithmetic, classic reasoning tripwires)
+            // terminate the turn before any LLM round-trip or feature
+            // extraction. Non-matches fall through unchanged.
             new UtilityFastPathStep(),
             new FeatureExtractorStep(),
             new LogicPuzzleScaffoldStep(),

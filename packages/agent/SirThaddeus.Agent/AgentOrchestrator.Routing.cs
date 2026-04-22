@@ -401,7 +401,14 @@ public sealed partial class AgentOrchestrator
         return new RouteResolutionResult(route, webEvidence, footmanDecision);
     }
 
-    private static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
+    /// <summary>
+    /// Heuristic over an assistant draft that detects "I don't know /
+    /// I can't / I'm not sure"-shaped responses. Used by the legacy
+    /// orchestrator's search fallback path, and re-exposed as public so
+    /// the pipeline's <c>SearchFallbackStep</c> trigger can share the
+    /// same refusal-detection logic instead of drifting.
+    /// </summary>
+    public static bool HasRefusalOrUncertaintySignals(string rawDraft, string processedDraft)
     {
         if (string.IsNullOrWhiteSpace(processedDraft))
             return true;

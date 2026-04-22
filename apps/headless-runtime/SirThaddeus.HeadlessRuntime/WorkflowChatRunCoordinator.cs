@@ -13,7 +13,7 @@ internal sealed class WorkflowChatRunCoordinator
     private const string SourcesJsonDelimiter = "<!-- SOURCES_JSON -->";
 
     private readonly Func<AppSettings> _getSettings;
-    private readonly Func<AppSettings, AgentOrchestrator> _buildOrchestrator;
+    private readonly Func<AppSettings, IHeadlessAgent> _buildOrchestrator;
     private readonly IAuditLogger _audit;
     private readonly ITaskClassifier _classifier = new TaskClassifier();
     private readonly IChecklistPlanner _checklistPlanner = new ChecklistPlanner();
@@ -25,7 +25,7 @@ internal sealed class WorkflowChatRunCoordinator
 
     public WorkflowChatRunCoordinator(
         Func<AppSettings> getSettings,
-        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings, IHeadlessAgent> buildOrchestrator,
         IAuditLogger audit)
     {
         _getSettings = getSettings;

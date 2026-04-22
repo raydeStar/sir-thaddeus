@@ -34,7 +34,7 @@ internal static partial class RuntimeApiServer
 
     public static async Task RunAsync(
         int port,
-        Func<AppSettings, AgentOrchestrator> buildOrchestrator,
+        Func<AppSettings, IHeadlessAgent> buildOrchestrator,
         Func<AppSettings> getSettings,
         Action<AppSettings> setSettings,
         Func<CancellationToken, Task<SearchStatusResponse>> getSearchStatus,
