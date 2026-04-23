@@ -4,6 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Force transitive NuGet dependencies (e.g. NCalc) to copy into
+         this assembly's bin/ so downstream class libraries and exes
+         pick them up. Without this, class libraries don't copy package
+         assemblies to their own output, so the chain
+         Agent → Runtime / HeadlessRuntime silently drops NCalc and
+         throws "Could not load assembly NCalc.Sync" at first use of
+         the advanced calculator. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>

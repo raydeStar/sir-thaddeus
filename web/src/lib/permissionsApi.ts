@@ -1,4 +1,4 @@
-import { runtimeFetch, readRuntimeMetadata } from './runtime';
+import { runtimeFetch, readRuntimeMetadata, parseRuntimeJson } from './runtime';
 
 export interface PendingPermission {
   id: string;
@@ -18,9 +18,8 @@ function token(): string {
 
 export async function listPendingPermissions(): Promise<PendingPermission[]> {
   const res = await runtimeFetch(token(), '/api/permissions/pending');
-  if (!res.ok) throw new Error(`runtime ${res.status}`);
-  const body = await res.json();
-  return (body.requests ?? []) as PendingPermission[];
+  const body = await parseRuntimeJson<{ requests?: PendingPermission[] }>(res);
+  return body.requests ?? [];
 }
 
 export async function respondToPermission(id: string, decision: PermissionResponse): Promise<void> {

@@ -100,20 +100,29 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   newThread: async (title?: string) => {
-    const thread = await api.createThread(title);
-    set((s) => ({
-      threads: [
-        {
-          id: thread.id,
-          title: thread.title,
-          createdAt: thread.createdAt,
-          updatedAt: thread.updatedAt,
-          messageCount: 0,
-        },
-        ...s.threads,
-      ],
-    }));
-    return thread;
+    // Mirror the try/catch-to-error shape the rest of the store uses so
+    // failures don't bubble up as unhandled promise rejections. Home's
+    // Send button needs a consumable error state, not a silent drop.
+    set({ error: null });
+    try {
+      const thread = await api.createThread(title);
+      set((s) => ({
+        threads: [
+          {
+            id: thread.id,
+            title: thread.title,
+            createdAt: thread.createdAt,
+            updatedAt: thread.updatedAt,
+            messageCount: 0,
+          },
+          ...s.threads,
+        ],
+      }));
+      return thread;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      throw e;
+    }
   },
 
   send: async (text: string) => {

@@ -197,6 +197,21 @@ public static class DeterministicUtilityEngine
     {
         var expression = raw;
 
+        // English operators — must run BEFORE constant rewrites so "pi
+        // times 5" reaches NCalc as "Pi * 5" rather than "Pi times 5"
+        // (which NCalc would reject). Kept case-insensitive but careful
+        // not to clobber legitimate identifiers ("over" in a URL, etc.)
+        // by requiring word boundaries on both sides.
+        expression = Regex.Replace(expression, @"\bmultiplied\s+by\b", "*", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\bdivided\s+by\b", "/", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\btimes\b", "*", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\bplus\b", "+", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\bminus\b", "-", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\bover\b", "/", RegexOptions.IgnoreCase);
+        // "x" as multiplication only between digit-looking operands so we
+        // don't mangle variable names like "x + 1" that a user might type.
+        expression = Regex.Replace(expression, @"(?<=\d)\s*x\s*(?=\d)", " * ", RegexOptions.IgnoreCase);
+
         // "X squared" / "X cubed"
         expression = Regex.Replace(expression,
             @"\b(?<base>\d+(?:\.\d+)?|\([^()]+\))\s+squared\b",

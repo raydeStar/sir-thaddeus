@@ -13,9 +13,11 @@ function HomeRoute() {
   const send = useChatStore((s) => s.send);
   const threads = useChatStore((s) => s.threads);
   const loadThreads = useChatStore((s) => s.loadThreads);
+  const storeError = useChatStore((s) => s.error);
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -34,16 +36,24 @@ function HomeRoute() {
   const start = async () => {
     if (!draft.trim() || busy) return;
     setBusy(true);
+    setLocalError(null);
     try {
       const t = await newThread();
       void navigate({ to: '/chat/$threadId', params: { threadId: t.id } });
       await useChatStore.getState().openThread(t.id);
       await send(draft.trim());
       setDraft('');
+    } catch (e) {
+      // Surface the failure so the user doesn't hit Send and see nothing
+      // happen. Common causes: backend offline, auth token missing (when
+      // opened directly in a browser), proxy misconfig.
+      setLocalError((e as Error).message || 'Could not send your message.');
     } finally {
       setBusy(false);
     }
   };
+
+  const displayError = localError ?? storeError;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -113,6 +123,15 @@ function HomeRoute() {
           <span className="mx-1">+</span>
           <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> for newline
         </p>
+        {displayError ? (
+          <div
+            role="alert"
+            data-testid="home-send-error"
+            className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-700 dark:text-red-300"
+          >
+            {displayError}
+          </div>
+        ) : null}
       </form>
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}

@@ -1,4 +1,4 @@
-import { runtimeFetch, readRuntimeMetadata } from './runtime';
+import { runtimeFetch, readRuntimeMetadata, parseRuntimeJson } from './runtime';
 import type {
   ChatThread,
   ThreadListResponse,
@@ -9,13 +9,7 @@ function token(): string {
   return readRuntimeMetadata().token;
 }
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`runtime ${res.status}: ${body || res.statusText}`);
-  }
-  return (await res.json()) as T;
-}
+const asJson = parseRuntimeJson;
 
 export async function listThreads(): Promise<ThreadSummary[]> {
   const res = await runtimeFetch(token(), '/api/threads');
