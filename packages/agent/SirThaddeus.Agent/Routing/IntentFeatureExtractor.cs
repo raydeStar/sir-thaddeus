@@ -1304,6 +1304,29 @@ public static class IntentFeatureExtractor
             lower.Contains("ratings", StringComparison.Ordinal) ||
             lower.Contains("price", StringComparison.Ordinal);
 
+        // Status / availability / single-URL fact checks ("is the PS5 in stock
+        // on amazon.com", "check walmart.com for the price of X") are factual
+        // lookups, not recommendation requests. Without an explicit
+        // recommend/compare cue they should never be classified as a product
+        // shortlist composition — that path emits a multi-item "qualified
+        // shortlist" wrapper that misrepresents a single-item status answer.
+        var looksLikeStatusOrUrlCheck =
+            lower.Contains("in stock", StringComparison.Ordinal) ||
+            lower.Contains("out of stock", StringComparison.Ordinal) ||
+            lower.Contains("availability", StringComparison.Ordinal) ||
+            lower.Contains("is it available", StringComparison.Ordinal) ||
+            lower.Contains("is there a ", StringComparison.Ordinal) ||
+            lower.Contains("is there an ", StringComparison.Ordinal) ||
+            lower.Contains("tell me if", StringComparison.Ordinal) ||
+            lower.Contains("check if", StringComparison.Ordinal) ||
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\bcheck\s+\w+\.(?:com|net|org|co)\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        if (looksLikeStatusOrUrlCheck && !hasRecommendationCue && !hasComparisonCue)
+            return false;
+
         if (hasRetailerAnchor && (hasRecommendationCue || hasComparisonCue || hasProductObject))
             return true;
 
