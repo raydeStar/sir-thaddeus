@@ -8,7 +8,12 @@ public sealed class TaskEnvelope
     public TaskComplexity Complexity { get; init; }
     public bool NeedsTools { get; init; }
     public bool ShowChecklist { get; init; }
-    public TimeSpan TimeBudget { get; init; } = TimeSpan.FromSeconds(30);
+    // 300s covers a 4B-class local model through a typical multi-step tool
+    // loop (gatekeeper + primary + ~3 tool calls) including slow final
+    // drafts. 2B models finish in 10-20s; leaving the ceiling this high
+    // hurts nothing and stops premature "Cancelled" responses when the
+    // model is just thinking slowly (a single 4B response can take 40s+).
+    public TimeSpan TimeBudget { get; init; } = TimeSpan.FromSeconds(300);
     public int MaxRetries { get; init; } = 1;
     public int MaxToolCalls { get; init; } = 8;
 }

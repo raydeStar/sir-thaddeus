@@ -256,6 +256,10 @@ public sealed class LmStudioAssistant : IAssistant
         // Logic-puzzle scaffold moved out of here — LogicPuzzleScaffoldStep
         // in the pipeline handles it after FeatureExtractorStep classifies
         // the turn. Keeping both would double-inject the suffix.
+        //
+        // Existence-verification hint also lives in the pipeline now
+        // (ExistenceVerificationHintStep) so UI and CLI share the same
+        // pattern-gated injection instead of duplicating it here.
 
         var dateBlock = BuildDateBlock();
         var locBlock = BuildLocationBlock();
@@ -275,6 +279,10 @@ public sealed class LmStudioAssistant : IAssistant
                "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
                "or rely on your training cutoff.";
     }
+
+    // (Existence-verification regex + builder moved to
+    // ExistenceVerificationHintStep — it belongs in the pipeline so both
+    // runtimes get it with the same gating.)
 
     /// <summary>
     /// Builds the one-paragraph location hint prepended to the system prompt
@@ -504,6 +512,12 @@ public sealed class LmStudioAssistant : IAssistant
             // without the user re-stating context. No-op on fresh
             // threads.
             new DialogueStateStep(DialogueStateAccessor),
+
+            // Existence-check nudge: when the user asks "does X exist" /
+            // "was X released" etc., remind the model to verify via
+            // web_search before answering from (stale) training memory.
+            // No-op on other prompt shapes.
+            new ExistenceVerificationHintStep(),
 
             new FootmanRouterStep(
                 Footman,

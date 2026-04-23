@@ -379,6 +379,12 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // for now). Singleton accessor matches the v1 store semantics.
         new DialogueStateStep(dialogueAccessor),
 
+        // Existence-check nudge: when the user asks "does X exist" /
+        // "was X released" etc., remind the model to verify via
+        // web_search before answering from (stale) training memory.
+        // No-op on other prompt shapes.
+        new ExistenceVerificationHintStep(),
+
         new FootmanRouterStep(footmanRouter, sink),
 
         // Guardrails: short-circuits the turn with a first-principles
@@ -446,7 +452,11 @@ static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
 
     // Date block runs unconditionally — local-LLM training cutoffs are
     // months to years stale, and "today's date" questions need to work
-    // even when the user hasn't set a location.
+    // even when the user hasn't set a location. The existence-verification
+    // nudge got moved OUT of here because a prompt-wide "verify" hint
+    // pushed 4B models to web_search casual questions. If the CLI grows a
+    // per-turn system prompt augmentation point later, that's where the
+    // surgical existence nudge should live.
     var today = DateTimeOffset.Now;
     var dateBlock =
         $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +

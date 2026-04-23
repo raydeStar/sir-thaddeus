@@ -19,11 +19,14 @@ public sealed class WorkflowTaskClassifierTests
     }
 
     [Fact]
-    public async Task TrivialPrompt_SetsThirtySecondTimeBudget()
+    public async Task TrivialPrompt_SetsOneHundredEightySecondTimeBudget()
     {
+        // Sized for a 4B-class local model — even a pure direct-answer
+        // draft can take 30-60s on the slower end. Earlier 30/60s ceilings
+        // cancelled mid-response.
         var envelope = await _classifier.ClassifyAsync("Hello!", CancellationToken.None);
 
-        Assert.Equal(TimeSpan.FromSeconds(30), envelope.TimeBudget);
+        Assert.Equal(TimeSpan.FromSeconds(180), envelope.TimeBudget);
     }
 
     // ── SimpleLookup prompts ─────────────────────────────────────────────────
@@ -94,11 +97,14 @@ public sealed class WorkflowTaskClassifierTests
     }
 
     [Fact]
-    public async Task MultiStepResearch_SetsSixtySecondTimeBudget()
+    public async Task MultiStepResearch_SetsSixHundredSecondTimeBudget()
     {
+        // Sized for a 4B-class local model stacking multiple LLM rounds
+        // + several tool calls. Conservative ceiling: smaller/faster
+        // models still finish well before this fires.
         var envelope = await _classifier.ClassifyAsync("Compare the pricing plans of GitHub billing", CancellationToken.None);
 
-        Assert.Equal(TimeSpan.FromSeconds(60), envelope.TimeBudget);
+        Assert.Equal(TimeSpan.FromSeconds(600), envelope.TimeBudget);
     }
 
     [Fact]
@@ -117,7 +123,7 @@ public sealed class WorkflowTaskClassifierTests
             CancellationToken.None);
 
         Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
-        Assert.Equal(TimeSpan.FromSeconds(60), envelope.TimeBudget);
+        Assert.Equal(TimeSpan.FromSeconds(600), envelope.TimeBudget);
         Assert.True(envelope.NeedsTools);
     }
 
@@ -129,7 +135,7 @@ public sealed class WorkflowTaskClassifierTests
             CancellationToken.None);
 
         Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
-        Assert.Equal(TimeSpan.FromSeconds(60), envelope.TimeBudget);
+        Assert.Equal(TimeSpan.FromSeconds(600), envelope.TimeBudget);
         Assert.True(envelope.NeedsTools);
     }
 

@@ -108,6 +108,12 @@ public static class DeterministicUtilityEngine
 
     private static DeterministicUtilityResult? TryParseStrict(string message)
     {
+        // Note: time-of-day queries intentionally fall through to the LLM
+        // + `time_now` MCP tool. A deterministic "system clock" fast-path
+        // would bypass the tool and break smoke suites that validate
+        // routing (e.g. smoke_time_now asserts `time_now` gets called).
+        // Date is safe because the system prompt already carries today's
+        // date in its preamble, so the LLM answers deterministically too.
         return TryParseDateQuestion(message)
             ?? ClassicReasoningEngine.TryMatch(message)
             ?? TryParsePercent(message)
@@ -363,6 +369,49 @@ public static class DeterministicUtilityEngine
         {
             Category = "date",
             Answer = $"Today is **{now:dddd, MMMM d, yyyy}** ({now:yyyy-MM-dd})."
+        };
+    }
+
+    // "What time is it?" / "Current time" / "What's the time right now?" —
+    // mirrors the legacy UtilityRouter.LocalTimeNowPattern so the pipeline
+    // short-circuits before the LLM picks a wrong tool (e.g. `web_search`).
+    // Explicitly scoped to "here/now" — queries like "time in Paris" fall
+    // through to the LLM + timezone tool. Anchored at the start but lets
+    // trailing compounds pass ("... tell me in one sentence") since those
+    // are clarifications, not different questions.
+    private static readonly Regex TimeQuestionPattern = new(
+        @"^\s*(?:hey[,!\s]+|hi[,!\s]+|please[,!\s]+)*" +
+        @"(?:" +
+            @"what(?:'s|\s+is)\s+(?:the\s+)?(?:current\s+)?(?:local\s+)?time(?:\s+right\s+now|\s+now)?|" +
+            @"what\s+time\s+is\s+it(?:\s+right\s+now|\s+now)?|" +
+            @"tell\s+me\s+(?:the\s+)?(?:current\s+)?time|" +
+            @"(?:the\s+)?current\s+(?:local\s+)?time" +
+        @")\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static DeterministicUtilityResult? TryParseTimeQuestion(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return null;
+
+        if (!TimeQuestionPattern.IsMatch(message))
+            return null;
+
+        // Reject location-scoped time queries — those need a timezone tool
+        // (e.g. "what time is it in Paris", "time at GMT"). Only the pure
+        // "what time is it locally" intent is safe to answer from the
+        // system clock. We strip trailing punctuation before checking so
+        // "... in Tokyo?" is caught the same as "... in Tokyo".
+        var lower = message.ToLowerInvariant();
+        var stripped = Regex.Replace(lower, @"[?.!\s]+$", "");
+        if (Regex.IsMatch(stripped, @"\b(?:in|at|for)\s+(?:the\s+)?[a-z][\w\s]{0,40}$") &&
+            !Regex.IsMatch(stripped, @"\b(?:in|at|for)\s+(?:one\s+sentence|short|brief|plain\s+english|detail|detail(s)?)\s*$"))
+            return null;
+
+        var now = DateTimeOffset.Now;
+        return new DeterministicUtilityResult
+        {
+            Category = "time",
+            Answer = $"It's **{now:h:mm tt}** local ({now:dddd, MMMM d, yyyy})."
         };
     }
 
