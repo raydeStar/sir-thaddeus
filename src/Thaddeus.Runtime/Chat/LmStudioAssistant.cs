@@ -257,8 +257,23 @@ public sealed class LmStudioAssistant : IAssistant
         // in the pipeline handles it after FeatureExtractorStep classifies
         // the turn. Keeping both would double-inject the suffix.
 
+        var dateBlock = BuildDateBlock();
         var locBlock = BuildLocationBlock();
-        return string.IsNullOrEmpty(locBlock) ? text : locBlock + "\n\n" + text;
+        var preamble = string.Join("\n\n",
+            new[] { dateBlock, locBlock }.Where(s => !string.IsNullOrEmpty(s)));
+        return string.IsNullOrEmpty(preamble) ? text : preamble + "\n\n" + text;
+    }
+
+    // Without this block the model freely hallucinates a year — local-LLM
+    // training cutoffs are months to years stale, and "what is today's date"
+    // is routine enough that we can't rely on tool calls to rescue it.
+    private static string BuildDateBlock()
+    {
+        var today = DateTimeOffset.Now;
+        return $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +
+               "Use this when the user asks about the current date, day of week, " +
+               "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
+               "or rely on your training cutoff.";
     }
 
     /// <summary>

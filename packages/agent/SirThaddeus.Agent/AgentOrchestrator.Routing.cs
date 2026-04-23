@@ -433,7 +433,26 @@ public sealed partial class AgentOrchestrator
             "i couldn't find",
             "i could not find",
             "i wasn't able to",
-            "i was not able to"
+            "i was not able to",
+            // Observed in real refusal drafts after web_search returned
+            // results but the model couldn't pull the specific datum the
+            // user asked for (e.g. weather returned timestamps instead of
+            // temperature). Kept in sync with the markers above.
+            "i couldn't retrieve",
+            "i could not retrieve",
+            "couldn't retrieve",
+            "could not retrieve",
+            "failed to retrieve",
+            "unable to retrieve",
+            "only provided",
+            "didn't return",
+            "did not return",
+            "no direct answer",
+            "no clear answer",
+            "try searching",
+            "i'll try to find",
+            "ill try to find",
+            "check back in a moment"
         ];
 
         foreach (var marker in markers)

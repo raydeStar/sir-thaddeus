@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using Serilog;
@@ -415,11 +416,62 @@ public static class ContentExtractor
         {
             using var resp = await http.GetAsync(uri, ct);
             resp.EnsureSuccessStatusCode();
-            var body = await resp.Content.ReadAsStringAsync(ct);
             var resolved = resp.RequestMessage?.RequestUri ?? uri;
+
+            // Prefer the server-declared charset; fall back to UTF-8. Using
+            // ReadAsStringAsync unconditionally here was decoding UTF-8 pages
+            // as ISO-8859-1 (the RFC 2616 text/* default) whenever the HTTP
+            // header omitted the charset — corrupting common symbols like °
+            // (0xC2 0xB0) into U+FFFD in the assistant's final reply.
+            var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+            var encoding = ResolveResponseEncoding(resp, bytes);
+            var body = encoding.GetString(bytes);
             return (resolved, body);
         }, ct);
     }
+
+    private static Encoding ResolveResponseEncoding(HttpResponseMessage resp, byte[] body)
+    {
+        // 1) Explicit charset in Content-Type wins.
+        var headerCharset = resp.Content.Headers.ContentType?.CharSet;
+        if (TryGetEncoding(headerCharset, out var headerEncoding))
+            return headerEncoding;
+
+        // 2) Sniff the <meta charset="..."> declaration from the first 2 KiB.
+        //    (HTML5 parsers also cap the sniff window — we match that shape.)
+        var sniffLen = Math.Min(body.Length, 2048);
+        var snippet = Encoding.ASCII.GetString(body, 0, sniffLen);
+        var metaMatch = MetaCharsetRegex.Match(snippet);
+        if (metaMatch.Success && TryGetEncoding(metaMatch.Groups["c"].Value, out var metaEncoding))
+            return metaEncoding;
+
+        // 3) Default to UTF-8. Modern web is ~99% UTF-8; ISO-8859-1 would be
+        //    lossy for the subset we actually read.
+        return Encoding.UTF8;
+    }
+
+    private static bool TryGetEncoding(string? name, out Encoding encoding)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            encoding = Encoding.UTF8;
+            return false;
+        }
+        try
+        {
+            encoding = Encoding.GetEncoding(name.Trim().Trim('"', '\''));
+            return true;
+        }
+        catch
+        {
+            encoding = Encoding.UTF8;
+            return false;
+        }
+    }
+
+    private static readonly Regex MetaCharsetRegex = new(
+        @"<meta[^>]*charset\s*=\s*[""']?(?<c>[\w\-]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static bool IsGoogleNewsWrapper(Uri uri)
     {

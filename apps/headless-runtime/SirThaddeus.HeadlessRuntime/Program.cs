@@ -444,8 +444,18 @@ static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
     var timezone = effectiveLocation.GetResolvedTimezone();
     var preferredUnits = currentSettings.Weather.GetNormalizedUnitSystem();
 
+    // Date block runs unconditionally — local-LLM training cutoffs are
+    // months to years stale, and "today's date" questions need to work
+    // even when the user hasn't set a location.
+    var today = DateTimeOffset.Now;
+    var dateBlock =
+        $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +
+        "Use this when the user asks about the current date, day of week, " +
+        "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
+        "or rely on your training cutoff.";
+
     if (string.IsNullOrWhiteSpace(locationLabel))
-        return currentSettings.Llm.SystemPrompt;
+        return dateBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
 
     var tzNote = string.IsNullOrWhiteSpace(timezone) ? "" : $" Timezone: {timezone.Trim()}.";
     var unitsNote = string.IsNullOrWhiteSpace(preferredUnits) ? "" : $" Preferred units: {preferredUnits}.";
@@ -456,7 +466,7 @@ static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
         "and similar location-scoped tools verbatim. Do not announce that you know " +
         "their location — just use it naturally.";
 
-    return locationBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
+    return dateBlock + "\n\n" + locationBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
 }
 
 var orchestrator = BuildOrchestrator(settings);

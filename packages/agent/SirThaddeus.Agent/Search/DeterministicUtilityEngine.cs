@@ -106,10 +106,40 @@ public static class DeterministicUtilityEngine
 
     private static DeterministicUtilityResult? TryParseStrict(string message)
     {
-        return ClassicReasoningEngine.TryMatch(message)
+        return TryParseDateQuestion(message)
+            ?? ClassicReasoningEngine.TryMatch(message)
             ?? TryParsePercent(message)
             ?? TryParseArithmetic(message)
             ?? TryParseConversion(message, StrictConversionPattern);
+    }
+
+    // "What's today's date?" / "What day is it?" etc. Local LLMs habitually
+    // hallucinate a year from their training cutoff; every time we can short-
+    // circuit to DateTimeOffset.Now we avoid the wrong-year bug. Kept tight —
+    // compound prompts ("... and tell me the weather") fall through to the LLM.
+    private static readonly Regex DateQuestionPattern = new(
+        @"^\s*(?:hey[,!\s]+|hi[,!\s]+|please[,!\s]+)*" +
+        @"(?:what(?:'s|\s+is)|tell me)\s+" +
+        @"(?:today'?s\s+date|the\s+date(?:\s+today)?|the\s+(?:current|today's?)\s+date|today'?s\s+day|" +
+        @"the\s+day(?:\s+of\s+the\s+week)?(?:\s+today)?|the\s+current\s+day|day\s+is\s+it|" +
+        @"day\s+of\s+the\s+week(?:\s+is\s+it)?)\s*\??\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex WhatDayPattern = new(
+        @"^\s*(?:hey[,!\s]+|hi[,!\s]+|please[,!\s]+)*what\s+day\s+(?:is\s+it|of\s+the\s+week\s+is\s+it)\s*\??\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static DeterministicUtilityResult? TryParseDateQuestion(string message)
+    {
+        if (!DateQuestionPattern.IsMatch(message) && !WhatDayPattern.IsMatch(message))
+            return null;
+
+        var now = DateTimeOffset.Now;
+        return new DeterministicUtilityResult
+        {
+            Category = "date",
+            Answer = $"Today is **{now:dddd, MMMM d, yyyy}** ({now:yyyy-MM-dd})."
+        };
     }
 
     private static DeterministicUtilityResult? TryParseConversational(string message)
