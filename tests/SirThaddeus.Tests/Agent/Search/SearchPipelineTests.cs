@@ -461,6 +461,38 @@ public class DeterministicUtilityEngineTests
         Assert.Contains(expectedFragment, result!.Result.Answer, StringComparison.Ordinal);
     }
 
+    // Time fast-path — previously orphaned (method existed but wasn't
+    // called). "What time is it right now? Tell me in one sentence."
+    // used to fall through to the LLM which picked web_search instead.
+    [Theory]
+    [InlineData("What time is it")]
+    [InlineData("What time is it right now? Tell me in one sentence.")]
+    [InlineData("current time")]
+    [InlineData("what's the current time")]
+    [InlineData("tell me the time")]
+    public void TimeQuestions_Hit_Deterministic_Fast_Path(string input)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        Assert.NotNull(result);
+        Assert.Equal("time", result!.Result.Category);
+        Assert.Matches(@"\*\*\d{1,2}:\d{2}\s?(AM|PM)\*\*", result.Result.Answer);
+    }
+
+    [Theory]
+    // Location-scoped time queries must still fall through to the LLM +
+    // a timezone tool. We only answer "here and now" deterministically.
+    [InlineData("what time is it in Paris")]
+    [InlineData("what time is it in Tokyo?")]
+    [InlineData("current time in London")]
+    public void TimeQuestions_Skip_When_Location_Scoped(string input)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        if (result is not null)
+        {
+            Assert.NotEqual("time", result.Result.Category);
+        }
+    }
+
     [Theory]
     [InlineData("ethanol's boiling point")]                      // no arithmetic
     [InlineData("tell me about the history of pi")]              // "pi" in prose
@@ -1431,6 +1463,56 @@ public class SearchOrchestratorModeHintTests
         Assert.Contains(mcp.Calls, c => c.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
                                         c.Tool.Equals("WebSearch", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(mcp.Calls, c => c.Tool.Contains("places", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FactRetailerAvailabilityLookup_ReturnsSingleCurrentAnswer()
+    {
+        var llm = new FakeLlmClient((_, _) =>
+            throw new InvalidOperationException("Retailer availability fast path should bypass LLM query building."));
+
+        var searchResult =
+            "1. PlayStation 5 Console (Slim) - Amazon.com\n" +
+            "   $499.99. In Stock. Ships from Amazon.\n\n" +
+            "2. PS5 price hike speculation - IGN\n" +
+            "   Analysts discuss possible pricing changes.\n\n" +
+            "<!-- SOURCES_JSON -->\n" +
+            "[" +
+            "{\"url\":\"https://www.amazon.com/ps5-console\",\"title\":\"PlayStation 5 Console (Slim) - Amazon.com\",\"domain\":\"amazon.com\",\"excerpt\":\"$499.99. In Stock. Ships from Amazon.\"}," +
+            "{\"url\":\"https://www.ign.com/articles/ps5-price-hike\",\"title\":\"PS5 price hike speculation\",\"domain\":\"ign.com\",\"excerpt\":\"Analysts discuss possible pricing changes.\"}" +
+            "]";
+
+        var mcp = new FakeMcpClient((tool, args) => tool switch
+        {
+            "web_search" or "WebSearch" when args.Contains("site:amazon.com ps5", StringComparison.OrdinalIgnoreCase) => searchResult,
+            "browser_navigate" or "BrowserNavigate" => "PlayStation 5 Console (Slim)\n$499.99\nIn Stock\nShips from Amazon",
+            _ => string.Empty
+        });
+
+        var orchestrator = new SearchOrchestrator(llm, mcp, new TestAuditLogger(), "Test assistant.");
+
+        var result = await orchestrator.ExecuteAsync(
+            "hello! can you check amazon and see if theres a ps5 in stock and what price it is please? thank you!",
+            memoryPackText: "",
+            history: [ChatMessage.System("Test assistant.")],
+            toolCallsMade: [],
+            modeHint: LookupModeHint.Fact,
+            ct: CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("PS5 on Amazon", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Price: $499.99.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Availability: In stock.", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://www.amazon.com/ps5-console", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IGN", result.Text, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("site:amazon.com ps5", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("\"recency\":\"day\"", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(mcp.Calls, call =>
+            call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
+            call.Args.Contains("amazon.com/ps5-console", StringComparison.OrdinalIgnoreCase));
     }
 }
 
