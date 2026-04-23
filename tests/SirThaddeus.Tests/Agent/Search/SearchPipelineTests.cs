@@ -1500,7 +1500,7 @@ public class SearchOrchestratorModeHintTests
             ct: CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Contains("PS5 on Amazon", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PlayStation 5", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Price: $499.99.", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Availability: In stock.", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("https://www.amazon.com/ps5-console", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -1509,7 +1509,7 @@ public class SearchOrchestratorModeHintTests
         Assert.Contains(mcp.Calls, call =>
             call.Tool.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
             call.Args.Contains("site:amazon.com ps5", StringComparison.OrdinalIgnoreCase) &&
-            call.Args.Contains("\"recency\":\"day\"", StringComparison.OrdinalIgnoreCase));
+            call.Args.Contains("\"recency\":\"any\"", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(mcp.Calls, call =>
             call.Tool.Equals("browser_navigate", StringComparison.OrdinalIgnoreCase) &&
             call.Args.Contains("amazon.com/ps5-console", StringComparison.OrdinalIgnoreCase));

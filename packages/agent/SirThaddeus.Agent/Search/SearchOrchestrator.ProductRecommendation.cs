@@ -75,44 +75,89 @@ public sealed partial class SearchOrchestrator
         if (request is null)
             return null;
 
-        var toolResult = await CallWebSearchAsync(
+        // Try a site-restricted search first (recency=any: retailer listings
+        // rarely surface in "day" buckets and many engines de-prioritize
+        // amazon/walmart in fresh-news indexes).
+        var primarySource = await TryResolveRetailerListingSourceAsync(
+            request,
             $"site:{request.RetailerDomain} {request.ProductQuery}",
-            "day",
             toolCallsMade,
-            ct,
-            originalUserMessage: userMessage,
-            maxResults: 3,
-            categories: "general");
+            userMessage,
+            ct);
 
-        if (string.IsNullOrWhiteSpace(toolResult) ||
-            LooksLikeNoResultsPayload(toolResult) ||
-            WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null)
+        // Fallback: broad query, then filter results to the retailer domain.
+        if (primarySource is null)
         {
-            return null;
+            primarySource = await TryResolveRetailerListingSourceAsync(
+                request,
+                $"{request.ProductQuery} {request.RetailerLabel}",
+                toolCallsMade,
+                userMessage,
+                ct);
         }
 
-        var filteredSources = FilterRetailerAvailabilitySources(
-            ResolveSourceUrls(ParseSourcesFromToolResult(toolResult)),
-            request);
-        if (filteredSources.Count == 0)
-            return null;
+        string? price = null;
+        string? availability = null;
+        string? listingUrl = primarySource?.Url;
+        string? listingTitle = primarySource?.Title;
 
-        var primarySource = filteredSources[0];
-        var fetchedContent = await FetchArticleContentAsync([primarySource], toolCallsMade, ct);
-        var evidence = string.Join(
-            "\n",
-            new[]
+        if (primarySource is not null)
+        {
+            var fetchedContent = await FetchArticleContentAsync([primarySource], toolCallsMade, ct);
+            var evidence = string.Join(
+                "\n",
+                new[]
+                {
+                    primarySource.Title,
+                    primarySource.Snippet,
+                    fetchedContent ?? string.Empty
+                }.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+            price = TryMatch(ProductPriceRegex, evidence, "$");
+            availability = TryExtractAvailability(evidence);
+
+            Session.RecordSearchResults(
+                SearchMode.WebFactFind,
+                $"site:{request.RetailerDomain} {request.ProductQuery}",
+                "any",
+                new List<SourceItem> { primarySource },
+                DateTimeOffset.UtcNow);
+        }
+
+        // If we have neither a listing nor any extracted data, return a
+        // deterministic honest answer with a direct retailer search link.
+        // Falling through to the generic fact-find path produces stale-news
+        // rambles for retail availability questions, which is the bug we are
+        // fixing.
+        if (primarySource is null &&
+            string.IsNullOrWhiteSpace(price) &&
+            string.IsNullOrWhiteSpace(availability))
+        {
+            var directSearchUrl = BuildRetailerSearchUrl(request);
+
+            _audit.Append(new AuditEvent
             {
-                primarySource.Title,
-                primarySource.Snippet,
-                fetchedContent ?? string.Empty
-            }.Where(part => !string.IsNullOrWhiteSpace(part)));
+                Actor = "search",
+                Action = "RETAILER_AVAILABILITY_DEGRADED",
+                Result = request.RetailerDomain,
+                Details = new Dictionary<string, object>
+                {
+                    ["product_query"] = request.ProductQuery,
+                    ["reason"] = "no_listing_resolved"
+                }
+            });
 
-        var price = TryMatch(ProductPriceRegex, evidence, "$");
-        var availability = TryExtractAvailability(evidence);
-
-        if (string.IsNullOrWhiteSpace(price) && string.IsNullOrWhiteSpace(availability))
-            return null;
+            return new AgentResponse
+            {
+                Text =
+                    $"I couldn't pull a live {request.RetailerLabel} listing for **{request.ProductQuery}** " +
+                    $"from search just now ({request.RetailerLabel} blocks most indexers, so live stock and price aren't reliably searchable). " +
+                    $"Check the listing directly: {directSearchUrl}",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
 
         var detailParts = new List<string>();
         if (request.WantsPrice)
@@ -137,7 +182,8 @@ public sealed partial class SearchOrchestrator
                 detailParts.Add($"Availability: {availability}.");
         }
 
-        detailParts.Add($"Link: {primarySource.Url}");
+        var linkUrl = listingUrl ?? BuildRetailerSearchUrl(request);
+        detailParts.Add($"Link: {linkUrl}");
 
         _audit.Append(new AuditEvent
         {
@@ -149,23 +195,60 @@ public sealed partial class SearchOrchestrator
                 ["product_query"] = request.ProductQuery,
                 ["price_found"] = !string.IsNullOrWhiteSpace(price),
                 ["availability_found"] = !string.IsNullOrWhiteSpace(availability),
-                ["source_url"] = primarySource.Url
+                ["source_url"] = linkUrl
             }
         });
 
-        Session.RecordSearchResults(
-            SearchMode.WebFactFind,
-            $"site:{request.RetailerDomain} {request.ProductQuery}",
-            "day",
-            filteredSources.Take(3).ToList(),
-            DateTimeOffset.UtcNow);
+        var titlePart = !string.IsNullOrWhiteSpace(listingTitle)
+            ? listingTitle!
+            : $"{request.ProductQuery} on {request.RetailerLabel}";
 
         return new AgentResponse
         {
-            Text = $"{request.ProductQuery} on {request.RetailerLabel}: {string.Join(" ", detailParts)}",
+            Text = $"{titlePart}: {string.Join(" ", detailParts)}",
             Success = true,
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = 0
+        };
+    }
+
+    private async Task<SourceItem?> TryResolveRetailerListingSourceAsync(
+        RetailerAvailabilityRequest request,
+        string query,
+        List<ToolCallRecord> toolCallsMade,
+        string originalUserMessage,
+        CancellationToken ct)
+    {
+        var toolResult = await CallWebSearchAsync(
+            query,
+            "any",
+            toolCallsMade,
+            ct,
+            originalUserMessage: originalUserMessage,
+            maxResults: 5,
+            categories: "general");
+
+        if (string.IsNullOrWhiteSpace(toolResult) ||
+            WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null)
+        {
+            return null;
+        }
+
+        var sources = ResolveSourceUrls(ParseSourcesFromToolResult(toolResult));
+        var filtered = FilterRetailerAvailabilitySources(sources, request);
+        return filtered.Count == 0 ? null : filtered[0];
+    }
+
+    private static string BuildRetailerSearchUrl(RetailerAvailabilityRequest request)
+    {
+        var encoded = Uri.EscapeDataString(request.ProductQuery);
+        return request.RetailerDomain switch
+        {
+            "amazon.com" => $"https://www.amazon.com/s?k={encoded}",
+            "walmart.com" => $"https://www.walmart.com/search?q={encoded}",
+            "ebay.com" => $"https://www.ebay.com/sch/i.html?_nkw={encoded}",
+            "etsy.com" => $"https://www.etsy.com/search?q={encoded}",
+            _ => $"https://www.{request.RetailerDomain}/"
         };
     }
 
@@ -347,7 +430,9 @@ public sealed partial class SearchOrchestrator
             "can", "could", "would", "check", "see", "tell", "me",
             "find", "out", "look", "up", "if", "there", "theres",
             "what", "whats", "price", "cost", "stock", "availability",
-            "available", "current", "currently", "online", "it"
+            "available", "current", "currently", "online", "it",
+            "get", "getting", "got", "for", "and", "is", "in",
+            "my", "your", "some", "any"
         };
 
         extracted = string.Join(
