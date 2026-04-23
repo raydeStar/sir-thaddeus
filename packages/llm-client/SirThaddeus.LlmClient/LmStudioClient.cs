@@ -90,7 +90,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         IReadOnlyList<ToolDefinition>? tools = null,
         CancellationToken cancellationToken = default)
     {
-        return await ChatCoreAsync(messages, tools, maxTokensOverride: null, cancellationToken);
+        return await ChatCoreAsync(messages, tools, maxTokensOverride: null, forcedToolName: null, cancellationToken);
     }
 
     /// <summary>
@@ -104,13 +104,30 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         int maxTokensOverride,
         CancellationToken cancellationToken = default)
     {
-        return await ChatCoreAsync(messages, tools, maxTokensOverride, cancellationToken);
+        return await ChatCoreAsync(messages, tools, maxTokensOverride, forcedToolName: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Chat with a forced <c>tool_choice</c> — the model's next action must
+    /// be a call to <paramref name="forcedToolName"/>. Used by freshness /
+    /// existence routing so small models can't hallucinate their way past a
+    /// structurally-required lookup. Passing <c>null</c> is equivalent to
+    /// the tool-less overload.
+    /// </summary>
+    public async Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        string? forcedToolName,
+        CancellationToken cancellationToken = default)
+    {
+        return await ChatCoreAsync(messages, tools, maxTokensOverride: null, forcedToolName, cancellationToken);
     }
 
     private async Task<LlmResponse> ChatCoreAsync(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools,
         int? maxTokensOverride,
+        string? forcedToolName,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(messages);
@@ -124,7 +141,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             : NormalizeMessagesForPlainChat(messages);
 
         // ── Attempt 1: full request with stop + repetition_penalty ───
-        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, includeExtras: true);
+        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: true);
 
         var response = await _http.PostAsJsonAsync(
             "/v1/chat/completions", body, _json, cancellationToken);
@@ -139,7 +156,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
-            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, includeExtras: false);
+            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: false);
 
             response = await _http.PostAsJsonAsync(
                 "/v1/chat/completions", bare, _json, cancellationToken);
@@ -274,6 +291,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools,
         int? maxTokensOverride,
+        string? forcedToolName,
         bool includeExtras)
     {
         var options = GetOptionsSnapshot();
@@ -301,7 +319,20 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         if (tools is { Count: > 0 })
         {
             body["tools"] = tools;
-            body["tool_choice"] = "auto";
+
+            // LM Studio / llama.cpp only support the string-form tool_choice
+            // values (none / auto / required). The per-function object form
+            // that OpenAI ships is rejected with HTTP 400 ("Invalid
+            // tool_choice type: 'object'"). Use "required" when a caller
+            // wants to force a tool and rely on:
+            //   - a narrow tool list (post-footman),
+            //   - a system-prompt hint that named the intended tool,
+            // to steer the model to the correct specific tool. This is
+            // the same pattern the legacy orchestrator used.
+            var forced = !string.IsNullOrWhiteSpace(forcedToolName)
+                && tools.Any(t => string.Equals(t.Function?.Name, forcedToolName, StringComparison.Ordinal));
+
+            body["tool_choice"] = forced ? "required" : "auto";
         }
         // When tools is null/empty, intentionally omit both fields.
         // Sending tools:[] or tool_choice:"none" can trigger LM Studio's

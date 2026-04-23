@@ -530,6 +530,13 @@ public sealed class LmStudioAssistant : IAssistant
             // when the detector fires; no-op otherwise.
             new GuardrailsStep(GuardrailsPipeline),
 
+            // Freshness router (Layer A of the confidence system): for
+            // clearly fresh / existence / recency / pricing questions,
+            // force tool_choice=web_search on the first tool-loop round
+            // so the model can't answer from stale training memory. The
+            // soft hint above motivates; this enforces.
+            new FreshnessRouterStep(),
+
             toolLoop,
             new PostProcessStep(sanitize, "PostProcess:Sanitize"),
 
@@ -546,7 +553,12 @@ public sealed class LmStudioAssistant : IAssistant
                 buildRequest: ctx =>
                 {
                     var draft = ctx.AssistantDraft ?? string.Empty;
-                    if (!RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft))
+                    var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
+                    // Layer B: hedge detection catches "I believe ... as of
+                    // my training data" drafts on factual prompts — same
+                    // fallback path as refusals, same grounded repair.
+                    var hedged = HedgeSignalDetector.ShouldVerify(draft, ctx.UserText);
+                    if (!refusal && !hedged)
                         return null;
                     return new SearchFallbackRequest
                     {

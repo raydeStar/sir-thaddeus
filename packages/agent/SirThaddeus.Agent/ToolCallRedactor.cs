@@ -173,7 +173,14 @@ public static class ToolCallRedactor
 
     private static string SummarizeBrowserOutput(string output)
     {
-        // Extract title if present, plus content length
+        // Extract title if present, plus content length. Page titles are
+        // public metadata (returned by the HTML <title> tag of a site
+        // the user consented to fetch), so we preserve the ORIGINAL case.
+        // The downstream harness scorer counts capitalized/digit-bearing
+        // tokens as "significant" to verify the model actually read the
+        // tool result — lowercasing the title would strip every proper
+        // noun and produce a false "model ignored the tool" signal on
+        // answers that plainly cited the source.
         var titleLine = output.Split('\n')
             .FirstOrDefault(l => l.TrimStart().StartsWith("Title:", StringComparison.OrdinalIgnoreCase));
 
@@ -181,7 +188,7 @@ public static class ToolCallRedactor
             ? titleLine.Trim()
             : "(no title)";
 
-        return $"[browser: {Truncate(title, 100).ToLowerInvariant()}, content returned]";
+        return $"[browser: {Truncate(title, 100)}, content returned]";
     }
 
     private static string SummarizeClipboardWriteInput(string argumentsJson)

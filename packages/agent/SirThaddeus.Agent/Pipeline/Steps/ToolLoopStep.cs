@@ -87,9 +87,29 @@ public sealed class ToolLoopStep : ITurnStep
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var response = await _llm
-                .ChatAsync(messages, context.ToolDefs.Count > 0 ? context.ToolDefs : null, cancellationToken)
-                .ConfigureAwait(false);
+            // Force the user-requested tool only on the FIRST round. After
+            // the tool fires and returns results, subsequent rounds must be
+            // free to synthesize prose or chain follow-up tools — otherwise
+            // we'd loop forever trying to call web_search over and over.
+            var forcedTool = round == 0 ? context.ForcedTool : null;
+            var tools = context.ToolDefs.Count > 0 ? context.ToolDefs : null;
+
+            LlmResponse response;
+            if (!string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
+            {
+                // Router-directed call: pass tool_choice through so the
+                // model cannot answer from stale training memory before the
+                // lookup runs.
+                response = await _llm
+                    .ChatAsync(messages, tools, forcedTool, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                response = await _llm
+                    .ChatAsync(messages, tools, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             if (response.ToolCalls is null || response.ToolCalls.Count == 0)
             {

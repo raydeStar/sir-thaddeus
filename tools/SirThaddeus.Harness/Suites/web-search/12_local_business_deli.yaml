@@ -2,7 +2,13 @@ id: web_local_business_deli
 name: Web Search - Local Business Recommendation (Deli in Hillsboro, OR)
 user_message: "Can you find me a good deli in Hillsboro, OR?"
 allowed_tools:
+  # "Find me a good deli in Hillsboro, OR" is a CATEGORY query, not a
+  # named-place lookup. places_discover (OSM-backed, free) is the
+  # right tool for this shape; places_lookup needs a Google Places API
+  # key and a specific business name. Allow both so either semantic
+  # pick passes the hard assertion.
   - memory_retrieve
+  - places_discover
   - places_lookup
   - web_search
   - browser_navigate

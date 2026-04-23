@@ -359,6 +359,14 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // half-loop.
         new GuardrailsStep(guardrails),
 
+        // Freshness router (Layer A of the confidence system): when the
+        // user asks a structurally fresh question (existence, current-
+        // state, recent release, live price), force tool_choice=web_search
+        // on the FIRST tool-loop round. Complements the earlier hint —
+        // the hint motivates, this enforces. Pattern-gated so casual
+        // chat and opinion prompts pass through untouched.
+        new FreshnessRouterStep(),
+
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),
 
@@ -377,7 +385,13 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             buildRequest: ctx =>
             {
                 var draft = ctx.AssistantDraft ?? string.Empty;
-                if (!RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft))
+                var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
+                // Layer B: a draft that hedges its own confidence on a
+                // factual question (e.g. "I believe ... as of my training
+                // data") is indistinguishable from stale-memory guessing.
+                // Trigger the same search-fallback so we ground the answer.
+                var hedged = HedgeSignalDetector.ShouldVerify(draft, ctx.UserText);
+                if (!refusal && !hedged)
                     return null;
 
                 return new SearchFallbackRequest
