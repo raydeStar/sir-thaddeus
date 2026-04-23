@@ -142,7 +142,7 @@ public sealed record SettingsDocument(
             BaseUrl: "http://127.0.0.1:1234/v1",
             ApiKey: null,
             MaxTokens: 4096,
-            ContextWindowTokens: 8192,
+            ContextWindowTokens: 16384,
             Temperature: 0.7,
             GatekeeperBaseUrl: null,
             GatekeeperModelId: "qwen3.5-2b",

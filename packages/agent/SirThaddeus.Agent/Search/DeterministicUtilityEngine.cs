@@ -1,6 +1,8 @@
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using NCalc;
+using NCalc.Handlers;
 
 namespace SirThaddeus.Agent.Search;
 
@@ -110,7 +112,229 @@ public static class DeterministicUtilityEngine
             ?? ClassicReasoningEngine.TryMatch(message)
             ?? TryParsePercent(message)
             ?? TryParseArithmetic(message)
+            ?? TryParseAdvancedMath(message)
             ?? TryParseConversion(message, StrictConversionPattern);
+    }
+
+    // Broader expressions that the simple arithmetic path can't handle —
+    // powers (^), roots (sqrt), trig (sin/cos/tan, with "degrees" wrapper),
+    // logs (log, ln), constants (pi, e), factorial (!), etc. Only fires
+    // when the message contains at least one advanced token so routine
+    // "2+2" still uses the faster DataTable path. Delegates evaluation to
+    // NCalc so we don't reimplement a math parser.
+    private static readonly Regex AdvancedMathDetector = new(
+        @"\b(sqrt|cbrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|log|log10|ln|exp|abs|floor|ceil|ceiling|round|min|max|pow|factorial|pi|tau|squared|cubed|square\s+root|cube\s+root)\b|\^|!",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex AdvancedEntryPattern = new(
+        @"^\s*(?:hey[,!\s]+|hi[,!\s]+|please[,!\s]+|)*" +
+        @"(?:what(?:'s|\s+is)\s+|calculate\s+|compute\s+|solve\s+|evaluate\s+|eval\s+)?" +
+        @"(?<expr>.+?)" +
+        @"\s*\??\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static DeterministicUtilityResult? TryParseAdvancedMath(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+        if (!AdvancedMathDetector.IsMatch(message))
+            return null;
+
+        var entry = AdvancedEntryPattern.Match(message);
+        if (!entry.Success)
+            return null;
+
+        // Strip sentence-terminators but NOT trailing '!', since '!' is the
+        // factorial operator (e.g. "what is 5!?" should keep the '!' and
+        // drop only the '?').
+        var raw = entry.Groups["expr"].Value.Trim().TrimEnd('?', '.', ' ');
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var normalized = NormalizeAdvancedExpression(raw);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        try
+        {
+            var expr = new Expression(normalized, ExpressionOptions.IgnoreCaseAtBuiltInFunctions);
+            expr.Parameters["Pi"] = Math.PI;
+            expr.Parameters["Tau"] = Math.PI * 2;
+            expr.Parameters["E"] = Math.E;
+            expr.EvaluateFunction += EvaluateExtraFunctions;
+
+            var value = expr.Evaluate();
+            if (expr.Error is not null)
+                return null;
+
+            var formatted = FormatNumericAnswer(value);
+            if (formatted is null)
+                return null;
+
+            return new DeterministicUtilityResult
+            {
+                Category = "calculator",
+                Answer = $"{raw.TrimEnd()} = **{formatted}**"
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // NCalc treats `^` as XOR, speaks "Log" as Log(value, base), and doesn't
+    // know about "squared" / "cubed" / "degrees" / factorial out of the box.
+    // Pre-translate these so the resulting expression evaluates the way a
+    // user would expect from scientific-calculator shorthand.
+    private static string NormalizeAdvancedExpression(string raw)
+    {
+        var expression = raw;
+
+        // "X squared" / "X cubed"
+        expression = Regex.Replace(expression,
+            @"\b(?<base>\d+(?:\.\d+)?|\([^()]+\))\s+squared\b",
+            "Pow(${base}, 2)",
+            RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression,
+            @"\b(?<base>\d+(?:\.\d+)?|\([^()]+\))\s+cubed\b",
+            "Pow(${base}, 3)",
+            RegexOptions.IgnoreCase);
+
+        // "square root of X" → Sqrt(X)
+        expression = Regex.Replace(expression,
+            @"\bsquare\s+root\s+of\s+(?<x>\d+(?:\.\d+)?|\([^()]+\))",
+            "Sqrt(${x})",
+            RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression,
+            @"\bcube\s+root\s+of\s+(?<x>\d+(?:\.\d+)?|\([^()]+\))",
+            "Cbrt(${x})",
+            RegexOptions.IgnoreCase);
+
+        // Constants: "pi"/"tau"/"e" as standalone tokens → Pi/Tau/E parameters
+        expression = Regex.Replace(expression, @"\bpi\b", "Pi", RegexOptions.IgnoreCase);
+        expression = Regex.Replace(expression, @"\btau\b", "Tau", RegexOptions.IgnoreCase);
+        // Only rewrite "e" when surrounded by operators/parens/EOL, not
+        // when it's the start of a longer word. The trailing class
+        // includes ')' so 'ln(e)' correctly rewrites to 'ln(E)'.
+        expression = Regex.Replace(
+            expression,
+            @"(?<![A-Za-z])e(?=\s*[+\-*/%^),]|\s*$)",
+            "E");
+
+        // NCalc's `Log(x)` requires two args (value, base), so rewrite:
+        //   ln(x)  → Log(x, E)   (natural log)
+        //   log(x) → Log10(x)    (single-arg "log" is base-10 by convention)
+        // `log10(...)` and `log(x, base)` are already NCalc-native.
+        expression = Regex.Replace(
+            expression,
+            @"\bln\s*\(\s*(?<arg>[^()]+(?:\([^()]*\)[^()]*)*)\)",
+            "Log(${arg}, E)",
+            RegexOptions.IgnoreCase);
+        expression = Regex.Replace(
+            expression,
+            @"(?<!\d|log)\blog\s*\(\s*(?<arg>[^(),]+?)\s*\)",
+            "Log10(${arg})",
+            RegexOptions.IgnoreCase);
+
+        // Degree wrappers inside trig: sin(30 deg) / sin(30°) / sin(30 degrees)
+        expression = Regex.Replace(expression,
+            @"(?<fn>sin|cos|tan)\s*\(\s*(?<val>-?\d+(?:\.\d+)?)\s*(?:°|deg(?:ree(?:s)?)?)\s*\)",
+            m => $"{m.Groups["fn"].Value}(({m.Groups["val"].Value}) * Pi / 180)",
+            RegexOptions.IgnoreCase);
+
+        // Factorial: 5! → Factorial(5)
+        expression = Regex.Replace(expression,
+            @"(?<val>\d+(?:\.\d+)?|\([^()]+\))\s*!",
+            "Factorial(${val})");
+
+        // Power operator: a^b → Pow(a,b) — keep this AFTER factorial so the
+        // negated-lookbehind doesn't trip. NCalc binds ^ as XOR, so
+        // substitution is required for scientific-calculator intuition.
+        expression = RewritePowerOperator(expression);
+
+        // Clean whitespace
+        expression = Regex.Replace(expression, @"\s+", " ").Trim();
+        return expression;
+    }
+
+    // Replaces every `a^b` with `Pow(a, b)`. Handles simple operand shapes —
+    // numbers, parenthesized sub-expressions, and bare identifiers. Nested
+    // expressions like `2^(3^4)` are handled by repeated application.
+    private static string RewritePowerOperator(string input)
+    {
+        var pattern = new Regex(
+            @"(?<base>\d+(?:\.\d+)?|\([^()]+\)|[A-Za-z_][A-Za-z0-9_]*(?:\([^()]*\))?)" +
+            @"\s*\^\s*" +
+            @"(?<exp>\d+(?:\.\d+)?|\([^()]+\)|[A-Za-z_][A-Za-z0-9_]*(?:\([^()]*\))?)",
+            RegexOptions.Compiled);
+
+        for (var i = 0; i < 8; i++) // cap iterations so a pathological input can't loop
+        {
+            var replaced = pattern.Replace(input, "Pow(${base}, ${exp})");
+            if (ReferenceEquals(replaced, input) || replaced == input)
+                break;
+            input = replaced;
+        }
+        return input;
+    }
+
+    private static void EvaluateExtraFunctions(string name, FunctionArgs args)
+    {
+        // NCalc picks up the first handler that sets args.Result; no need to
+        // toggle HasResult explicitly (the setter is init-only in 5.x).
+        switch (name.ToLowerInvariant())
+        {
+            case "factorial":
+                if (args.Parameters.Length == 1)
+                {
+                    var raw = args.Parameters[0].Evaluate();
+                    if (raw is not null && double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
+                    {
+                        if (n < 0 || n > 170 || Math.Abs(n - Math.Round(n)) > 1e-9)
+                            return;
+                        double result = 1;
+                        for (var i = 2; i <= (int)n; i++) result *= i;
+                        args.Result = result;
+                    }
+                }
+                break;
+            case "cbrt":
+                if (args.Parameters.Length == 1)
+                {
+                    var raw = args.Parameters[0].Evaluate();
+                    if (raw is not null && double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                        args.Result = Math.Cbrt(x);
+                }
+                break;
+        }
+    }
+
+    private static string? FormatNumericAnswer(object? value)
+    {
+        if (value is null) return null;
+        double number;
+        switch (value)
+        {
+            case double d: number = d; break;
+            case float f: number = f; break;
+            case decimal dec: number = (double)dec; break;
+            case int i: number = i; break;
+            case long l: number = l; break;
+            default:
+                if (!double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number))
+                    return null;
+                break;
+        }
+        if (double.IsNaN(number) || double.IsInfinity(number))
+            return null;
+
+        // Integer-valued results rendered without a decimal point.
+        if (Math.Abs(number - Math.Round(number)) < 1e-9 && Math.Abs(number) < 1e15)
+            return ((long)Math.Round(number)).ToString(CultureInfo.InvariantCulture);
+
+        // Keep up to 6 significant digits for readability.
+        return number.ToString("0.######", CultureInfo.InvariantCulture);
     }
 
     // "What's today's date?" / "What day is it?" etc. Local LLMs habitually
@@ -426,6 +650,11 @@ public static class DeterministicUtilityEngine
         expression = Regex.Replace(expression, @"\bover\b", "/", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         expression = Regex.Replace(expression, @"(?<=\d)\s*x\s*(?=\d)", " * ", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         expression = Regex.Replace(expression, @"\s+", " ", RegexOptions.Compiled).Trim();
+        // Drop trailing punctuation so CalcPattern's anchored "ends-in-digit"
+        // rule matches prompts like "What is 347 * 29?" — the "?" is the
+        // difference between firing the deterministic fast-path and letting
+        // a small model guess (and get the arithmetic wrong).
+        expression = expression.TrimEnd('?', '.', '!', ' ');
         return expression;
     }
 

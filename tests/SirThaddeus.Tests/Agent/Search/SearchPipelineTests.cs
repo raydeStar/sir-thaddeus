@@ -425,6 +425,57 @@ public class DeterministicUtilityEngineTests
         var result = DeterministicPreRouter.TryRoute("what's the boiling point of ethanol?");
         Assert.Null(result);
     }
+
+    // Advanced math (NCalc-backed): powers, roots, trig, logs, constants,
+    // factorial. These used to fall through to the LLM and routinely got
+    // computed wrong by small models. The advanced path short-circuits the
+    // deterministic answer — no LLM round-trip, no wrong result.
+    [Theory]
+    [InlineData("What is sqrt(144)?", "12")]
+    [InlineData("what is 2^10?", "1024")]
+    [InlineData("what is 5 squared?", "25")]
+    [InlineData("what is 3 cubed?", "27")]
+    [InlineData("calculate sqrt(2^10)", "32")]
+    [InlineData("solve square root of 49", "7")]
+    [InlineData("what is cos(0)", "1")]
+    [InlineData("Calculate sin(30 degrees)", "0.5")]
+    [InlineData("compute 5!", "120")]
+    [InlineData("what is log10(1000)", "3")]
+    [InlineData("what is ln(e)", "1")]
+    public void AdvancedMath_Deterministic(string input, string expectedFragment)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        Assert.NotNull(result);
+        Assert.Equal(DeterministicMatchConfidence.High, result!.Confidence);
+        Assert.Equal("calculator", result.Result.Category);
+        Assert.Contains(expectedFragment, result.Result.Answer, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // pi ≈ 3.14159 so pi*2 ≈ 6.283185 — spot-check the bold-formatted number.
+    [InlineData("calculate pi * 2", "6.283185")]
+    public void AdvancedMath_Constants(string input, string expectedFragment)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+        Assert.NotNull(result);
+        Assert.Contains(expectedFragment, result!.Result.Answer, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("ethanol's boiling point")]                      // no arithmetic
+    [InlineData("tell me about the history of pi")]              // "pi" in prose
+    [InlineData("set the oven to 350F")]                         // no math verb
+    public void AdvancedMath_DoesNotHijackProse(string input)
+    {
+        // Prose that mentions advanced tokens without a computable shape
+        // must not fire the calculator fast-path — otherwise we'd shortcut
+        // legitimate follow-up LLM/tool work.
+        var result = DeterministicPreRouter.TryRoute(input);
+        if (result is not null)
+        {
+            Assert.NotEqual("calculator", result.Result.Category);
+        }
+    }
 }
 
 #endregion

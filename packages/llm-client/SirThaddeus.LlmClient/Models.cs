@@ -214,7 +214,7 @@ public sealed record LlmClientOptions
     /// <summary>
     /// Approximate context window size used for context-fill percentage.
     /// </summary>
-    public int ContextWindowTokens { get; init; } = 8192;
+    public int ContextWindowTokens { get; init; } = 16384;
 
     /// <summary>
     /// Sampling temperature (0.0 = deterministic, 1.0 = creative).
