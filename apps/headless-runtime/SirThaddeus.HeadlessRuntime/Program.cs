@@ -206,51 +206,16 @@ if (toolsAvailable && settings.Memory.Enabled)
         }));
 }
 
-// Feature flag read once at startup. The pipeline-backed orchestrator
-// (IHeadlessAgent implementation that delegates to
-// SirThaddeus.Agent.Pipeline.ChatPipeline) is the default as of 2K.
-// Set ST_RUNTIME_USE_PIPELINE=0 to force the legacy AgentOrchestrator
-// (kept for harness A/B comparisons until the legacy path is retired).
-var pipelineFlag = Environment.GetEnvironmentVariable("ST_RUNTIME_USE_PIPELINE");
-var usePipelineBackend = !string.Equals(pipelineFlag, "0", StringComparison.Ordinal);
-
+// Pipeline-backed orchestrator is the only path now — the legacy
+// AgentOrchestrator was retired after the harness stabilized at 81%+
+// parity. The old `ST_RUNTIME_USE_PIPELINE=0` escape hatch is gone;
+// there's nothing to toggle.
 IHeadlessAgent BuildOrchestrator(AppSettings currentSettings)
 {
     llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
     gatekeeperLlm.UpdateOptions(RuntimeLlmOptionsFactory.BuildGatekeeper(currentSettings));
 
-    return usePipelineBackend
-        ? BuildPipelineBackedOrchestrator(currentSettings)
-        : BuildLegacyOrchestrator(currentSettings);
-}
-
-AgentOrchestrator BuildLegacyOrchestrator(AppSettings currentSettings)
-{
-    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
-
-    return new AgentOrchestrator(
-        llm,
-        agentMcp,
-        audit,
-        currentSettings.Llm.SystemPrompt,
-        activePersonalityId: currentSettings.ActivePersonalityId,
-        personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings),
-        footmanRouter: footmanRouter,
-        autoMemoryExtractor: autoMemoryExtractor,
-        gatekeeperLlm: gatekeeperLlm)
-    {
-        ActiveProfileId = currentSettings.ActiveProfileId,
-        // The headless runtime powers harness and API evaluation, so keep
-        // explicit deep-dive briefings available even when the desktop
-        // baseline preset hides that surface area.
-        DeepDiveEnabled = true,
-        AdvancedPlaceDiscoveryEnabled = currentSettings.AllowsAdvancedPlaceDiscoveryByProfile(),
-        MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
-        UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
-        UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
-        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem(),
-        MaxTokensBudget = currentSettings.Llm.MaxTokens
-    };
+    return BuildPipelineBackedOrchestrator(currentSettings);
 }
 
 PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings currentSettings)
@@ -305,8 +270,8 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     // Search fallback: when the primary tool loop produces a refusal-
     // shaped draft ("I don't know / I can't / not sure") AND the user's
     // message has web-lookup signals, retry via the SearchOrchestrator.
-    // Shares AgentOrchestrator.HasRefusalOrUncertaintySignals so the
-    // trigger heuristic can't drift from the legacy path.
+    // Shares RefusalDetector.HasRefusalOrUncertaintySignals so both the
+    // UI runtime and the CLI use the same trigger heuristic.
     ISearchFallbackExecutor? searchFallback = null;
     if (toolsAvailable)
     {
@@ -412,7 +377,7 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             buildRequest: ctx =>
             {
                 var draft = ctx.AssistantDraft ?? string.Empty;
-                if (!AgentOrchestrator.HasRefusalOrUncertaintySignals(draft, draft))
+                if (!RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft))
                     return null;
 
                 return new SearchFallbackRequest

@@ -1,6 +1,6 @@
 # Pipeline Migration — AI Handoff Log
 
-**Status:** Phase 2K complete. UI and CLI pipelines are now at **parity — 17 steps each**: safety boundary → utility fast-path → benign fallback → personality injection → feature extractor → logic-puzzle scaffold → memory context → onboarding injection → **dialogue state** → footman router → **guardrails** → tool loop → post-process → **completion validation** → search fallback → auto-memory extract → response composer. **Pipeline is now default ON** — set `ST_RUNTIME_USE_PIPELINE=0` to force the legacy `AgentOrchestrator` (kept for harness A/B comparisons). Safe to ship / push at any point between phases.
+**Status:** Phase 2D.5 complete — **legacy `AgentOrchestrator` retired**. UI and CLI pipelines now share the 17-step pipeline with no fallback path: safety boundary → utility fast-path → benign fallback → personality injection → feature extractor → logic-puzzle scaffold → memory context → onboarding injection → **dialogue state** → **existence verification hint** → footman router → **guardrails** → tool loop → post-process → **completion validation** → search fallback → auto-memory extract → response composer. The `ST_RUNTIME_USE_PIPELINE` env var is gone along with 8,939 lines of `AgentOrchestrator*.cs` partials and ~6,300 lines of legacy-only tests. Migration is done; future entries belong elsewhere.
 
 **Purpose of this doc:** Any AI or contributor picking this up mid-stream should be able to read this file once and continue. Each phase ends with updates here. Keep it terse — it's a ledger, not prose.
 
@@ -212,15 +212,16 @@ Update this section when landing each sub-PR.
 
 ### Known gaps relative to legacy orchestrator (harness will likely flag these)
 
-The following orchestrator behaviors don't yet have pipeline steps. Each surfaces as a potential harness failure; each is a focused "add step X" PR.
+The following orchestrator behaviors aren't ported as dedicated pipeline steps. With `AgentOrchestrator` retired they're genuinely gone — not "hidden behind a flag". If a harness failure points at one of these, that's the ROI signal to add a focused step.
 
-- **Search orchestrator / deep-dive** — legacy delegates web research to `SearchOrchestrator` with multi-turn session tracking + deep-dive follow-up fetching. Pipeline's `ToolLoopStep` calls `web_search` directly. Expect gaps in `Suites/web-search/` and `Suites/quality/02_web_grounding.yaml`.
-- **Slot extraction + tool planner** — legacy builds a deterministic tool plan before calling the LLM. Pipeline is reactive (LLM picks tools). May affect tool-contract suite. (2K.3 deferred — footman already narrows per turn.)
-- **Dialogue state write-side / context anchoring** — the read-side lands in 2K.4 (`DialogueStateStep` injects `[CONVERSATION CONTEXT]`). The legacy `ContextAnchoringService` still does the WRITE side (state patches from tool results + context lock). Port is in place so the write-side can move into a follow-up step without touching the read step.
-- **Multi-intent bypass + conversation segmentation + lane router** — legacy-only. Low priority; add steps if harness flags them.
-- **2K.7 — Pipeline default ON.** Shipped. `ST_RUNTIME_USE_PIPELINE` flag semantics inverted: pipeline is now default; set the env var to `"0"` to force the legacy path for A/B comparisons. Legacy `AgentOrchestrator` branch stays wired until 2D.5.
-- **2D.4 — Harness full pass.** Not started. Run: `./dev/harness.ps1 --suite smoke --judge none` first (no env var needed now — pipeline is default), then `--suite reasoning`, then `--all`. Legacy A/B: `$env:ST_RUNTIME_USE_PIPELINE = "0"; ...`. Expect gaps in the areas listed under "Known gaps" below — each becomes a focused "add step X" PR.
-- **2D.5 — Retire AgentOrchestrator.** Not started. Gated on harness pass against the pipeline default.
+- **Search orchestrator / deep-dive** — legacy used a `SearchOrchestrator` with multi-turn session tracking + deep-dive follow-up fetching. Pipeline's `ToolLoopStep` calls `web_search` directly. `Suites/web-search/` covers this territory; lift is +2-3 tests when added.
+- **Slot extraction + tool planner** — deterministic tool plan before the LLM. Pipeline is reactive (LLM picks tools). Footman narrowing covers the usual case; add the step only if tool-contract suite regresses.
+- **Dialogue state write-side** — the read-side is in `DialogueStateStep`. Writes (patching topic/location from tool results, context lock) used to live in `ContextAnchoringService` — that file was deleted with the legacy orchestrator. Multi-turn UI coherence will degrade in ways that `Suites/continuity/`-style tests catch. When those fail, port the writes into a new step.
+- **Multi-intent bypass + conversation segmentation + lane router** — never appeared on either side of the 2D harness work. Low priority; add if the harness ever flags them.
+
+- **2K.7 — Pipeline default ON.** Shipped.
+- **2D.4 — Harness full pass.** Shipped. 4B baseline stabilized at 65/80 (81%) across 4 iteration cycles. Details + run-by-run deltas live in [.github/instructions/local-model-harness-workflow.instructions.md](../../.github/instructions/local-model-harness-workflow.instructions.md).
+- **2D.5 — Retire AgentOrchestrator.** Shipped. Removed 22 `AgentOrchestrator*.cs` partials (8,939 LOC), `ContextAnchoringService` + interface, `ST_RUNTIME_USE_PIPELINE` flag branch, `BuildLegacyOrchestrator` factory. Ported `HasRefusalOrUncertaintySignals` → `RefusalDetector`, `InjectFewShotExamplesInPlace` → `PersonalityFewShotInjector`. Tests: deleted 9 legacy-only files (~6,300 LOC), surgically pruned 37 AgentOrchestrator-using methods out of `SearchPipelineTests` + `PersonalityEngineTests`. Shared fakes (`FakeLlmClient`, `FakeMcpClient`, `StubMemoryContextProvider`, `StubGuardrailsCoordinator`, `StubRouter`) moved to `tests/SirThaddeus.Tests/TestHelpers.cs`. Net: 2099/2099 unit tests green, smoke suite unchanged post-retirement.
 
 ---
 
@@ -228,8 +229,8 @@ The following orchestrator behaviors don't yet have pipeline steps. Each surface
 
 1. `git status` is clean, and you're on the expected branch.
 2. `dotnet build packages/agent/SirThaddeus.Agent/SirThaddeus.Agent.csproj` → 0 errors.
-3. `dotnet test ... Agent.Pipeline` → 160 passing (as of 2J).
+3. `dotnet test tests/SirThaddeus.Tests/` → 2099 passing (as of 2D.5).
 4. Read this doc.
-5. Look at `LmStudioAssistant.BuildTurnPipeline` — that's the reference composition. The CLI migration should produce an equivalent.
+5. Look at `LmStudioAssistant.BuildTurnPipeline` and the CLI's `BuildPipelineBackedOrchestrator` — they compose the same 17-step pipeline with runtime-specific adapters. Changes should land on both sides.
 
-When you finish a sub-PR: update the "Phase log" section above. Keep entries 1-2 lines each.
+When you finish a sub-PR: update the "Phase log" section above. Keep entries 1-2 lines each. Note: active tuning work now lives under [.github/instructions/local-model-harness-workflow.instructions.md](../../.github/instructions/local-model-harness-workflow.instructions.md) — this migration doc is effectively a historical record.

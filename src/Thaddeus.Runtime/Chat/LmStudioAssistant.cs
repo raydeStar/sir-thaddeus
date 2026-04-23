@@ -286,9 +286,10 @@ public sealed class LmStudioAssistant : IAssistant
 
     /// <summary>
     /// Builds the one-paragraph location hint prepended to the system prompt
-    /// when the user has a configured home location. Mirrors the AgentOrchestrator
-    /// behavior so weather / local-search queries resolve to the user's city
-    /// instead of the model's geographic default.
+    /// when the user has a configured home location. Weather / local-search
+    /// queries resolve to the user's city instead of the model's geographic
+    /// default. Mirrors <c>BuildHeadlessSystemPrompt</c> in the CLI so both
+    /// runtimes give the model the same baseline location context.
     /// </summary>
     private string BuildLocationBlock()
     {
@@ -545,7 +546,7 @@ public sealed class LmStudioAssistant : IAssistant
                 buildRequest: ctx =>
                 {
                     var draft = ctx.AssistantDraft ?? string.Empty;
-                    if (!AgentOrchestrator.HasRefusalOrUncertaintySignals(draft, draft))
+                    if (!RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft))
                         return null;
                     return new SearchFallbackRequest
                     {

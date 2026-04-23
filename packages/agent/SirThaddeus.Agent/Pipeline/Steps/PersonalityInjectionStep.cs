@@ -68,30 +68,10 @@ public sealed class PersonalityInjectionStep : ITurnStep
         messages.Insert(0, ChatMessage.System(runtime.BuildSystemPrompt(taskInstruction: string.Empty)));
     }
 
+    // Few-shot injection delegates to the shared PersonalityFewShotInjector
+    // so this step and the tool-loop executor can't drift from each other.
     private static void InjectFewShotExamples(
         List<ChatMessage> messages,
         IReadOnlyList<PersonalityEngine.Profiles.PersonalityFewShotExample>? examples)
-    {
-        if (examples is null || examples.Count == 0) return;
-
-        // Insert after the run of system messages so the examples sit
-        // between "you are X" and the real chat history — matches
-        // AgentOrchestrator.InjectFewShotExamplesInPlace.
-        var insertAt = 0;
-        while (insertAt < messages.Count &&
-               string.Equals(messages[insertAt].Role, "system", StringComparison.OrdinalIgnoreCase))
-        {
-            insertAt++;
-        }
-
-        foreach (var example in examples)
-        {
-            if (string.IsNullOrWhiteSpace(example.User) ||
-                string.IsNullOrWhiteSpace(example.Assistant))
-                continue;
-
-            messages.Insert(insertAt++, ChatMessage.User(example.User.Trim()));
-            messages.Insert(insertAt++, ChatMessage.Assistant(example.Assistant.Trim()));
-        }
-    }
+        => PersonalityFewShotInjector.InjectInPlace(messages, examples);
 }

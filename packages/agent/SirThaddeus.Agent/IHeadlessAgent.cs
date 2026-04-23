@@ -5,11 +5,12 @@ namespace SirThaddeus.Agent;
 /// and harness need a couple of concrete operations beyond
 /// request/response — most importantly, a way to seed prior history for
 /// workflow runs and to reset between iterations. Keeping these on an
-/// interface lets the legacy <c>AgentOrchestrator</c> and the new
-/// <c>PipelineBackedAgentOrchestrator</c> both satisfy the same contract,
-/// so wiring sites (REST endpoints, workflow coordinator,
+/// interface means wiring sites (REST endpoints, workflow coordinator,
 /// <c>TimeBudgetedAgentOrchestrator</c> decorator) don't depend on a
-/// concrete type.
+/// concrete type. Today only
+/// <see cref="Pipeline.PipelineBackedAgentOrchestrator"/> implements this —
+/// the legacy monolithic orchestrator was retired after pipeline parity
+/// reached the harness bar.
 ///
 /// <para>Keep this interface as small as practical — anything the UI
 /// runtime doesn't need stays off it.</para>

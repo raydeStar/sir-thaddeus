@@ -4,8 +4,8 @@ namespace SirThaddeus.Agent.Utilities;
 
 /// <summary>
 /// Pure-function builder for deterministic time/timezone response text.
-/// Extracted from AgentOrchestrator.Internal — no instance state.
-/// The caller supplies <c>utcNow</c> so this remains fully testable.
+/// No instance state. The caller supplies <c>utcNow</c> so this remains
+/// fully testable with a frozen clock.
 /// </summary>
 public static class TimeResponseBuilder
 {

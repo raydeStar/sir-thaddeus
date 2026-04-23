@@ -55,7 +55,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             LlmResponse response;
             
             var messagesToSend = request.History.ToList();
-            AgentOrchestrator.InjectFewShotExamplesInPlace(messagesToSend, request.FewShotExamples);
+            PersonalityFewShotInjector.InjectInPlace(messagesToSend, request.FewShotExamples);
 
             try
             {

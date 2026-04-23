@@ -13,10 +13,9 @@ namespace SirThaddeus.Agent.Pipeline;
 /// <para>Single-conversation at a time. If the caller passes a
 /// <c>conversationId</c>, it flows through to the
 /// <see cref="TurnContext.ThreadId"/> but does not partition history — a
-/// process holds one active conversation. This matches the legacy
-/// <c>AgentOrchestrator</c> behavior; workflow coordinators swap
-/// conversations via <see cref="ResetConversation"/> + <see cref="SeedHistory"/>
-/// between iterations.</para>
+/// process holds one active conversation. Workflow coordinators swap
+/// conversations via <see cref="ResetConversation"/> +
+/// <see cref="SeedHistory"/> between iterations.</para>
 ///
 /// <para>Thread-safe: the two <c>ProcessAsync</c> overloads,
 /// <see cref="ResetConversation"/>, and <see cref="SeedHistory"/>

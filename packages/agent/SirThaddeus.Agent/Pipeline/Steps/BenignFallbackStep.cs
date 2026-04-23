@@ -40,9 +40,10 @@ public sealed class BenignFallbackStep : ITurnStep
 
         var lower = userText.Trim().ToLowerInvariant();
 
-        // Same defensive gates as AgentOrchestrator.cs lines 194-200:
-        // if the message looks like it wants a tool, let the tool loop
-        // handle it and don't stamp a benign reply on top.
+        // Defensive gates: if the message looks like it wants a tool,
+        // let the tool loop handle it and don't stamp a benign reply on
+        // top. Covers explicit invocation ("call X"), web search shapes,
+        // screen / file / system / browser requests.
         if (IntentFeatureExtractor.LooksLikeExplicitToolInvocation(lower) ||
             IntentFeatureExtractor.LooksLikeWebSearchRequest(lower) ||
             IntentFeatureExtractor.LooksLikeScreenRequest(lower) ||
