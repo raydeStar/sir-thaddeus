@@ -19,19 +19,28 @@ export function RuntimeStateBadge() {
   const connected = useRuntimeStore((s) => s.connected);
   const meta = stateLabels[state] ?? { label: state, tone: 'text-ink-muted', dot: 'bg-ink-subtle' };
 
+  // Connection trumps runtime state. Showing the green "Ready" pill while
+  // the WebSocket is down was actively misleading — users assumed Sir
+  // Thaddeus was healthy when nothing was reachable.
+  const displayLabel = connected ? meta.label : 'Disconnected';
+  const displayTone = connected ? meta.tone : 'text-ink-muted';
+  const displayDot = connected ? meta.dot : 'bg-ink-subtle';
+  const tooltip = connected ? 'Connected to runtime' : 'Disconnected from runtime';
+
   return (
     <div
       className="flex items-center gap-2 rounded-full border border-line bg-canvas-raised px-2.5 py-1"
       data-testid="runtime-state-badge"
       data-state={state}
+      data-connected={connected}
+      title={tooltip}
     >
       <span
-        className={`inline-block h-1.5 w-1.5 rounded-full ${connected ? meta.dot : 'bg-ink-subtle'}`}
-        title={connected ? 'Connected to runtime' : 'Disconnected from runtime'}
+        className={`inline-block h-1.5 w-1.5 rounded-full ${displayDot}`}
         data-testid="runtime-connection-dot"
         data-connected={connected}
       />
-      <span className={`text-[11px] font-medium tracking-wide ${meta.tone}`}>{meta.label}</span>
+      <span className={`text-[11px] font-medium tracking-wide ${displayTone}`}>{displayLabel}</span>
     </div>
   );
 }

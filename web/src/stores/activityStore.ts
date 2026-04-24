@@ -43,9 +43,11 @@ export const useActivityStore = create<ActivityStoreState>((set, get) => ({
       set({ error: (e as Error).message });
       return;
     }
-    socket.addEventListener('open', () => set({ connected: true }));
+    socket.addEventListener('open', () => set({ connected: true, error: null }));
     socket.addEventListener('close', () => set({ connected: false }));
-    socket.addEventListener('error', () => set({ error: 'websocket_error' }));
+    socket.addEventListener('error', () =>
+      set({ error: 'Live activity stream is offline. The runtime may not be reachable.' }),
+    );
     socket.addEventListener('message', (msg) => {
       try {
         const evt = JSON.parse(msg.data as string) as RuntimeEvent<ActivityEntry>;

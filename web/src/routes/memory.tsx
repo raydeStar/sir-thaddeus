@@ -121,15 +121,15 @@ function MemoryRoute() {
         </p>
       ) : null}
 
-      {memos === null ? (
+      {memos === null && !error ? (
         <p className="text-sm italic text-ink-subtle" data-testid="memo-loading">
           Loading…
         </p>
-      ) : memos.length === 0 ? (
+      ) : memos !== null && memos.length === 0 ? (
         <p className="text-sm text-ink-muted" data-testid="memo-empty">
           No memos yet. Add one above.
         </p>
-      ) : (
+      ) : memos !== null ? (
         <ul data-testid="memo-list" className="space-y-3">
           {memos.map((m) => (
             <li
@@ -174,7 +174,7 @@ function MemoryRoute() {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </PageScaffold>
   );
 }

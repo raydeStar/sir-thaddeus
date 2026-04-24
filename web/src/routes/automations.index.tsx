@@ -92,15 +92,15 @@ function AutomationsListRoute() {
         </p>
       ) : null}
 
-      {items === null ? (
+      {items === null && !error ? (
         <p className="text-sm italic text-ink-subtle" data-testid="automation-loading">
           Loading…
         </p>
-      ) : items.length === 0 ? (
+      ) : items !== null && items.length === 0 ? (
         <p className="text-sm text-ink-muted" data-testid="automation-empty">
           No automations yet.
         </p>
-      ) : (
+      ) : items !== null ? (
         <ul data-testid="automation-list" className="space-y-2">
           {items.map((a) => (
             <li
@@ -145,7 +145,7 @@ function AutomationsListRoute() {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </PageScaffold>
   );
 }
