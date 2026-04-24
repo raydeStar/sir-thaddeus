@@ -35,7 +35,7 @@ public static class Program
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         var bearerToken = TokenGenerator.NewToken();
-        var lockFilePath = LockFileService.GetDefaultPath();
+        var lockFilePath = parsed.LockFilePath ?? LockFileService.GetDefaultPath();
         var ipcEndpoint = IpcEndpoint.GetDefault();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -298,12 +298,13 @@ public static class Program
     }
 
     /// <summary>Parses CLI arguments. Currently very small.</summary>
-    internal sealed record StartupArgs(bool TestMode, int? ParentPid)
+    internal sealed record StartupArgs(bool TestMode, int? ParentPid, string? LockFilePath)
     {
         public static StartupArgs Parse(string[] args)
         {
             var testMode = false;
             int? parentPid = null;
+            string? lockFilePath = null;
             foreach (var a in args)
             {
                 if (a.Equals("--test-mode", StringComparison.OrdinalIgnoreCase)) testMode = true;
@@ -312,8 +313,16 @@ public static class Program
                 {
                     parentPid = pid;
                 }
+                else if (a.StartsWith("--lock-file=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = a["--lock-file=".Length..].Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        lockFilePath = Path.GetFullPath(value);
+                    }
+                }
             }
-            return new StartupArgs(testMode, parentPid);
+            return new StartupArgs(testMode, parentPid, lockFilePath);
         }
     }
 }

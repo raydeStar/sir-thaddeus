@@ -70,6 +70,7 @@ function ChatListRoute() {
           <button
             type="button"
             onClick={onNew}
+            data-testid="chat-new-thread"
             className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             <Plus className="h-4 w-4" strokeWidth={2} />
