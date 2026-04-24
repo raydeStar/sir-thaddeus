@@ -7,6 +7,33 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   createdAt: string;
+  /**
+   * Optional structured sources the assistant cited for this turn —
+   * rendered as rich preview cards in the chat UI (thumbnails, favicons,
+   * titles, domains, excerpts). Populated when a citation-producing tool
+   * (currently web_search) fired; null otherwise.
+   */
+  sources?: ChatMessageSource[] | null;
+}
+
+export interface ChatMessageSource {
+  /** Canonical URL the card links to. */
+  url: string;
+  /** Human-readable title; falls back to the URL host. */
+  title?: string | null;
+  /** Lowercased host used for favicon + display. */
+  domain?: string | null;
+  /** Short preview text, ≤ ~250 chars. */
+  excerpt?: string | null;
+  /**
+   * data-URL for the favicon when the extractor captured one; the UI
+   * falls back to a generic icon when absent.
+   */
+  favicon?: string | null;
+  /** Absolute URL of a representative image (og:image or inline). */
+  thumbnail?: string | null;
+  /** ISO-8601 publish timestamp for dated articles; null otherwise. */
+  publishedAt?: string | null;
 }
 
 export interface ChatThread {
@@ -50,6 +77,7 @@ export interface ChatTurnComplete {
   finalText: string;
   completedAt: string;
   cancelled: boolean;
+  sources?: ChatMessageSource[] | null;
 }
 
 export interface ChatUserMessageAppended {

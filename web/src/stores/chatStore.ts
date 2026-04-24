@@ -203,12 +203,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         role: 'assistant',
         text: p.finalText,
         createdAt: p.completedAt,
+        sources: p.sources ?? null,
       };
       set((s) => {
         const thread = s.activeThread;
         if (!thread) return { activeTurn: null };
         const alreadyHasIt = thread.messages.some((m) => m.id === finalMessage.id);
-        const messages = alreadyHasIt ? thread.messages : [...thread.messages, finalMessage];
+        const messages = alreadyHasIt
+          ? thread.messages.map((m) =>
+              m.id === finalMessage.id
+                ? { ...m, text: finalMessage.text, createdAt: finalMessage.createdAt, sources: finalMessage.sources }
+                : m,
+            )
+          : [...thread.messages, finalMessage];
         return {
           activeThread: { ...thread, messages, updatedAt: p.completedAt },
           activeTurn: null,

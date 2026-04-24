@@ -72,7 +72,12 @@ public sealed class StubAssistant : IAssistant
                 threadId, messageId);
         }
 
-        await _publisher.PublishCompleteAsync(threadId, messageId, finalText, cancelled, CancellationToken.None)
+        await _publisher.PublishCompleteAsync(
+                threadId,
+                messageId,
+                finalText,
+                cancelled,
+                ct: CancellationToken.None)
             .ConfigureAwait(false);
         return message;
     }
