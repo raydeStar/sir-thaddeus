@@ -32,9 +32,12 @@ function readMeta(name: string): string {
  */
 export function buildRuntimeWebSocketUrl(token: string): string {
   if (typeof window === 'undefined') return '';
+  const meta = readRuntimeMetadata();
+  if (!token && !meta.port) return '';
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const path = `/ws${token ? `?access_token=${encodeURIComponent(token)}` : ''}`;
-  return `${proto}//${window.location.host}${path}`;
+  const host = meta.port ? `${window.location.hostname}:${meta.port}` : window.location.host;
+  return `${proto}//${host}${path}`;
 }
 
 /** Thin fetch wrapper that includes the bearer token. */

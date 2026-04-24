@@ -52,6 +52,7 @@ function RootLayout() {
   const startPermissions = usePermissionsStore((s) => s.start);
   const startToolActivity = useToolActivityStore((s) => s.start);
   const meta = readRuntimeMetadata();
+  const versionLabel = meta.version === 'dev' ? 'dev' : `v${meta.version}`;
 
   useEffect(() => {
     connect();
@@ -85,7 +86,7 @@ function RootLayout() {
 
         <div className="mt-auto mx-3 pt-4 text-[11px] text-ink-subtle">
           <div className="overflow-hidden whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
-            <span data-testid="runtime-version">v{meta.version}</span>
+            <span data-testid="runtime-version">{versionLabel}</span>
             <span className="mx-2 text-ink-subtle/60">·</span>
             <span className="font-mono lowercase tracking-wide">local</span>
           </div>
@@ -93,14 +94,17 @@ function RootLayout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-11 items-center justify-between border-b border-line bg-canvas/80 px-4 backdrop-blur md:px-6">
-          <nav className="flex items-center gap-1 md:hidden" aria-label="Primary">
+        <header className="flex min-w-0 h-11 items-center justify-between gap-3 overflow-hidden border-b border-line bg-canvas/80 px-4 backdrop-blur md:px-6">
+          <nav
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap md:hidden"
+            aria-label="Primary"
+          >
             {primaryNav.concat(secondaryNav).map(({ to, label }) => (
               <Link
                 key={to}
                 to={to}
                 activeProps={{ className: 'text-ink' }}
-                className="rounded-full px-2.5 py-1 text-xs text-ink-muted hover:text-ink"
+                className="shrink-0 rounded-full px-2.5 py-1 text-xs text-ink-muted hover:text-ink"
               >
                 {label}
               </Link>
