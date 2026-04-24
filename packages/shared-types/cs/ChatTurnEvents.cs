@@ -19,19 +19,13 @@ public static class ChatTurnEvents
     public const string ToolStarted = "chat.tool.started";
     /// <summary>Emitted when a tool call finishes (success, error, or denied).</summary>
     public const string ToolCompleted = "chat.tool.completed";
-    /// <summary>
-    /// Emitted when the assistant calls the virtual <c>propose_automation</c>
-    /// tool. The UI intercepts this to render an inline editable confirmation
-    /// card instead of a plain tool-result pill.
-    /// </summary>
-    public const string AutomationProposed = "chat.automation.proposed";
 
     /// <summary>
     /// Emitted when a user message is appended server-side (not via the
-    /// chat HTTP POST the UI already knows about) — e.g. each step of an
-    /// automation run posts the step text as a user message. Without this
-    /// event the UI never renders steps 2..N because it only saw step 1 in
-    /// the initial thread fetch.
+    /// chat HTTP POST the UI already knows about). Reserved for future server-
+    /// initiated user turns; currently unused after the removal of automation
+    /// runs, but the event surface stays so the web store stays tolerant of
+    /// either source.
     /// </summary>
     public const string UserMessageAppended = "chat.user.message";
 
@@ -56,12 +50,16 @@ public sealed record ChatTurnDelta(string ThreadId, string MessageId, string Tex
 /// <param name="FinalText">The full assembled assistant text after streaming ends.</param>
 /// <param name="CompletedAt">UTC timestamp the turn finished.</param>
 /// <param name="Cancelled">True if the turn was stopped before natural completion.</param>
+/// <param name="Sources">Optional structured citations surfaced with the
+/// assistant reply so the live chat UI can render rich cards without
+/// waiting for a thread reload.</param>
 public sealed record ChatTurnComplete(
     string ThreadId,
     string MessageId,
     string FinalText,
     DateTimeOffset CompletedAt,
-    bool Cancelled);
+    bool Cancelled,
+    IReadOnlyList<ChatMessageSource>? Sources = null);
 
 /// <summary>Payload for <see cref="ChatTurnEvents.ToolStarted"/>.</summary>
 /// <param name="ActivityId">Unique id for this tool run (matches the completed event).</param>
@@ -102,37 +100,9 @@ public sealed record ChatToolCompleted(
     DateTimeOffset CompletedAt);
 
 /// <summary>
-/// Payload for <see cref="ChatTurnEvents.AutomationProposed"/>. Carries the
-/// model's proposed automation in structured form so the chat UI can render
-/// an editable confirmation card with Create / Cancel. The proposal is
-/// <em>not</em> persisted — the UI writes it to the automation store only
-/// if the user clicks Create.
-/// </summary>
-/// <param name="ProposalId">Stable id for this proposal (matches the tool call activity).</param>
-/// <param name="ThreadId">Thread the proposal belongs to.</param>
-/// <param name="MessageId">Assistant message that triggered the proposal.</param>
-/// <param name="Name">Proposed automation name.</param>
-/// <param name="Description">Optional short description.</param>
-/// <param name="Steps">Ordered prompts the automation will run when fired.</param>
-/// <param name="Schedule">
-/// Parsed/normalized schedule. Null means the model did not ask for a
-/// recurring or one-shot trigger — the UI will default to "run on demand".
-/// </param>
-/// <param name="ProposedAt">UTC timestamp the proposal was emitted.</param>
-public sealed record ChatAutomationProposed(
-    string ProposalId,
-    string ThreadId,
-    string MessageId,
-    string Name,
-    string? Description,
-    IReadOnlyList<string> Steps,
-    AutomationSchedule? Schedule,
-    DateTimeOffset ProposedAt);
-
-/// <summary>
 /// Payload for <see cref="ChatTurnEvents.UserMessageAppended"/>. Lets the web
-/// chat store insert a user message that was appended by the server (e.g. an
-/// automation step) into the active thread's rendered messages.
+/// chat store insert a user message that was appended by the server into the
+/// active thread's rendered messages.
 /// </summary>
 public sealed record ChatUserMessageAppended(
     string ThreadId,

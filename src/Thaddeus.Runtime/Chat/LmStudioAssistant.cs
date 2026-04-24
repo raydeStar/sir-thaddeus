@@ -162,22 +162,6 @@ public sealed class LmStudioAssistant : IAssistant
         "than your own knowledge — especially for live data (weather, news, " +
         "dates, file contents). Do not narrate the tool call itself. " +
 
-        // ── Automations (propose_automation) ─────────────────────────────
-        // When the user asks to be reminded, to save a recurring task, or
-        // to automate something, the model should use the propose_automation
-        // tool so the UI can pop a confirmation card. The tool description
-        // carries the exact schema; keep this nudge short.
-        "When the user asks you to remind them, schedule a task, or save an " +
-        "automation (e.g. 'remind me tomorrow at 9 about the meeting', " +
-        "'every weekday at 8:15 AM check the weather'), call the " +
-        "propose_automation tool with a short name, the ordered steps, and a " +
-        "schedule. Use 'one-shot' only for a single future time. For recurring " +
-        "requests like 'every day', 'daily', 'every weekday', 'every Monday', " +
-        "or 'every month', use a cron schedule instead of one-shot. Do not try " +
-        "to set reminders with other tools. When the user gave an explicit " +
-        "cadence or time, do not omit the schedule. For example, 'every day at " +
-        "9 AM' should be a cron schedule like '0 9 * * *', not manual. " +
-
         // ── Using tool RESULTS (small-model failure mode) ────────────────
         // Small local models sometimes call a second tool and forget to use
         // the first one's result. This rule makes that a hard stop.
@@ -200,58 +184,9 @@ public sealed class LmStudioAssistant : IAssistant
         "inline caveat rather than a whole-reply hedge. If you don't know a " +
         "fact and it matters, say so and keep going. ";
 
-    /// <summary>
-    /// Appended to the base <see cref="SystemPrompt"/> when the current thread
-    /// is an automation run. Small local models default to "I can't do that,
-    /// would you like me to..." refusal loops when asked to "go to" a site,
-    /// because their RLHF teaches them they have no browser. That's wrong
-    /// here — they DO have tools. This block forces action-first behavior.
-    /// </summary>
-    private const string AutomationRunSystemPromptSuffix =
-        "\n\n" +
-        "═══ AUTOMATION MODE ═══\n" +
-        "You are running inside a SCRIPTED automation. No human is watching. " +
-        "You MUST act on each step using your tools — never ask the user to " +
-        "do anything, never offer to search later, never wait for confirmation. " +
-        "\n\n" +
-        "Strictly forbidden phrasings (do NOT emit these — they break the run):\n" +
-        "  • \"I can't open websites\" / \"I can't open a new tab\" / \"I can't navigate\"\n" +
-        "  • \"Would you like me to...\" / \"Do you want me to...\"\n" +
-        "  • \"Let me know if...\" / \"Just tell me and I'll...\"\n" +
-        "  • \"I'll check up on ... after your message\" / \"I can't wait for you\"\n" +
-        "\n" +
-        "Your tools DO give you the capability. Use them:\n" +
-        "  • Step says \"go to X\" or \"check X\" → call browser_navigate(url) or web_search\n" +
-        "  • Step mentions a URL / domain → call browser_navigate on that URL\n" +
-        "  • Step asks a factual question → call web_search\n" +
-        "  • Step mentions the screen → call screen_capture\n" +
-        "\n" +
-        "browser_navigate FETCHES page content for you to read; it does not open " +
-        "a tab in the user's browser. Describe what you did as \"fetched\" or " +
-        "\"read\", never \"navigated your browser\". \n\n" +
-        "When a tool RETURNS AN ERROR (e.g. \"Error reading https://…\", 403, 503, " +
-        "timeout) that is a specific fetch failure, NOT a limitation of your " +
-        "tool. Do NOT conclude \"I can't access external URLs\" or \"this tool " +
-        "doesn't allow that\" — the tool does allow it, the site just refused " +
-        "or timed out. Report the specific failure in one short sentence, " +
-        "suggest an alternate approach (different URL, web_search instead, etc.), " +
-        "and move on. \n\n" +
-        "Do NOT retry the same tool call after an error. Do NOT fall back to " +
-        "web_search in a loop when browser_navigate fails — pick ONE alternative, " +
-        "try it at most once, then produce your final answer from whatever data " +
-        "you already have. Spinning on the same tool will hit the round-trip " +
-        "cap and leave the user with an empty summary. \n\n" +
-        "When multiple steps reference the same URL or topic, reuse what the " +
-        "previous step already fetched. If step 1 already captured an Amazon " +
-        "listing URL, step 2 should call browser_navigate with that exact URL " +
-        "— do not re-search for it. \n\n" +
-        "If a tool truly cannot help with a step, say so in ONE short sentence " +
-        "and stop — do not loop with more apologies.";
-
-    private string ComposeSystemPrompt(bool isAutomationRun)
+    private string ComposeSystemPrompt()
     {
         var text = SystemPrompt;
-        if (isAutomationRun) text += AutomationRunSystemPromptSuffix;
 
         // Logic-puzzle scaffold moved out of here — LogicPuzzleScaffoldStep
         // in the pipeline handles it after FeatureExtractorStep classifies
@@ -297,10 +232,13 @@ public sealed class LmStudioAssistant : IAssistant
         var units = string.IsNullOrWhiteSpace(PreferredUnits) ? "" : $" Preferred units: {PreferredUnits!.Trim()}.";
         return
             $"The user's home location is: {LocationHint!.Trim()}.{units} " +
-            "Use this as the default area when they ask about weather, local places, " +
-            "news, or times without specifying a location. Pass it to weather_geocode " +
-            "and similar location-scoped tools verbatim. Do not announce that you know " +
-            "their location — just use it naturally.";
+            "Use this ONLY as the default area when they ask about weather, local " +
+            "places, news, or times WITHOUT specifying a location. When the user " +
+            "explicitly names a different city (e.g. \"weather in Seattle\"), use " +
+            "the city THEY named — do not ask for clarification or second-guess. " +
+            "Pass the location string to weather_geocode and similar location-scoped " +
+            "tools verbatim. Do not announce that you know their home location — " +
+            "just use it naturally when they omit one.";
     }
 
     public LmStudioAssistant(
@@ -328,23 +266,17 @@ public sealed class LmStudioAssistant : IAssistant
             .ToLowerInvariant();
         await _publisher.PublishStartAsync(threadId, messageId, ct).ConfigureAwait(false);
 
-        // Automation runs explicitly suppress `propose_automation` from the
-        // advertised list (the user is executing a saved automation, not
-        // building a new one — the inline confirmation card makes no sense
-        // during a run). Defense-in-depth against small models hallucinating
-        // the call from memory lives in the pipeline interceptor.
         var thread = await _store.GetAsync(threadId, ct).ConfigureAwait(false);
-        var isAutomationRun = _gate.IsAutomationRunThread(threadId);
         var llmMessages = new List<LlmChatMessage>(HistoryTurns + 2)
         {
-            LlmChatMessage.System(ComposeSystemPrompt(isAutomationRun)),
+            LlmChatMessage.System(ComposeSystemPrompt()),
         };
         llmMessages.AddRange(BuildHistory(thread));
 
         // Fetch available tools from the MCP server and shape them for the
         // OpenAI function-calling API. Empty list means "no tools" — the
         // model will just answer from knowledge.
-        var toolDefs = await BuildToolDefinitionsAsync(!isAutomationRun, ct).ConfigureAwait(false);
+        var toolDefs = await BuildToolDefinitionsAsync(ct).ConfigureAwait(false);
 
         // Build the per-turn pipeline. Steps are cheap to construct; the
         // long-lived collaborators (LLM client, MCP client, footman) are
@@ -360,7 +292,7 @@ public sealed class LmStudioAssistant : IAssistant
             ThreadId = threadId,
             MessageId = messageId,
             UserText = userText,
-            IsAutomationRun = isAutomationRun,
+            IsAutomationRun = false,
             LlmMessages = llmMessages,
             ToolDefs = toolDefs,
         };
@@ -373,13 +305,13 @@ public sealed class LmStudioAssistant : IAssistant
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await _publisher.PublishCompleteAsync(threadId, messageId, string.Empty, cancelled: true,
-                CancellationToken.None).ConfigureAwait(false);
+                ct: CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         catch (HttpRequestException)
         {
             await _publisher.PublishCompleteAsync(threadId, messageId, string.Empty, cancelled: true,
-                CancellationToken.None).ConfigureAwait(false);
+                ct: CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
@@ -412,7 +344,28 @@ public sealed class LmStudioAssistant : IAssistant
         }
 
         var finalText = sentSoFar.ToString();
-        var message = new RuntimeChatMessage(messageId, ChatRole.Assistant, finalText, DateTimeOffset.UtcNow);
+        // Copy citation cards from the pipeline onto the persisted message
+        // so the UI can render rich preview cards when the user reopens
+        // the thread. Null when the turn didn't call a source-producing
+        // tool (keeps the JSON payload small for casual chat).
+        var persistedSources = !response.SuppressSourceCardsUi && response.Sources.Count > 0
+            ? response.Sources
+                .Select(s => new ChatMessageSource(
+                    Url: s.Url,
+                    Title: s.Title,
+                    Domain: s.Domain,
+                    Excerpt: s.Excerpt,
+                    Favicon: s.Favicon,
+                    Thumbnail: s.Thumbnail,
+                    PublishedAt: s.PublishedAt))
+                .ToArray()
+            : null;
+        var message = new RuntimeChatMessage(
+            messageId,
+            ChatRole.Assistant,
+            finalText,
+            DateTimeOffset.UtcNow,
+            Sources: persistedSources);
 
         try
         {
@@ -424,7 +377,13 @@ public sealed class LmStudioAssistant : IAssistant
                 threadId, messageId);
         }
 
-        await _publisher.PublishCompleteAsync(threadId, messageId, finalText, cancelled, CancellationToken.None)
+        await _publisher.PublishCompleteAsync(
+                threadId,
+                messageId,
+                finalText,
+                cancelled,
+                persistedSources,
+                CancellationToken.None)
             .ConfigureAwait(false);
         return message;
     }
@@ -439,31 +398,15 @@ public sealed class LmStudioAssistant : IAssistant
     /// </summary>
     private ChatPipeline BuildTurnPipeline(IChatEventSink sink, IToolPermissionGate permissionGate)
     {
-        var sanitize = new Func<TurnContext, string, string>((ctx, draft) =>
-        {
-            // Scrub harmony / template-token leaks and <think> scaffolding —
-            // raw markers would otherwise feed back into the next turn's
-            // history. Automation runs additionally collapse "I can't /
-            // would you like me to" refusal loops since small local models
-            // emit them even when they have the capability.
-            var cleaned = AssistantResponseSanitizer.CleanChatReply(draft);
-            if (ctx.IsAutomationRun)
-                cleaned = AssistantResponseSanitizer.CollapseAutomationRefusalLoop(cleaned);
-            return cleaned;
-        });
+        var sanitize = new Func<TurnContext, string, string>((_, draft) =>
+            AssistantResponseSanitizer.CleanChatReply(draft));
 
         var toolLoop = new ToolLoopStep(
             _llm, _mcp, sink,
             permissionGate: permissionGate,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
-            interceptors: new IToolCallInterceptor[]
-            {
-                new ProposeAutomationInterceptor(_publisher, _gate),
-            },
-            argsRewriters: new IToolArgsRewriter[]
-            {
-                new AutomationSearchRecencyRewriter(),
-            },
+            interceptors: Array.Empty<IToolCallInterceptor>(),
+            argsRewriters: Array.Empty<IToolArgsRewriter>(),
             maxRoundTrips: MaxRoundTrips);
 
         return new ChatPipeline(new ITurnStep[]
@@ -523,7 +466,7 @@ public sealed class LmStudioAssistant : IAssistant
             new FootmanRouterStep(
                 Footman,
                 sink,
-                alwaysAllowToolNames: new[] { ProposeAutomationTool.ToolName }),
+                alwaysAllowToolNames: Array.Empty<string>()),
 
             // Guardrails: first-principles scaffold for reasoning-heavy
             // questions. Terminates the turn with a synthesized answer
@@ -581,13 +524,8 @@ public sealed class LmStudioAssistant : IAssistant
     /// <summary>
     /// Queries the MCP server for its advertised tools and reshapes them
     /// into the OpenAI function-calling structure expected by the LLM.
-    /// When <paramref name="includeProposeAutomation"/> is false, the
-    /// runtime-side virtual tool is omitted (see the automation-run guard
-    /// in <see cref="RespondAsync"/>).
     /// </summary>
-    private async Task<IReadOnlyList<ToolDefinition>> BuildToolDefinitionsAsync(
-        bool includeProposeAutomation,
-        CancellationToken ct)
+    private async Task<IReadOnlyList<ToolDefinition>> BuildToolDefinitionsAsync(CancellationToken ct)
     {
         IReadOnlyList<McpToolInfo> mcpTools;
         try
@@ -600,14 +538,9 @@ public sealed class LmStudioAssistant : IAssistant
             return Array.Empty<ToolDefinition>();
         }
 
-        if (mcpTools.Count == 0)
-        {
-            return includeProposeAutomation
-                ? new[] { ProposeAutomationTool.BuildDefinition() }
-                : Array.Empty<ToolDefinition>();
-        }
+        if (mcpTools.Count == 0) return Array.Empty<ToolDefinition>();
 
-        var defs = new List<ToolDefinition>(mcpTools.Count + (includeProposeAutomation ? 1 : 0));
+        var defs = new List<ToolDefinition>(mcpTools.Count);
         foreach (var t in mcpTools)
         {
             defs.Add(new ToolDefinition
@@ -621,15 +554,6 @@ public sealed class LmStudioAssistant : IAssistant
                     Parameters = t.InputSchema,
                 }
             });
-        }
-
-        // Virtual (runtime-side) tool: the assistant can emit this to pop an
-        // inline confirmation card in the chat. It is NOT sent to the MCP
-        // server — LmStudioAssistant intercepts the call and publishes a
-        // typed event instead. See ProposeAutomationTool.
-        if (includeProposeAutomation)
-        {
-            defs.Add(ProposeAutomationTool.BuildDefinition());
         }
         return defs;
     }

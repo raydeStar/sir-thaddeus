@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUp } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
+import { SourceCards } from '../components/SourceCards';
 import { ToolActivityPills } from '../components/ToolActivityPills';
 import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
-import { ProposalCard } from '../components/ProposalCard';
-import { useProposalsStore } from '../stores/proposalsStore';
+import type { ChatMessageSource } from '@thaddeus/shared-types';
 
 export const Route = createFileRoute('/chat/$threadId')({
   component: ChatThreadRoute,
@@ -88,7 +88,7 @@ function ChatThreadRoute() {
         data-testid="chat-message-list"
         className="flex-1 overflow-y-auto px-4 md:px-10"
       >
-        <div className="mx-auto w-full max-w-[720px] py-6 pb-12">
+        <div className="mx-auto w-full max-w-[720px] py-6 pb-40">
           {empty ? (
             <div className="flex h-full items-center justify-center pt-24 text-center">
               <p className="text-sm text-ink-subtle" data-testid="chat-thread-empty">
@@ -105,6 +105,7 @@ function ChatThreadRoute() {
                     key={m.id}
                     role={role as MessageRowProps['role']}
                     text={m.text}
+                    sources={m.sources ?? null}
                     messageId={m.id}
                     testId={`chat-message-${m.id}`}
                   />
@@ -173,24 +174,15 @@ function ChatThreadRoute() {
 interface MessageRowProps {
   role: 'user' | 'assistant' | 'system';
   text: string;
+  sources?: ChatMessageSource[] | null;
   messageId?: string;
   streaming?: boolean;
   testId: string;
 }
 
-function MessageRow({ role, text, messageId, streaming, testId }: MessageRowProps) {
+function MessageRow({ role, text, sources, messageId, streaming, testId }: MessageRowProps) {
   const normalized = String(role || '').toLowerCase();
   const isUser = normalized === 'user';
-
-  // Start the proposals WS listener the first time any assistant message
-  // renders. Idempotent — the store no-ops if already started.
-  const startProposals = useProposalsStore((s) => s.start);
-  useEffect(() => {
-    if (!isUser) startProposals();
-  }, [isUser, startProposals]);
-  const hasProposal = useProposalsStore((s) =>
-    messageId ? Boolean(s.byMessage[messageId]) : false,
-  );
 
   if (isUser) {
     return (
@@ -218,8 +210,8 @@ function MessageRow({ role, text, messageId, streaming, testId }: MessageRowProp
     >
       {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
-      {messageId && hasProposal ? <ProposalCard messageId={messageId} /> : null}
       <Markdown>{text}</Markdown>
+      {sources && sources.length > 0 ? <SourceCards sources={sources} /> : null}
       {streaming ? (
         <span
           className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-1 animate-pulse bg-accent align-middle"

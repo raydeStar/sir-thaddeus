@@ -36,10 +36,11 @@ public sealed class ChatTurnPublisher
         string messageId,
         string finalText,
         bool cancelled,
+        IReadOnlyList<ChatMessageSource>? sources = null,
         CancellationToken ct = default) =>
         _bus.PublishAsync(
             ChatTurnEvents.Complete,
-            new ChatTurnComplete(threadId, messageId, finalText, DateTimeOffset.UtcNow, cancelled),
+            new ChatTurnComplete(threadId, messageId, finalText, DateTimeOffset.UtcNow, cancelled, sources),
             correlationId: messageId,
             ct);
 
@@ -104,20 +105,4 @@ public sealed class ChatTurnPublisher
             correlationId: messageId,
             ct);
 
-    public Task PublishAutomationProposedAsync(
-        string proposalId,
-        string threadId,
-        string messageId,
-        string name,
-        string? description,
-        IReadOnlyList<string> steps,
-        AutomationSchedule? schedule,
-        CancellationToken ct = default) =>
-        _bus.PublishAsync(
-            ChatTurnEvents.AutomationProposed,
-            new ChatAutomationProposed(
-                proposalId, threadId, messageId, name, description, steps, schedule,
-                DateTimeOffset.UtcNow),
-            correlationId: messageId,
-            ct);
 }

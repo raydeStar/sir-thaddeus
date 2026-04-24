@@ -58,12 +58,6 @@ public sealed class ToolPermissionGate
     // the group is explicitly denied / Alwaysed via the modal.
     private readonly ConcurrentDictionary<ToolGroup, bool> _sessionAllow = new();
 
-    // Per-thread explicit tool allowlists. Used by automation runs so a
-    // pre-approved set of tools skips the modal entirely for that run,
-    // while unexpected tool calls still trigger the normal prompt flow.
-    // Keyed by threadId; value is a case-insensitive set of tool names.
-    private readonly ConcurrentDictionary<string, HashSet<string>> _threadAllowlists = new();
-
     // Pending ask requests keyed by request id. The UI pulls from GET
     // /api/permissions/pending and resolves with POST /api/permissions/respond.
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
@@ -87,53 +81,6 @@ public sealed class ToolPermissionGate
             .ToArray();
     }
 
-    /// <summary>
-    /// Returns true if the given thread is executing inside an automation run
-    /// (i.e. a <see cref="RegisterThreadAllowlist"/> scope is active on it).
-    /// Callers use this to suppress chat-only virtual tools (e.g.
-    /// <c>propose_automation</c>) whose UI makes no sense during a run.
-    /// </summary>
-    public bool IsAutomationRunThread(string threadId)
-        => !string.IsNullOrEmpty(threadId) && _threadAllowlists.ContainsKey(threadId);
-
-    /// <summary>
-    /// Registers an explicit allowlist of tool names for all tool calls made
-    /// within the given thread. Used by the automation runner to pre-approve
-    /// the tools the user selected when creating the automation. Overwrites
-    /// any prior allowlist on the same thread.
-    /// Returns an <see cref="IDisposable"/> that clears the allowlist — the
-    /// runner disposes it in a <c>finally</c>.
-    /// </summary>
-    public IDisposable RegisterThreadAllowlist(string threadId, IEnumerable<string> toolNames)
-    {
-        var set = new HashSet<string>(toolNames ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        _threadAllowlists[threadId] = set;
-        return new ThreadAllowlistHandle(this, threadId);
-    }
-
-    private void ClearThreadAllowlist(string threadId)
-    {
-        _threadAllowlists.TryRemove(threadId, out _);
-    }
-
-    private sealed class ThreadAllowlistHandle : IDisposable
-    {
-        private readonly ToolPermissionGate _gate;
-        private readonly string _threadId;
-        private bool _disposed;
-        public ThreadAllowlistHandle(ToolPermissionGate gate, string threadId)
-        {
-            _gate = gate;
-            _threadId = threadId;
-        }
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            _gate.ClearThreadAllowlist(_threadId);
-        }
-    }
-
     public async Task<ToolPermissionDecision> DecideAsync(
         string toolName,
         string argumentsJson,
@@ -143,16 +90,6 @@ public sealed class ToolPermissionGate
     {
         var group = ToolGroupClassifier.Classify(toolName);
         if (group == ToolGroup.Safe) return ToolPermissionDecision.Allow;
-
-        // Automation-run allowlist: if this thread belongs to an automation
-        // run and the tool is in its pre-approved list, allow without prompt.
-        // Tools NOT in the list still fall through to the normal policy so
-        // surprise tool calls surface a modal.
-        if (_threadAllowlists.TryGetValue(threadId, out var allowlist) &&
-            allowlist.Contains(toolName))
-        {
-            return ToolPermissionDecision.Allow;
-        }
 
         // Session shortcut: if the user approved the group earlier this
         // process, skip the prompt.

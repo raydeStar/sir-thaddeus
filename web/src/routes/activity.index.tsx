@@ -22,7 +22,7 @@ function ActivityRoute() {
     <PageScaffold
       testId="route-activity"
       title="Activity"
-      subtitle="Chat turns, voice turns, and automation runs from this runtime."
+      subtitle="Chat turns, voice turns, and routine runs from this runtime."
     >
       {error ? (
         <p className="mb-3 text-sm text-rose-500" data-testid="activity-error">

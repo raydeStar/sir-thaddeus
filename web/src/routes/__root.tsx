@@ -3,12 +3,12 @@ import { useEffect } from 'react';
 import {
   Activity,
   BookOpenText,
+  ClipboardList,
   Cog,
   Gauge,
   History,
   Home,
   MessageSquareText,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { useRuntimeStore } from '../stores/runtimeStore';
@@ -37,7 +37,7 @@ const primaryNav: ReadonlyArray<NavEntry> = [
 
 const secondaryNav: ReadonlyArray<NavEntry> = [
   { to: '/memory', label: 'Memory', icon: BookOpenText },
-  { to: '/automations', label: 'Automations', icon: Workflow },
+  { to: '/routines', label: 'Routines', icon: ClipboardList },
   { to: '/settings', label: 'Settings', icon: Cog },
   { to: '/diagnostics', label: 'Diagnostics', icon: Gauge },
 ];
