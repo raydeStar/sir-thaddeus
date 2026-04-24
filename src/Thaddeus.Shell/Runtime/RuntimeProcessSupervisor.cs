@@ -104,9 +104,11 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         }
 
         // Dev layout: walk up to the repo root and `dotnet run` the runtime project.
+        // localrunner.ps1 pre-builds the runtime in the default (Debug) configuration,
+        // so we match that here with --no-build for fast startup.
         var repoRoot = FindRepoRoot(shellDir);
         var runtimeProj = Path.Combine(repoRoot, "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj");
-        return ("dotnet", new[] { "run", "--project", runtimeProj, "-c", "Release", "--no-build" });
+        return ("dotnet", new[] { "run", "--project", runtimeProj, "--no-build" });
     }
 
     private static string FindRepoRoot(string startDir)

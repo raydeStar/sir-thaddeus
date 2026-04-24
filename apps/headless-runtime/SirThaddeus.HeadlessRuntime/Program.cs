@@ -450,10 +450,13 @@ static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
     var unitsNote = string.IsNullOrWhiteSpace(preferredUnits) ? "" : $" Preferred units: {preferredUnits}.";
     var locationBlock =
         $"The user's home location is: {locationLabel.Trim()}.{tzNote}{unitsNote} " +
-        "Use this as the default area when they ask about weather, local places, " +
-        "news, or times without specifying a location. Pass it to weather_geocode " +
-        "and similar location-scoped tools verbatim. Do not announce that you know " +
-        "their location — just use it naturally.";
+        "Use this ONLY as the default area when they ask about weather, local " +
+        "places, news, or times WITHOUT specifying a location. When the user " +
+        "explicitly names a different city (e.g. \"weather in Seattle\"), use " +
+        "the city THEY named — do not ask for clarification or second-guess. " +
+        "Pass the location string to weather_geocode and similar location-scoped " +
+        "tools verbatim. Do not announce that you know their home location — " +
+        "just use it naturally when they omit one.";
 
     return dateBlock + "\n\n" + locationBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
 }
