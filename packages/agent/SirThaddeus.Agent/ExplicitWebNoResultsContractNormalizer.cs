@@ -6,11 +6,12 @@ namespace SirThaddeus.Agent;
 public static class ExplicitWebNoResultsContractNormalizer
 {
     public const string TimeoutMessage =
-        "I hit a timeout while running web tools, so I couldn't complete that request right now. " +
+        "Live lookup timed out for this request, so I do not have confirmed results to quote right now. " +
         "Please retry in a moment or narrow the query.";
 
     public const string UnavailableMessage =
-        "The requested tool is unavailable for this request. Please retry in a moment.";
+        "Live lookup is unavailable for this request, so I do not have confirmed results to quote right now. " +
+        "Please retry in a moment.";
 
     public static string? TryBuildResponse(
         string? userMessage,

@@ -197,7 +197,7 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Contains("Live web lookup is unavailable right now", response.Text, StringComparison.Ordinal);
+        Assert.Contains("I don't have fresh live results for this turn", response.Text, StringComparison.Ordinal);
         Assert.Contains("best-effort answer", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.True(response.Text.Length > 50);
     }
@@ -542,7 +542,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = "The requested tool is unavailable for this request. Please retry in a moment.\n\n-- Sir Thaddeus",
+                    Content = "Live lookup is unavailable for this request, so I do not have confirmed results to quote right now. Please retry in a moment.\n\n-- Sir Thaddeus",
                     FinishReason = "stop"
                 };
             }

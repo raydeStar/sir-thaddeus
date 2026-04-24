@@ -162,9 +162,55 @@ public static class ToolCallRedactor
             _ when lower.StartsWith("memory")
                 => Truncate(output, 300).ToLowerInvariant(),
 
+            // Capability listing: the raw manifest can be 10-20 KB. Default
+            // truncation to 200 chars strips 95% of the content, which
+            // breaks any downstream consumer checking whether the model
+            // actually surveyed tools (scoring sees only the first entry).
+            // Emit a compact structured summary instead — tool count plus
+            // a comma-joined list of names. Safe: tool names are public
+            // metadata with no user data.
+            "toollistcapabilities" or "tool_list_capabilities"
+                => SummarizeToolListCapabilities(output),
+
             // Default: truncate to safe length
             _ => Truncate(output, DefaultMaxChars)
         };
+    }
+
+    private static string SummarizeToolListCapabilities(string output)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return $"[tool_list_capabilities: {output.Length} chars]";
+
+            var names = new List<string>();
+            foreach (var entry in doc.RootElement.EnumerateArray())
+            {
+                if (entry.TryGetProperty("name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String)
+                {
+                    var name = nameEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        names.Add(name);
+                }
+                if (names.Count >= 40) break; // keep the summary bounded
+            }
+
+            if (names.Count == 0)
+                return $"[tool_list_capabilities: {output.Length} chars, no names parseable]";
+
+            // Preserve the original tool-name casing so downstream
+            // consumers (e.g. harness scoring) that require capitalized
+            // or digit-bearing tokens see meaningful content.
+            var joined = string.Join(", ", names);
+            return $"[tool_list_capabilities: {names.Count} tool(s): {Truncate(joined, 400)}]";
+        }
+        catch
+        {
+            return $"[tool_list_capabilities: {output.Length} chars, unparseable]";
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

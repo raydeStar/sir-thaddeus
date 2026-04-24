@@ -290,7 +290,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 if (timeoutErrorCount > 0)
                 {
                     const string timeoutMsg =
-                        "I hit a timeout while running web tools, so I couldn't complete that request right now. " +
+                        "Live lookup timed out for this request, so I do not have confirmed results to quote right now. " +
                         "Please retry in a moment or narrow the query.";
                     request.History.Add(ChatMessage.Assistant(timeoutMsg));
                     log("AGENT_TIMEOUT_FALLBACK", timeoutMsg);
@@ -678,10 +678,10 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                    ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
                    StringComparison.Ordinal) ||
                trimmed.StartsWith(
-                   "The requested tool is currently unavailable right now.",
+                   "Live lookup is unavailable for this turn",
                    StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith(
-                   "I hit a timeout while running web tools",
+                   "Live lookup timed out for this request",
                    StringComparison.OrdinalIgnoreCase);
     }
 
@@ -820,7 +820,7 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
             return text;
         }
 
-        return $"The requested tool is currently unavailable right now.\n\n{text.Trim()}";
+        return $"Live lookup is unavailable for this turn, so this answer is best-effort and may be out of date.\n\n{text.Trim()}";
     }
 
     private async Task<AgentResponse> BuildBestEffortOfflineFallbackAsync(
@@ -843,7 +843,9 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         fallbackMessages.Insert(0, ChatMessage.System(
             "Live tool-backed lookup is offline for this turn.\n" +
             "Answer with best effort from your existing non-real-time knowledge.\n" +
+            "Lead with the best answer you can give, not a refusal.\n" +
             "Do not mention tools, permissions, network, or internet status unless the user explicitly asks for diagnostics.\n" +
+            "Do not start with 'I can't', 'I cannot', or similar capability disclaimers.\n" +
             "If the request depends on current events and certainty is low, be explicit about uncertainty and avoid fabricated specifics."));
 
         LlmResponse fallbackResponse;
