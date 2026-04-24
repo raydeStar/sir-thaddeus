@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Sparkles } from 'lucide-react';
+import { ArrowUp, ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 
 export const Route = createFileRoute('/')({
@@ -62,12 +62,12 @@ function HomeRoute() {
     }
   };
 
-  const recent = threads.slice(0, 5);
+  const recent = threads.slice(0, 6);
 
   return (
     <section
       data-testid="route-home"
-      className="mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 pt-24 pb-16 md:pt-32"
+      className="mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 pt-20 pb-16 md:pt-28"
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
       <div
@@ -136,37 +136,51 @@ function HomeRoute() {
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}
       {recent.length > 0 ? (
-        <nav aria-label="Recent conversations" className="mt-16">
-          <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-            Recent
-          </p>
-          <ul className="divide-y divide-line">
+        <nav aria-label="Recent conversations" className="mt-20">
+          {/* Hairline divider gives the section its own visual weight so it
+              doesn't read as a continuation of the input hint. */}
+          <div className="mb-6 h-px bg-line" aria-hidden />
+          <div className="mb-4 flex items-baseline justify-between">
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+              Recent
+            </p>
+            <Link
+              to="/history"
+              className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle transition-colors hover:text-accent"
+            >
+              View all
+            </Link>
+          </div>
+          <ul className="space-y-1">
             {recent.map((t) => (
               <li key={t.id}>
                 <Link
                   to="/chat/$threadId"
                   params={{ threadId: t.id }}
                   data-testid={`home-recent-${t.id}`}
-                  className="flex items-center justify-between gap-3 py-3 text-sm text-ink transition-colors hover:text-accent"
+                  className="group/recent flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink transition-colors hover:bg-canvas-raised"
                 >
-                  <span className="min-w-0 truncate">
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-canvas-sunken text-ink-subtle transition-colors group-hover/recent:bg-accent-soft group-hover/recent:text-accent"
+                    aria-hidden
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">
                     {t.title || 'Untitled conversation'}
                   </span>
-                  <span className="shrink-0 text-xs text-ink-subtle">
+                  <span className="shrink-0 text-xs tabular-nums text-ink-subtle">
                     {formatRelative(t.updatedAt)}
                   </span>
+                  <ChevronRight
+                    className="h-3.5 w-3.5 shrink-0 text-ink-subtle opacity-0 transition-opacity group-hover/recent:opacity-100"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
                 </Link>
               </li>
             ))}
           </ul>
-          <div className="mt-4">
-            <Link
-              to="/history"
-              className="text-xs text-ink-muted hover:text-accent"
-            >
-              All conversations →
-            </Link>
-          </div>
         </nav>
       ) : null}
     </section>
