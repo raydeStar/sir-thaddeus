@@ -5,8 +5,12 @@ allowed_tools:
   - time_now
 mode: live
 assertions:
-  required_tools:
-    - time_now
+  # `time_now` is a valid path, but the deterministic pre-router now
+  # answers "what time is it" locally from DateTimeOffset.Now without
+  # burning a tool call. Both paths produce the same visible result;
+  # the forbidden_tools list below ensures we still fail on web_search
+  # or other tool misrouting.
+  required_tools: []
   forbidden_tools:
     - system_execute
     - file_read

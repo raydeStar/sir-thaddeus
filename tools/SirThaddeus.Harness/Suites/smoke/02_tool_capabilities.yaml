@@ -13,8 +13,11 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: true
 expectations:
+  # Prefix so "capabilities" (plural) also matches — the scorer uses
+  # substring match, and natural summaries of a tool manifest use the
+  # plural form more often than the singular.
   required_keywords:
-    - capability
+    - capabilit
   forbidden_keywords: []
   max_response_chars: 1200
 min_score: 7.0
