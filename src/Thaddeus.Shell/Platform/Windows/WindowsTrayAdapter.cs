@@ -36,6 +36,12 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
     private const int BaseMenuId = 1000;
     private static readonly IntPtr IDI_APPLICATION = new(32512);
 
+    private const uint IMAGE_ICON = 1;
+    private const uint LR_LOADFROMFILE = 0x00000010;
+    private const uint LR_DEFAULTSIZE = 0x00000040;
+
+    private const string TrayIconFileName = "sir-thaddeus-tray.ico";
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern ushort RegisterClassEx(in WNDCLASSEX lpwcx);
 
@@ -74,6 +80,18 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
 
     [DllImport("user32.dll")]
     private static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadImage(
+        IntPtr hInst,
+        string lpszName,
+        uint uType,
+        int cxDesired,
+        int cyDesired,
+        uint fuLoad);
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -115,6 +133,8 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
     private readonly WndProc _windowProc;
     private readonly string _className = "ThaddeusTrayWindow_" + Guid.NewGuid().ToString("N");
     private IntPtr _windowHandle;
+    private IntPtr _trayIcon;
+    private bool _ownsTrayIcon;
     private bool _disposed;
     private bool _isOperational;
     private TrayMenu _menu = new(Array.Empty<TrayMenuItem>());
@@ -239,13 +259,13 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
         try
         {
             var instance = GetModuleHandle(null);
-            var icon = LoadIcon(IntPtr.Zero, IDI_APPLICATION);
+            _trayIcon = LoadTrayIcon(out _ownsTrayIcon);
             var cls = new WNDCLASSEX
             {
                 cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
                 hInstance = instance,
-                hIcon = icon,
-                hIconSm = icon,
+                hIcon = _trayIcon,
+                hIconSm = _trayIcon,
                 lpszClassName = _className,
                 lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_windowProc),
             };
@@ -278,8 +298,9 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
                 return;
             }
 
-            AddIcon(icon);
+            AddIcon(_trayIcon);
             _isOperational = true;
+            _ready.Set();
 
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
             {
@@ -301,6 +322,13 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
                 try { DestroyWindow(_windowHandle); } catch { /* best effort */ }
                 _windowHandle = IntPtr.Zero;
             }
+
+            if (_ownsTrayIcon && _trayIcon != IntPtr.Zero)
+            {
+                try { DestroyIcon(_trayIcon); } catch { /* best effort */ }
+            }
+            _trayIcon = IntPtr.Zero;
+            _ownsTrayIcon = false;
         }
     }
 
@@ -433,8 +461,34 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
             return;
         }
 
-        var data = CreateNotifyIconData(LoadIcon(IntPtr.Zero, IDI_APPLICATION));
+        var data = CreateNotifyIconData(_trayIcon);
         Shell_NotifyIcon(NIM_MODIFY, ref data);
+    }
+
+    private IntPtr LoadTrayIcon(out bool owned)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "assets", "icons", TrayIconFileName);
+        if (File.Exists(path))
+        {
+            var handle = LoadImage(IntPtr.Zero, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+            if (handle != IntPtr.Zero)
+            {
+                owned = true;
+                return handle;
+            }
+
+            _logger.LogWarning(
+                "tray.windows.icon_load_failed path={Path} error={Error}",
+                path,
+                Marshal.GetLastWin32Error());
+        }
+        else
+        {
+            _logger.LogWarning("tray.windows.icon_missing path={Path}", path);
+        }
+
+        owned = false;
+        return LoadIcon(IntPtr.Zero, IDI_APPLICATION);
     }
 
     private void RemoveIcon()
@@ -456,7 +510,7 @@ public sealed class WindowsTrayAdapter : ITrayAdapter
         uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
         uCallbackMessage = WM_TRAYICON,
         hIcon = icon,
-        szTip = "Sir Thaddeus",
+        szTip = "Sir Thaddeus — At your service",
         szInfo = string.Empty,
         szInfoTitle = string.Empty,
     };
