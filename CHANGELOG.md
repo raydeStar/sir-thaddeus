@@ -1,5 +1,115 @@
 # Changelog
 
+## 0.3.0 — 2026-04-24
+
+First versioned release. Previous builds reported `0.0.0-dev`; from here
+on, `Assembly.GetName().Version` and `package.json` report a real SemVer
+and the binary identifies itself in logs, diagnostics, and the UI
+runtime-version badge.
+
+### Routines replaces Automations
+
+- **Rip-out**: the Phase 7.2 Automations feature is gone (AutomationRunner,
+  AutomationScheduler, ScheduleMath, JsonFileAutomationStore,
+  AutomationsApi, the propose_automation virtual tool + its interceptor,
+  the per-thread tool allowlist on `ToolPermissionGate`, the AutomationRun
+  activity kind, and all web-side automation routes). Scheduled background
+  agent execution was drifting away from the "local-first, permissioned,
+  visible" trust model — pulling it out lets us ship v1 without a feature
+  we'd have had to either finish or keep apologizing for.
+- **Routines** is the replacement: user-invoked repeatable checklists
+  (Morning Launch, Evening Shutdown, Fitness Check-In, Project Focus,
+  Weekly Review — seeded on first boot, idempotent across reboots, never
+  overwritten by the seeder after a user edits them). New shared-types
+  records, file-backed store with cascade delete and sealed-run
+  immutability, REST surface for CRUD + run lifecycle, web routes for
+  list/run/edit/history, and audit events for every lifecycle transition.
+  No background fire. No silent side effects. A meta-test asserts no
+  new `IHostedService` gets added under `Thaddeus.Runtime.Routines` so
+  the "no scheduler" property is enforced in the test suite.
+
+### Chat
+
+- **Structured source cards** alongside assistant replies. The agent
+  already emitted a `SOURCES_JSON` block when `web_search` fired; the new
+  `SourceCardExtractor` parses, dedupes, and orders it into an
+  `AgentSource` list, flowed through `AgentResponse.Sources` and
+  `ChatMessageSource` to the web store. `SourceCards.tsx` renders
+  featured + standard cards with favicons, thumbnails, and excerpts.
+  Smoke test covers the end-to-end flow.
+
+### Agent behavior
+
+- **Weather intent routing** forces the first tool-loop round into
+  `weather_geocode` → `weather_forecast` when the prompt is clearly a
+  weather question, instead of falling through to `web_search` and
+  getting worse answers from search snippets.
+- **Imperative tool requests** ("use web_search", "try file_read") now
+  set `tool_choice` to the named tool so small local models can't
+  fabricate "I can't do that" errors when the user explicitly asked for
+  a tool that exists.
+- **`WeatherTools`** accepts both `location`/`place` aliases for
+  geocode and both flat and nested coordinate shapes for forecast —
+  small models emit either depending on context.
+- **Offline-path wording** leads with the best-effort answer (training
+  data, time utilities) and adds a freshness caveat, instead of
+  refusing outright. `DeterministicUtilityEngine` now answers
+  "what time is it" locally with "The current local time is …" so
+  downstream matchers pick up the keyword.
+- **`ToolCallRedactor.SummarizeToolListCapabilities`** compacts verbose
+  tool-manifest responses into per-category summaries instead of
+  truncating mid-tool.
+
+### Settings
+
+- **Clear recovered safe mode**: once SafeMode tripped from
+  `settings_json_corrupt` or `unsupported_settings_schema_v*`, the flag
+  stayed true forever. Now the first successful load against a
+  supported schema clears it and persists the cleared state.
+- **Fix `FilesSettings` equality**: default record equality was
+  reference-comparing `AllowedRoots`, so a JSON round-trip (which
+  deserializes into `List<string>`) never matched a fresh `Defaults()`
+  (which produces `string[]`). Three latent round-trip tests had been
+  red because of this.
+
+### Shell
+
+- **Butler voice** on tray menu and windows ("At your service, sir",
+  "Stand down", "Dismiss", "At the ready") instead of generic verbs.
+  Tray loads a custom icon with a P/Invoke fallback to the app icon.
+
+### Build / dev / release
+
+- **Repository versioning**: `Directory.Build.props` VersionPrefix
+  bumped to `0.3.0`. `web/package.json` and
+  `packages/shared-types/ts/package.json` aligned. Local dev builds
+  report `0.3.0-dev`; CI release tags still override via `-p:Version`.
+- **`tests/shell/Thaddeus.Shell.Tests.csproj` builds again**: resolved
+  NU1605 (bumped `Microsoft.Extensions.Logging.Abstractions` to 10.0.3
+  to match the transitive graph, dropped the unused direct
+  `Microsoft.Extensions.Logging` ref), added
+  `InternalsVisibleTo("Thaddeus.Shell.Tests")` on `Thaddeus.Shell.csproj`
+  so the tests can see `ShellSessionController.OpenWorkspaceMenuId` /
+  `StopAllMenuId`, and added a missing `using Xunit;` that the dead
+  build had been hiding. Shell now contributes **41 tests** to the green
+  suite (was 0).
+- **`localrunner.ps1`** pre-builds both Shell and Runtime so the
+  supervisor's `--no-build` spawn path is honest, and adds Shell to the
+  kill-list.
+- **Playwright global-setup** pre-builds the SPA and Release runtime so
+  `wwwroot/` bundles match the embedded binary at test time.
+- **Build artifacts gitignored**: `src/Thaddeus.Runtime/wwwroot/assets/`
+  and `wwwroot/index.html` (regenerated by hybrid-shell auto-sync on
+  every `dotnet build`, with hash-suffixed filenames that churned with
+  every change), plus `.playwright-mcp/`, `test-results/`, and loose
+  repo-root `*.png` screenshots.
+
+### Verified
+
+- `dotnet build SirThaddeus.sln` — 0 errors, 0 warnings.
+- Full test suite — **2,345 pass, 0 fail, 0 skip**
+  (2,190 main + 114 runtime + 41 shell).
+
 ## 2026-04-19 — Production Coherence (observability, diagnostics, permission proofs)
 
 This release is connective-tissue work: the features were already here,
