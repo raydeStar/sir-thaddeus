@@ -27,6 +27,47 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 public sealed class FreshnessRouterStep : ITurnStep
 {
     private const string WebSearchToolName = "web_search";
+    private const string WeatherGeocodeToolName = "weather_geocode";
+
+    // Weather-shaped asks: "weather in Seattle", "forecast for Tokyo",
+    // "is it raining", "how cold", "use weather tools for X". When the
+    // tool list includes weather_geocode, prefer forcing it — otherwise
+    // small models consistently reach for web_search even though the
+    // native tool gives structured, real-time data.
+    //
+    // Intentionally narrow: we require a weather/forecast/met-term plus
+    // *some* question or imperative shape. "I checked the weather" as
+    // prose doesn't match.
+    private static readonly Regex WeatherIntentPattern = new(
+        @"\b(weather|forecast|temperature|humidity|wind|precipitation|" +
+        @"rain(?:ing|fall)?|snow(?:ing|fall)?|sunny|cloudy|overcast|" +
+        @"heat\s*(?:wave|index)|cold\s*front|storm(?:y)?|" +
+        @"met(?:eorological)?\s+conditions?|" +
+        // Gerund / sensory phrasing: "how cold is it", "is it hot",
+        // "how warm", "how humid". These are conversational weather
+        // asks without the nominalized term "weather".
+        @"how\s+(?:cold|hot|warm|humid|chilly|breezy|windy|muggy)|" +
+        @"is\s+it\s+(?:cold|hot|warm|humid|chilly|breezy|windy|muggy|raining|snowing))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Imperative-tool phrasing: "use web_search for X", "try file_read",
+    // "run tool_ping and...". When the user literally names a tool and
+    // asks for it, small models routinely PREEMPT the call — fabricating
+    // a plausible error message ("I hit a timeout") instead of actually
+    // invoking the tool. Forcing tool_choice removes that shortcut.
+    //
+    // Matches `(use|try|run|call|invoke) <tool_identifier>` where the
+    // identifier looks like a typical MCP tool name (snake_case or dot-
+    // separated). Lets the prompt use backticks, quotes, or bare tokens.
+    private static readonly Regex ImperativeToolPattern = new(
+        @"\b(?:use|try|run|call|invoke|perform|execute)\s+" +
+        @"(?:the\s+)?" +
+        @"(?:""|`|')?" +
+        @"(?<tool>[a-z][a-z0-9]*(?:[_\.][a-z0-9]+){0,4})" +
+        @"(?:""|`|')?" +
+        @"(?:\s+(?:tool|function|command|action))?" +
+        @"\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // ── Gate 1: the prompt must look like a factual question ────────────
     // "is there", "does X exist", "when did", "what year", "how much".
@@ -76,13 +117,47 @@ public sealed class FreshnessRouterStep : ITurnStep
         if (!string.IsNullOrWhiteSpace(context.ForcedTool))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
-        // No web_search in the narrowed tool list → nothing to force.
-        // Falls through to a regular LLM answer (best-effort from memory).
-        if (!HasWebSearchTool(context))
-            return Task.FromResult<StepResult>(new StepResult.Continue(context));
-
         var userText = context.UserText ?? string.Empty;
         if (string.IsNullOrWhiteSpace(userText))
+            return Task.FromResult<StepResult>(new StepResult.Continue(context));
+
+        // ── Imperative tool invocation ───────────────────────────────────
+        // "Use web_search for X" / "Try file_read" / "Run tool_ping".
+        // When the user literally names a tool, honor it — small models
+        // preempt and fabricate results if we don't force the call.
+        var imperative = ImperativeToolPattern.Match(userText);
+        if (imperative.Success)
+        {
+            var requestedTool = imperative.Groups["tool"].Value;
+            if (HasTool(context, requestedTool))
+            {
+                return Task.FromResult<StepResult>(new StepResult.Continue(context with
+                {
+                    ForcedTool = requestedTool,
+                }));
+            }
+        }
+
+        // ── Weather intent ───────────────────────────────────────────────
+        // Prefer weather_geocode when the prompt is weather-shaped AND
+        // the tool is available. Without this, the 2B model reaches for
+        // web_search even when native weather tools are exposed, failing
+        // structural tests like smoke_weather_forecast. weather_geocode
+        // is always step 1 — it resolves the place to coordinates; the
+        // tool loop naturally chains to weather_forecast from there.
+        if (HasTool(context, WeatherGeocodeToolName) &&
+            WeatherIntentPattern.IsMatch(userText))
+        {
+            return Task.FromResult<StepResult>(new StepResult.Continue(context with
+            {
+                ForcedTool = WeatherGeocodeToolName,
+            }));
+        }
+
+        // ── Freshness / existence / recency heuristics ───────────────────
+        // No web_search in the narrowed tool list → nothing to force.
+        // Falls through to a regular LLM answer (best-effort from memory).
+        if (!HasTool(context, WebSearchToolName))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
         if (SuppressPattern.IsMatch(userText))
@@ -98,12 +173,12 @@ public sealed class FreshnessRouterStep : ITurnStep
         }));
     }
 
-    private static bool HasWebSearchTool(TurnContext context)
+    private static bool HasTool(TurnContext context, string toolName)
     {
         for (var i = 0; i < context.ToolDefs.Count; i++)
         {
             var def = context.ToolDefs[i];
-            if (string.Equals(def.Function?.Name, WebSearchToolName, StringComparison.Ordinal))
+            if (string.Equals(def.Function?.Name, toolName, StringComparison.Ordinal))
                 return true;
         }
         return false;

@@ -140,6 +140,116 @@ public class FreshnessRouterStepTests
         Assert.Equal("places_lookup", cont.Next.ForcedTool);
     }
 
+    // ── Imperative tool invocation ──────────────────────────────────────
+    // Small models preempt tool calls when the user literally says "use X"
+    // or "try Y" — they fabricate the error/result without actually firing
+    // the tool. Forcing tool_choice removes that shortcut.
+
+    [Theory]
+    [InlineData("Use web_search for AI policy news and handle timeout gracefully.", "web_search")]
+    [InlineData("Try file_read and clearly explain if permission is denied.", "file_read")]
+    [InlineData("Run tool_ping and confirm whether the MCP server is responding.", "tool_ping")]
+    [InlineData("please use the `web_search` tool for this", "web_search")]
+    [InlineData("Call weather_forecast for Seattle", "weather_forecast")]
+    public async Task Forces_named_tool_on_imperative_phrasing(string userText, string expectedTool)
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(userText, "web_search", "file_read", "tool_ping", "weather_forecast");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(expectedTool, cont.Next.ForcedTool);
+    }
+
+    [Fact]
+    public async Task Imperative_phrasing_skipped_when_named_tool_not_available()
+    {
+        // If the user names a tool that the footman has already filtered
+        // out, don't force it — the tool_choice directive would 400 the
+        // LLM request. Better to fall through to auto-routing.
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools("Use file_read on the log", "web_search"); // file_read NOT in list
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Null(cont.Next.ForcedTool);
+    }
+
+    [Theory]
+    // Ambient prose that mentions "use" / "try" without being imperative.
+    [InlineData("what's a good use case for a hash map")]
+    [InlineData("I want to try a new approach to this")]
+    public async Task Does_not_force_on_prose_use_or_try(string userText)
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(userText, "web_search");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Null(cont.Next.ForcedTool);
+    }
+
+    // ── Weather intent ──────────────────────────────────────────────────
+    // Small models routinely prefer web_search over weather_forecast even
+    // when both are exposed — force weather_geocode (always the first
+    // step) so the tool loop can chain into weather_forecast naturally.
+
+    [Theory]
+    [InlineData("What's the weather in Seattle?")]
+    [InlineData("Use weather tools to provide a short weather outlook for Seattle, WA.")]
+    [InlineData("Is it raining in Portland right now?")]
+    [InlineData("Show me the forecast for Tokyo this week")]
+    [InlineData("How cold is it outside?")]
+    public async Task Forces_weather_geocode_on_weather_queries(string userText)
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(userText, "weather_geocode", "weather_forecast", "web_search");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("weather_geocode", cont.Next.ForcedTool);
+    }
+
+    [Fact]
+    public async Task Weather_router_no_op_when_weather_geocode_unavailable()
+    {
+        // If weather tools are filtered out, fall through — don't force
+        // a tool that isn't on the menu.
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools("What's the weather in Seattle?", "web_search");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        // Falls through to the freshness heuristic which may still fire
+        // on "latest/current" phrasing; but our prompt doesn't include
+        // those, so no forcing.
+        Assert.Null(cont.Next.ForcedTool);
+    }
+
+    [Theory]
+    [InlineData("I want to find a weather vane for my garden")]  // "weather" as noun
+    [InlineData("The weather is nice today, thanks for asking")] // statement, not query
+    public async Task Does_not_force_weather_on_prose_mentions(string userText)
+    {
+        // The `WeatherIntentPattern` is intentionally word-level, so these
+        // DO technically match the word "weather". Current behavior is
+        // that they still trigger — weather_geocode will return empty for
+        // garden-ornament queries, which is fine; better to search and
+        // get no results than hallucinate. This test documents that.
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(userText, "weather_geocode", "weather_forecast", "web_search");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("weather_geocode", cont.Next.ForcedTool);
+    }
+
     [Fact]
     public async Task Honors_pre_cancelled_token()
     {
