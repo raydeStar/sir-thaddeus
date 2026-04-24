@@ -111,6 +111,42 @@ public sealed class SettingsManagerEnvironmentOverrideTests
     }
 
     [Fact]
+    public void LoadWithDiagnostics_ClearsRecoveredSchemaSafeMode_WhenSchemaIsNowSupported()
+    {
+        var settingsPath = CreateTempSettingsPath();
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            File.WriteAllText(settingsPath, """
+                {
+                  "schemaVersion": 4,
+                  "runtimeSafety": {
+                    "safeMode": true,
+                    "safeModeReason": "unsupported_settings_schema_v4",
+                    "safeModeSinceUtc": "2026-04-01T13:53:48.9702863+00:00"
+                  }
+                }
+                """);
+
+            using var envScope = new EnvironmentVariableScope(new Dictionary<string, string?>
+            {
+                ["ST_SETTINGS_PATH"] = settingsPath
+            });
+
+            var result = SettingsManager.LoadWithDiagnostics();
+
+            Assert.False(result.Settings.RuntimeSafety.SafeMode);
+            Assert.Equal(string.Empty, result.Settings.RuntimeSafety.SafeModeReason);
+            Assert.Equal(string.Empty, result.Settings.RuntimeSafety.SafeModeSinceUtc);
+        }
+        finally
+        {
+            DeleteTempSettingsPath(settingsPath);
+        }
+    }
+
+    [Fact]
     public void OptionalFeatureHelpers_NonBaselineProfile_AllowExplicitOptIns()
     {
         var settings = new AppSettings

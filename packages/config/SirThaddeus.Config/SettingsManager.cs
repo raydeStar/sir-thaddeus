@@ -169,6 +169,24 @@ public static class SettingsManager
             }
 
             string? safeModeReason = null;
+            var shouldClearRecoveredSafeMode =
+                loaded.SchemaVersion <= AppSettings.CurrentSchemaVersion &&
+                loaded.RuntimeSafety is { SafeMode: true } &&
+                ShouldClearRecoveredSafeMode(loaded.RuntimeSafety.SafeModeReason);
+
+            if (shouldClearRecoveredSafeMode)
+            {
+                normalized = normalized with
+                {
+                    RuntimeSafety = normalized.RuntimeSafety with
+                    {
+                        SafeMode = false,
+                        SafeModeReason = "",
+                        SafeModeSinceUtc = ""
+                    }
+                };
+            }
+
             if (loaded.SchemaVersion > AppSettings.CurrentSchemaVersion)
             {
                 // Future schema detected: run fail-closed until user updates.
@@ -184,7 +202,7 @@ public static class SettingsManager
                 };
             }
 
-            if (requiresMigration || safeModeReason is not null)
+            if (requiresMigration || safeModeReason is not null || shouldClearRecoveredSafeMode)
                 Save(normalized);
 
             return new SettingsLoadResult
@@ -469,6 +487,16 @@ public static class SettingsManager
             },
             ToolBudgets = normalizedBudgets
         };
+    }
+
+    private static bool ShouldClearRecoveredSafeMode(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return false;
+
+        var trimmed = reason.Trim();
+        return trimmed.Equals("settings_json_corrupt", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("unsupported_settings_schema_v", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, LocationSettings> NormalizeLocationsByProfile(
