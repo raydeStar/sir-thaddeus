@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Thaddeus.Shell.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\..\assets\icons\sir-thaddeus.ico">
       <Link>assets\icons\sir-thaddeus.ico</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

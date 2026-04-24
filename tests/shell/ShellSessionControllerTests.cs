@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Thaddeus.Shell.Platform;
 using Thaddeus.Shell.Windows;
+using Xunit;
 
 namespace Thaddeus.Shell.Tests;
 
