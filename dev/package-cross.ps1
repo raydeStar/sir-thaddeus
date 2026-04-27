@@ -76,10 +76,16 @@ function Get-VersionLabel([string]$RawVersion) {
 }
 
 function Get-AssemblyVersion([string]$VersionLabel) {
+    # MSBuild's -p:Version accepts NuGet/SemVer versions, not branch labels.
+    # Keep non-release labels for archive names, but let MSBuild use the
+    # repo default version for those builds.
     if ([string]::IsNullOrWhiteSpace($VersionLabel)) { return "" }
     $v = $VersionLabel.Trim()
-    if ($v.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($v -match '^[vV](?=\d)') {
         $v = $v.Substring(1)
+    }
+    if ($v -notmatch '^\d+\.\d+\.\d+(\.\d+)?(-[0-9A-Za-z][0-9A-Za-z\.-]*)?(\+[0-9A-Za-z][0-9A-Za-z\.-]*)?$') {
+        return ""
     }
     return $v
 }
@@ -126,6 +132,12 @@ Write-Host "  Configuration : $Configuration"
 Write-Host "  SelfContained : $effectiveSelfContained"
 Write-Host "  Bundle profile: $bundleProfile"
 Write-Host "  Version       : $(if ($versionLabel) { $versionLabel } else { '<timestamp>' })"
+if (-not [string]::IsNullOrWhiteSpace($versionLabel) -and [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+    Write-Host "  MSBuildVersion: <default; label is not NuGet-compatible>"
+}
+elseif (-not [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+    Write-Host "  MSBuildVersion: $assemblyVersion"
+}
 Write-Host "  Stage dir     : $stageDir"
 Write-Host "  Archive       : $archivePath"
 
