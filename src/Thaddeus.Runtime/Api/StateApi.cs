@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
 using Thaddeus.Runtime.Events;
+using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.State;
-using Thaddeus.Runtime.Voice;
 using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Api;
@@ -66,14 +66,12 @@ public static class StateApi
         })
             .WithName("StopRuntime");
 
-        // Phase 2.6 stop-all panic button. Cancels any in-flight STT/TTS and drives
-        // the state machine through Stopping → Idle. The shell hits this endpoint
-        // when the global stop-all shortcut fires; the React workspace can also
-        // call it from the Stop control in the input bar.
-        app.MapPost("/api/stop-all", (VoiceModeController voice, RuntimeStateMachine machine) =>
+        // Panic button. Cancels in-flight voice work and tears down managed sidecars
+        // such as the MCP server without terminating the workspace itself.
+        app.MapPost("/api/stop-all", async (RuntimeStopAllService stopAll, HttpContext context) =>
         {
-            voice.StopAll();
-            return Results.Ok(new { applied = true, current = machine.Current.ToString() });
+            var result = await stopAll.StopAllAsync(context.RequestAborted).ConfigureAwait(false);
+            return Results.Json(result, StateSnapshotJsonContext.Default.RuntimeStopAllResult);
         })
             .WithName("StopAll");
 
@@ -105,6 +103,7 @@ public static class StateApi
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UseStringEnumConverter = true)]
 [JsonSerializable(typeof(RuntimeStateEvent))]
+[JsonSerializable(typeof(RuntimeStopAllResult))]
 public partial class StateSnapshotJsonContext : JsonSerializerContext
 {
 }

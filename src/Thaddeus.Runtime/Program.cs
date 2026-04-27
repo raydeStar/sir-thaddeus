@@ -161,6 +161,7 @@ public static class Program
             builder.Services.AddSingleton<McpClientHost>();
             builder.Services.AddSingleton<IMcpToolClient>(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddHostedService(sp => sp.GetRequiredService<McpClientHost>());
+            builder.Services.AddSingleton<RuntimeStopAllService>();
 
             // Gate that wraps every MCP call with the user's permission policy.
             builder.Services.AddSingleton<ToolPermissionGate>();

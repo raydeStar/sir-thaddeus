@@ -108,6 +108,27 @@ public sealed class ShellSessionControllerTests
     }
 
     [Fact]
+    public async Task Tray_menu_uses_clear_command_labels()
+    {
+        var workspace = new FakeWorkspaceWindow();
+        var tray = new FakeTrayAdapter(isSupported: true);
+        var sut = new ShellSessionController(
+            workspace,
+            tray,
+            () => Task.CompletedTask,
+            NullLogger<ShellSessionController>.Instance);
+
+        await sut.InitializeAsync(startMinimized: false, CancellationToken.None);
+
+        Assert.Contains(tray.Menu!.Items, item =>
+            item.Id == ShellSessionController.OpenWorkspaceMenuId && item.Label == "Open Sir Thaddeus");
+        Assert.Contains(tray.Menu!.Items, item =>
+            item.Id == ShellSessionController.StopAllMenuId && item.Label == "Stop All Processes");
+        Assert.Contains(tray.Menu!.Items, item =>
+            item.Id == ShellSessionController.ExitMenuId && item.Label == "Exit Sir Thaddeus");
+    }
+
+    [Fact]
     public async Task ExitAsync_closes_compact_and_allows_real_close()
     {
         var workspace = new FakeWorkspaceWindow();
