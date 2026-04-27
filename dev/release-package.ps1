@@ -57,16 +57,20 @@ function Get-VersionLabel([string]$RawVersion) {
 }
 
 function Get-AssemblyVersion([string]$VersionLabel) {
-    # MSBuild's -p:Version accepts SemVer. Our tag format is `v1.2.3`;
-    # strip the leading `v` so the assembly version becomes `1.2.3`,
-    # which AssemblyVersion + FileVersion + InformationalVersion all consume.
+    # MSBuild's -p:Version accepts NuGet/SemVer versions, not branch labels.
+    # Keep non-release labels for archive names, but let MSBuild use the
+    # repo default version for those builds.
     if ([string]::IsNullOrWhiteSpace($VersionLabel)) {
         return ""
     }
 
     $value = $VersionLabel.Trim()
-    if ($value.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($value -match '^[vV](?=\d)') {
         $value = $value.Substring(1)
+    }
+
+    if ($value -notmatch '^\d+\.\d+\.\d+(\.\d+)?(-[0-9A-Za-z][0-9A-Za-z\.-]*)?(\+[0-9A-Za-z][0-9A-Za-z\.-]*)?$') {
+        return ""
     }
 
     return $value
@@ -126,6 +130,12 @@ if ([string]::IsNullOrWhiteSpace($versionLabel)) {
 }
 else {
     Write-Host "  Version       : $versionLabel"
+}
+if (-not [string]::IsNullOrWhiteSpace($versionLabel) -and [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+    Write-Host "  MSBuildVersion: <default; label is not NuGet-compatible>"
+}
+elseif (-not [string]::IsNullOrWhiteSpace($assemblyVersion)) {
+    Write-Host "  MSBuildVersion: $assemblyVersion"
 }
 Write-Host "  Publish dir   : $publishDir"
 Write-Host "  Stage dir     : $stageDir"
