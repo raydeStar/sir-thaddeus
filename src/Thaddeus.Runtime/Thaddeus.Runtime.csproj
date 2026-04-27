@@ -61,6 +61,11 @@
 
   <Target Name="BuildWebBundle" BeforeTargets="BeforeBuild" Condition="'$(SkipWebBuild)' != 'true'">
     <Message Importance="high" Text="[hybrid-shell] Web auto-sync: SkipNpmBuild=$(SkipNpmBuild) WebDistDir=$(WebDistDir)" />
+    <!-- Install npm deps if missing. tsr/vite/etc. live in node_modules/.bin
+         so a fresh CI checkout fails `npm run build` without this. -->
+    <Exec Command="$(NpmCommand) ci"
+          WorkingDirectory="$(WebSourceDir)"
+          Condition="!Exists('$(WebSourceDir)\node_modules') And !Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' != 'true'" />
     <Exec Command="$(NpmCommand) run build"
           WorkingDirectory="$(WebSourceDir)"
           Condition="!Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' != 'true'" />
