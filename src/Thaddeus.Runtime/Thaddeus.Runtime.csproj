@@ -30,7 +30,7 @@
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="NUlid" Version="1.7.2" />
     <!-- Cron parser used by the automation scheduler. Handles DST + IANA timezones. -->
-    <PackageReference Include="Cronos" Version="0.11.0" />
+    <PackageReference Include="Cronos" Version="0.12.0" />
   </ItemGroup>
 
   <ItemGroup>
