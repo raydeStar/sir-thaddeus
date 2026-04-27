@@ -631,16 +631,79 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "  Removed debug symbols: $($pdbFiles.Count)"
 }
 
+# Trim cross-platform Playwright node binaries. The Microsoft.Playwright
+# NuGet package ships node launchers for darwin/linux/win in .playwright/node/,
+# but a self-contained build only ever runs on its target RID. Keeping the
+# others bloats the public download by ~450 MB on Windows (where the publish
+# output didn't even include a win32 node, since playwright.ps1 + system node
+# is the Windows path).
+$playwrightNodeDir = Join-Path $stageDir ".playwright/node"
+if (Test-Path $playwrightNodeDir) {
+    $keepByRuntime = @{
+        "win-x64"     = @("win32_x64")
+        "linux-x64"   = @("linux-x64")
+        "linux-arm64" = @("linux-arm64")
+        "osx-x64"     = @("darwin-x64")
+        "osx-arm64"   = @("darwin-arm64")
+    }
+    $keep = if ($keepByRuntime.ContainsKey($Runtime)) { $keepByRuntime[$Runtime] } else { @() }
+    $sizeBefore = ((Get-ChildItem -Path $playwrightNodeDir -File -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum)
+    $prunedDirs = 0
+    Get-ChildItem -Path $playwrightNodeDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.Name -notin $keep) {
+            Remove-Item -Path $_.FullName -Recurse -Force
+            $prunedDirs++
+        }
+    }
+    if ($prunedDirs -gt 0) {
+        $sizeAfter = if (Test-Path $playwrightNodeDir) {
+            ((Get-ChildItem -Path $playwrightNodeDir -File -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum)
+        } else { 0 }
+        $freedMB = [math]::Round((($sizeBefore - $sizeAfter) / 1MB), 1)
+        Write-Host "  Pruned cross-RID Playwright node dirs: $prunedDirs (${freedMB} MB freed)"
+    }
+}
+
+# Strip XmlDoc files at the stage root. They're IDE/IntelliSense aids, not
+# runtime artifacts — not needed in a user-facing zip.
+$xmlDocFiles = @(Get-ChildItem -Path $stageDir -File -Filter "*.xml")
+if ($xmlDocFiles.Count -gt 0) {
+    foreach ($xml in $xmlDocFiles) { Remove-Item -Path $xml.FullName -Force }
+    Write-Host "  Removed XmlDoc files: $($xmlDocFiles.Count)"
+}
+
 Write-Section "Archive + Checksums"
 
 foreach ($p in @($archivePath, $checksumPath, $contentsChecksumsPath)) {
     if (Test-Path $p) { Remove-Item $p -Force }
 }
 
-# ── Package zip (full by default; use -LiteBundle to trim optional assets) ─────
-$sourcePath = $stageDir
-if ($sourcePath -notmatch '\\$') { $sourcePath += '\' }
-Compress-Archive -Path "$sourcePath*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
+# Wrap zip contents in a single top-level folder so users get one tidy folder
+# on extract instead of a 200-file DLL spew in their target directory. Mirrors
+# the tar.gz flow in dev/package-cross.ps1 which already wraps.
+$archiveRootName = $archiveStem
+$parentStageDir = Split-Path $stageDir -Parent
+$renamedStageDir = Join-Path $parentStageDir $archiveRootName
+$stageDirLeaf = Split-Path $stageDir -Leaf
+$stageWasRenamed = $false
+if ($stageDirLeaf -ne $archiveRootName) {
+    if (Test-Path $renamedStageDir) {
+        Remove-Item -Path $renamedStageDir -Recurse -Force
+    }
+    Rename-Item -Path $stageDir -NewName $archiveRootName
+    $stageWasRenamed = $true
+}
+
+try {
+    Compress-Archive -Path $renamedStageDir -DestinationPath $archivePath -CompressionLevel Optimal -Force
+}
+finally {
+    if ($stageWasRenamed) {
+        # Restore so smoke-test, debug-package, and clean-rebuild-launch still
+        # find the stage dir at the legacy "artifacts/stage/<rid>" path.
+        Rename-Item -Path $renamedStageDir -NewName $stageDirLeaf
+    }
+}
 
 $zipHash = Get-FileHash -Path $archivePath -Algorithm SHA256
 "$($zipHash.Hash) *$archiveName" | Out-File -FilePath $checksumPath -Encoding ASCII -Force
@@ -654,7 +717,8 @@ $stagedFiles = Get-ChildItem -Path $stageDir -File -Recurse | Sort-Object FullNa
 $contentLines = foreach ($file in $stagedFiles) {
     $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256
     $relativePath = $file.FullName.Substring($stageRootPrefix.Length).Replace('\', '/')
-    "$($hash.Hash) *$relativePath"
+    # Prefix with wrapper folder so contents checksums match the post-extract layout.
+    "$($hash.Hash) *$archiveRootName/$relativePath"
 }
 $contentLines | Out-File -FilePath $contentsChecksumsPath -Encoding ASCII -Force
 
