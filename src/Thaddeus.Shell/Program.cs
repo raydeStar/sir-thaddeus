@@ -85,7 +85,7 @@ public static class Program
             {
                 try
                 {
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
                     using var resp = await http.PostAsync(
                         $"http://127.0.0.1:{lockFile.Port}/api/stop-all",
                         content: null).ConfigureAwait(false);

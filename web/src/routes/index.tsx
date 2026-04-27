@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
+import { ArrowUp, ChevronRight, CircleStop, Loader2, MessageSquare, Sparkles } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
+import { stopAllProcesses } from '../lib/runtimeActions';
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
@@ -17,6 +18,9 @@ function HomeRoute() {
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [stoppingAll, setStoppingAll] = useState(false);
+  const [stopAllStatus, setStopAllStatus] = useState<string | null>(null);
+  const [stopAllError, setStopAllError] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -55,6 +59,29 @@ function HomeRoute() {
 
   const displayError = localError ?? storeError;
 
+  const onStopAll = async () => {
+    if (stoppingAll) return;
+    setStoppingAll(true);
+    setStopAllStatus(null);
+    setStopAllError(null);
+    try {
+      const result = await stopAllProcesses();
+      const stoppedCount = result.stopped?.length ?? 0;
+      const errorCount = result.errors?.length ?? 0;
+      setStopAllStatus(
+        errorCount > 0
+          ? `Stop requested. ${stoppedCount} stopped, ${errorCount} issue${errorCount === 1 ? '' : 's'} reported.`
+          : stoppedCount > 0
+            ? `Stopped ${stoppedCount} managed item${stoppedCount === 1 ? '' : 's'}.`
+            : 'Stop requested. No managed sidecars were running.'
+      );
+    } catch (e) {
+      setStopAllError((e as Error).message || 'Could not send stop-all command.');
+    } finally {
+      setStoppingAll(false);
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -84,6 +111,33 @@ function HomeRoute() {
       <p className="mt-3 text-center text-[15px] text-ink-muted">
         Ask anything, or pick up where you left off.
       </p>
+
+      <div className="mt-8 flex flex-col items-center gap-2" aria-live="polite">
+        <button
+          type="button"
+          onClick={onStopAll}
+          disabled={stoppingAll}
+          data-testid="home-stop-all"
+          className="inline-flex min-h-14 items-center justify-center gap-3 rounded-lg border border-red-300 bg-red-600 px-8 py-4 text-base font-semibold uppercase tracking-[0.08em] text-white shadow-lg shadow-red-950/15 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-500/25 disabled:cursor-not-allowed disabled:bg-red-900/60 disabled:text-white/70"
+        >
+          {stoppingAll ? (
+            <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2.25} aria-hidden />
+          ) : (
+            <CircleStop className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+          )}
+          {stoppingAll ? 'Stopping' : 'STOP ALL'}
+        </button>
+        {stopAllStatus ? (
+          <p className="max-w-md text-center text-xs text-ink-muted" data-testid="home-stop-all-status">
+            {stopAllStatus}
+          </p>
+        ) : null}
+        {stopAllError ? (
+          <p className="max-w-md text-center text-xs text-rose-500" data-testid="home-stop-all-error">
+            {stopAllError}
+          </p>
+        ) : null}
+      </div>
 
       {/* Prompt. Deliberately minimal — no visible card border until focus. */}
       <form

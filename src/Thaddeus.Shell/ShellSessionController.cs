@@ -106,9 +106,9 @@ public sealed class ShellSessionController
 
     private TrayMenu BuildTrayMenu() => new(
         [
-            new TrayMenuItem(OpenWorkspaceMenuId, "At your service, sir", OpenWorkspaceAsync),
-            new TrayMenuItem(StopAllMenuId, "Stand down", StopAllAsync),
-            new TrayMenuItem(ExitMenuId, "Dismiss", ExitAsync),
+            new TrayMenuItem(OpenWorkspaceMenuId, "Open Sir Thaddeus", OpenWorkspaceAsync),
+            new TrayMenuItem(StopAllMenuId, "Stop All Processes", StopAllAsync),
+            new TrayMenuItem(ExitMenuId, "Exit Sir Thaddeus", ExitAsync),
         ]);
 
     private Task OpenWorkspaceAsync()

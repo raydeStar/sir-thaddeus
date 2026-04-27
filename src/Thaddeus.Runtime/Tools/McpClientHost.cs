@@ -170,17 +170,44 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _settings.Changed -= OnSettingsChanged;
-        if (_inner is not null)
+        await StopChildAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> StopChildAsync(CancellationToken cancellationToken = default)
+    {
+        await _restartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            try { await _inner.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogDebug(ex, "mcp.client.shutdown_failed"); }
-            finally { _inner = null; _ready = false; }
+            var inner = _inner;
+            _inner = null;
+            _ready = false;
+
+            if (inner is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                await inner.DisposeAsync().ConfigureAwait(false);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "mcp.client.stop_child_failed");
+                return false;
+            }
+        }
+        finally
+        {
+            _restartGate.Release();
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        _settings.Changed -= OnSettingsChanged;
+        await StopChildAsync(CancellationToken.None).ConfigureAwait(false);
         _restartGate.Dispose();
     }
 
