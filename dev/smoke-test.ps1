@@ -105,6 +105,16 @@ elseif ($ZipPath) {
     Write-Host "  Extracting: $ZipPath"
     Expand-Archive -Path $ZipPath -DestinationPath $extractDir -Force
     $testDir = $extractDir
+
+    # Descend into wrapper folder if the archive uses the wrapped layout.
+    if (-not (Test-Path (Join-Path $testDir 'Thaddeus.Runtime.exe'))) {
+        $wrapper = @(Get-ChildItem -Path $testDir -Directory -Filter 'sir-thaddeus-*')
+        if ($wrapper.Count -eq 1) {
+            $testDir = $wrapper[0].FullName
+            Write-Host "  Wrapper folder: $($wrapper[0].Name)"
+        }
+    }
+
     Write-Host "  Extracted to: $testDir"
 }
 else {
@@ -129,6 +139,15 @@ else {
                 Write-Host "  Auto-detected zip: $($latestZip.FullName)"
                 Expand-Archive -Path $latestZip.FullName -DestinationPath $extractDir -Force
                 $testDir = $extractDir
+
+                # Descend into wrapper folder if the archive uses the wrapped layout.
+                if (-not (Test-Path (Join-Path $testDir 'Thaddeus.Runtime.exe'))) {
+                    $wrapper = @(Get-ChildItem -Path $testDir -Directory -Filter 'sir-thaddeus-*')
+                    if ($wrapper.Count -eq 1) {
+                        $testDir = $wrapper[0].FullName
+                        Write-Host "  Wrapper folder: $($wrapper[0].Name)"
+                    }
+                }
             }
         }
     }

@@ -5,4 +5,4 @@ export * from "./chat";
 export * from "./activity";
 export * from "./settings";
 export * from "./memo";
-export * from "./automation";
+export * from "./routine";

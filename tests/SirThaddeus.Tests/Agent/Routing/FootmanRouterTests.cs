@@ -570,8 +570,13 @@ public class FootmanRouterTests
             throw new HttpRequestException("LLM is down"));
 
         var router = new FastLlmFootmanRouter(llm);
-        var features = RoutingFeatures.Extract("what is the weather");
-        var decision = await router.RouteAsync("what is the weather", features);
+        // The test needs a prompt that does NOT match any deterministic
+        // short-circuit — otherwise we never call the LLM and the throw
+        // is irrelevant. A vague, opinion-ish ask has no single-family
+        // signal and is exactly the shape that should defer to the LLM.
+        const string ambiguousPrompt = "think about that for a moment";
+        var features = RoutingFeatures.Extract(ambiguousPrompt);
+        var decision = await router.RouteAsync(ambiguousPrompt, features);
 
         Assert.Equal(AgentState.Fallback, decision.NextState);
         Assert.True(decision.Abstain);
@@ -643,4 +648,115 @@ internal sealed class SlowFakeLlmClient : ILlmClient
 
     public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
         => Task.FromResult<string?>("slow-fake-model");
+}
+
+// ── Deterministic Single-Family Routing ─────────────────────────────────
+//
+// Covers the extension to `TryDeterministicRoute` that bypasses the 2B
+// gatekeeper LLM on unambiguous single-family signals. When the footman
+// gatekeeper abstains or fails, the tool filter opens up — so for common
+// shapes (news lookup, file task, etc.) we short-circuit to the right
+// AgentState before the gatekeeper call runs.
+public class FootmanDeterministicRouteTests
+{
+    [Fact]
+    public void News_lookup_alone_routes_to_SearchNews()
+    {
+        var features = new RoutingFeatures { LooksLikeNewsLookup = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.SearchNews, d!.NextState);
+    }
+
+    [Fact]
+    public void Local_business_alone_routes_to_SearchDeepDive()
+    {
+        var features = new RoutingFeatures { LooksLikeLocalBusiness = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.SearchDeepDive, d!.NextState);
+    }
+
+    [Fact]
+    public void Fact_lookup_alone_routes_to_SearchFact()
+    {
+        var features = new RoutingFeatures { LooksLikeFactLookup = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.SearchFact, d!.NextState);
+    }
+
+    [Fact]
+    public void File_request_alone_routes_to_FileTask()
+    {
+        var features = new RoutingFeatures { LooksLikeFileRequest = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.FileTask, d!.NextState);
+    }
+
+    [Fact]
+    public void System_command_alone_routes_to_SystemTask()
+    {
+        var features = new RoutingFeatures { LooksLikeSystemCommand = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.SystemTask, d!.NextState);
+    }
+
+    [Fact]
+    public void Browse_request_alone_routes_to_BrowseOnce()
+    {
+        var features = new RoutingFeatures { LooksLikeBrowseRequest = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.BrowseOnce, d!.NextState);
+    }
+
+    [Fact]
+    public void Screen_request_alone_routes_to_ScreenObserve()
+    {
+        var features = new RoutingFeatures { LooksLikeScreenRequest = true };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.ScreenObserve, d!.NextState);
+    }
+
+    [Fact]
+    public void Mixed_signals_defer_to_LLM_classifier()
+    {
+        // Conservative: when two family flags are set, no deterministic
+        // route fires — the gatekeeper has to decide.
+        var features = new RoutingFeatures
+        {
+            LooksLikeNewsLookup = true,
+            LooksLikeLocalBusiness = true,
+        };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.Null(d);
+    }
+
+    [Fact]
+    public void Greeting_still_takes_precedence_over_family_signals()
+    {
+        // If the feature extractor somehow flagged both greeting AND
+        // fact_lookup, greeting wins — it's the cheapest to handle and
+        // most benign tool-wise (no tools).
+        var features = new RoutingFeatures
+        {
+            IsGreeting = true,
+            LooksLikeFactLookup = true,
+        };
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.Chat, d!.NextState);
+    }
+
+    [Fact]
+    public void No_signals_defers_to_LLM_classifier()
+    {
+        var features = new RoutingFeatures();
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.Null(d);
+    }
 }

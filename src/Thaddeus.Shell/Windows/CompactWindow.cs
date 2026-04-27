@@ -65,7 +65,7 @@ public sealed class PhotinoCompactWindowSurface : ICompactWindowSurface
         }
         _logger.LogInformation("compact.window.opening url={Url}", url);
         _window = new PhotinoWindow(_parent)
-            .SetTitle("Sir Thaddeus — Quick")
+            .SetTitle("Sir Thaddeus — At the ready")
             .SetSize(420, 220)
             .Center()
             .SetUseOsDefaultLocation(false)

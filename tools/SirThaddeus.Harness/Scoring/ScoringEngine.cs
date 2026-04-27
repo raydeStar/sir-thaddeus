@@ -515,6 +515,41 @@ public sealed class ScoringEngine
         if (result.Contains("0 result", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        // Redacted summaries of tools whose canonical response is
+        // status/health info (tool_ping, health.check, policy.get_state).
+        // A good model summarizes these instead of quoting version
+        // numbers verbatim — penalizing that would reward verbose copy-
+        // paste over actual comprehension.
+        if (result.Contains("protocol_version", StringComparison.OrdinalIgnoreCase) &&
+            result.Contains("contract_version", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Empty-scope discovery / geocode results — when the user didn't
+        // specify a location, the tool correctly returns empty. The model
+        // should ask the user for clarification (which is the whole point
+        // of the test) rather than inventing content. Don't penalize that.
+        if (result.Contains("\"resolvedLocation\":\"\"", StringComparison.Ordinal) ||
+            result.Contains("\"resolvedLocation\": \"\"", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        if (result.Contains("\"results\":[]", StringComparison.Ordinal) ||
+            result.Contains("\"results\": []", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Weather-specific: geocode summary that couldn't parse JSON
+        // falls back to "[Weather geocode: N chars]". No parseable
+        // content to cite.
+        if (result.StartsWith("[Weather geocode:", StringComparison.OrdinalIgnoreCase) &&
+            result.Contains("chars]", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         // document_read often returns an opaque summary like
         // "[Document content: 100 chars, sha256=...]". That does not carry
         // meaningful tokens for incorporation scoring.

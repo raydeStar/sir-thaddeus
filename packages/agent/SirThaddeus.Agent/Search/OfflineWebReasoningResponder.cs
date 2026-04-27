@@ -11,10 +11,13 @@ internal static partial class OfflineWebReasoningResponder
 {
     private const int MaxTokensOfflineAnswer = 1024;
     private const string OfflineReasoningInstruction =
-        "\n\nAnswer this question using only your general knowledge and careful reasoning. " +
+        "\n\nLive web lookup is offline for this turn. " +
+        "Answer this question using only your general knowledge and careful reasoning. " +
+        "Lead with the most helpful best-effort answer you can give, not a refusal. " +
         "Be explicit about uncertainty for time-sensitive facts. " +
         "Do not claim you searched the web or mention web search availability. " +
         "Do not add disclaimers about limited access, tools, or real-time data. " +
+        "Do not start with phrases like 'I can't', 'I cannot', or 'I was unable to browse'. " +
         "Do not invent citations, links, or exact current values.";
 
     // Footer appended after the answer content. Contains "cannot verify
@@ -36,11 +39,13 @@ internal static partial class OfflineWebReasoningResponder
         var strictFormat = RequiresStrictOutputFormat(userMessage);
         var isLocalBusinessRequest = LooksLikeLocalBusinessRequest(userMessage, out _, out _);
         var isLocalNewsRequest = LooksLikeLocalNewsRequest(userMessage, out _);
+        var isCurrentHeadlinesRequest = LooksLikeCurrentHeadlinesRequest(userMessage);
         var isMediaInstallmentRequest = LooksLikeMediaInstallmentPlotRequest(userMessage, out _);
         var messages = BuildMessages(systemPrompt, memoryPackText, history, userMessage, failureReason);
         var forceDeterministicFallback = ShouldUseDeterministicFallbackFirst(userMessage, failureReason, toolCallsMade)
             || isLocalBusinessRequest
             || isLocalNewsRequest
+            || isCurrentHeadlinesRequest
             || isMediaInstallmentRequest;
 
         try
@@ -64,7 +69,14 @@ internal static partial class OfflineWebReasoningResponder
                 answer = EnsureSearchTokenIfWebFallback(
                     BuildDeterministicFallback(userMessage, memoryPackText),
                     toolCallsMade);
-            var finalText = BuildFinalText(answer, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
+            var finalText = BuildFinalText(
+                answer,
+                userMessage,
+                failureReason,
+                isLocalBusinessRequest,
+                isLocalNewsRequest || isCurrentHeadlinesRequest,
+                isMediaInstallmentRequest,
+                strictFormat);
             finalText = EnsureUnavailableKeywordForExplicitWebFallback(finalText, userMessage);
 
             return new AgentResponse
@@ -81,7 +93,14 @@ internal static partial class OfflineWebReasoningResponder
                 BuildDeterministicFallback(userMessage, memoryPackText),
                 memoryPackText);
             fallback = EnsureSearchTokenIfWebFallback(fallback, toolCallsMade);
-            var finalText = BuildFinalText(fallback, userMessage, failureReason, isLocalBusinessRequest, isLocalNewsRequest, isMediaInstallmentRequest, strictFormat);
+            var finalText = BuildFinalText(
+                fallback,
+                userMessage,
+                failureReason,
+                isLocalBusinessRequest,
+                isLocalNewsRequest || isCurrentHeadlinesRequest,
+                isMediaInstallmentRequest,
+                strictFormat);
             finalText = EnsureUnavailableKeywordForExplicitWebFallback(finalText, userMessage);
 
             return new AgentResponse
@@ -150,7 +169,7 @@ internal static partial class OfflineWebReasoningResponder
             ? "web lookup did not return usable results"
             : failureReason.Trim().TrimEnd('.');
 
-        return $"Live web lookup is unavailable right now ({reason}). " +
+        return $"I don't have fresh live results for this turn ({reason}). " +
                "Here is a best-effort answer from built-in reasoning:";
     }
 
@@ -199,7 +218,7 @@ internal static partial class OfflineWebReasoningResponder
             return text;
         }
 
-        return $"The requested tool is currently unavailable right now.\n\n{text.Trim()}";
+        return $"Live lookup is unavailable for this turn, so this answer is best-effort and may be out of date.\n\n{text.Trim()}";
     }
 
     private static string BuildDeterministicFallback(string userMessage, string memoryPackText = "")
@@ -236,6 +255,12 @@ internal static partial class OfflineWebReasoningResponder
                    "If you share a topic (weather, traffic, schools, politics), I can give you a focused brief template.";
         }
 
+        if (LooksLikeCurrentHeadlinesRequest(userMessage))
+        {
+            return $"{greeting}I do not have confirmed live headlines for this turn, so I should not present breaking news as verified. " +
+                   "What I can do is give a best-effort overview of likely ongoing themes, clearly marked as provisional, or help narrow it by topic, region, or source.";
+        }
+
         if (LooksLikeLocalBusinessRequest(userMessage, out var category, out var location))
         {
             var locationClause = string.IsNullOrWhiteSpace(location) ? "near you" : $"in {location}";
@@ -245,13 +270,13 @@ internal static partial class OfflineWebReasoningResponder
         }
 
                  var lead = shouldMentionOutage
-                     ? "search evidence was incomplete or unavailable"
+                     ? "fresh live evidence is not available for this turn"
                      : "based on general knowledge";
 
                  return $"{greeting}{lead}, " +
                         $"here is what I can share about your question. " +
-                        $"I was unable to retrieve live search results for \"{Truncate(userMessage, 120)}\". " +
-                        "Please try again shortly, or rephrase for more specific results.";
+                        $"Treat any time-sensitive detail for \"{Truncate(userMessage, 120)}\" as provisional rather than confirmed. " +
+                        "If you want, I can still narrow the question and give the strongest best-effort answer I can.";
     }
 
     internal static string? TryBuildKnownLatestVersionAnswer(string userMessage, string memoryPackText = "")
@@ -508,7 +533,9 @@ internal static partial class OfflineWebReasoningResponder
         var lower = userMessage.ToLowerInvariant();
         var hasLocalNewsIntent =
             lower.Contains("local news", StringComparison.Ordinal) ||
-            (lower.Contains("news", StringComparison.Ordinal) && lower.Contains(" in ", StringComparison.Ordinal));
+            (lower.Contains("news", StringComparison.Ordinal) && lower.Contains(" in ", StringComparison.Ordinal)) ||
+            lower.Contains("local headlines", StringComparison.Ordinal) ||
+            lower.Contains("headlines in ", StringComparison.Ordinal);
 
         if (!hasLocalNewsIntent)
             return false;
@@ -520,6 +547,20 @@ internal static partial class OfflineWebReasoningResponder
         }
 
         return true;
+    }
+
+    private static bool LooksLikeCurrentHeadlinesRequest(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        return lower.Contains("headlines today", StringComparison.Ordinal) ||
+               lower.Contains("today's headlines", StringComparison.Ordinal) ||
+               lower.Contains("todays headlines", StringComparison.Ordinal) ||
+               lower.Contains("latest headlines", StringComparison.Ordinal) ||
+               lower.Contains("news today", StringComparison.Ordinal) ||
+               lower.Contains("latest news", StringComparison.Ordinal);
     }
 
     private static bool RequiresStrictOutputFormat(string userMessage)

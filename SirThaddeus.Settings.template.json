@@ -7,7 +7,7 @@
     "gatekeeperModelId": "qwen3.5-2b",
     "reusePrimaryModelForGatekeeperOnSharedEndpoint": true,
     "maxTokens": 2048,
-    "contextWindowTokens": 8192,
+    "contextWindowTokens": 16384,
     "temperature": 0.7,
     "maxRepairAttempts": 1
   },

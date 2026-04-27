@@ -315,6 +315,41 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "  Stripped: $($pdbFiles.Count) .pdb files"
 }
 
+# ─── Trim cross-RID Playwright binaries + XmlDoc files ────────────────────────
+
+$playwrightNodeDir = Join-Path $stageDir ".playwright/node"
+if (Test-Path $playwrightNodeDir) {
+    $keepByRuntime = @{
+        "win-x64"     = @("win32_x64")
+        "linux-x64"   = @("linux-x64")
+        "linux-arm64" = @("linux-arm64")
+        "osx-x64"     = @("darwin-x64")
+        "osx-arm64"   = @("darwin-arm64")
+    }
+    $keep = if ($keepByRuntime.ContainsKey($Runtime)) { $keepByRuntime[$Runtime] } else { @() }
+    $sizeBefore = ((Get-ChildItem -Path $playwrightNodeDir -File -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum)
+    $prunedDirs = 0
+    Get-ChildItem -Path $playwrightNodeDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.Name -notin $keep) {
+            Remove-Item -Path $_.FullName -Recurse -Force
+            $prunedDirs++
+        }
+    }
+    if ($prunedDirs -gt 0) {
+        $sizeAfter = if (Test-Path $playwrightNodeDir) {
+            ((Get-ChildItem -Path $playwrightNodeDir -File -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum)
+        } else { 0 }
+        $freedMB = [math]::Round((($sizeBefore - $sizeAfter) / 1MB), 1)
+        Write-Host "  Pruned cross-RID Playwright node dirs: $prunedDirs (${freedMB} MB freed)"
+    }
+}
+
+$xmlDocFiles = @(Get-ChildItem -Path $stageDir -File -Filter "*.xml")
+if ($xmlDocFiles.Count -gt 0) {
+    foreach ($xml in $xmlDocFiles) { Remove-Item -Path $xml.FullName -Force }
+    Write-Host "  Removed XmlDoc files: $($xmlDocFiles.Count)"
+}
+
 # ─── Package structure validation ─────────────────────────────────────────────
 
 Write-Section "Validate Package"
@@ -358,9 +393,25 @@ if ($IsWindows_Host) {
     $checksumPath = "$zipPath.sha256.txt"
     $archiveName  = [IO.Path]::GetFileName($zipPath)
     Write-Host "  NOTE: running on Windows, producing .zip instead of .tar.gz" -ForegroundColor Yellow
-    $stageSource = $stageDir
-    if ($stageSource -notmatch '[/\\]$') { $stageSource += [IO.Path]::DirectorySeparatorChar }
-    Compress-Archive -Path "$stageSource*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
+
+    # Wrap contents in a top-level folder, matching the tar.gz branch below.
+    $archiveNameInZip = $archiveStem
+    $parentDir = Split-Path $stageDir -Parent
+    $renamedDir = Join-Path $parentDir $archiveNameInZip
+    $stageDirLeaf = Split-Path $stageDir -Leaf
+    $renamedZip = $false
+    if ($stageDirLeaf -ne $archiveNameInZip) {
+        if (Test-Path $renamedDir) { Remove-Item $renamedDir -Recurse -Force }
+        Rename-Item -Path $stageDir -NewName $archiveNameInZip
+        $renamedZip = $true
+    }
+    try {
+        Compress-Archive -Path $renamedDir -DestinationPath $archivePath -CompressionLevel Optimal -Force
+    } finally {
+        if ($renamedZip) {
+            Rename-Item -Path $renamedDir -NewName $stageDirLeaf
+        }
+    }
 } else {
     # tar.gz preserves execute bits set above
     # Rename stage dir to desired archive root name so we avoid GNU --transform

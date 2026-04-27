@@ -162,9 +162,55 @@ public static class ToolCallRedactor
             _ when lower.StartsWith("memory")
                 => Truncate(output, 300).ToLowerInvariant(),
 
+            // Capability listing: the raw manifest can be 10-20 KB. Default
+            // truncation to 200 chars strips 95% of the content, which
+            // breaks any downstream consumer checking whether the model
+            // actually surveyed tools (scoring sees only the first entry).
+            // Emit a compact structured summary instead — tool count plus
+            // a comma-joined list of names. Safe: tool names are public
+            // metadata with no user data.
+            "toollistcapabilities" or "tool_list_capabilities"
+                => SummarizeToolListCapabilities(output),
+
             // Default: truncate to safe length
             _ => Truncate(output, DefaultMaxChars)
         };
+    }
+
+    private static string SummarizeToolListCapabilities(string output)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return $"[tool_list_capabilities: {output.Length} chars]";
+
+            var names = new List<string>();
+            foreach (var entry in doc.RootElement.EnumerateArray())
+            {
+                if (entry.TryGetProperty("name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String)
+                {
+                    var name = nameEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        names.Add(name);
+                }
+                if (names.Count >= 40) break; // keep the summary bounded
+            }
+
+            if (names.Count == 0)
+                return $"[tool_list_capabilities: {output.Length} chars, no names parseable]";
+
+            // Preserve the original tool-name casing so downstream
+            // consumers (e.g. harness scoring) that require capitalized
+            // or digit-bearing tokens see meaningful content.
+            var joined = string.Join(", ", names);
+            return $"[tool_list_capabilities: {names.Count} tool(s): {Truncate(joined, 400)}]";
+        }
+        catch
+        {
+            return $"[tool_list_capabilities: {output.Length} chars, unparseable]";
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -173,7 +219,14 @@ public static class ToolCallRedactor
 
     private static string SummarizeBrowserOutput(string output)
     {
-        // Extract title if present, plus content length
+        // Extract title if present, plus content length. Page titles are
+        // public metadata (returned by the HTML <title> tag of a site
+        // the user consented to fetch), so we preserve the ORIGINAL case.
+        // The downstream harness scorer counts capitalized/digit-bearing
+        // tokens as "significant" to verify the model actually read the
+        // tool result — lowercasing the title would strip every proper
+        // noun and produce a false "model ignored the tool" signal on
+        // answers that plainly cited the source.
         var titleLine = output.Split('\n')
             .FirstOrDefault(l => l.TrimStart().StartsWith("Title:", StringComparison.OrdinalIgnoreCase));
 
@@ -181,7 +234,7 @@ public static class ToolCallRedactor
             ? titleLine.Trim()
             : "(no title)";
 
-        return $"[browser: {Truncate(title, 100).ToLowerInvariant()}, content returned]";
+        return $"[browser: {Truncate(title, 100)}, content returned]";
     }
 
     private static string SummarizeClipboardWriteInput(string argumentsJson)

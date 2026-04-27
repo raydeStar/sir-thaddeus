@@ -248,7 +248,12 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+          make_latest: true
+          # Public release surface: only the full bundles. Lite variants stay
+          # built as CI artifacts (downloadable via the Actions tab) but are
+          # not promoted to the Releases page to keep the download UX simple.
           files: |
-            release-assets/*.zip
-            release-assets/*.tar.gz
-            release-assets/*.sha256.txt
+            release-assets/*-full.zip
+            release-assets/*-full.tar.gz
+            release-assets/*-full.zip.sha256.txt
+            release-assets/*-full.tar.gz.sha256.txt

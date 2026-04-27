@@ -127,6 +127,99 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
         if (features.IsLogicPuzzle)
             return RoutingDecision.CreateDeterministic(requestId, AgentState.Chat, "heuristic_logic_puzzle");
 
+        // ── Single-family short-circuits ────────────────────────────────
+        // When the feature extractor returns an UNAMBIGUOUS single bucket,
+        // skip the LLM gatekeeper entirely. 2B models often abstain on
+        // these which fail-opens the tool list — then the primary model
+        // reaches for memory_store_facts on a news query, places_discover
+        // on a file task, and so on. A short-circuit here narrows tools
+        // to the right family every time without paying a classifier call.
+        //
+        // Conservatism is the point: if ANY non-matching family flag is
+        // also set, we bail and let the LLM gatekeeper decide. Cost is
+        // only extra coverage; we don't forge decisions when signals mix.
+
+        if (features.LooksLikeScreenRequest
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeBrowseRequest
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeDeepDive)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.ScreenObserve, "heuristic_screen_request");
+        }
+
+        if (features.LooksLikeSystemCommand
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeDeepDive
+            && !features.LooksLikeLocalBusiness
+            && !features.LooksLikeBrowseRequest)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.SystemTask, "heuristic_system_command");
+        }
+
+        if (features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeDeepDive
+            && !features.LooksLikeLocalBusiness
+            && !features.LooksLikeBrowseRequest)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.FileTask, "heuristic_file_request");
+        }
+
+        if (features.LooksLikeBrowseRequest
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.BrowseOnce, "heuristic_browse_request");
+        }
+
+        if (features.LooksLikeNewsLookup
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeScreenRequest
+            && !features.LooksLikeLocalBusiness)
+        {
+            // News queries only need WebSearch — narrowing here prevents
+            // the model from proactively calling memory_store_facts or
+            // places_discover on a "top headlines" prompt.
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.SearchNews, "heuristic_news_lookup");
+        }
+
+        if (features.LooksLikeLocalBusiness
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeScreenRequest)
+        {
+            // Local-business queries want deep-dive capabilities (places
+            // tools + web_search + browse). SearchDeepDive exposes all of
+            // them without opening memory-write or system tools.
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.SearchDeepDive, "heuristic_local_business");
+        }
+
+        if (features.LooksLikeDeepDive
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeScreenRequest)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.SearchDeepDive, "heuristic_deep_dive");
+        }
+
+        if (features.LooksLikeFactLookup
+            && !features.LooksLikeNewsLookup
+            && !features.LooksLikeDeepDive
+            && !features.LooksLikeLocalBusiness
+            && !features.LooksLikeFileRequest
+            && !features.LooksLikeSystemCommand
+            && !features.LooksLikeScreenRequest
+            && !features.LooksLikeBrowseRequest)
+        {
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.SearchFact, "heuristic_fact_lookup");
+        }
+
         return null;
     }
 

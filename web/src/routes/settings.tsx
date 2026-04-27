@@ -333,7 +333,7 @@ function SettingsRoute() {
           </div>
 
           {/* Floating save bar — uses the full-width canvas bg with a top fade. */}
-          <div className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-canvas/85 backdrop-blur">
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/85 backdrop-blur">
             <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-6 py-3 md:px-10">
               <span className="text-[11px] text-ink-subtle">
                 Saved to <code className="font-mono text-[11px]">~/.thaddeus/runtime-settings.json</code>

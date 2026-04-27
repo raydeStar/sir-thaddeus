@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Serilog;
 using Thaddeus.Runtime.Api;
 using Thaddeus.Runtime.Activity;
-using Thaddeus.Runtime.Automations;
 using Thaddeus.Runtime.Chat;
+using Thaddeus.Runtime.Routines;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
@@ -35,7 +35,7 @@ public static class Program
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         var bearerToken = TokenGenerator.NewToken();
-        var lockFilePath = LockFileService.GetDefaultPath();
+        var lockFilePath = parsed.LockFilePath ?? LockFileService.GetDefaultPath();
         var ipcEndpoint = IpcEndpoint.GetDefault();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -140,17 +140,16 @@ public static class Program
                     memosDir,
                     sp.GetRequiredService<ILogger<JsonFileMemoStore>>());
             });
-            builder.Services.AddSingleton<IAutomationStore>(sp =>
+            builder.Services.AddSingleton<IRoutineStore>(sp =>
             {
                 var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
-                var dir = builder.Configuration.GetValue<string>("Automations:Directory")
-                    ?? Path.Combine(lockDir, "automations");
-                return new JsonFileAutomationStore(
+                var dir = builder.Configuration.GetValue<string>("Routines:Directory")
+                    ?? Path.Combine(lockDir, "routines");
+                return new JsonFileRoutineStore(
                     dir,
-                    sp.GetRequiredService<ILogger<JsonFileAutomationStore>>());
+                    sp.GetRequiredService<ILogger<JsonFileRoutineStore>>());
             });
-            builder.Services.AddSingleton<AutomationRunner>();
-            builder.Services.AddHostedService<AutomationScheduler>();
+            builder.Services.AddHostedService<RoutineSeeder>();
             // MCP tool client. Spawns the SirThaddeus.McpServer child process,
             // handshakes asynchronously, and exposes IMcpToolClient to the
             // assistant. Registered as singleton + hosted so DI consumers get
@@ -240,7 +239,7 @@ public static class Program
             app.MapActivityApi();
             app.MapSettingsApi();
             app.MapMemoryApi();
-            app.MapAutomationsApi();
+            app.MapRoutinesApi();
             app.MapAudioApi();
             app.MapVoiceApi();
             app.MapPermissionsApi();
@@ -299,12 +298,13 @@ public static class Program
     }
 
     /// <summary>Parses CLI arguments. Currently very small.</summary>
-    internal sealed record StartupArgs(bool TestMode, int? ParentPid)
+    internal sealed record StartupArgs(bool TestMode, int? ParentPid, string? LockFilePath)
     {
         public static StartupArgs Parse(string[] args)
         {
             var testMode = false;
             int? parentPid = null;
+            string? lockFilePath = null;
             foreach (var a in args)
             {
                 if (a.Equals("--test-mode", StringComparison.OrdinalIgnoreCase)) testMode = true;
@@ -313,8 +313,16 @@ public static class Program
                 {
                     parentPid = pid;
                 }
+                else if (a.StartsWith("--lock-file=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = a["--lock-file=".Length..].Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        lockFilePath = Path.GetFullPath(value);
+                    }
+                }
             }
-            return new StartupArgs(testMode, parentPid);
+            return new StartupArgs(testMode, parentPid, lockFilePath);
         }
     }
 }

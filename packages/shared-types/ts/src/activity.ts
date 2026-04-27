@@ -1,6 +1,6 @@
 // AUTO-GENERATED-CANDIDATE — hand-mirrored from packages/shared-types/cs/ActivityEntry.cs
 
-export type ActivityKind = "ChatTurn" | "VoiceTurn" | "Automation" | "System";
+export type ActivityKind = "ChatTurn" | "VoiceTurn" | "Routine" | "System";
 
 export type ActivityStatus = "Running" | "Ok" | "Cancelled" | "Failed";
 

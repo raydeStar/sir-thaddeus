@@ -60,4 +60,30 @@ public sealed record TurnContext
     /// tool-loop step appends calls; final <see cref="AgentResponse"/>
     /// inherits this list.</summary>
     public IReadOnlyList<ToolCallRecord> ToolCallsMade { get; init; } = [];
+
+    /// <summary>
+    /// True when the user is new/unknown — no profile facts stored.
+    /// Populated by <c>MemoryContextStep</c> from the provider's
+    /// <see cref="SirThaddeus.Agent.Memory.MemoryContextResult.OnboardingNeeded"/>
+    /// signal, and consumed by <c>OnboardingInjectionStep</c> to decide
+    /// whether to inject the warm-introduction suffix. Defaults to false
+    /// — runtimes without a memory provider never trigger onboarding.
+    /// </summary>
+    public bool IsNewUser { get; init; }
+
+    /// <summary>
+    /// When set, <c>ToolLoopStep</c> passes this as <c>tool_choice</c> on
+    /// the <b>first</b> LLM round so the model is forced to invoke the
+    /// named tool before producing any prose. Used by steps that detect a
+    /// structural need for a tool call (e.g. <c>FreshnessRouterStep</c>
+    /// for existence/recency queries — "does the iPhone 15 exist?" must
+    /// verify via <c>web_search</c>, never from stale training memory).
+    ///
+    /// <para>Subsequent rounds in the same turn fall back to
+    /// <c>tool_choice: "auto"</c> so the model can summarize or chain
+    /// follow-up tools normally.</para>
+    ///
+    /// <para>Null means no forcing — the default behavior.</para>
+    /// </summary>
+    public string? ForcedTool { get; init; }
 }

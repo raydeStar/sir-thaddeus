@@ -74,11 +74,15 @@ public sealed class MemoryContextStep : ITurnStep
             return new StepResult.Continue(context);
         }
 
-        if (string.IsNullOrWhiteSpace(result.PackText))
-            return new StepResult.Continue(context);
+        // Propagate the onboarding signal regardless of pack contents
+        // so OnboardingInjectionStep can fire on empty-memory turns.
+        var withOnboarding = context with { IsNewUser = result.OnboardingNeeded };
 
-        var updatedMessages = AppendMemoryPackToSystemMessage(context.LlmMessages, result.PackText);
-        return new StepResult.Continue(context with { LlmMessages = updatedMessages });
+        if (string.IsNullOrWhiteSpace(result.PackText))
+            return new StepResult.Continue(withOnboarding);
+
+        var updatedMessages = AppendMemoryPackToSystemMessage(withOnboarding.LlmMessages, result.PackText);
+        return new StepResult.Continue(withOnboarding with { LlmMessages = updatedMessages });
     }
 
     private static MemoryContextRequest DefaultRequestBuilder(TurnContext context) => new()

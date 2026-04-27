@@ -110,11 +110,6 @@ Sir Thaddeus does not phone home. Your prompts go to your local model server. Yo
 - **Fail-closed behavior** when something goes sideways
 - **Tool budgets** to prevent runaway loops and token burn
 
-### Optional Connected Services
-
-- **Background watchers** for website changes
-- **Local notifications** for monitored events
-
 </details>
 
 ---

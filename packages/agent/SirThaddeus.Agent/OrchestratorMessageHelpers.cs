@@ -197,7 +197,14 @@ internal static partial class OrchestratorMessageHelpers
         return null;
     }
 
-    internal static string? TryBuildEarlyDeterministicBenignFallback(string? userMessage)
+    /// <summary>
+    /// Builds a deterministic reply for common benign prompts (trivial
+    /// greetings, classic-reasoning follow-ups, etc.) before the
+    /// orchestrator enters its full routing pass. Public so the
+    /// pipeline's <c>BenignFallbackStep</c> can terminate those turns
+    /// before any LLM call. Returns null when no fallback applies.
+    /// </summary>
+    public static string? TryBuildEarlyDeterministicBenignFallback(string? userMessage)
     {
         var lower = userMessage?.Trim().ToLowerInvariant() ?? string.Empty;
         if (lower.Length == 0)
@@ -340,7 +347,14 @@ internal static partial class OrchestratorMessageHelpers
         return char.ToUpperInvariant(normalized[0]) + normalized[1..];
     }
 
-    internal static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
+    /// <summary>
+    /// Heuristic over the user message that detects "tell me how to
+    /// [do something illicit]"-shaped prompts. Public so the pipeline's
+    /// <c>SafetyBoundaryStep</c> can reuse the exact same detector the
+    /// legacy orchestrator uses — the safety response must stay stable
+    /// no matter which runtime path handles the turn.
+    /// </summary>
+    public static bool LooksLikeHighRiskIllicitInstructionRequest(string? userMessage)
     {
         if (string.IsNullOrWhiteSpace(userMessage))
             return false;
@@ -357,7 +371,13 @@ internal static partial class OrchestratorMessageHelpers
         return HighRiskIllicitInstructionRegex.IsMatch(lower);
     }
 
-    internal static string BuildSafetyBoundaryWithAlternativeReply()
+    /// <summary>
+    /// Canned response used when a high-risk illicit-instruction request
+    /// is detected. Declines the specific ask and offers a safe,
+    /// redirected alternative instead of a flat refusal. Public so both
+    /// orchestrator and pipeline paths emit byte-identical safety text.
+    /// </summary>
+    public static string BuildSafetyBoundaryWithAlternativeReply()
         => "I can’t help with instructions to bypass security or cause harm. " +
            "If you’re locked out of something you own, I can help with safe, legal options like contacting a licensed locksmith, verifying ownership requirements, and steps to prevent future lockouts.";
 

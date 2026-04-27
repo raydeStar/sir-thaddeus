@@ -25,6 +25,26 @@ public interface ILlmClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Same as <see cref="ChatAsync(IReadOnlyList{ChatMessage}, IReadOnlyList{ToolDefinition}?, CancellationToken)"/>
+    /// but forces the model's next action to be a call to
+    /// <paramref name="forcedToolName"/> — translated to OpenAI's
+    /// <c>tool_choice</c>. Used by routing steps that know the answer
+    /// structurally requires a specific tool (e.g. freshness verification
+    /// for existence/recency questions).
+    ///
+    /// <para>Default implementation ignores the forced tool and falls back
+    /// to regular auto-routing — so existing fakes and non-OpenAI-compatible
+    /// clients keep compiling without a behavior change. Real clients (like
+    /// <c>LmStudioClient</c>) override to pass the directive through.</para>
+    /// </summary>
+    Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        string? forcedToolName,
+        CancellationToken cancellationToken = default) =>
+        ChatAsync(messages, tools, cancellationToken);
+
+    /// <summary>
     /// Pings the LLM endpoint and returns the loaded model name if reachable,
     /// or null if the provider is offline / unreachable.
     /// This is transport-only — no state, no side effects.

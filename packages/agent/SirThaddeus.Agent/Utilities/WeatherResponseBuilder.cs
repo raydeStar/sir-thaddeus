@@ -4,10 +4,9 @@ using System.Text.RegularExpressions;
 namespace SirThaddeus.Agent.Utilities;
 
 /// <summary>
-/// Pure-function builder for deterministic weather response text.
-/// Extracted from AgentOrchestrator.Internal — no instance state.
-/// All methods are static; the caller supplies any runtime values
-/// (e.g. <c>preferredUnits</c>) as parameters.
+/// Pure-function builder for deterministic weather response text. No
+/// instance state; all methods are static and the caller supplies any
+/// runtime values (e.g. <c>preferredUnits</c>) as parameters.
 /// </summary>
 public static partial class WeatherResponseBuilder
 {

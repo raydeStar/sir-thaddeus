@@ -48,4 +48,20 @@ public sealed class LockFileServiceTests : IDisposable
     {
         Assert.Null(LockFileService.TryRead(_tempPath));
     }
+
+    [Fact]
+    public void StartupArgs_parse_supports_custom_lock_file()
+    {
+        var lockFilePath = Path.Combine(Path.GetTempPath(), "thaddeus custom lock.lock");
+
+        var parsed = Program.StartupArgs.Parse([
+            "--test-mode",
+            "--parent-pid=1234",
+            $"--lock-file={lockFilePath}",
+        ]);
+
+        Assert.True(parsed.TestMode);
+        Assert.Equal(1234, parsed.ParentPid);
+        Assert.Equal(Path.GetFullPath(lockFilePath), parsed.LockFilePath);
+    }
 }

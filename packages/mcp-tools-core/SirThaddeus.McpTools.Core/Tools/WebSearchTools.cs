@@ -186,6 +186,57 @@ public static class WebSearchTools
             providersUsed.Add(bundleResult.Provider);
         }
 
+        // ── Phase 1.1: Broadened-retry safety net ─────────────────────
+        // If the first pass returned very few hits, try ONE broadened
+        // rephrasing of the original query before giving up. Over-specific
+        // phrasings (format directives, "as of 2025", embedded quotes)
+        // routinely match zero pages even when the underlying topic has
+        // abundant coverage. One extra search call beats a hallucinated
+        // answer.
+        const int BroadenThreshold = 3;
+        if (aggregatedResults.Count < BroadenThreshold)
+        {
+            var broadened = QueryBundleBuilder.TryBroaden(query);
+            if (!string.IsNullOrWhiteSpace(broadened))
+            {
+                var alreadyTried = queryBundle.Any(q =>
+                    string.Equals(q, broadened, StringComparison.OrdinalIgnoreCase));
+                if (!alreadyTried)
+                {
+                    var retry = await Router.Value.SearchAsync(
+                        broadened,
+                        new WebSearchOptions
+                        {
+                            MaxResults = fetchCount,
+                            TimeoutMs = searchTimeoutMs,
+                            Recency = recency,
+                            Categories = categories
+                        },
+                        cancellationToken);
+
+                    aggregatedResults.AddRange(retry.Results);
+                    aggregatedErrors.AddRange(retry.Errors);
+                    providerLog.Add(new
+                    {
+                        query = broadened,
+                        provider = retry.Provider,
+                        resultCount = retry.Results.Count,
+                        phase = "broaden_retry",
+                        errors = retry.Errors,
+                        diagnostics = retry.Diagnostics.Select(d => new
+                        {
+                            provider = d.Provider,
+                            phase = d.Phase,
+                            outcome = d.Outcome,
+                            message = d.Message,
+                            resultCount = d.ResultCount
+                        }).ToArray()
+                    });
+                    providersUsed.Add(retry.Provider);
+                }
+            }
+        }
+
         var searchResult = new SearchResults
         {
             Provider = string.Join(", ", providersUsed.Distinct(StringComparer.OrdinalIgnoreCase)),
@@ -206,11 +257,40 @@ public static class WebSearchTools
         if (searchResult.Results.Count == 0)
         {
             var sb = new StringBuilder();
+            var health = ClassifyEmptyResultHealth(searchResult);
+
             sb.AppendLine($"No results found for \"{query}\".");
             sb.AppendLine($"Provider: {searchResult.Provider}");
-            if (searchResult.Errors.Count > 0)
-                sb.AppendLine("Some search providers were temporarily unavailable.");
-            sb.AppendLine("Try a different query, or paste a URL for BrowserNavigate.");
+
+            // Distinguish "this does not exist on the internet" from "we
+            // could not reach a search backend right now". Small models
+            // routinely conflate the two — a rate-limited DDG looks the
+            // same as "no such thing" unless we say so explicitly.
+            switch (health)
+            {
+                case EmptyResultHealth.ProviderImpaired:
+                    sb.AppendLine(
+                        "The search backend reported errors or was rate-limited. " +
+                        "This likely means our lookup couldn't complete, NOT that no " +
+                        "answer exists. Tell the user the search is temporarily " +
+                        "unavailable and suggest they retry in a moment, or paste a " +
+                        "direct URL for browser_navigate. Do NOT answer from training " +
+                        "memory as if the search was authoritative.");
+                    break;
+                case EmptyResultHealth.NoProvider:
+                    sb.AppendLine(
+                        "No search provider was available. Tell the user search is " +
+                        "offline and suggest retrying, a different query, or a direct URL.");
+                    break;
+                default:
+                    sb.AppendLine(
+                        "The search backend returned zero matches for this query. " +
+                        "Before answering from memory, consider whether the query " +
+                        "phrasing is too specific or contains a typo — a broader " +
+                        "rephrasing via a fresh web_search often recovers a valid hit.");
+                    break;
+            }
+
             sb.AppendLine();
             sb.AppendLine(SourcesDelimiter);
             sb.AppendLine(SerializeSourcesPayload(Array.Empty<object>(), searchDiagnostics));
@@ -271,6 +351,57 @@ public static class WebSearchTools
             extractions,
             urlsToRead,
             searchDiagnostics);
+    }
+
+    // Classifies zero-results so the prompt we hand the model can
+    // distinguish transport failures (retry-worthy) from genuinely-empty
+    // searches (query-worthy). The model acts very differently on each.
+    private enum EmptyResultHealth
+    {
+        ProviderImpaired, // at least one provider error / throttling / 5xx
+        NoProvider,       // no provider name surfaced at all
+        LikelyGenuinelyEmpty // providers responded, just nothing matched
+    }
+
+    private static EmptyResultHealth ClassifyEmptyResultHealth(SearchResults searchResult)
+    {
+        if (string.IsNullOrWhiteSpace(searchResult.Provider))
+            return EmptyResultHealth.NoProvider;
+
+        if (searchResult.Errors is { Count: > 0 })
+        {
+            // Error strings from providers typically contain verbs like
+            // "HTTP error", "timeout", "blocked", "rate", "503", or
+            // "anomaly". If any of those appear, the search didn't have
+            // a fair shot and the caller should not treat emptiness as
+            // authoritative.
+            foreach (var err in searchResult.Errors)
+            {
+                if (LooksLikeImpairment(err))
+                    return EmptyResultHealth.ProviderImpaired;
+            }
+        }
+
+        return EmptyResultHealth.LikelyGenuinelyEmpty;
+    }
+
+    private static bool LooksLikeImpairment(string error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return false;
+        var lower = error.ToLowerInvariant();
+        return lower.Contains("http error")
+            || lower.Contains("timed out")
+            || lower.Contains("timeout")
+            || lower.Contains("rate")
+            || lower.Contains("blocked")
+            || lower.Contains("captcha")
+            || lower.Contains("anomaly")
+            || lower.Contains("5xx")
+            || lower.Contains("502")
+            || lower.Contains("503")
+            || lower.Contains("504")
+            || lower.Contains("429")
+            || lower.Contains("unavailable");
     }
 
     /// <summary>

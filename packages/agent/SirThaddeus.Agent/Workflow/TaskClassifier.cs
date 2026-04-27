@@ -19,7 +19,12 @@ public sealed class TaskClassifier : ITaskClassifier
                 Complexity = TaskComplexity.Trivial,
                 NeedsTools = false,
                 ShowChecklist = false,
-                TimeBudget = TimeSpan.FromSeconds(30),
+                // 180s for the trivial direct-answer path: no tool calls
+                // but the LLM still has to draft + sanitize, and a 4B
+                // local model's first draft can easily take 30-60s on
+                // longer prompts. Earlier 30/60s ceilings caused
+                // "Cancelled" mid-response.
+                TimeBudget = TimeSpan.FromSeconds(180),
                 MaxRetries = 1,
                 MaxToolCalls = 8
             });
@@ -63,9 +68,16 @@ public sealed class TaskClassifier : ITaskClassifier
             Complexity = complexity,
             NeedsTools = needsTools,
             ShowChecklist = complexity != TaskComplexity.Trivial,
+            // Budgets sized for a 4B-class local model — generous ceilings
+            // so the whole tool loop + final draft fits comfortably. A
+            // single 4B response can take 40-60s; a multi-round research
+            // turn can stack to several minutes. Smaller models will still
+            // return long before the timer fires.
+            //   trivial/simple lookup:       240s  (draft + 0-2 tool calls)
+            //   multi-step research:         600s  (multiple LLM rounds)
             TimeBudget = complexity == TaskComplexity.MultiStepResearch
-                ? TimeSpan.FromSeconds(60)
-                : TimeSpan.FromSeconds(30),
+                ? TimeSpan.FromSeconds(600)
+                : TimeSpan.FromSeconds(240),
             MaxRetries = complexity == TaskComplexity.MultiStepResearch ? 1 : 1,
             MaxToolCalls = 8
         };

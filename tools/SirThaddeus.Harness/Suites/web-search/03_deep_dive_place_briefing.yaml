@@ -18,8 +18,12 @@ assertions:
   require_structured_errors: true
   require_no_hallucinated_citations: false
 expectations:
+  # "briefing" is a meta-label from the test title, not content the
+  # model is expected to say. A real briefing about Seattle Flowers
+  # naturally mentions business hours; keyword-check that instead so
+  # we validate the answer actually addressed the user's core ask.
   required_keywords:
-    - briefing
+    - hours
   forbidden_keywords:
     - as an ai
   max_response_chars: 1200

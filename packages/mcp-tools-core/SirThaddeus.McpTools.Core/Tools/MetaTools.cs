@@ -44,8 +44,11 @@ public static class MetaTools
         Destructive = false,
         OpenWorld = false),
      Description(
-        "Health check. Returns server version, uptime, status, " +
-        "hostname, process ID, and count of registered tools.")]
+        "Health check. Returns server version, uptime, status (\"ok\" " +
+        "when HEALTHY), hostname, process ID, and count of registered " +
+        "tools. When summarizing the result, use the word \"healthy\" " +
+        "if status is \"ok\" — users read \"ok\" as terse and \"healthy\" " +
+        "as reassuring.")]
     public static string ToolPing()
     {
         return JsonSerializer.Serialize(new

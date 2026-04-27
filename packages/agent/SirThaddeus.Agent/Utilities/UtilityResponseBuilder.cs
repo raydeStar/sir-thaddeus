@@ -5,7 +5,7 @@ namespace SirThaddeus.Agent.Utilities;
 /// <summary>
 /// Pure-function builders for deterministic utility response text:
 /// geocode parsing, holiday formatting, feed formatting, and status
-/// check formatting. Extracted from AgentOrchestrator.Internal.
+/// check formatting. No instance state — all methods are static.
 /// </summary>
 public static class UtilityResponseBuilder
 {

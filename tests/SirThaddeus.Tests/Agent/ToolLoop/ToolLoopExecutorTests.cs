@@ -622,7 +622,7 @@ public class ToolLoopExecutorTests
         Assert.Equal(1, llmCallCount);
         Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            "The requested tool is unavailable for this request. Please retry in a moment.",
+            "Live lookup is unavailable for this request, so I do not have confirmed results to quote right now. Please retry in a moment.",
             response.Text);
     }
 
@@ -687,7 +687,7 @@ public class ToolLoopExecutorTests
         Assert.True(response.Success);
         Assert.Equal(1, llmCallCount);
         Assert.Equal(
-            "I hit a timeout while running web tools, so I couldn't complete that request right now. Please retry in a moment or narrow the query.",
+            "Live lookup timed out for this request, so I do not have confirmed results to quote right now. Please retry in a moment or narrow the query.",
             response.Text);
     }
 
@@ -795,7 +795,7 @@ public class ToolLoopExecutorTests
                 2 => new LlmResponse
                 {
                     IsComplete = true,
-                    Content = "The requested tool is unavailable for this request. Please retry in a moment.\n\n-- Sir Thaddeus"
+                    Content = "Live lookup is unavailable for this request, so I do not have confirmed results to quote right now. Please retry in a moment.\n\n-- Sir Thaddeus"
                 },
                 3 => new LlmResponse
                 {
@@ -971,7 +971,7 @@ public class ToolLoopExecutorTests
 
         Assert.True(response.Success);
         Assert.Equal(
-            "I hit a timeout while running web tools, so I couldn't complete that request right now. Please retry in a moment or narrow the query.",
+            "Live lookup timed out for this request, so I do not have confirmed results to quote right now. Please retry in a moment or narrow the query.",
             response.Text);
         Assert.Equal(1, llmCallCount);
     }

@@ -43,6 +43,16 @@ public sealed record AgentResponse
     public bool SuppressSourceCardsUi { get; init; }
 
     /// <summary>
+    /// Structured source citations surfaced this turn — e.g. results
+    /// extracted from <c>web_search</c>'s trailing
+    /// <c>&lt;!-- SOURCES_JSON --&gt;</c> block. The runtime persists
+    /// these on the assistant <c>ChatMessage</c> so the UI can render
+    /// rich preview cards (thumbnails, favicons, domain badges). Empty
+    /// on turns that didn't invoke a citation-producing tool.
+    /// </summary>
+    public IReadOnlyList<AgentSource> Sources { get; init; } = [];
+
+    /// <summary>
     /// When true, the desktop chat UI should not append the "tool activity"
     /// chat bubble for this response. Tool input/output remains in logs.
     /// </summary>
@@ -163,4 +173,25 @@ public sealed record ToolCallRecord
     public required string Arguments { get; init; }
     public required string Result { get; init; }
     public bool Success { get; init; }
+}
+
+/// <summary>
+/// Agent-package representation of a citation surfaced with the
+/// assistant's reply. Mirrors <c>Thaddeus.SharedTypes.ChatMessageSource</c>
+/// but lives here so the agent package doesn't need a dependency on the
+/// shared-types runtime layer. The runtime facade converts between the
+/// two shapes when persisting the assistant message.
+/// </summary>
+public sealed record AgentSource
+{
+    public required string Url { get; init; }
+    public string? Title { get; init; }
+    public string? Domain { get; init; }
+    public string? Excerpt { get; init; }
+    /// <summary>data-URL for the favicon (e.g. "data:image/png;base64,...").</summary>
+    public string? Favicon { get; init; }
+    /// <summary>Absolute URL of a representative image.</summary>
+    public string? Thumbnail { get; init; }
+    /// <summary>ISO-8601 publish timestamp when the source is a dated article.</summary>
+    public string? PublishedAt { get; init; }
 }

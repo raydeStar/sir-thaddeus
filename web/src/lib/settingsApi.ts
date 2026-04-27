@@ -1,17 +1,11 @@
-import { runtimeFetch, readRuntimeMetadata } from './runtime';
+import { runtimeFetch, readRuntimeMetadata, parseRuntimeJson } from './runtime';
 import type { SettingsDocument } from '@thaddeus/shared-types';
 
 function token(): string {
   return readRuntimeMetadata().token;
 }
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`runtime ${res.status}: ${body || res.statusText}`);
-  }
-  return (await res.json()) as T;
-}
+const asJson = parseRuntimeJson;
 
 export async function getSettings(): Promise<SettingsDocument> {
   const res = await runtimeFetch(token(), '/api/settings');

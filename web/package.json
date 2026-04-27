@@ -1,6 +1,6 @@
 {
   "name": "thaddeus-web",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Sir Thaddeus web workspace (Phase 1 scaffold). React 18 + Vite 5 + TanStack Router + Zustand + Tailwind.",

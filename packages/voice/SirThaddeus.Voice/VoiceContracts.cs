@@ -120,8 +120,9 @@ public interface IAsrService
 }
 
 /// <summary>
-/// Bridge contract for agent orchestration.
-/// Must call AgentOrchestrator.ProcessAsync(...) underneath.
+/// Bridge contract for agent orchestration. Implementations call the
+/// active <c>IHeadlessAgent.ProcessAsync</c> (pipeline-backed) under the
+/// hood; voice surfaces just bolt onto whatever the text path does.
 /// </summary>
 public interface IVoiceAgentService
 {

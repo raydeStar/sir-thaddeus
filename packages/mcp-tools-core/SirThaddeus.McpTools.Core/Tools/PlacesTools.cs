@@ -18,8 +18,13 @@ public static class PlacesTools
         new(() => new OsmPlacesDiscoveryProvider(httpClient: SharedHttp.Value));
 
     [McpServerTool, Description(
-        "Discovers nearby businesses and places using open OSM geocoding + Overpass data. " +
-        "Works without paid API keys and returns structured nearby place candidates.")]
+        "Finds nearby places by CATEGORY (e.g. 'bakeries', 'parks', " +
+        "'gas stations'). Returns coarse OSM candidates with name + " +
+        "coordinates only — NO hours, NO reviews, NO phone numbers. " +
+        "USE THIS ONLY when the user wants a category list (e.g. 'find " +
+        "parks near me'). Do NOT use this when the user asks about " +
+        "business hours, reviews, or a specific named business — use " +
+        "`places_lookup` for those.")]
     public static async Task<string> PlacesDiscover(
         [Description("Nearby place query, such as 'bakeries nearby' or 'parks in Olympia'.")] string query,
         [Description("Optional user location hint (city/region).")]
@@ -68,8 +73,13 @@ public static class PlacesTools
     }
 
     [McpServerTool, Description(
-        "Looks up a place via Google Places API and returns structured details " +
-        "(hours, reviews, address, links, and coordinates) for deep-dive briefings.")]
+        "Deep-dive business/place lookup. Returns structured HOURS, " +
+        "REVIEWS, address, phone, website, and coordinates for a single " +
+        "place. USE THIS for any question about: a named business (e.g. " +
+        "'is Trader Joe's open?', 'find a florist in Hillsboro'), hours " +
+        "of operation, reviews, ratings, or contact info. Prefer this " +
+        "over `places_discover` whenever the user wants details about a " +
+        "specific place rather than a category list.")]
     public static async Task<string> PlacesLookup(
         [Description("Place query (business or venue name).")] string query,
         [Description("Timezone context (IANA or Windows ID).")] string timezone = "unknown",

@@ -55,21 +55,6 @@ public class RuntimePermissionGateAdapterTests
         Assert.Contains("blocked", result.DenialReason, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task CheckAsync_forwards_threadId_and_turnId_bound_at_construction()
-    {
-        // Automation allowlist keyed by threadId — if the adapter passes
-        // the right threadId, pre-approved tools skip the prompt flow.
-        using var fixture = new GateFixture();
-        using var scope = fixture.Gate.RegisterThreadAllowlist("t1", new[] { "web_search" });
-
-        var adapter = new RuntimePermissionGateAdapter(fixture.Gate, "t1", "turn1");
-        var result = await adapter.CheckAsync("web_search", "{}", CancellationToken.None);
-
-        Assert.True(result.Granted);
-        Assert.Equal(AgentAuditMode.SessionGrant, result.AuditMode);
-    }
-
     private sealed class GateFixture : IDisposable
     {
         public ToolPermissionGate Gate { get; }

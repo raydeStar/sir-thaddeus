@@ -124,3 +124,18 @@ tmp/
 
 # Local PowerShell analyzer cache accidentally generated under repo root
 Microsoft/Windows/PowerShell/ModuleAnalysisCache
+
+# Playwright MCP session cache (per-run console/page snapshots)
+.playwright-mcp/
+
+# Test runner output (hyphen variant — TestResults/ is already ignored above)
+test-results/
+
+# Scratch screenshots captured at repo root during dev/debug
+/*.png
+
+# Runtime web assets are produced by `vite build` + hybrid-shell auto-sync on
+# every `dotnet build`, so the hashed filenames churn with each change.
+# The publish pipeline regenerates them; don't track the bundles.
+src/Thaddeus.Runtime/wwwroot/assets/
+src/Thaddeus.Runtime/wwwroot/index.html

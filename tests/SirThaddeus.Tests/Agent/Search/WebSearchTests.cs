@@ -380,8 +380,12 @@ public class WebSearchRouterTests
     }
 
     [Fact]
-    public async Task AutoMode_DoesNotUseDdg_WhenSearxngAndSearchApiAreUnavailable()
+    public async Task AutoMode_PrefersDdg_WhenSearxngAndSearchApiAreUnavailable()
     {
+        // DDG is the zero-install default fallback. Using GoogleNews as
+        // the primary fallback was silently poisoning general queries with
+        // unrelated headlines (its RSS endpoint ignores the query when its
+        // "generic news" heuristic misclassifies the input).
         var searxng = new StubProvider("SearxNG", available: false);
         var searchApi = new StubProvider("SearchApi", available: false);
         var ddg = new StubProvider("DuckDuckGo", available: true, results: OneResult("DuckDuckGo", "https://ddg.example/article"));
@@ -393,8 +397,30 @@ public class WebSearchRouterTests
         using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
         var result = await router.SearchAsync("technology outlook", new WebSearchOptions());
 
+        Assert.Equal("DuckDuckGo", result.Provider);
+        Assert.Equal(1, ddg.SearchCallCount);
+        Assert.Equal(0, googleNews.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task AutoMode_FallsBackToGoogleNews_WhenDdgReturnsZeroResults()
+    {
+        // GoogleNews still covers the case where DDG is throttling (anti-
+        // bot) and returns empty — better to get something than nothing.
+        var searxng = new StubProvider("SearxNG", available: false);
+        var searchApi = new StubProvider("SearchApi", available: false);
+        var ddg = new StubProvider("DuckDuckGo", available: true, results: EmptyResults("DuckDuckGo"));
+        var googleNews = new StubProvider(
+            "GoogleNews",
+            available: true,
+            results: OneResult("GoogleNews", "https://news.example/article"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("technology outlook", new WebSearchOptions());
+
         Assert.Equal("GoogleNews", result.Provider);
-        Assert.Equal(0, ddg.SearchCallCount);
+        Assert.Equal(1, ddg.SearchCallCount);
+        Assert.Equal(1, googleNews.SearchCallCount);
     }
 
     [Fact]
@@ -415,6 +441,11 @@ public class WebSearchRouterTests
         Assert.Equal(0, searxng.SearchCallCount);
         Assert.Equal(0, ddg.SearchCallCount);
         Assert.Equal(0, googleNews.SearchCallCount);
+    }
+
+    private static SearchResults EmptyResults(string provider)
+    {
+        return new SearchResults { Provider = provider, Results = new List<SearchResult>() };
     }
 
     private static SearchResults OneResult(string provider, string url)

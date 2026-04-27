@@ -46,7 +46,7 @@ public sealed class WorkspaceWindow : IWorkspaceWindowSurface
         _logger.LogInformation("workspace.window.opening url={Url}", url);
 
         _window = new PhotinoWindow()
-            .SetTitle($"Sir Thaddeus — {version}")
+            .SetTitle($"Sir Thaddeus — Ready for adventure · v{version}")
             .SetSize(1200, 800)
             .Center()
             .SetResizable(true)

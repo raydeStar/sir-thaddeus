@@ -31,11 +31,21 @@ public sealed class ResponseComposerStep : ITurnStep
             ? "(The model returned an empty response.)"
             : context.AssistantDraft!;
 
+        // Extract citation cards from every successful tool result's
+        // trailing SOURCES_JSON block (currently emitted by web_search).
+        // Merged + de-duped by URL so a follow-up call in the same turn
+        // doesn't double-count the same article.
+        var sources = SourceCardExtractor.ExtractMerged(
+            context.ToolCallsMade
+                .Where(call => call.Success)
+                .Select(call => call.Result));
+
         var response = new AgentResponse
         {
             Text = text,
             Success = true,
             ToolCallsMade = context.ToolCallsMade,
+            Sources = sources,
         };
 
         return Task.FromResult<StepResult>(new StepResult.Terminate(response));

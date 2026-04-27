@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 
@@ -32,6 +33,13 @@ public sealed partial class SearchOrchestrator
         @"\$(\d{1,4}(?:\.\d{2})?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private sealed record RetailerAvailabilityRequest(
+        string RetailerDomain,
+        string RetailerLabel,
+        string ProductQuery,
+        bool WantsAvailability,
+        bool WantsPrice);
+
     private enum ProductResponseMode
     {
         FullRecommendation,
@@ -57,6 +65,192 @@ public sealed partial class SearchOrchestrator
         string ProductType,
         IReadOnlyList<string> RetailerDomains,
         int RequestedCount);
+
+    private async Task<AgentResponse?> TryHandleRetailerAvailabilityLookupAsync(
+        string userMessage,
+        List<ToolCallRecord> toolCallsMade,
+        CancellationToken ct)
+    {
+        var request = TryParseRetailerAvailabilityRequest(userMessage);
+        if (request is null)
+            return null;
+
+        // Try a site-restricted search first (recency=any: retailer listings
+        // rarely surface in "day" buckets and many engines de-prioritize
+        // amazon/walmart in fresh-news indexes).
+        var primarySource = await TryResolveRetailerListingSourceAsync(
+            request,
+            $"site:{request.RetailerDomain} {request.ProductQuery}",
+            toolCallsMade,
+            userMessage,
+            ct);
+
+        // Fallback: broad query, then filter results to the retailer domain.
+        if (primarySource is null)
+        {
+            primarySource = await TryResolveRetailerListingSourceAsync(
+                request,
+                $"{request.ProductQuery} {request.RetailerLabel}",
+                toolCallsMade,
+                userMessage,
+                ct);
+        }
+
+        string? price = null;
+        string? availability = null;
+        string? listingUrl = primarySource?.Url;
+        string? listingTitle = primarySource?.Title;
+
+        if (primarySource is not null)
+        {
+            var fetchedContent = await FetchArticleContentAsync([primarySource], toolCallsMade, ct);
+            var evidence = string.Join(
+                "\n",
+                new[]
+                {
+                    primarySource.Title,
+                    primarySource.Snippet,
+                    fetchedContent ?? string.Empty
+                }.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+            price = TryMatch(ProductPriceRegex, evidence, "$");
+            availability = TryExtractAvailability(evidence);
+
+            Session.RecordSearchResults(
+                SearchMode.WebFactFind,
+                $"site:{request.RetailerDomain} {request.ProductQuery}",
+                "any",
+                new List<SourceItem> { primarySource },
+                DateTimeOffset.UtcNow);
+        }
+
+        // If we have neither a listing nor any extracted data, return a
+        // deterministic honest answer with a direct retailer search link.
+        // Falling through to the generic fact-find path produces stale-news
+        // rambles for retail availability questions, which is the bug we are
+        // fixing.
+        if (primarySource is null &&
+            string.IsNullOrWhiteSpace(price) &&
+            string.IsNullOrWhiteSpace(availability))
+        {
+            var directSearchUrl = BuildRetailerSearchUrl(request);
+
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "RETAILER_AVAILABILITY_DEGRADED",
+                Result = request.RetailerDomain,
+                Details = new Dictionary<string, object>
+                {
+                    ["product_query"] = request.ProductQuery,
+                    ["reason"] = "no_listing_resolved"
+                }
+            });
+
+            return new AgentResponse
+            {
+                Text =
+                    $"I couldn't pull a live {request.RetailerLabel} listing for **{request.ProductQuery}** " +
+                    $"from search just now ({request.RetailerLabel} blocks most indexers, so live stock and price aren't reliably searchable). " +
+                    $"Check the listing directly: {directSearchUrl}",
+                Success = true,
+                ToolCallsMade = toolCallsMade,
+                LlmRoundTrips = 0
+            };
+        }
+
+        var detailParts = new List<string>();
+        if (request.WantsPrice)
+        {
+            detailParts.Add(!string.IsNullOrWhiteSpace(price)
+                ? $"Price: {price}."
+                : "Price: not visible in the current listing snippet.");
+        }
+
+        if (request.WantsAvailability)
+        {
+            detailParts.Add(!string.IsNullOrWhiteSpace(availability)
+                ? $"Availability: {availability}."
+                : "Availability: not clearly stated in the current listing snippet.");
+        }
+
+        if (!request.WantsPrice && !request.WantsAvailability)
+        {
+            if (!string.IsNullOrWhiteSpace(price))
+                detailParts.Add($"Price: {price}.");
+            if (!string.IsNullOrWhiteSpace(availability))
+                detailParts.Add($"Availability: {availability}.");
+        }
+
+        var linkUrl = listingUrl ?? BuildRetailerSearchUrl(request);
+        detailParts.Add($"Link: {linkUrl}");
+
+        _audit.Append(new AuditEvent
+        {
+            Actor = "search",
+            Action = "RETAILER_AVAILABILITY_FACT",
+            Result = request.RetailerDomain,
+            Details = new Dictionary<string, object>
+            {
+                ["product_query"] = request.ProductQuery,
+                ["price_found"] = !string.IsNullOrWhiteSpace(price),
+                ["availability_found"] = !string.IsNullOrWhiteSpace(availability),
+                ["source_url"] = linkUrl
+            }
+        });
+
+        var titlePart = !string.IsNullOrWhiteSpace(listingTitle)
+            ? listingTitle!
+            : $"{request.ProductQuery} on {request.RetailerLabel}";
+
+        return new AgentResponse
+        {
+            Text = $"{titlePart}: {string.Join(" ", detailParts)}",
+            Success = true,
+            ToolCallsMade = toolCallsMade,
+            LlmRoundTrips = 0
+        };
+    }
+
+    private async Task<SourceItem?> TryResolveRetailerListingSourceAsync(
+        RetailerAvailabilityRequest request,
+        string query,
+        List<ToolCallRecord> toolCallsMade,
+        string originalUserMessage,
+        CancellationToken ct)
+    {
+        var toolResult = await CallWebSearchAsync(
+            query,
+            "any",
+            toolCallsMade,
+            ct,
+            originalUserMessage: originalUserMessage,
+            maxResults: 5,
+            categories: "general");
+
+        if (string.IsNullOrWhiteSpace(toolResult) ||
+            WebToolFailureMapper.TryBuildFailureResponse(toolResult, toolCallsMade) is not null)
+        {
+            return null;
+        }
+
+        var sources = ResolveSourceUrls(ParseSourcesFromToolResult(toolResult));
+        var filtered = FilterRetailerAvailabilitySources(sources, request);
+        return filtered.Count == 0 ? null : filtered[0];
+    }
+
+    private static string BuildRetailerSearchUrl(RetailerAvailabilityRequest request)
+    {
+        var encoded = Uri.EscapeDataString(request.ProductQuery);
+        return request.RetailerDomain switch
+        {
+            "amazon.com" => $"https://www.amazon.com/s?k={encoded}",
+            "walmart.com" => $"https://www.walmart.com/search?q={encoded}",
+            "ebay.com" => $"https://www.ebay.com/sch/i.html?_nkw={encoded}",
+            "etsy.com" => $"https://www.etsy.com/search?q={encoded}",
+            _ => $"https://www.{request.RetailerDomain}/"
+        };
+    }
 
     private async Task<AgentResponse> ExecuteProductRecommendationAsync(
         string userMessage,
@@ -190,6 +384,124 @@ public sealed partial class SearchOrchestrator
         extracted = Regex.Replace(extracted, @"\s+", " ").Trim();
 
         return extracted;
+    }
+
+    private static RetailerAvailabilityRequest? TryParseRetailerAvailabilityRequest(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        var lower = userMessage.ToLowerInvariant();
+        if (IntentFeatureExtractor.LooksLikeProductRecommendationLookup(lower))
+            return null;
+
+        var retailerDomain = ProductRetailerDomains.FirstOrDefault(domain =>
+            lower.Contains(domain, StringComparison.Ordinal) ||
+            lower.Contains(domain.Replace(".com", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(retailerDomain))
+            return null;
+
+        var wantsAvailability =
+            lower.Contains("in stock", StringComparison.Ordinal) ||
+            lower.Contains("out of stock", StringComparison.Ordinal) ||
+            lower.Contains("availability", StringComparison.Ordinal) ||
+            lower.Contains("available", StringComparison.Ordinal);
+        var wantsPrice =
+            lower.Contains("price", StringComparison.Ordinal) ||
+            lower.Contains("cost", StringComparison.Ordinal) ||
+            lower.Contains("how much", StringComparison.Ordinal);
+
+        if (!wantsAvailability && !wantsPrice)
+            return null;
+
+        var extracted = userMessage;
+        extracted = Regex.Replace(extracted, @"https?://\S+", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:amazon(?:\.com)?|walmart(?:\.com)?|ebay|etsy)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:hello|hi|hey|please|thanks|thank\s+you)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:can\s+you|could\s+you|would\s+you|check|see|tell\s+me|find\s+out|look\s+up)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:if\s+there(?:'s|\s+is)?|there(?:'s|\s+is)|is\s+there|what(?:'s|\s+is)|it\s+is|it)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:in\s+stock|out\s+of\s+stock|availability|available|current(?:ly)?|price|cost|how\s+much|online)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"\b(?:on|at|from|for|of|the|a|an|and|to|do|does|is|are)\b", " ", RegexOptions.IgnoreCase);
+        extracted = Regex.Replace(extracted, @"[^A-Za-z0-9\-\s]", " ");
+
+        var genericTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "hello", "hi", "hey", "please", "thanks", "thank", "you",
+            "can", "could", "would", "check", "see", "tell", "me",
+            "find", "out", "look", "up", "if", "there", "theres",
+            "what", "whats", "price", "cost", "stock", "availability",
+            "available", "current", "currently", "online", "it",
+            "get", "getting", "got", "for", "and", "is", "in",
+            "my", "your", "some", "any"
+        };
+
+        extracted = string.Join(
+            " ",
+            Regex.Matches(extracted, @"[A-Za-z0-9\-]+")
+                .Select(match => match.Value)
+                .Where(token => !genericTokens.Contains(token)));
+        extracted = Regex.Replace(extracted, @"\s+", " ").Trim();
+
+        if (string.IsNullOrWhiteSpace(extracted))
+            return null;
+
+        var retailerLabel = retailerDomain.Split('.')[0];
+        retailerLabel = char.ToUpperInvariant(retailerLabel[0]) + retailerLabel[1..];
+
+        return new RetailerAvailabilityRequest(
+            retailerDomain,
+            retailerLabel,
+            extracted,
+            wantsAvailability,
+            wantsPrice);
+    }
+
+    private static IReadOnlyList<SourceItem> FilterRetailerAvailabilitySources(
+        IReadOnlyList<SourceItem> sources,
+        RetailerAvailabilityRequest request)
+    {
+        var tokens = Tokenize(request.ProductQuery);
+
+        return sources
+            .Where(source =>
+                source.Domain.Contains(request.RetailerDomain, StringComparison.OrdinalIgnoreCase) ||
+                source.Url.Contains(request.RetailerDomain, StringComparison.OrdinalIgnoreCase))
+            .Where(source =>
+            {
+                if (tokens.Count == 0)
+                    return true;
+
+                var combined = $"{source.Title} {source.Snippet} {source.Url}";
+                return tokens.Any(token => combined.Contains(token, StringComparison.OrdinalIgnoreCase));
+            })
+            .GroupBy(source => source.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static string? TryExtractAvailability(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var lower = text.ToLowerInvariant();
+        if (lower.Contains("currently unavailable", StringComparison.Ordinal) ||
+            lower.Contains("temporarily out of stock", StringComparison.Ordinal) ||
+            lower.Contains("out of stock", StringComparison.Ordinal) ||
+            lower.Contains("unavailable", StringComparison.Ordinal))
+        {
+            return "Out of stock";
+        }
+
+        if (lower.Contains("in stock", StringComparison.Ordinal) ||
+            lower.Contains("available now", StringComparison.Ordinal) ||
+            lower.Contains("add to cart", StringComparison.Ordinal) ||
+            lower.Contains("buy now", StringComparison.Ordinal))
+        {
+            return "In stock";
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<string> BuildProductSearchPlan(ProductConstraints constraints)

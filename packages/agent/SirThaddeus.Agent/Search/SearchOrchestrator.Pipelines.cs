@@ -273,6 +273,13 @@ public sealed partial class SearchOrchestrator
             };
         }
 
+        var retailerAvailabilityResponse = await TryHandleRetailerAvailabilityLookupAsync(
+            userMessage ?? string.Empty,
+            toolCallsMade,
+            ct);
+        if (retailerAvailabilityResponse is not null)
+            return retailerAvailabilityResponse;
+
         var isLocalBusinessQuery = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage);
         var isGenericLocalBusinessDiscovery = IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerMessage);
         var localBusinessKeywords = isLocalBusinessQuery

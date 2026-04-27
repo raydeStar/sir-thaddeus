@@ -93,7 +93,46 @@ public sealed record PermissionsSettings(
 public sealed record FilesSettings(
     IReadOnlyList<string> AllowedRoots,
     bool DisableAllFileAccess,
-    int MaxDefaultCharsPerRead);
+    int MaxDefaultCharsPerRead)
+{
+    // Default record equality reference-compares AllowedRoots, which breaks
+    // round-trip tests: JSON deserialization produces a List<string> while
+    // Defaults() creates a string[] — same contents, different reference.
+    // Treat two FilesSettings as equal when AllowedRoots has the same ordered
+    // elements (ordinal string compare), regardless of concrete list type.
+    public bool Equals(FilesSettings? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return DisableAllFileAccess == other.DisableAllFileAccess
+            && MaxDefaultCharsPerRead == other.MaxDefaultCharsPerRead
+            && AllowedRootsEqual(AllowedRoots, other.AllowedRoots);
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(DisableAllFileAccess);
+        hash.Add(MaxDefaultCharsPerRead);
+        if (AllowedRoots is not null)
+        {
+            foreach (var root in AllowedRoots) hash.Add(root, StringComparer.Ordinal);
+        }
+        return hash.ToHashCode();
+    }
+
+    private static bool AllowedRootsEqual(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return a is null && b is null;
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+        }
+        return true;
+    }
+}
 
 /// <summary>Application-level flags (onboarding completion, etc.).</summary>
 public sealed record AppFlags(
@@ -142,7 +181,7 @@ public sealed record SettingsDocument(
             BaseUrl: "http://127.0.0.1:1234/v1",
             ApiKey: null,
             MaxTokens: 4096,
-            ContextWindowTokens: 8192,
+            ContextWindowTokens: 16384,
             Temperature: 0.7,
             GatekeeperBaseUrl: null,
             GatekeeperModelId: "qwen3.5-2b",

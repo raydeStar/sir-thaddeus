@@ -7,8 +7,8 @@ public enum ActivityKind
     ChatTurn,
     /// <summary>A voice turn (push-to-talk → STT → assistant → TTS).</summary>
     VoiceTurn,
-    /// <summary>An automation, scheduled task, or background job invocation.</summary>
-    Automation,
+    /// <summary>A user-invoked routine run (checklist walkthrough).</summary>
+    Routine,
     /// <summary>System-level event (startup, shutdown, error).</summary>
     System,
 }

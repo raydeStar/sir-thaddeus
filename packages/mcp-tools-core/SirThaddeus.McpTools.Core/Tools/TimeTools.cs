@@ -25,8 +25,14 @@ namespace SirThaddeus.McpServer.Tools;
 public static class TimeTools
 {
     [McpServerTool, Description(
-        "Returns the current local time as ISO 8601, Unix milliseconds, " +
-        "Windows timezone ID, and UTC offset. No parameters required.")]
+        "Returns the CURRENT LOCAL TIME — ISO 8601, Unix milliseconds, " +
+        "Windows timezone ID, and UTC offset. Takes no parameters; always " +
+        "safe to call. " +
+        "USE THIS TOOL when the user asks 'what time is it', 'current " +
+        "time', 'time right now', or 'what time is it here'. Do NOT ask " +
+        "the user for their location first — this tool reads the local " +
+        "system clock directly. For time in a DIFFERENT city/country, " +
+        "use weather_geocode followed by resolve_timezone instead.")]
     public static string TimeNow()
     {
         var now = DateTimeOffset.Now;

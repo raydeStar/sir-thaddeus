@@ -31,20 +31,25 @@ function ChatListRoute() {
       title="Chat"
       subtitle="Your conversations with Sir Thaddeus."
     >
-      <div className="mb-8 flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle" data-testid="chat-thread-count">
-          {threads.length} {threads.length === 1 ? 'conversation' : 'conversations'}
-        </span>
-        <button
-          type="button"
-          onClick={onNew}
-          data-testid="chat-new-thread"
-          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-        >
-          <Plus className="h-4 w-4" strokeWidth={2} />
-          New chat
-        </button>
-      </div>
+      {/* Header bar only renders when there are conversations — the empty
+          state has its own primary CTA, so we don't double the New chat
+          button. */}
+      {threads.length > 0 ? (
+        <div className="mb-8 flex items-center justify-between">
+          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle" data-testid="chat-thread-count">
+            {threads.length} {threads.length === 1 ? 'conversation' : 'conversations'}
+          </span>
+          <button
+            type="button"
+            onClick={onNew}
+            data-testid="chat-new-thread"
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2} />
+            New chat
+          </button>
+        </div>
+      ) : null}
 
       {loading ? <p className="text-sm text-ink-muted">Loading…</p> : null}
       {error ? (
@@ -65,6 +70,7 @@ function ChatListRoute() {
           <button
             type="button"
             onClick={onNew}
+            data-testid="chat-new-thread"
             className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             <Plus className="h-4 w-4" strokeWidth={2} />

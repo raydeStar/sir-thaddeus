@@ -4,8 +4,15 @@ using System.Security.Principal;
 using System.Text.Json;
 using Serilog;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Dialogue;
+using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
+using SirThaddeus.Agent.Pipeline;
+using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Validation;
+using SirThaddeus.PersonalityEngine;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
@@ -199,36 +206,259 @@ if (toolsAvailable && settings.Memory.Enabled)
         }));
 }
 
-AgentOrchestrator BuildOrchestrator(AppSettings currentSettings)
+// Pipeline-backed orchestrator is the only path now — the legacy
+// AgentOrchestrator was retired after the harness stabilized at 81%+
+// parity. The old `ST_RUNTIME_USE_PIPELINE=0` escape hatch is gone;
+// there's nothing to toggle.
+IHeadlessAgent BuildOrchestrator(AppSettings currentSettings)
 {
     llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
     gatekeeperLlm.UpdateOptions(RuntimeLlmOptionsFactory.BuildGatekeeper(currentSettings));
 
-    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
+    return BuildPipelineBackedOrchestrator(currentSettings);
+}
 
-    return new AgentOrchestrator(
+PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings currentSettings)
+{
+    // CLI-side pipeline composition. Mirrors
+    // Thaddeus.Runtime.Chat.LmStudioAssistant.BuildTurnPipeline so harness
+    // runs exercise the same behavior path as the desktop UI.
+    //
+    // Differences from the UI composition:
+    //   - Event sink writes to stdout (CLI "thinking cadence") instead of
+    //     the desktop WebSocket event bus.
+    //   - Permission gate = AlwaysGrantGate; the CLI's ConsolePermissionGate
+    //     / ApiPermissionGate handle approval at the MCP-client layer
+    //     (AuditedMcpToolClient), not inside the tool loop.
+    //   - No propose_automation interceptor (CLI never emits it).
+    //   - No automation-args rewriter (automation runs are UI-only).
+    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
+    var sink = new StdoutChatEventSink(showDeltas: false);
+
+    // Build a fresh PersonalityRuntime per orchestrator instance — matches
+    // the legacy orchestrator's construction. Profile is loaded from disk
+    // the first time the runtime is touched (lazy via Reload).
+    var personalityRuntime = new PersonalityRuntime(
+        currentSettings.ActivePersonalityId,
+        SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings));
+
+    var toolLoop = new ToolLoopStep(
         llm,
         agentMcp,
-        audit,
-        currentSettings.Llm.SystemPrompt,
-        activePersonalityId: currentSettings.ActivePersonalityId,
-        personalityProfilesDirectory: SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings),
-        footmanRouter: footmanRouter,
-        autoMemoryExtractor: autoMemoryExtractor,
-        gatekeeperLlm: gatekeeperLlm)
+        sink,
+        permissionGate: new AlwaysGrantGate(),
+        groupClassifier: null,
+        interceptors: null,
+        argsRewriters: null,
+        maxRoundTrips: 6);
+
+    var sanitize = new Func<TurnContext, string, string>(
+        (_, draft) => AssistantResponseSanitizer.CleanChatReply(draft));
+
+    // Memory context read (user profile facts, preferences). Uses the
+    // same MCP memory tools the orchestrator does, so stored facts from
+    // legacy-path turns are visible to pipeline-path turns and vice
+    // versa. Null-safe — when memory is disabled, the provider returns
+    // an empty pack and the step is effectively a no-op.
+    IMemoryContextProvider? memoryProvider = null;
+    if (toolsAvailable && currentSettings.Memory.Enabled)
     {
-        ActiveProfileId = currentSettings.ActiveProfileId,
-        // The headless runtime powers harness and API evaluation, so keep
-        // explicit deep-dive briefings available even when the desktop
-        // baseline preset hides that surface area.
-        DeepDiveEnabled = true,
-        AdvancedPlaceDiscoveryEnabled = currentSettings.AllowsAdvancedPlaceDiscoveryByProfile(),
-        MemoryEnabled = toolsAvailable && currentSettings.Memory.Enabled,
-        UserLocationHint = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel(),
-        UserTimezone = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedTimezone(),
-        PreferredUnits = currentSettings.Weather.GetNormalizedUnitSystem(),
-        MaxTokensBudget = currentSettings.Llm.MaxTokens
-    };
+        var intentClassifier = new SmartIntentClassifier(gatekeeperLlm, audit);
+        memoryProvider = new MemoryContextProvider(agentMcp, audit, intentClassifier);
+    }
+
+    // Search fallback: when the primary tool loop produces a refusal-
+    // shaped draft ("I don't know / I can't / not sure") AND the user's
+    // message has web-lookup signals, retry via the SearchOrchestrator.
+    // Shares RefusalDetector.HasRefusalOrUncertaintySignals so both the
+    // UI runtime and the CLI use the same trigger heuristic.
+    ISearchFallbackExecutor? searchFallback = null;
+    if (toolsAvailable)
+    {
+        var searchOrchestrator = new SearchOrchestrator(
+            llm, agentMcp, audit, currentSettings.Llm.SystemPrompt);
+        searchFallback = new SearchFallbackExecutor(searchOrchestrator);
+    }
+
+    // 2K pipeline-only services — these all share the primary LLM and
+    // don't need per-turn configuration, so construct once per
+    // orchestrator build.
+    //
+    // - Dialogue state: CLI uses the singleton adapter over the legacy
+    //   DialogueStateStore so harness runs see the same topic/location
+    //   carryover the legacy orchestrator produced.
+    // - Guardrails: first-principles scaffold for reasoning-shaped prompts.
+    // - Validator + repair loop: catches inadequate drafts and runs one
+    //   focused repair pass.
+    var dialogueAccessor = new SingletonDialogueStateAccessor(new DialogueStateStore());
+    var guardrails = new ReasoningGuardrailsPipeline(llm, audit);
+    var completionValidator = new CompletionValidator(llm);
+    var repairLoop = new RepairLoop(llm, completionValidator);
+
+    var pipeline = new ChatPipeline(new ITurnStep[]
+    {
+        // Safety boundary runs FIRST. High-risk illicit-instruction
+        // prompts short-circuit to a canned safe-redirect response
+        // before memory, personality, LLM, or tools are touched.
+        new SafetyBoundaryStep(),
+
+        // Utility fast-path — deterministic answers never touch the
+        // LLM or personality wrapping.
+        new UtilityFastPathStep(),
+
+        // Benign fallback: canned replies for trivial benign prompts
+        // (greetings, hash-table probes). Only fires when the prompt
+        // isn't tool-eligible.
+        new BenignFallbackStep(),
+
+        // Personality wraps the base system prompt. Sits early so every
+        // subsequent injection (logic-puzzle scaffold, memory, onboarding)
+        // appends on top of the personality-framed prompt.
+        new PersonalityInjectionStep(personalityRuntime),
+
+        new FeatureExtractorStep(),
+        new LogicPuzzleScaffoldStep(),
+
+        // Memory context injects [REMEMBERED CONTEXT] block for the LLM.
+        // Also sets TurnContext.IsNewUser from the provider's onboarding
+        // signal so the next step can fire on cold starts. No-op when
+        // memoryProvider is null (memory disabled in settings).
+        new MemoryContextStep(memoryProvider, ctx => new MemoryContextRequest
+        {
+            UserMessage = ctx.UserText ?? string.Empty,
+            ConversationId = ctx.ThreadId,
+            MemoryEnabled = currentSettings.Memory.Enabled,
+            ActiveProfileId = currentSettings.ActiveProfileId,
+        }),
+
+        // Onboarding injection: appends the cold-introduction suffix
+        // when the memory provider signals no profile facts are known
+        // yet. No-op on warm users / when memory is off.
+        new OnboardingInjectionStep(ctx => ctx.IsNewUser
+            ? OnboardingMode.Cold
+            : OnboardingMode.NotNeeded),
+
+        // Dialogue state: appends [CONVERSATION CONTEXT] with carry-over
+        // topic/location/time. Read-only — writes happen inside the
+        // legacy context anchoring service (still on the orchestrator
+        // for now). Singleton accessor matches the v1 store semantics.
+        new DialogueStateStep(dialogueAccessor),
+
+        // Existence-check nudge: when the user asks "does X exist" /
+        // "was X released" etc., remind the model to verify via
+        // web_search before answering from (stale) training memory.
+        // No-op on other prompt shapes.
+        new ExistenceVerificationHintStep(),
+
+        new FootmanRouterStep(footmanRouter, sink),
+
+        // Guardrails: short-circuits the turn with a first-principles
+        // scaffold when the prompt looks reasoning-shaped. Runs after
+        // the footman so it can still see the narrowed tool view, but
+        // before the tool loop so a clean scaffold answer beats a
+        // half-loop.
+        new GuardrailsStep(guardrails),
+
+        // Freshness router (Layer A of the confidence system): when the
+        // user asks a structurally fresh question (existence, current-
+        // state, recent release, live price), force tool_choice=web_search
+        // on the FIRST tool-loop round. Complements the earlier hint —
+        // the hint motivates, this enforces. Pattern-gated so casual
+        // chat and opinion prompts pass through untouched.
+        new FreshnessRouterStep(),
+
+        toolLoop,
+        new PostProcessStep(sanitize, "PostProcess:Sanitize"),
+
+        // Completion validation + targeted repair: catches refusal-ish
+        // or incomplete drafts after sanitize and runs one focused
+        // repair pass. Fail-open — validator/repair exceptions don't
+        // abort the turn.
+        new CompletionValidationStep(completionValidator, repairLoop),
+
+        // Search fallback: runs after sanitizer so the refusal check
+        // sees the final draft. Builds the full request including
+        // history + tool calls; no-op when the draft doesn't look like
+        // a refusal.
+        new SearchFallbackStep(
+            searchFallback,
+            buildRequest: ctx =>
+            {
+                var draft = ctx.AssistantDraft ?? string.Empty;
+                var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
+                // Layer B: a draft that hedges its own confidence on a
+                // factual question (e.g. "I believe ... as of my training
+                // data") is indistinguishable from stale-memory guessing.
+                // Trigger the same search-fallback so we ground the answer.
+                var hedged = HedgeSignalDetector.ShouldVerify(draft, ctx.UserText);
+                if (!refusal && !hedged)
+                    return null;
+
+                return new SearchFallbackRequest
+                {
+                    UserMessage = ctx.UserText ?? string.Empty,
+                    History = ctx.LlmMessages.ToList(),
+                    ToolCallsMade = ctx.ToolCallsMade.ToList(),
+                    HasRefusalOrUncertaintySignals = true,
+                };
+            }),
+
+        // Auto-memory: fire-and-forget user + assistant chunk writes after
+        // post-process so the stored chunks match what the user sees.
+        // Null when memory is disabled in settings — the step becomes a no-op.
+        new AutoMemoryExtractStep(
+            autoMemoryExtractor,
+            activeProfileIdGetter: _ => currentSettings.ActiveProfileId),
+
+        new ResponseComposerStep(),
+    });
+
+    // The CLI's system prompt gets a location block prepended — matches
+    // the UI runtime's BuildLocationBlock so the LLM sees "your home is
+    // Olympia, WA" and can pass that to weather_geocode without a
+    // separate round-trip to ask.
+    var systemPrompt = BuildHeadlessSystemPrompt(currentSettings);
+
+    return new PipelineBackedAgentOrchestrator(pipeline, agentMcp, systemPrompt);
+}
+
+static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
+{
+    var effectiveLocation = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId);
+    var locationLabel = effectiveLocation.GetResolvedLabel();
+    var timezone = effectiveLocation.GetResolvedTimezone();
+    var preferredUnits = currentSettings.Weather.GetNormalizedUnitSystem();
+
+    // Date block runs unconditionally — local-LLM training cutoffs are
+    // months to years stale, and "today's date" questions need to work
+    // even when the user hasn't set a location. The existence-verification
+    // nudge got moved OUT of here because a prompt-wide "verify" hint
+    // pushed 4B models to web_search casual questions. If the CLI grows a
+    // per-turn system prompt augmentation point later, that's where the
+    // surgical existence nudge should live.
+    var today = DateTimeOffset.Now;
+    var dateBlock =
+        $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +
+        "Use this when the user asks about the current date, day of week, " +
+        "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
+        "or rely on your training cutoff.";
+
+    if (string.IsNullOrWhiteSpace(locationLabel))
+        return dateBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
+
+    var tzNote = string.IsNullOrWhiteSpace(timezone) ? "" : $" Timezone: {timezone.Trim()}.";
+    var unitsNote = string.IsNullOrWhiteSpace(preferredUnits) ? "" : $" Preferred units: {preferredUnits}.";
+    var locationBlock =
+        $"The user's home location is: {locationLabel.Trim()}.{tzNote}{unitsNote} " +
+        "Use this ONLY as the default area when they ask about weather, local " +
+        "places, news, or times WITHOUT specifying a location. When the user " +
+        "explicitly names a different city (e.g. \"weather in Seattle\"), use " +
+        "the city THEY named — do not ask for clarification or second-guess. " +
+        "Pass the location string to weather_geocode and similar location-scoped " +
+        "tools verbatim. Do not announce that you know their home location — " +
+        "just use it naturally when they omit one.";
+
+    return dateBlock + "\n\n" + locationBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
 }
 
 var orchestrator = BuildOrchestrator(settings);
@@ -671,7 +901,7 @@ static bool LooksLikeLlmConnectivityFailure(HttpRequestException ex, string base
 static async Task PrintStatusAsync(
     AppSettings settings,
     HeadlessOptions options,
-    AgentOrchestrator orchestrator,
+    IHeadlessAgent orchestrator,
     bool toolsAvailable,
     string toolsMessage,
     CancellationToken cancellationToken)
@@ -700,7 +930,7 @@ static async Task PrintStatusAsync(
 static async Task RunDoctorAsync(
     AppSettings settings,
     HeadlessOptions options,
-    AgentOrchestrator orchestrator,
+    IHeadlessAgent orchestrator,
     bool toolsAvailable,
     string toolsMessage,
     CancellationToken cancellationToken)
@@ -789,7 +1019,7 @@ static async Task<(bool Reachable, string Detail)> CheckHttpEndpointReachableAsy
 }
 
 static async Task<string> TryGetToolCountStatusAsync(
-    AgentOrchestrator orchestrator,
+    IHeadlessAgent orchestrator,
     CancellationToken cancellationToken)
 {
     try
@@ -1040,8 +1270,8 @@ static bool HandleProfileCommand(
     PersonalityProfileStore personalityStore,
     ref AppSettings settings,
     ref (string User, string Assistant) handles,
-    ref AgentOrchestrator orchestrator,
-    Func<AppSettings, AgentOrchestrator> buildOrchestrator)
+    ref IHeadlessAgent orchestrator,
+    Func<AppSettings, IHeadlessAgent> buildOrchestrator)
 {
     var parts = SplitCommand(input);
     if (parts.Count == 1 || parts[1].Equals("help", StringComparison.OrdinalIgnoreCase))

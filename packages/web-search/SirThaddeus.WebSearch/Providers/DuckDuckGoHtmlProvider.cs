@@ -133,18 +133,17 @@ public sealed class DuckDuckGoHtmlProvider : IWebSearchProvider, IDisposable
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(3_000);
-
-            var response = await _http.GetAsync("https://html.duckduckgo.com/", cts.Token);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
+        // The zero-install default fallback — always advertise availability.
+        // A GET on the DDG root can return 403/connection-reset even when
+        // `/html/?q=...` searches succeed (DDG's anti-bot sometimes triggers
+        // on the bare root). Gating router selection on that root-probe
+        // meant a transient 403 disabled DDG for the entire probe TTL, and
+        // the auto-chain then fell all the way to GoogleNews — which
+        // returns query-agnostic headlines. Treating DDG as "always
+        // available" is safe: the real search call handles empty/error
+        // responses and the chain still falls back to GoogleNews below.
+        await Task.CompletedTask;
+        return true;
     }
 
     // ─────────────────────────────────────────────────────────────────

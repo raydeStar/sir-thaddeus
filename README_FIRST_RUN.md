@@ -5,8 +5,8 @@ This package is a self-contained Windows build. You do not need to install the .
 ## Quick start: Download, Unzip, Run
 
 1. **Download** the release ZIP from the [Releases](https://github.com/raydeStar/sir-thaddeus/releases) page.
-2. **Unzip** to a local folder, for example `C:\Apps\SirThaddeus\`.
-3. **Run** `Thaddeus.Runtime.exe`.
+2. **Unzip** anywhere — you'll get one folder named `sir-thaddeus-win-x64-v…`.
+3. **Open** that folder and run `Thaddeus.Runtime.exe`.
 
 That's it. Everything else happens automatically.
 

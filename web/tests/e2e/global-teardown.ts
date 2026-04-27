@@ -1,8 +1,4 @@
 import { existsSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-const LOCK_PATH = join(homedir(), '.thaddeus', 'runtime.lock');
 
 /** Best-effort cleanup: kill the runtime process and remove its lock file. */
 export default async function globalTeardown(): Promise<void> {
@@ -14,7 +10,8 @@ export default async function globalTeardown(): Promise<void> {
       // already gone
     }
   }
-  if (existsSync(LOCK_PATH)) {
-    try { unlinkSync(LOCK_PATH); } catch { /* ignore */ }
+  const lockPath = process.env.RUNTIME_LOCK_PATH;
+  if (lockPath && existsSync(lockPath)) {
+    try { unlinkSync(lockPath); } catch { /* ignore */ }
   }
 }

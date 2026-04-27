@@ -8,6 +8,7 @@
     <RootNamespace>Thaddeus.Shell</RootNamespace>
     <AssemblyName>Thaddeus.Shell</AssemblyName>
     <OutputType>Exe</OutputType>
+    <ApplicationIcon>..\..\assets\icons\sir-thaddeus.ico</ApplicationIcon>
     <UseWindowsForms>false</UseWindowsForms>
     <UseWPF>false</UseWPF>
     <!-- Photino must run on the UI thread; STA matters on Windows. -->
@@ -24,6 +25,25 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Thaddeus.Shell.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\icons\sir-thaddeus.ico">
+      <Link>assets\icons\sir-thaddeus.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\assets\icons\sir-thaddeus-tray.ico">
+      <Link>assets\icons\sir-thaddeus-tray.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\assets\icons\sir-thaddeus-tray-dark.ico">
+      <Link>assets\icons\sir-thaddeus-tray-dark.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

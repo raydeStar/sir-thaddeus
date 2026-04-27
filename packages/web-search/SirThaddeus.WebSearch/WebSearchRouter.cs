@@ -154,16 +154,23 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             diagnostics = [.. hostedFallback.Diagnostics];
         }
 
-        var googleFallback = await _googleNews.SearchAsync(query, options, ct);
-        googleFallback = AttachSearchDiagnostic(googleFallback, _googleNews.Name, "fallback", diagnostics);
-        if (googleFallback.Results.Count > 0)
-            return googleFallback;
-
-        diagnostics = [.. googleFallback.Diagnostics];
-
-        // Last-resort free fallback.
+        // DDG is the zero-install default and genuinely searches. Try it
+        // BEFORE GoogleNews — the latter's RSS endpoint returns current
+        // headlines regardless of query for anything its "generic news"
+        // heuristic claims, which silently poisons non-news searches
+        // (e.g. "latest .NET version" returned Middle East war headlines).
         var ddgFallback = await _ddg.SearchAsync(query, options, ct);
-        return AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
+        ddgFallback = AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
+        if (ddgFallback.Results.Count > 0)
+            return ddgFallback;
+
+        diagnostics = [.. ddgFallback.Diagnostics];
+
+        // Last-resort: GoogleNews RSS. Useful for genuine news asks and
+        // when DDG is blocked (anti-bot throttling), but its headlines-
+        // mode fallback is off-topic for general queries.
+        var googleFallback = await _googleNews.SearchAsync(query, options, ct);
+        return AttachSearchDiagnostic(googleFallback, _googleNews.Name, "fallback", diagnostics);
     }
 
     /// <summary>

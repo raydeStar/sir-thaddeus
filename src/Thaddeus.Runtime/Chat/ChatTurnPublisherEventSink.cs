@@ -41,7 +41,7 @@ public sealed class ChatTurnPublisherEventSink : IChatEventSink
     public Task TurnCompleteAsync(string threadId, string messageId, string finalText, bool cancelled, CancellationToken cancellationToken = default)
         => SafePublishAsync(
             nameof(TurnCompleteAsync),
-            () => _publisher.PublishCompleteAsync(threadId, messageId, finalText, cancelled, cancellationToken));
+            () => _publisher.PublishCompleteAsync(threadId, messageId, finalText, cancelled, ct: cancellationToken));
 
     public Task ToolStartedAsync(
         string activityId,

@@ -219,7 +219,7 @@ public sealed record LlmSettings
     public int MaxTokens { get; init; } = 2048;
 
     [JsonPropertyName("contextWindowTokens")]
-    public int ContextWindowTokens { get; init; } = 8192;
+    public int ContextWindowTokens { get; init; } = 16384;
 
     [JsonPropertyName("temperature")]
     public double Temperature { get; init; } = 0.7;

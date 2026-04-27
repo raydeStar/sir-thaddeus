@@ -5,10 +5,8 @@ namespace SirThaddeus.Agent.Tools;
 /// <summary>
 /// Resolves MCP tool name aliases (snake_case ↔ PascalCase) and executes
 /// tool calls with automatic fallback to the alternate name when the
-/// primary name returns an "unknown tool" error.
-///
-/// Extracted from AgentOrchestrator.Internal to be reusable by utility
-/// handlers and future modules.
+/// primary name returns an "unknown tool" error. Shared by pipeline
+/// steps and utility handlers so both sides agree on which name wins.
 /// </summary>
 public sealed class ToolAliasResolver
 {

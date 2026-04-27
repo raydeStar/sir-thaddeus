@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace SirThaddeus.Agent.Search;
@@ -1120,13 +1121,48 @@ public static class ClassicReasoningEngine
         IReadOnlyList<string> checks,
         string answer)
     {
-        _ = facts;
-        _ = goal;
-        _ = checks;
-
-        return string.IsNullOrWhiteSpace(answer)
+        var finalAnswer = string.IsNullOrWhiteSpace(answer)
             ? "I can't determine a reliable answer from the given details."
             : answer.Trim();
+
+        // When any scaffold is provided, emit a short walk-through before the
+        // final answer. Users who ask classic tripwires often phrase the ask
+        // as "walk me through" / "step by step", and a bare one-liner feels
+        // dismissive even when the number is correct.
+        var hasFacts = facts is { Count: > 0 } && facts.Any(f => !string.IsNullOrWhiteSpace(f));
+        var hasGoal = !string.IsNullOrWhiteSpace(goal);
+        var hasChecks = checks is { Count: > 0 } && checks.Any(c => !string.IsNullOrWhiteSpace(c));
+        if (!hasFacts && !hasGoal && !hasChecks)
+            return finalAnswer;
+
+        var sb = new StringBuilder();
+        if (hasFacts)
+        {
+            sb.AppendLine("**Given:**");
+            foreach (var f in facts)
+            {
+                if (string.IsNullOrWhiteSpace(f)) continue;
+                sb.Append("- ").AppendLine(f.Trim());
+            }
+            sb.AppendLine();
+        }
+        if (hasGoal)
+        {
+            sb.Append("**Goal:** ").AppendLine(goal.Trim());
+            sb.AppendLine();
+        }
+        if (hasChecks)
+        {
+            sb.AppendLine("**Working it out:**");
+            foreach (var c in checks)
+            {
+                if (string.IsNullOrWhiteSpace(c)) continue;
+                sb.Append("- ").AppendLine(c.Trim());
+            }
+            sb.AppendLine();
+        }
+        sb.Append("**Answer:** ").Append(finalAnswer);
+        return sb.ToString();
     }
 
     private readonly record struct JugState(int A, int B);

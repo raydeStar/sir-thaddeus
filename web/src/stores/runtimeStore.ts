@@ -40,7 +40,9 @@ export const useRuntimeStore = create<RuntimeStoreState>((set) => ({
 
     socket.addEventListener('open', () => set({ connected: true, lastError: null }));
     socket.addEventListener('close', () => set({ connected: false }));
-    socket.addEventListener('error', () => set({ lastError: 'websocket_error' }));
+    socket.addEventListener('error', () =>
+      set({ lastError: 'WebSocket connection failed.' }),
+    );
     socket.addEventListener('message', (msg) => {
       try {
         const evt = JSON.parse(msg.data as string) as RuntimeEvent<RuntimeStateEvent>;

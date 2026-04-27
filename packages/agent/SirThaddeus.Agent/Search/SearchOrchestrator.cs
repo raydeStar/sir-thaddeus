@@ -1102,6 +1102,28 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        // Proximity-without-location guard. If the user said "bakeries near
+        // me" / "local florists" / etc. and we have NO location context to
+        // resolve from (no inline city, no profile location), the deep-dive
+        // path will issue a useless places_discover call and let the LLM
+        // fabricate a vague clarifying question. Surface the deterministic
+        // settings prompt instead — same UX as SearchFact already does.
+        var lowerForGuard = (userMessage ?? string.Empty).ToLowerInvariant();
+        if (IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerForGuard) &&
+            string.IsNullOrWhiteSpace(ResolveLocalBusinessLocationContext(userMessage ?? string.Empty)))
+        {
+            return new AgentResponse
+            {
+                Text = "I need a location to search for local businesses. " +
+                       "You can set your location in **Settings \u2192 Location**, " +
+                       "or include a city in your request " +
+                       "(e.g., \"bakeries in Olympia, WA\").",
+                Success = true,
+                ToolCallsMade = toolCallsMade.ToList(),
+                LlmRoundTrips = 0
+            };
+        }
+
         // When the user says "bring me up more info on X", the raw message
         // still contains conversational filler.  Strip it to produce a
         // clean entity-only query (e.g. "San Francisco Street Bakery")
@@ -3594,7 +3616,7 @@ public sealed partial class SearchOrchestrator
             return "Web search hit a timeout before results were retrieved. Please retry in a moment or narrow the query.";
         }
 
-        return "The requested tool is currently unavailable right now. Please retry in a moment.";
+        return "Live lookup is unavailable for this request, so I do not have confirmed results to quote right now. Please retry in a moment.";
     }
 
     private static bool IsWebSearchToolName(string toolName)
@@ -3923,7 +3945,8 @@ public sealed partial class SearchOrchestrator
         if (IsBrokenWebOutcomeSummaryText(text))
             return true;
 
-        if (text.Contains("Live web lookup is unavailable right now", StringComparison.OrdinalIgnoreCase))
+        if (text.Contains("Live web lookup is unavailable right now", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("I don't have fresh live results for this turn", StringComparison.OrdinalIgnoreCase))
             return false;
 
         var paragraphs = text.Replace("\r\n", "\n", StringComparison.Ordinal)
@@ -3973,10 +3996,10 @@ public sealed partial class SearchOrchestrator
                    ExplicitWebNoResultsContractNormalizer.TimeoutMessage,
                    StringComparison.Ordinal) ||
                trimmed.StartsWith(
-                   "The requested tool is currently unavailable right now.",
+                   "Live lookup is unavailable for this turn",
                    StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith(
-                   "I hit a timeout while running web tools",
+                   "Live lookup timed out for this request",
                    StringComparison.OrdinalIgnoreCase);
     }
 
