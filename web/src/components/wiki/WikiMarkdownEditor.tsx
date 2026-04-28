@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import LinkExtension from '@tiptap/extension-link';
 import StarterKit from '@tiptap/starter-kit';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
@@ -10,10 +11,12 @@ import {
   Heading1,
   Heading2,
   Italic,
+  Link as LinkIcon,
   List,
   ListOrdered,
   Pilcrow,
   Quote,
+  Unlink,
 } from 'lucide-react';
 
 interface WikiMarkdownEditorProps {
@@ -41,6 +44,15 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
       }),
+      LinkExtension.configure({
+        autolink: true,
+        linkOnPaste: true,
+        openOnClick: false,
+        HTMLAttributes: {
+          rel: 'noopener noreferrer',
+          target: '_blank',
+        },
+      }),
     ],
     content: markdownToHtml(markdown),
     editable: !disabled,
@@ -66,6 +78,33 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
       onSelectionChange?.(selectedText);
     },
   }, [turndown, onChange, onSelectionChange]);
+
+  const applyLink = () => {
+    if (!editor) return;
+    const currentHref = editor.getAttributes('link').href as string | undefined;
+    const href = window.prompt('Link URL', currentHref ?? '');
+    if (href === null) return;
+
+    const trimmedHref = href.trim();
+    if (!trimmedHref) {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      return;
+    }
+
+    if (editor.state.selection.empty) {
+      const label = window.prompt('Link text', trimmedHref);
+      if (label === null) return;
+      const text = label.trim() || trimmedHref;
+      editor.chain().focus().insertContent({
+        type: 'text',
+        text,
+        marks: [{ type: 'link', attrs: { href: trimmedHref } }],
+      }).run();
+      return;
+    }
+
+    editor.chain().focus().extendMarkRange('link').setLink({ href: trimmedHref }).run();
+  };
 
   useEffect(() => {
     if (!editor) return;
@@ -102,6 +141,12 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         </ToolbarButton>
         <ToolbarButton label="Code" active={editor?.isActive('codeBlock') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleCodeBlock().run()}>
           <Code className="h-4 w-4" strokeWidth={1.8} />
+        </ToolbarButton>
+        <ToolbarButton label="Link" active={editor?.isActive('link') ?? false} disabled={!editor || disabled} onClick={applyLink}>
+          <LinkIcon className="h-4 w-4" strokeWidth={1.8} />
+        </ToolbarButton>
+        <ToolbarButton label="Remove link" active={false} disabled={!editor || disabled || !editor.isActive('link')} onClick={() => editor?.chain().focus().extendMarkRange('link').unsetLink().run()}>
+          <Unlink className="h-4 w-4" strokeWidth={1.8} />
         </ToolbarButton>
         <div className="mx-1 h-5 w-px shrink-0 bg-line" />
         <ToolbarButton label="Bullet list" active={editor?.isActive('bulletList') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>
