@@ -109,6 +109,78 @@ public sealed class WikiPageAssistantServiceTests : IDisposable
                 CancellationToken.None));
     }
 
+    [Fact]
+    public async Task RewriteSelectionAsync_locates_plain_text_selection_with_inline_markdown()
+    {
+        using var wiki = NewWikiStore();
+        using var threads = NewThreadStore();
+        var assistant = new CapturingAssistant("very pleased");
+        var service = new WikiPageAssistantService(wiki, threads, assistant);
+        var root = await wiki.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await wiki.CreatePageAsync(root.Id, null, "Notes", "He was _not_ amused by the cat.", CancellationToken.None);
+
+        // The frontend may send the rendered plain text "not amused" rather than the
+        // markdown form "_not_ amused"; the service should still find the unique span
+        // and produce a clean replacement (no orphan underscore left behind).
+        var draft = await service.RewriteSelectionAsync(
+            page.Page.Id,
+            "not amused",
+            "Make it positive",
+            page.Page.Version,
+            "page",
+            CancellationToken.None);
+
+        Assert.NotNull(draft);
+        Assert.Equal("He was very pleased by the cat.", draft!.Markdown);
+    }
+
+    [Fact]
+    public async Task RewriteSelectionAsync_locates_paragraph_with_collapsed_whitespace()
+    {
+        using var wiki = NewWikiStore();
+        using var threads = NewThreadStore();
+        var assistant = new CapturingAssistant("Replacement paragraph.");
+        var service = new WikiPageAssistantService(wiki, threads, assistant);
+        var root = await wiki.CreateRootAsync("Personal", null, CancellationToken.None);
+        var pageMarkdown = "# Story\n\nClarence napped on the windowsill.\n\nHe dreamed of fish.";
+        var page = await wiki.CreatePageAsync(root.Id, null, "Story", pageMarkdown, CancellationToken.None);
+
+        var draft = await service.RewriteSelectionAsync(
+            page.Page.Id,
+            "Clarence napped  on the windowsill.", // double space + missing newline context
+            "Be more vivid",
+            page.Page.Version,
+            "page",
+            CancellationToken.None);
+
+        Assert.NotNull(draft);
+        Assert.Equal("# Story\n\nReplacement paragraph.\n\nHe dreamed of fish.", draft!.Markdown);
+    }
+
+    [Fact]
+    public void TryLocateSelection_rejects_ambiguous_match()
+    {
+        var found = WikiPageAssistantService.TryLocateSelection(
+            "alpha\n\nbeta\n\nalpha",
+            "alpha",
+            out _, out _, out var ambiguous);
+
+        Assert.False(found);
+        Assert.True(ambiguous);
+    }
+
+    [Fact]
+    public void TryLocateSelection_returns_false_when_selection_is_missing()
+    {
+        var found = WikiPageAssistantService.TryLocateSelection(
+            "alpha\n\nbeta",
+            "gamma",
+            out _, out _, out var ambiguous);
+
+        Assert.False(found);
+        Assert.False(ambiguous);
+    }
+
     private LocalWikiStore NewWikiStore() =>
         new(Path.Combine(_root, "wiki"), NullLogger<LocalWikiStore>.Instance);
 

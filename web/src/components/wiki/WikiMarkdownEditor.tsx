@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import LinkExtension from '@tiptap/extension-link';
 import StarterKit from '@tiptap/starter-kit';
+import { DOMSerializer } from '@tiptap/pm/model';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
 import {
@@ -74,8 +75,29 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         return;
       }
 
-      const selectedText = updatedEditor.state.doc.textBetween(from, to, '\n\n').trim();
-      onSelectionChange?.(selectedText);
+      // Serialize the selected slice through the same HTML→markdown pipeline
+      // used for the full document so the resulting text matches verbatim
+      // against the persisted page markdown (preserving italics, links,
+      // headings, etc.). This is what the backend uses to locate the passage
+      // it must replace; sending plain text would lose markdown markers and
+      // cause "selected text no longer matches" errors.
+      let selectedMarkdown = '';
+      try {
+        const slice = updatedEditor.state.doc.slice(from, to);
+        const serializer = DOMSerializer.fromSchema(updatedEditor.schema);
+        const fragment = serializer.serializeFragment(slice.content);
+        const container = document.createElement('div');
+        container.appendChild(fragment);
+        selectedMarkdown = turndown.turndown(container.innerHTML).trim();
+      } catch {
+        selectedMarkdown = '';
+      }
+
+      if (!selectedMarkdown) {
+        selectedMarkdown = updatedEditor.state.doc.textBetween(from, to, '\n\n').trim();
+      }
+
+      onSelectionChange?.(selectedMarkdown);
     },
   }, [turndown, onChange, onSelectionChange]);
 

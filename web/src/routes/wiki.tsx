@@ -679,11 +679,11 @@ function WikiRoute() {
                         <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
                         Ask
                       </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || dirty || !pagePrompt.trim()} title={dirty ? 'Save or discard changes before AI writes to the page' : undefined} onClick={() => void submitPageDraft()}>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
                         <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                         Write
                       </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || dirty || !pagePrompt.trim() || !selectedText.trim()} title={dirty ? 'Save or discard changes before AI rewrites the selection' : undefined} onClick={() => void submitSelectionRewrite()}>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
                         <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                         Rewrite selection
                       </button>

@@ -652,12 +652,16 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   draftPage: async (instruction: string) => {
-    const current = get().page;
     const trimmed = instruction.trim();
-    if (!current || !trimmed) return;
+    if (!trimmed) return;
+    let current = get().page;
+    if (!current) return;
+    // Auto-flush any pending user edits so the AI works against the latest content.
     if (get().dirty) {
-      set({ error: 'Save or discard changes before asking AI to write this page.' });
-      return;
+      await get().savePage();
+      if (get().error) return;
+      current = get().page;
+      if (!current) return;
     }
 
     const userMessage: WikiPageChatMessage = {
@@ -736,13 +740,17 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   clearPageDraft: () => set({ pageChatDraft: null }),
 
   rewriteSelection: async (instruction: string) => {
-    const current = get().page;
     const trimmed = instruction.trim();
     const selectedText = get().selectedText.trim();
-    if (!current || !trimmed || !selectedText) return;
+    if (!trimmed || !selectedText) return;
+    let current = get().page;
+    if (!current) return;
+    // Auto-flush any pending user edits so the selection still resolves against the saved page.
     if (get().dirty) {
-      set({ error: 'Save or discard changes before asking AI to rewrite this selection.' });
-      return;
+      await get().savePage();
+      if (get().error) return;
+      current = get().page;
+      if (!current) return;
     }
 
     const userMessage: WikiPageChatMessage = {

@@ -71,21 +71,24 @@ public sealed class WikiPageAssistantService
             throw new WikiSelectionRewriteException("Select text before requesting a rewrite.");
         }
 
-        var occurrenceCount = CountOccurrences(page.Markdown, normalizedSelection);
-        if (occurrenceCount != 1)
+        if (!TryLocateSelection(page.Markdown, normalizedSelection, out var spanStart, out var spanLength, out var ambiguous))
         {
             throw new WikiSelectionRewriteException(
-                occurrenceCount == 0
-                    ? "Selected text no longer matches this page. Reselect the passage and try again."
-                    : "Selected text appears more than once. Select a more specific passage and try again.");
+                ambiguous
+                    ? "Selected text appears more than once. Select a more specific passage and try again."
+                    : "Selected text no longer matches this page. Reselect the passage and try again.");
         }
 
-        var userText = BuildSelectionRewritePrompt(page, normalizedSelection, instruction, scope);
+        var matchedSelection = page.Markdown.Substring(spanStart, spanLength);
+        var userText = BuildSelectionRewritePrompt(page, matchedSelection, instruction, scope);
         var reply = await RunEphemeralThreadAsync(page.Page.Title, userText, cancellationToken).ConfigureAwait(false);
         var replacement = ExtractReplacementText(reply.Text);
-        var markdown = ReplaceFirst(page.Markdown, normalizedSelection, replacement);
+        var markdown = string.Concat(
+            page.Markdown.AsSpan(0, spanStart),
+            replacement,
+            page.Markdown.AsSpan(spanStart + spanLength));
         return new WikiSelectionRewriteDraft(
-            normalizedSelection,
+            matchedSelection,
             replacement,
             markdown,
             reply.Text,
@@ -238,6 +241,268 @@ public sealed class WikiPageAssistantService
             ? source
             : string.Concat(source.AsSpan(0, index), replacement, source.AsSpan(index + value.Length));
     }
+
+    /// <summary>
+    /// Locates a selection inside the page markdown. Tries an exact substring match first
+    /// (the fast path when the editor sends a verbatim markdown slice), then falls back to
+    /// whitespace-normalized and finally markdown-stripped comparisons so plain-text selections
+    /// (e.g. text that included italics or links) still resolve to a unique span.
+    /// </summary>
+    internal static bool TryLocateSelection(string markdown, string selection, out int start, out int length, out bool ambiguous)
+    {
+        start = 0;
+        length = 0;
+        ambiguous = false;
+        if (string.IsNullOrEmpty(selection)) return false;
+
+        var exactCount = CountOccurrences(markdown, selection);
+        if (exactCount == 1)
+        {
+            start = markdown.IndexOf(selection, StringComparison.Ordinal);
+            length = selection.Length;
+            return true;
+        }
+        if (exactCount > 1)
+        {
+            ambiguous = true;
+            return false;
+        }
+
+        var normalizers = new Func<string, (string Text, int[] Map)>[]
+        {
+            NormalizeWhitespace,
+            NormalizePlainText,
+        };
+
+        foreach (var normalize in normalizers)
+        {
+            var (mdNorm, mdMap) = normalize(markdown);
+            var (selNormRaw, _) = normalize(selection);
+            var selNorm = selNormRaw.Trim();
+            if (selNorm.Length == 0) continue;
+            var idx = mdNorm.IndexOf(selNorm, StringComparison.Ordinal);
+            if (idx < 0) continue;
+            if (mdNorm.IndexOf(selNorm, idx + selNorm.Length, StringComparison.Ordinal) >= 0)
+            {
+                ambiguous = true;
+                return false;
+            }
+            var spanStart = mdMap[idx];
+            var endIdx = idx + selNorm.Length;
+            var spanEnd = endIdx < mdMap.Length ? mdMap[endIdx] : markdown.Length;
+            if (spanEnd <= spanStart) continue;
+            ExpandPairedMarkers(markdown, ref spanStart, ref spanEnd);
+            start = spanStart;
+            length = spanEnd - spanStart;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static (string Text, int[] Map) NormalizeWhitespace(string source)
+    {
+        var sb = new StringBuilder(source.Length);
+        var map = new int[source.Length + 1];
+        var prevWs = true;
+        for (var i = 0; i < source.Length; i++)
+        {
+            var c = source[i];
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+            {
+                if (!prevWs)
+                {
+                    map[sb.Length] = i;
+                    sb.Append(' ');
+                    prevWs = true;
+                }
+                continue;
+            }
+            map[sb.Length] = i;
+            sb.Append(c);
+            prevWs = false;
+        }
+        while (sb.Length > 0 && sb[sb.Length - 1] == ' ') sb.Length--;
+        map[sb.Length] = source.Length;
+        return (sb.ToString(), map);
+    }
+
+    private static (string Text, int[] Map) NormalizePlainText(string source)
+    {
+        var sb = new StringBuilder(source.Length);
+        var map = new int[source.Length + 1];
+        var prevWs = true;
+        var atLineStart = true;
+        var i = 0;
+        while (i < source.Length)
+        {
+            var c = source[i];
+            if (c == '\r' || c == '\n')
+            {
+                if (!prevWs && sb.Length > 0)
+                {
+                    map[sb.Length] = i;
+                    sb.Append(' ');
+                    prevWs = true;
+                }
+                while (i < source.Length && (source[i] == '\r' || source[i] == '\n')) i++;
+                atLineStart = true;
+                continue;
+            }
+
+            if (atLineStart)
+            {
+                if (c == ' ' || c == '\t') { i++; continue; }
+                if (c == '#')
+                {
+                    while (i < source.Length && source[i] == '#') i++;
+                    while (i < source.Length && (source[i] == ' ' || source[i] == '\t')) i++;
+                    atLineStart = false;
+                    continue;
+                }
+                if (c == '>')
+                {
+                    i++;
+                    while (i < source.Length && (source[i] == ' ' || source[i] == '\t')) i++;
+                    continue;
+                }
+                if ((c == '-' || c == '*' || c == '+') && i + 1 < source.Length && (source[i + 1] == ' ' || source[i + 1] == '\t'))
+                {
+                    i += 2;
+                    atLineStart = false;
+                    continue;
+                }
+                var j = i;
+                while (j < source.Length && char.IsDigit(source[j])) j++;
+                if (j > i && j < source.Length && source[j] == '.' && j + 1 < source.Length && (source[j + 1] == ' ' || source[j + 1] == '\t'))
+                {
+                    i = j + 2;
+                    atLineStart = false;
+                    continue;
+                }
+                atLineStart = false;
+            }
+
+            if (c == '*' || c == '_' || c == '`' || c == '~') { i++; continue; }
+
+            if (c == '[')
+            {
+                var closeText = source.IndexOf(']', i + 1);
+                if (closeText > i && closeText + 1 < source.Length && source[closeText + 1] == '(')
+                {
+                    var closeUrl = source.IndexOf(')', closeText + 2);
+                    if (closeUrl > closeText)
+                    {
+                        for (var k = i + 1; k < closeText; k++)
+                        {
+                            var tc = source[k];
+                            if (tc == ' ' || tc == '\t')
+                            {
+                                if (!prevWs && sb.Length > 0)
+                                {
+                                    map[sb.Length] = k;
+                                    sb.Append(' ');
+                                    prevWs = true;
+                                }
+                            }
+                            else
+                            {
+                                map[sb.Length] = k;
+                                sb.Append(tc);
+                                prevWs = false;
+                            }
+                        }
+                        i = closeUrl + 1;
+                        continue;
+                    }
+                }
+            }
+
+            if (c == ' ' || c == '\t')
+            {
+                if (!prevWs && sb.Length > 0)
+                {
+                    map[sb.Length] = i;
+                    sb.Append(' ');
+                    prevWs = true;
+                }
+                i++;
+                continue;
+            }
+
+            map[sb.Length] = i;
+            sb.Append(c);
+            prevWs = false;
+            i++;
+        }
+        while (sb.Length > 0 && sb[sb.Length - 1] == ' ') sb.Length--;
+        map[sb.Length] = source.Length;
+        return (sb.ToString(), map);
+    }
+
+    private static void ExpandPairedMarkers(string source, ref int start, ref int end)
+    {
+        // Repair unmatched inline markdown markers (italic/bold/code/strike) at the span
+        // boundary so the replacement does not leave an orphan marker behind. We loop until
+        // no more adjustments are needed because expanding one side can expose another case.
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+
+            // Case A: an opening marker sits immediately before the span and its closing
+            // partner is inside the span (odd count of that marker char within the span).
+            if (start > 0 && IsInlineMarker(source[start - 1]))
+            {
+                var marker = source[start - 1];
+                if (CountChar(source, start, end, marker) % 2 == 1)
+                {
+                    start--;
+                    changed = true;
+                    continue;
+                }
+            }
+
+            // Case B: a closing marker sits immediately after the span and its opening
+            // partner is inside the span.
+            if (end < source.Length && IsInlineMarker(source[end]))
+            {
+                var marker = source[end];
+                if (CountChar(source, start, end, marker) % 2 == 1)
+                {
+                    end++;
+                    changed = true;
+                    continue;
+                }
+            }
+
+            // Case C: the span lies between a matched pair of identical markers
+            // (e.g. located text "italic word" between "_..._").
+            if (start > 0 && end < source.Length && end > start)
+            {
+                var prev = source[start - 1];
+                var next = source[end];
+                if (IsInlineMarker(prev) && prev == next)
+                {
+                    start--;
+                    end++;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    private static int CountChar(string source, int start, int end, char target)
+    {
+        var count = 0;
+        for (var i = start; i < end; i++)
+        {
+            if (source[i] == target) count++;
+        }
+        return count;
+    }
+
+    private static bool IsInlineMarker(char c) => c == '*' || c == '_' || c == '`' || c == '~';
 
     private static string NewMessageId() =>
         "msg_" + Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 8)).ToLowerInvariant();
