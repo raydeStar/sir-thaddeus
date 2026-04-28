@@ -11,7 +11,7 @@ import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
 
 interface WikiContextOption {
   value: string;
-  mode: 'root' | 'folder' | 'page';
+  mode: 'all' | 'root' | 'folder' | 'page';
   rootId?: string;
   folderId?: string;
   pageId?: string;
@@ -57,8 +57,11 @@ function ChatThreadRoute() {
         );
         if (disposed) return;
         setWikiContextOptions(
-          trees.flatMap(({ root, tree }) =>
-            [
+          [
+            ...(roots.length > 0
+              ? [{ value: 'all', mode: 'all' as const, title: 'Every wiki root' }]
+              : []),
+            ...trees.flatMap(({ root, tree }) => [
               { value: `root:${root.id}`, mode: 'root' as const, rootId: root.id, title: `${root.name}` },
               ...tree.folders.map((folder) => ({
                 value: `folder:${root.id}:${folder.id}`,
@@ -73,8 +76,8 @@ function ChatThreadRoute() {
                 pageId: page.id,
                 title: `${root.name} / ${page.title}`,
               })),
-            ],
-          ),
+            ]),
+          ],
         );
       } catch {
         if (!disposed) setWikiContextOptions([]);
@@ -221,14 +224,14 @@ function ChatThreadRoute() {
                   <option value="">No wiki context</option>
                   {wikiContextOptions.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {wikiContextKind(option.mode)} / {option.title}
+                      {wikiContextOptionLabel(option)}
                     </option>
                   ))}
                 </select>
               </div>
               {selectedWikiContextOption ? (
                 <div
-                  className="mt-2 flex min-w-0 items-center justify-between gap-2 rounded-lg border border-accent/25 bg-accent-soft px-2.5 py-1.5 text-xs text-ink"
+                  className={wikiContextChipClass(selectedWikiContextOption.mode)}
                   data-testid="chat-wiki-context-active"
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
@@ -282,6 +285,7 @@ function ChatThreadRoute() {
 
 function selectedWikiContext(option: WikiContextOption | null) {
   if (!option) return undefined;
+  if (option.mode === 'all') return { mode: 'all' as const };
   if (option.mode === 'root' && option.rootId) return { mode: 'root' as const, rootId: option.rootId };
   if (option.mode === 'folder' && option.rootId && option.folderId) {
     return { mode: 'folder' as const, rootId: option.rootId, folderId: option.folderId };
@@ -291,12 +295,26 @@ function selectedWikiContext(option: WikiContextOption | null) {
 }
 
 function wikiContextKind(mode: WikiContextOption['mode']) {
+  if (mode === 'all') return 'All Roots';
   if (mode === 'root') return 'Root';
   if (mode === 'folder') return 'Folder';
   return 'Page';
 }
 
+function wikiContextOptionLabel(option: WikiContextOption) {
+  if (option.mode === 'all') return 'All roots';
+  return `${wikiContextKind(option.mode)} / ${option.title}`;
+}
+
+function wikiContextChipClass(mode: WikiContextOption['mode']) {
+  const base = 'mt-2 flex min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-ink';
+  return mode === 'all'
+    ? `${base} border-amber-500/35 bg-amber-500/10`
+    : `${base} border-accent/25 bg-accent-soft`;
+}
+
 function WikiContextGlyph({ mode }: { mode: WikiContextOption['mode'] }) {
+  if (mode === 'all') return <Library className="h-3.5 w-3.5 shrink-0 text-amber-600" strokeWidth={1.8} aria-hidden />;
   if (mode === 'root') return <Library className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
   if (mode === 'folder') return <Folder className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
   return <FileText className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;

@@ -77,6 +77,29 @@ public sealed class WikiChatContextServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildAsync_injects_all_roots_context_explicitly()
+    {
+        var firstRoot = await _wiki.CreateRootAsync("Novel", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(firstRoot.Id, null, "Kazalt", "# Kazalt\n\nRoyal secret.", CancellationToken.None);
+        var secondRoot = await _wiki.CreateRootAsync("Work", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(secondRoot.Id, null, "Roadmap", "# Roadmap\n\nRevenue plan.", CancellationToken.None);
+
+        var prompt = await _service.BuildAsync(
+            "Find contradictions",
+            new WikiChatContextRequest("all"),
+            CancellationToken.None);
+
+        Assert.NotNull(prompt.Attachment);
+        Assert.Equal("all", prompt.Attachment!.Type);
+        Assert.Equal("all", prompt.Attachment.Id);
+        Assert.Contains("<wiki_context type=\"all\">", prompt.Prompt);
+        Assert.Contains("Root: Novel", prompt.Prompt);
+        Assert.Contains("Royal secret.", prompt.Prompt);
+        Assert.Contains("Root: Work", prompt.Prompt);
+        Assert.Contains("Revenue plan.", prompt.Prompt);
+    }
+
+    [Fact]
     public async Task BuildAsync_injects_folder_context_with_descendants()
     {
         var root = await _wiki.CreateRootAsync("Novel", null, CancellationToken.None);

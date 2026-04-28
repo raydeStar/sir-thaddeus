@@ -24,6 +24,9 @@ public sealed class WikiChatContextService
             return new WikiChatContextPrompt(trimmedUserText, null);
 
         var mode = (request.Mode ?? string.Empty).Trim();
+        if (mode.Equals("all", StringComparison.OrdinalIgnoreCase))
+            return await BuildAllRootsContextAsync(trimmedUserText, cancellationToken).ConfigureAwait(false);
+
         if (mode.Equals("root", StringComparison.OrdinalIgnoreCase))
             return await BuildRootContextAsync(trimmedUserText, request, cancellationToken).ConfigureAwait(false);
 
@@ -42,6 +45,26 @@ public sealed class WikiChatContextService
         var prompt = BuildPagePrompt(trimmedUserText, document);
         var attachment = new WikiChatContextAttachment("page", document.Page.Id, document.Page.Title);
         return new WikiChatContextPrompt(prompt, attachment);
+    }
+
+    private async Task<WikiChatContextPrompt> BuildAllRootsContextAsync(
+        string userText,
+        CancellationToken cancellationToken)
+    {
+        var roots = await _wiki.ListRootsAsync(cancellationToken).ConfigureAwait(false);
+        var rootNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var pages = new List<WikiPageDocument>();
+
+        foreach (var root in roots.OrderBy(root => root.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var tree = await _wiki.GetTreeAsync(root.Id, cancellationToken).ConfigureAwait(false);
+            if (tree is null) continue;
+            rootNames[tree.Root.Id] = tree.Root.Name;
+            pages.AddRange(await ReadPagesAsync(tree.Pages, cancellationToken).ConfigureAwait(false));
+        }
+
+        var prompt = BuildScopePrompt(userText, "all", "All Roots", "all", pages, rootNames);
+        return new WikiChatContextPrompt(prompt, new WikiChatContextAttachment("all", "all", "All Roots"));
     }
 
     private async Task<WikiChatContextPrompt> BuildRootContextAsync(
@@ -115,7 +138,8 @@ public sealed class WikiChatContextService
         string scopeType,
         string title,
         string id,
-        IReadOnlyList<WikiPageDocument> pages)
+        IReadOnlyList<WikiPageDocument> pages,
+        IReadOnlyDictionary<string, string>? rootNames = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("The user attached Wiki Context to this chat turn.");
@@ -128,10 +152,12 @@ public sealed class WikiChatContextService
         builder.AppendLine($"PageCount: {pages.Count}");
 
         var remaining = MaxScopeContextChars;
-        foreach (var page in pages.OrderBy(page => page.Page.RelativePath, StringComparer.OrdinalIgnoreCase))
+        foreach (var page in pages
+            .OrderBy(page => RootSortName(page, rootNames), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(page => page.Page.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
             if (remaining <= 0) break;
-            var header = $"\n---\nPage: {page.Page.RelativePath}\nTitle: {page.Page.Title}\nVersion: {page.Page.Version}\nMarkdown:\n";
+            var header = BuildPageHeader(page, rootNames);
             var bodyBudget = Math.Max(0, remaining - header.Length);
             if (bodyBudget <= 0) break;
             var body = Bound(page.Markdown, bodyBudget, out var truncated);
@@ -153,6 +179,29 @@ public sealed class WikiChatContextService
         builder.AppendLine(userText);
         return builder.ToString().Trim();
     }
+
+    private static string BuildPageHeader(
+        WikiPageDocument page,
+        IReadOnlyDictionary<string, string>? rootNames)
+    {
+        var header = new StringBuilder();
+        header.AppendLine();
+        header.AppendLine("---");
+        if (rootNames is not null && rootNames.TryGetValue(page.Page.RootId, out var rootName))
+            header.AppendLine($"Root: {rootName}");
+        header.AppendLine($"Page: {page.Page.RelativePath}");
+        header.AppendLine($"Title: {page.Page.Title}");
+        header.AppendLine($"Version: {page.Page.Version}");
+        header.AppendLine("Markdown:");
+        return header.ToString();
+    }
+
+    private static string RootSortName(
+        WikiPageDocument page,
+        IReadOnlyDictionary<string, string>? rootNames)
+        => rootNames is not null && rootNames.TryGetValue(page.Page.RootId, out var rootName)
+            ? rootName
+            : string.Empty;
 
     private async Task<IReadOnlyList<WikiPageDocument>> ReadPagesAsync(
         IEnumerable<WikiPage> pages,

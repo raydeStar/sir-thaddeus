@@ -7,6 +7,7 @@ import type {
 
 export type WikiChatContextInput =
   | { mode: 'none' }
+  | { mode: 'all' }
   | { mode: 'root'; rootId: string }
   | { mode: 'folder'; rootId: string; folderId: string }
   | { mode: 'page'; pageId: string };
