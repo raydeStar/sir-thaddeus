@@ -11,6 +11,7 @@ import type {
 } from '@thaddeus/shared-types';
 import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
+import type { WikiChatContextInput } from '../lib/chatApi';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
 
 /**
@@ -39,7 +40,7 @@ interface ChatStoreState {
   loadThreads: () => Promise<void>;
   openThread: (id: string) => Promise<void>;
   newThread: (title?: string) => Promise<ChatThread>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, wikiContext?: WikiChatContextInput) => Promise<void>;
   destroy: () => void;
   ingestEvent: (evt: RuntimeEvent<unknown>) => void;
 }
@@ -125,13 +126,13 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  send: async (text: string) => {
+  send: async (text: string, wikiContext?: WikiChatContextInput) => {
     const id = get().activeThreadId;
     if (!id || !text.trim()) return;
     set({ sending: true, error: null });
     ensureSocket((evt) => get().ingestEvent(evt));
     try {
-      const updated = await api.appendMessage(id, text.trim());
+      const updated = await api.appendMessage(id, text.trim(), wikiContext);
       set({ activeThread: updated, sending: false });
     } catch (e) {
       set({ error: (e as Error).message, sending: false });

@@ -74,6 +74,7 @@ public static class ChatApi
 
         app.MapPost("/api/threads/{id}/messages",
             async (string id, AppendMessageRequest? req, IThreadStore store, IAssistant assistant,
+                WikiChatContextService wikiContext,
                 RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
                 IHostApplicationLifetime lifetime,
                 CancellationToken ct) =>
@@ -81,10 +82,25 @@ public static class ChatApi
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
                 return Results.BadRequest(new { error = "text is required" });
 
+            WikiChatContextPrompt prompt;
+            try
+            {
+                prompt = await wikiContext.BuildAsync(req.Text, req.WikiContext, ct).ConfigureAwait(false);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+
+            var userText = req.Text.Trim();
             var message = new ChatMessage(
                 Id: NewMessageId(),
                 Role: ChatRole.User,
-                Text: req.Text.Trim(),
+                Text: userText,
                 CreatedAt: DateTimeOffset.UtcNow);
 
             try
@@ -139,7 +155,7 @@ public static class ChatApi
                     var bgCt = lifetime.ApplicationStopping;
                     try
                     {
-                        var reply = await assistant.RespondAsync(id, message.Text, bgCt)
+                        var reply = await assistant.RespondAsync(id, prompt.Prompt, bgCt)
                             .ConfigureAwait(false);
                         detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
                     }
@@ -197,7 +213,7 @@ public sealed record CreateThreadRequest(string? Title);
 public sealed record PatchThreadRequest(string? Title, bool? Pinned);
 
 /// <summary>Body for POST /api/threads/{id}/messages.</summary>
-public sealed record AppendMessageRequest(string Text);
+public sealed record AppendMessageRequest(string Text, WikiChatContextRequest? WikiContext = null);
 
 /// <summary>Response for POST /api/threads/{id}/messages.</summary>
 public sealed record AppendMessageResponse(ChatMessage Message, ChatThread Thread);
@@ -235,6 +251,9 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(PatchThreadRequest))]
 [JsonSerializable(typeof(CreateThreadRequest))]
 [JsonSerializable(typeof(AppendMessageRequest))]
+[JsonSerializable(typeof(WikiChatContextRequest))]
+[JsonSerializable(typeof(WikiChatContextPrompt))]
+[JsonSerializable(typeof(WikiChatContextAttachment))]
 [JsonSerializable(typeof(AppendMessageResponse))]
 public partial class ChatJsonContext : JsonSerializerContext
 {

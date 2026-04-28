@@ -167,7 +167,8 @@ public static class Program
                     libraryDir,
                     sp.GetRequiredService<ILogger<LocalWikiStore>>());
             });
-                    builder.Services.AddSingleton<WikiPageAssistantService>();
+                builder.Services.AddSingleton<WikiChatContextService>();
+                builder.Services.AddSingleton<WikiPageAssistantService>();
             builder.Services.AddHostedService<RoutineSeeder>();
             // MCP tool client. Spawns the SirThaddeus.McpServer child process,
             // handshakes asynchronously, and exposes IMcpToolClient to the
