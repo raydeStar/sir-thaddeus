@@ -1,8 +1,15 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiPageDocument, WikiRevision, WikiRoot, WikiTree } from '../lib/wikiApi';
+import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
+
+export interface WikiPageChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: string;
+}
 
 interface WikiStoreState {
   roots: WikiRoot[];
@@ -15,9 +22,12 @@ interface WikiStoreState {
   scope: WikiScope;
   search: string;
   draft: string;
+  pageChatMessages: WikiPageChatMessage[];
+  pageChatDraft: WikiPageDraft | null;
   dirty: boolean;
   loading: boolean;
   saving: boolean;
+  pageAssistantBusy: boolean;
   error: string | null;
 
   loadRoots: () => Promise<void>;
@@ -29,6 +39,10 @@ interface WikiStoreState {
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   restoreRevision: (revisionId: string) => Promise<void>;
+  askPage: (prompt: string) => Promise<void>;
+  draftPage: (instruction: string) => Promise<void>;
+  applyPageDraft: () => Promise<void>;
+  clearPageDraft: () => void;
   setDraft: (markdown: string) => void;
   setSearch: (search: string) => void;
   setScope: (scope: WikiScope) => void;
@@ -45,9 +59,12 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   scope: 'root',
   search: '',
   draft: '',
+  pageChatMessages: [],
+  pageChatDraft: null,
   dirty: false,
   loading: false,
   saving: false,
+  pageAssistantBusy: false,
   error: null,
 
   loadRoots: async () => {
@@ -62,7 +79,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       } else if (roots.length > 0) {
         await get().selectRoot(roots[0].id);
       } else {
-        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', draft: '', dirty: false });
+        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', draft: '', pageChatMessages: [], pageChatDraft: null, dirty: false });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
@@ -70,7 +87,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   selectRoot: async (rootId: string) => {
-    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', dirty: false, scope: 'root' });
+    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', pageChatMessages: [], pageChatDraft: null, dirty: false, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
       set({ tree, loading: false });
@@ -99,6 +116,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectedFolderId: page.page.folderId,
         selectedRootId: page.page.rootId,
         draft: page.markdown,
+        pageChatMessages: [],
+        pageChatDraft: null,
         dirty: false,
         scope: 'page',
         loading: false,
@@ -156,6 +175,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectedPageId: created.page.id,
         selectedFolderId: created.page.folderId,
         draft: created.markdown,
+        pageChatMessages: [],
+        pageChatDraft: null,
         dirty: false,
         scope: 'page',
       });
@@ -206,6 +227,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectedPageId: restored.page.id,
         selectedFolderId: restored.page.folderId,
         draft: restored.markdown,
+        pageChatDraft: null,
         dirty: false,
         scope: 'page',
       });
@@ -216,7 +238,87 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     }
   },
 
+  askPage: async (prompt: string) => {
+    const current = get().page;
+    const trimmed = prompt.trim();
+    if (!current || !trimmed) return;
+    const userMessage: WikiPageChatMessage = {
+      id: newLocalMessageId('user'),
+      role: 'user',
+      text: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      pageAssistantBusy: true,
+      error: null,
+      pageChatMessages: [...state.pageChatMessages, userMessage],
+    }));
+    try {
+      const reply = await api.askWikiPage(current.page.id, { prompt: trimmed, scope: get().scope });
+      set((state) => ({
+        pageChatMessages: [
+          ...state.pageChatMessages,
+          { id: reply.messageId, role: 'assistant', text: reply.answer, createdAt: reply.createdAt },
+        ],
+      }));
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ pageAssistantBusy: false });
+    }
+  },
+
+  draftPage: async (instruction: string) => {
+    const current = get().page;
+    const trimmed = instruction.trim();
+    if (!current || !trimmed) return;
+    set({ pageAssistantBusy: true, error: null, pageChatDraft: null });
+    try {
+      const draft = await api.draftWikiPage(current.page.id, { instruction: trimmed, scope: get().scope });
+      set((state) => ({
+        pageChatDraft: draft,
+        pageChatMessages: [
+          ...state.pageChatMessages,
+          { id: newLocalMessageId('user'), role: 'user', text: trimmed, createdAt: new Date().toISOString() },
+          { id: draft.messageId, role: 'assistant', text: draft.assistantText, createdAt: draft.createdAt },
+        ],
+      }));
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ pageAssistantBusy: false });
+    }
+  },
+
+  applyPageDraft: async () => {
+    const current = get().page;
+    const pendingDraft = get().pageChatDraft;
+    if (!current || !pendingDraft) return;
+    set({ saving: true, error: null });
+    try {
+      const saved = await api.updateWikiPage(current.page.id, {
+        markdown: pendingDraft.markdown,
+        expectedVersion: current.page.version,
+        source: 'ai',
+        summary: pendingDraft.summary,
+      });
+      const tree = await api.getWikiTree(saved.page.rootId);
+      const revisions = await api.listWikiRevisions(saved.page.id);
+      set({ page: saved, tree, revisions, draft: saved.markdown, dirty: false, pageChatDraft: null });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  clearPageDraft: () => set({ pageChatDraft: null }),
+
   setDraft: (markdown: string) => set({ draft: markdown, dirty: true }),
   setSearch: (search: string) => set({ search }),
   setScope: (scope: WikiScope) => set({ scope }),
 }));
+
+function newLocalMessageId(prefix: string): string {
+  return `${prefix}_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 8)}`;
+}

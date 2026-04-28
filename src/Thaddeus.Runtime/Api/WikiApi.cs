@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Wiki;
+using Thaddeus.Runtime.Wiki;
 
 namespace Thaddeus.Runtime.Api;
 
@@ -156,6 +157,44 @@ public static class WikiApi
             }
         });
 
+        app.MapPost("/api/wiki/pages/{pageId}/chat", async (string pageId, HttpContext ctx, WikiPageAssistantService assistant, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var req = await ReadAsync(ctx, WikiJsonContext.Default.WikiPageChatRequest, ct).ConfigureAwait(false);
+            if (req is null) return Results.BadRequest(new WikiErrorResponse("empty_body", "Request body is required."));
+            if (string.IsNullOrWhiteSpace(req.Prompt)) return Results.BadRequest(new WikiErrorResponse("prompt_required", "Prompt is required."));
+
+            var reply = await assistant.AskAsync(pageId, req.Prompt, req.Scope, ct).ConfigureAwait(false);
+            if (reply is null) return Results.NotFound();
+
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_PAGE_CHAT",
+                Target = pageId,
+                Details = new() { ["scope"] = req.Scope ?? "page" },
+            });
+            return Results.Json(reply, WikiJsonContext.Default.WikiPageAssistantReply);
+        });
+
+        app.MapPost("/api/wiki/pages/{pageId}/draft", async (string pageId, HttpContext ctx, WikiPageAssistantService assistant, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var req = await ReadAsync(ctx, WikiJsonContext.Default.WikiPageDraftRequest, ct).ConfigureAwait(false);
+            if (req is null) return Results.BadRequest(new WikiErrorResponse("empty_body", "Request body is required."));
+            if (string.IsNullOrWhiteSpace(req.Instruction)) return Results.BadRequest(new WikiErrorResponse("instruction_required", "Instruction is required."));
+
+            var draft = await assistant.DraftAsync(pageId, req.Instruction, req.Scope, ct).ConfigureAwait(false);
+            if (draft is null) return Results.NotFound();
+
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_PAGE_DRAFTED",
+                Target = pageId,
+                Details = new() { ["scope"] = req.Scope ?? "page" },
+            });
+            return Results.Json(draft, WikiJsonContext.Default.WikiPageDraft);
+        });
+
         app.MapGet("/api/wiki/search", async (string? rootId, string? query, IWikiStore store, CancellationToken ct) =>
         {
             var results = await store.SearchAsync(rootId, query ?? string.Empty, ct).ConfigureAwait(false);
@@ -187,6 +226,8 @@ public sealed record CreateWikiFolderRequest(string? Name, string? ParentFolderI
 public sealed record CreateWikiPageRequest(string? Title, string? FolderId, string? Markdown);
 public sealed record UpdateWikiPageRequest(string? Markdown, long? ExpectedVersion, string? Source, string? Summary);
 public sealed record RestoreWikiRevisionRequest(long? ExpectedVersion);
+public sealed record WikiPageChatRequest(string? Prompt, string? Scope);
+public sealed record WikiPageDraftRequest(string? Instruction, string? Scope);
 public sealed record WikiRootsResponse(IReadOnlyList<WikiRoot> Roots);
 public sealed record WikiRevisionsResponse(IReadOnlyList<WikiRevision> Revisions);
 public sealed record WikiSearchResponse(IReadOnlyList<WikiSearchResult> Results);
@@ -204,6 +245,8 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiPageDocument))]
 [JsonSerializable(typeof(WikiSearchResult))]
 [JsonSerializable(typeof(WikiIndexRebuildResult))]
+[JsonSerializable(typeof(WikiPageAssistantReply))]
+[JsonSerializable(typeof(WikiPageDraft))]
 [JsonSerializable(typeof(WikiRootsResponse))]
 [JsonSerializable(typeof(WikiRevisionsResponse))]
 [JsonSerializable(typeof(WikiSearchResponse))]
@@ -214,6 +257,8 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(CreateWikiPageRequest))]
 [JsonSerializable(typeof(UpdateWikiPageRequest))]
 [JsonSerializable(typeof(RestoreWikiRevisionRequest))]
+[JsonSerializable(typeof(WikiPageChatRequest))]
+[JsonSerializable(typeof(WikiPageDraftRequest))]
 public partial class WikiJsonContext : JsonSerializerContext
 {
 }

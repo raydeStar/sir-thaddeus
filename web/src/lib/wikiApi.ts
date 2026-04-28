@@ -69,6 +69,20 @@ export interface WikiSearchResult {
   version: number;
 }
 
+export interface WikiPageAssistantReply {
+  answer: string;
+  createdAt: string;
+  messageId: string;
+}
+
+export interface WikiPageDraft {
+  markdown: string;
+  assistantText: string;
+  summary: string;
+  createdAt: string;
+  messageId: string;
+}
+
 interface WikiRootsResponse {
   roots: WikiRoot[];
 }
@@ -102,6 +116,16 @@ export interface UpdateWikiPageInput {
   expectedVersion?: number;
   source?: 'user' | 'ai' | 'restore';
   summary?: string;
+}
+
+export interface WikiPageChatInput {
+  prompt: string;
+  scope?: string;
+}
+
+export interface WikiPageDraftInput {
+  instruction: string;
+  scope?: string;
 }
 
 export async function listWikiRoots(): Promise<WikiRoot[]> {
@@ -175,6 +199,24 @@ export async function restoreWikiRevision(
     },
   );
   return asJson<WikiPageDocument>(res);
+}
+
+export async function askWikiPage(pageId: string, input: WikiPageChatInput): Promise<WikiPageAssistantReply> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<WikiPageAssistantReply>(res);
+}
+
+export async function draftWikiPage(pageId: string, input: WikiPageDraftInput): Promise<WikiPageDraft> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<WikiPageDraft>(res);
 }
 
 export async function searchWiki(rootId: string | null, query: string): Promise<WikiSearchResult[]> {

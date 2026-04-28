@@ -17,11 +17,14 @@ import {
   Plus,
   Save,
   Search,
+  Send,
   Settings2,
   Sparkles,
   Undo2,
+  WandSparkles,
+  X,
 } from 'lucide-react';
-import { useWikiStore, type WikiScope } from '../stores/wikiStore';
+import { useWikiStore, type WikiPageChatMessage, type WikiScope } from '../stores/wikiStore';
 import type { WikiFolder, WikiPage, WikiRevision } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
@@ -37,6 +40,7 @@ export const Route = createFileRoute('/wiki')({
 function WikiRoute() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [pagePrompt, setPagePrompt] = useState('');
   const {
     roots,
     tree,
@@ -48,9 +52,12 @@ function WikiRoute() {
     scope,
     search,
     draft,
+    pageChatMessages,
+    pageChatDraft,
     dirty,
     loading,
     saving,
+    pageAssistantBusy,
     error,
     loadRoots,
     selectRoot,
@@ -61,6 +68,10 @@ function WikiRoute() {
     createPage,
     savePage,
     restoreRevision,
+    askPage,
+    draftPage,
+    applyPageDraft,
+    clearPageDraft,
     setDraft,
     setSearch,
     setScope,
@@ -85,7 +96,19 @@ function WikiRoute() {
   }, [search, tree?.pages]);
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
   const markdownWordCount = countWords(draft);
-  const busy = loading || saving;
+  const busy = loading || saving || pageAssistantBusy;
+  const submitPageAsk = async () => {
+    const prompt = pagePrompt.trim();
+    if (!prompt) return;
+    setPagePrompt('');
+    await askPage(prompt);
+  };
+  const submitPageDraft = async () => {
+    const prompt = pagePrompt.trim();
+    if (!prompt) return;
+    setPagePrompt('');
+    await draftPage(prompt);
+  };
 
   return (
     <section className="flex min-h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
@@ -297,10 +320,54 @@ function WikiRoute() {
 
               <section className="space-y-2">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
-                <div className="rounded-xl border border-line bg-canvas-raised p-3">
-                  <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2 text-sm text-ink-subtle">
-                    <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-                    Ask about this page
+                <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
+                  <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                    {pageChatMessages.length > 0 ? (
+                      pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2 text-sm text-ink-subtle">
+                        <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+                        Ask about this page
+                      </div>
+                    )}
+                    {pageAssistantBusy ? (
+                      <div className="flex items-center gap-2 text-xs text-ink-subtle">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                        Thinking
+                      </div>
+                    ) : null}
+                  </div>
+                  {pageChatDraft ? (
+                    <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Draft</span>
+                        <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear draft" disabled={busy} onClick={clearPageDraft}>
+                          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        </button>
+                      </div>
+                      <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-muted">{pageChatDraft.markdown}</pre>
+                      <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applyPageDraft()}>
+                        Apply draft
+                      </button>
+                    </div>
+                  ) : null}
+                  <textarea
+                    value={pagePrompt}
+                    onChange={(event) => setPagePrompt(event.target.value)}
+                    disabled={!page || busy}
+                    rows={3}
+                    placeholder="Ask about this page"
+                    className="field-input min-h-20 resize-none"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim()} onClick={() => void submitPageAsk()}>
+                      <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Ask
+                    </button>
+                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
+                      <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Draft
+                    </button>
                   </div>
                 </div>
               </section>
@@ -328,6 +395,15 @@ function WikiRoute() {
         </aside>
       </div>
     </section>
+  );
+}
+
+function PageChatBubble({ message }: { message: WikiPageChatMessage }) {
+  return (
+    <div className={`rounded-xl px-3 py-2 text-sm ${message.role === 'user' ? 'bg-accent-soft text-ink' : 'bg-canvas text-ink-muted'}`}>
+      <p className="whitespace-pre-wrap leading-5">{message.text}</p>
+      <p className="mt-1 text-[10px] uppercase tracking-[0.08em] text-ink-subtle">{message.role}</p>
+    </div>
   );
 }
 

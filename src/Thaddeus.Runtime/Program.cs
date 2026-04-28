@@ -14,6 +14,7 @@ using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.Runtime.Voice;
+using Thaddeus.Runtime.Wiki;
 using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
 using SirThaddeus.Agent;
@@ -166,6 +167,7 @@ public static class Program
                     libraryDir,
                     sp.GetRequiredService<ILogger<LocalWikiStore>>());
             });
+                    builder.Services.AddSingleton<WikiPageAssistantService>();
             builder.Services.AddHostedService<RoutineSeeder>();
             // MCP tool client. Spawns the SirThaddeus.McpServer child process,
             // handshakes asynchronously, and exposes IMcpToolClient to the
