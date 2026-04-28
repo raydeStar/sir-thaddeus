@@ -119,7 +119,7 @@ function WikiRoute() {
   }, [page?.page.id]);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId) ?? tree?.root ?? null;
-  const selectedPage = page?.page ?? tree?.pages.find((candidate) => candidate.id === selectedPageId) ?? null;
+  const selectedPage = page?.page ?? null;
   const folders = tree?.folders ?? [];
   const selectedFolder = tree?.folders.find((folder) => folder.id === selectedFolderId) ?? null;
   const selectedFolderPath = selectedFolder ? formatFolderPath(folders, selectedFolder) : null;
@@ -201,7 +201,7 @@ function WikiRoute() {
   };
   const confirmRootDelete = () => {
     if (!selectedRoot) return;
-    if (window.confirm(`Remove ${selectedRoot.name} from Sir Thaddeus? Files stay on disk at ${selectedRoot.path}.`)) {
+    if (window.confirm(`Remove workspace ${selectedRoot.name} from Sir Thaddeus? Files stay on disk at ${selectedRoot.path}.`)) {
       void deleteRoot(selectedRoot.id);
     }
   };
@@ -274,7 +274,7 @@ function WikiRoute() {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button type="button" className="wiki-icon-button" title="New root" aria-label="New root" disabled={busy} onClick={() => void createRoot()}>
+          <button type="button" className="wiki-icon-button" title="New workspace" aria-label="New workspace" disabled={busy} onClick={() => void createRoot()}>
             <Library className="h-4 w-4" strokeWidth={1.8} />
           </button>
           <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
@@ -320,26 +320,62 @@ function WikiRoute() {
           '--wiki-right': rightCollapsed ? '56px' : '336px',
         } as CSSProperties}
       >
-        <aside className="min-h-0 border-b border-line bg-canvas md:border-b-0 md:border-r" aria-label="Wiki tree">
+        <aside className="min-h-0 border-b border-line bg-canvas md:border-b-0 md:border-r" aria-label="Page tree">
           <PanelHeader
-            title="Roots"
+            title="Pages"
             collapsed={leftCollapsed}
             onToggle={() => setLeftCollapsed((value) => !value)}
             collapsedIcon={<PanelLeftOpen className="h-4 w-4" strokeWidth={1.8} />}
             expandedIcon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />}
           />
           {!leftCollapsed ? (
-            <div className="space-y-4 px-4 pb-4">
-              <div className="flex items-center justify-between gap-2">
-                <label className="block text-xs font-medium text-ink-muted" htmlFor="wiki-root-select">
-                  Root
-                </label>
-                <div className="flex items-center gap-1">
+            <div className="space-y-3 px-3 pb-4">
+              <div className="flex items-center gap-1.5 rounded-xl border border-line bg-canvas-raised p-1.5">
+                <Library className="h-4 w-4 shrink-0 text-ink-muted" strokeWidth={1.8} />
+                {renamingRoot ? (
+                  <input
+                    autoFocus
+                    value={rootNameDraft}
+                    onChange={(event) => setRootNameDraft(event.target.value)}
+                    onBlur={() => void submitRootRename()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelRootRename();
+                      }
+                    }}
+                    aria-label="Workspace name"
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-1 text-sm font-medium text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15"
+                  />
+                ) : (
+                  <div className="relative min-w-0 flex-1">
+                    <select
+                      id="wiki-root-select"
+                      aria-label="Workspace"
+                      value={selectedRootId ?? ''}
+                      onChange={(event) => void selectRoot(event.target.value)}
+                      disabled={busy || roots.length === 0}
+                      className="w-full appearance-none truncate rounded-lg border border-transparent bg-transparent py-1 pl-1 pr-7 text-sm font-medium text-ink outline-none transition hover:border-line focus:border-accent focus:bg-canvas focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
+                    >
+                      {roots.length === 0 ? <option value="">Loading workspace</option> : null}
+                      {roots.map((root) => (
+                        <option key={root.id} value={root.id}>{root.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3.5 w-3.5 text-ink-subtle" strokeWidth={1.8} />
+                  </div>
+                )}
+                {!renamingRoot ? (
+                  <>
                   <button
                     type="button"
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink disabled:opacity-40"
-                    title="Rename root"
-                    aria-label="Rename root"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition hover:bg-canvas hover:text-ink disabled:opacity-40"
+                    title="Rename workspace"
+                    aria-label="Rename workspace"
                     disabled={!selectedRoot || busy || dirty || renamingRoot}
                     onClick={beginRootRename}
                   >
@@ -347,53 +383,28 @@ function WikiRoute() {
                   </button>
                   <button
                     type="button"
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-40"
-                    title="Remove root"
-                    aria-label="Remove root"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-40"
+                    title="Remove workspace"
+                    aria-label="Remove workspace"
                     disabled={!selectedRoot || busy || dirty || renamingRoot}
                     onClick={confirmRootDelete}
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
                   </button>
-                </div>
+                  </>
+                ) : null}
               </div>
-              {renamingRoot ? (
-                <input
-                  autoFocus
-                  value={rootNameDraft}
-                  onChange={(event) => setRootNameDraft(event.target.value)}
-                  onBlur={() => void submitRootRename()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      cancelRootRename();
-                    }
-                  }}
-                  aria-label="Root name"
-                  className="w-full rounded-xl border border-line bg-canvas-raised px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15"
-                />
-              ) : (
-                <div className="relative">
-                  <select
-                    id="wiki-root-select"
-                    value={selectedRootId ?? ''}
-                    onChange={(event) => void selectRoot(event.target.value)}
-                    disabled={busy || roots.length === 0}
-                    className="w-full appearance-none rounded-xl border border-line bg-canvas-raised px-3 py-2 pr-8 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
-                  >
-                    {roots.length === 0 ? <option value="">No roots</option> : null}
-                    {roots.map((root) => (
-                      <option key={root.id} value={root.id}>{root.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
-                </div>
-              )}
-              <p className="truncate font-mono text-xs text-ink-muted" title={selectedRoot?.path ?? 'Local wiki library'}>{selectedRoot?.path ?? 'Local wiki library'}</p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className="wiki-command-button justify-center px-2" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
+                  <Plus className="h-4 w-4" strokeWidth={1.9} />
+                  Page
+                </button>
+                <button type="button" className="wiki-command-button justify-center px-2" disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
+                  <Folder className="h-4 w-4" strokeWidth={1.8} />
+                  Folder
+                </button>
+              </div>
 
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
@@ -406,19 +417,21 @@ function WikiRoute() {
                   className="w-full rounded-xl border border-line bg-canvas-raised py-2 pl-9 pr-3 text-sm text-ink outline-none transition placeholder:text-ink-subtle focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
                 />
               </div>
-              <div className="grid grid-cols-2 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Search scope">
-                {(['root', 'all'] as WikiSearchScope[]).map((candidate) => (
-                  <button
-                    key={candidate}
-                    type="button"
-                    className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition ${searchScope === candidate ? 'bg-accent-soft text-ink shadow-soft' : 'text-ink-muted hover:text-ink'}`}
-                    disabled={!tree || (candidate === 'all' && roots.length < 2)}
-                    onClick={() => setSearchScope(candidate)}
-                  >
-                    {candidate === 'root' ? 'Root' : 'All'}
-                  </button>
-                ))}
-              </div>
+              {roots.length > 1 ? (
+                <div className="grid grid-cols-2 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Search scope">
+                  {(['root', 'all'] as WikiSearchScope[]).map((candidate) => (
+                    <button
+                      key={candidate}
+                      type="button"
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${searchScope === candidate ? 'bg-accent-soft text-ink shadow-soft' : 'text-ink-muted hover:text-ink'}`}
+                      disabled={!tree}
+                      onClick={() => setSearchScope(candidate)}
+                    >
+                      {candidate === 'root' ? 'This workspace' : 'All'}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               {tree && hasSearch ? (
                 <SearchResultsList
@@ -430,7 +443,7 @@ function WikiRoute() {
                   onPageSelect={(pageId) => void selectPage(pageId)}
                 />
               ) : tree ? (
-                <nav className="space-y-3" aria-label="Wiki folders">
+                <nav className="space-y-1" aria-label="Pages">
                   {rootFolders.map((folder) => (
                     <FolderSection
                       key={folder.id}
@@ -477,10 +490,9 @@ function WikiRoute() {
                   ) : null}
                 </nav>
               ) : (
-                <button type="button" className="btn-quiet w-full justify-center" disabled={busy} onClick={() => void createRoot()}>
-                  <Plus className="h-4 w-4" strokeWidth={1.8} />
-                  New root
-                </button>
+                <div className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-center text-sm text-ink-muted">
+                  Loading pages
+                </div>
               )}
             </div>
           ) : null}
@@ -569,24 +581,31 @@ function WikiRoute() {
                 </Suspense>
               ) : (
                 <div className="flex flex-1 items-center justify-center px-6 text-center">
-                  <div className="flex max-w-xs flex-col items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-line bg-canvas-raised text-ink-muted">
-                      <FileText className="h-5 w-5" strokeWidth={1.8} />
+                  {loading || selectedPageId ? (
+                    <div className="flex items-center gap-2 text-sm text-ink-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
+                      Opening page
                     </div>
-                    <p className="text-sm font-medium text-ink">No page selected</p>
-                    <button type="button" className="wiki-command-button" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
-                      <Plus className="h-4 w-4" strokeWidth={1.9} />
-                      New page
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex max-w-xs flex-col items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-line bg-canvas-raised text-ink-muted">
+                        <FileText className="h-5 w-5" strokeWidth={1.8} />
+                      </div>
+                      <p className="text-sm font-medium text-ink">No page selected</p>
+                      <button type="button" className="wiki-command-button" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
+                        <Plus className="h-4 w-4" strokeWidth={1.9} />
+                        New page
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-base font-medium text-ink">No wiki roots yet</p>
+                <p className="text-base font-medium text-ink">Preparing your wiki</p>
                 <button type="button" className="btn-primary" disabled={busy} onClick={() => void createRoot()}>
                   <Plus className="h-4 w-4" strokeWidth={1.9} />
-                  New root
+                  New workspace
                 </button>
               </div>
             )}
@@ -619,7 +638,7 @@ function WikiRoute() {
                       disabled={candidate === 'folder' ? !selectedFolder : candidate === 'page' ? !selectedPage : !selectedRoot}
                       className={`rounded-full border px-3 py-1 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-55 ${scope === candidate ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-muted hover:text-ink'}`}
                     >
-                      {candidate}
+                      {candidate === 'root' ? 'Workspace' : candidate}
                     </button>
                   ))}
                 </div>
@@ -732,10 +751,16 @@ function WikiRoute() {
                   </section>
                 </>
               ) : (
-                <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center">
-                  <FileText className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.8} />
-                  <p className="mt-2 text-sm font-medium text-ink">No page context</p>
-                </div>
+                loading || selectedPageId ? (
+                  <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center text-sm text-ink-muted">
+                    Opening page
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center">
+                    <FileText className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.8} />
+                    <p className="mt-2 text-sm font-medium text-ink">No page context</p>
+                  </div>
+                )
               )}
             </div>
           ) : null}
@@ -844,10 +869,31 @@ function FolderSection({
   onFolderRenameSubmit: () => void;
   onFolderNameDraftChange: (name: string) => void;
 }) {
-  const isFolderSelected = folder ? selectedFolderId === folder.id && scope === 'folder' : !selectedFolderId && scope === 'root';
+  const isFolderSelected = folder ? selectedFolderId === folder.id && scope === 'folder' : false;
   const isRenaming = folder ? renamingFolderId === folder.id : false;
   const childFolders = folder ? folders.filter((candidate) => candidate.parentFolderId === folder.id) : [];
   const sectionPages = folder ? pages.filter((page) => page.folderId === folder.id) : pages;
+  const pageItems = (
+    <ul className="space-y-1">
+      {sectionPages.map((page) => (
+        <li key={page.id}>
+          <button
+            type="button"
+            onClick={() => onPageSelect(page.id)}
+            className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition ${selectedPageId === page.id ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}
+          >
+            <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="min-w-0 flex-1 truncate font-medium">{page.title}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+
+  if (!folder) {
+    return <section>{pageItems}</section>;
+  }
+
   return (
     <section>
       {isRenaming ? (
@@ -873,16 +919,16 @@ function FolderSection({
           />
         </div>
       ) : (
-        <div className={`flex w-full items-center gap-1 rounded-lg transition ${isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-subtle hover:text-ink'}`}>
+        <div className={`flex h-8 w-full items-center gap-1 rounded-lg transition ${isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}>
           <button
             type="button"
-            onClick={() => onFolderSelect(folder?.id ?? null)}
-            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs font-medium uppercase tracking-[0.08em]"
+            onClick={() => onFolderSelect(folder.id)}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-medium"
           >
             <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span className="truncate">{folder?.name ?? 'Pages'}</span>
+            <span className="truncate">{folder.name}</span>
           </button>
-          {folder && isFolderSelected ? (
+          {isFolderSelected ? (
             <div className="mr-1 flex shrink-0 items-center gap-1">
               <button
                 type="button"
@@ -906,25 +952,9 @@ function FolderSection({
           ) : null}
         </div>
       )}
-      <ul className="mt-1 space-y-1">
-        {sectionPages.map((page) => (
-          <li key={page.id}>
-            <button
-              type="button"
-              onClick={() => onPageSelect(page.id)}
-              className={`flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition ${selectedPageId === page.id ? 'bg-canvas-raised text-ink shadow-soft' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}
-            >
-              <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{page.title}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{formatStamp(page.updatedAt)}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {sectionPages.length > 0 ? <div className="mt-1 pl-3">{pageItems}</div> : null}
       {childFolders.length > 0 ? (
-        <div className="mt-2 space-y-2 border-l border-line/70 pl-3">
+        <div className="mt-1 space-y-1 border-l border-line/70 pl-3">
           {childFolders.map((childFolder) => (
             <FolderSection
               key={childFolder.id}
@@ -976,9 +1006,10 @@ function PanelHeader({
 
 function ScopeChip({ scope, root, folder, page }: { scope: WikiScope; root?: string; folder?: string; page?: string }) {
   const label = scope === 'root' ? root : scope === 'folder' ? folder ?? root : page ?? root;
+  const scopeLabel = scope === 'root' ? 'Workspace' : scope;
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
-      <span className="capitalize text-ink-muted">{scope}</span>
+      <span className="capitalize text-ink-muted">{scopeLabel}</span>
       <span className="max-w-[220px] truncate">{label ?? 'None'}</span>
     </span>
   );

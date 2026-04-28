@@ -5,6 +5,8 @@ import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearc
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
 
+const STARTER_PAGE_MARKDOWN = '# Untitled Page\n\n';
+
 export interface WikiPageChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -105,7 +107,9 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       } else if (roots.length > 0) {
         await get().selectRoot(roots[0].id);
       } else {
-        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
+        const createdRoot = await api.createWikiRoot({ name: 'My Wiki' });
+        set({ roots: [createdRoot] });
+        await get().selectRoot(createdRoot.id);
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
@@ -114,17 +118,41 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
 
   selectRoot: async (rootId: string) => {
     if (get().dirty) {
-      set({ error: 'Save or discard changes before switching roots.' });
+      set({ error: 'Save or discard changes before switching workspaces.' });
       return;
     }
     set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], searching: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
-      set({ tree, loading: false });
       const firstPage = tree.pages[0];
       if (firstPage) {
+        set({ tree, selectedPageId: firstPage.id });
         await get().selectPage(firstPage.id);
+        return;
       }
+
+      const createdPage = await api.createWikiPage(rootId, {
+        title: 'Untitled Page',
+        markdown: STARTER_PAGE_MARKDOWN,
+      });
+      const refreshedTree = await api.getWikiTree(rootId);
+      const revisions = await api.listWikiRevisions(createdPage.page.id);
+      set({
+        tree: refreshedTree,
+        page: createdPage,
+        revisions,
+        selectedRootId: rootId,
+        selectedFolderId: createdPage.page.folderId,
+        selectedPageId: createdPage.page.id,
+        draft: createdPage.markdown,
+        pageChatMessages: [],
+        pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: 'page',
+        loading: false,
+      });
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }
@@ -161,18 +189,49 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         loading: false,
       });
     } catch (error) {
+      const rootId = get().selectedRootId;
+      if (rootId && isRuntimeNotFound(error)) {
+        try {
+          const createdPage = await api.createWikiPage(rootId, {
+            title: 'Untitled Page',
+            markdown: STARTER_PAGE_MARKDOWN,
+          });
+          const refreshedTree = await api.getWikiTree(rootId);
+          const revisions = await api.listWikiRevisions(createdPage.page.id);
+          set({
+            tree: refreshedTree,
+            page: createdPage,
+            revisions,
+            selectedPageId: createdPage.page.id,
+            selectedFolderId: createdPage.page.folderId,
+            draft: createdPage.markdown,
+            pageChatMessages: [],
+            pageChatDraft: null,
+            selectedText: '',
+            selectionRewriteDraft: null,
+            dirty: false,
+            scope: 'page',
+            loading: false,
+            error: null,
+          });
+          return;
+        } catch (fallbackError) {
+          set({ error: (fallbackError as Error).message, loading: false });
+          return;
+        }
+      }
       set({ error: (error as Error).message, loading: false });
     }
   },
 
   createRoot: async () => {
     if (get().dirty) {
-      set({ error: 'Save or discard changes before creating a root.' });
+      set({ error: 'Save or discard changes before creating a workspace.' });
       return;
     }
     set({ saving: true, error: null });
     try {
-      const created = await api.createWikiRoot({ name: `Wiki ${new Date().toLocaleDateString()}` });
+      const created = await api.createWikiRoot({ name: `Workspace ${new Date().toLocaleDateString()}` });
       set((state) => ({ roots: [created, ...state.roots] }));
       await get().selectRoot(created.id);
     } catch (error) {
@@ -188,7 +247,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const currentRoot = get().roots.find((root) => root.id === rootId) ?? null;
     if (currentRoot && currentRoot.name === trimmed) return;
     if (get().dirty) {
-      set({ error: 'Save or discard changes before renaming this root.' });
+      set({ error: 'Save or discard changes before renaming this workspace.' });
       return;
     }
 
@@ -209,7 +268,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   deleteRoot: async (rootId: string) => {
     if (!rootId) return;
     if (get().dirty) {
-      set({ error: 'Save or discard changes before removing this root.' });
+      set({ error: 'Save or discard changes before removing this workspace.' });
       return;
     }
 
@@ -371,10 +430,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const created = await api.createWikiPage(rootId, {
         title: 'Untitled Page',
         folderId,
-        // Trailing blank line gives Tiptap an empty paragraph below the
-        // seeded H1 so a user typing immediately starts a new line
-        // instead of concatenating into the heading.
-        markdown: '# Untitled Page\n\n',
+        markdown: STARTER_PAGE_MARKDOWN,
       });
       const tree = await api.getWikiTree(rootId);
       const revisions = await api.listWikiRevisions(created.page.id);
@@ -753,4 +809,9 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
 
 function newLocalMessageId(prefix: string): string {
   return `${prefix}_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function isRuntimeNotFound(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b404\b|not found/i.test(message);
 }
