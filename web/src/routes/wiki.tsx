@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   BookOpenText,
@@ -42,6 +42,7 @@ function WikiRoute() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pagePrompt, setPagePrompt] = useState('');
   const [pageTitleDraft, setPageTitleDraft] = useState('');
+  const pageTitleRef = useRef<HTMLInputElement>(null);
   const {
     roots,
     tree,
@@ -144,6 +145,7 @@ function WikiRoute() {
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
             {selectedPage ? (
               <input
+                ref={pageTitleRef}
                 value={pageTitleDraft}
                 onChange={(event) => setPageTitleDraft(event.target.value)}
                 onBlur={() => void submitPageTitle()}
@@ -308,7 +310,17 @@ function WikiRoute() {
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                <button type="button" className="wiki-icon-button" title="Page settings" aria-label="Page settings" disabled={!page}>
+                <button
+                  type="button"
+                  className="wiki-icon-button"
+                  title="Edit page title"
+                  aria-label="Edit page title"
+                  disabled={!page || busy || dirty}
+                  onClick={() => {
+                    pageTitleRef.current?.focus();
+                    pageTitleRef.current?.select();
+                  }}
+                >
                   <Settings2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
                 <button type="button" className="wiki-icon-button" title="Undo latest AI edit" aria-label="Undo latest AI edit" disabled={busy || !canUndoLatestAiEdit} onClick={() => void undoLatestAiEdit()}>
