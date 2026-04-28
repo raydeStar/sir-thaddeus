@@ -107,10 +107,12 @@ function WikiRoute() {
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId) ?? tree?.root ?? null;
   const selectedPage = page?.page ?? tree?.pages.find((candidate) => candidate.id === selectedPageId) ?? null;
+  const folders = tree?.folders ?? [];
   const selectedFolder = tree?.folders.find((folder) => folder.id === selectedFolderId) ?? null;
+  const selectedFolderPath = selectedFolder ? formatFolderPath(folders, selectedFolder) : null;
   const filteredPages = tree?.pages ?? [];
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
-  const rootFolders = tree?.folders.filter((folder) => !folder.parentFolderId) ?? [];
+  const rootFolders = folders.filter((folder) => !folder.parentFolderId);
   const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
@@ -213,7 +215,7 @@ function WikiRoute() {
                 {selectedRoot?.name ?? 'Wiki'}
               </h1>
             )}
-            <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolder?.name} page={selectedPage?.title} />
+            <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
             <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted">
               <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
               {dirty ? 'Unsaved' : 'Saved'}
@@ -402,7 +404,7 @@ function WikiRoute() {
               <div className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
                 <BookOpenText className="h-4 w-4 shrink-0" strokeWidth={1.8} />
                 <span className="truncate">
-                  {selectedRoot?.name ?? 'Wiki'}{selectedFolder ? ` / ${selectedFolder.name}` : ''}
+                  {selectedRoot?.name ?? 'Wiki'}{selectedFolderPath ? ` / ${selectedFolderPath}` : ''}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -851,4 +853,19 @@ function formatStamp(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function formatFolderPath(folders: WikiFolder[], folder: WikiFolder): string {
+  const foldersById = new Map(folders.map((candidate) => [candidate.id, candidate]));
+  const segments: string[] = [];
+  const seen = new Set<string>();
+  let current: WikiFolder | undefined = folder;
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    segments.push(current.name);
+    current = current.parentFolderId ? foldersById.get(current.parentFolderId) : undefined;
+  }
+
+  return segments.reverse().join(' / ');
 }
