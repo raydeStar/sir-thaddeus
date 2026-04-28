@@ -10,9 +10,12 @@ import type { ChatMessageSource } from '@thaddeus/shared-types';
 import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
 
 interface WikiContextOption {
-  pageId: string;
+  value: string;
+  mode: 'root' | 'folder' | 'page';
+  rootId?: string;
+  folderId?: string;
+  pageId?: string;
   title: string;
-  rootName: string;
 }
 
 export const Route = createFileRoute('/chat/$threadId')({
@@ -29,7 +32,7 @@ function ChatThreadRoute() {
   const send = useChatStore((s) => s.send);
 
   const [draft, setDraft] = useState('');
-  const [wikiContextPageId, setWikiContextPageId] = useState('');
+  const [wikiContextValue, setWikiContextValue] = useState('');
   const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -51,7 +54,22 @@ function ChatThreadRoute() {
         if (disposed) return;
         setWikiContextOptions(
           trees.flatMap(({ root, tree }) =>
-            tree.pages.map((page) => ({ pageId: page.id, title: page.title, rootName: root.name })),
+            [
+              { value: `root:${root.id}`, mode: 'root' as const, rootId: root.id, title: `${root.name}` },
+              ...tree.folders.map((folder) => ({
+                value: `folder:${root.id}:${folder.id}`,
+                mode: 'folder' as const,
+                rootId: root.id,
+                folderId: folder.id,
+                title: `${root.name} / ${folder.name}`,
+              })),
+              ...tree.pages.map((page) => ({
+                value: `page:${page.id}`,
+                mode: 'page' as const,
+                pageId: page.id,
+                title: `${root.name} / ${page.title}`,
+              })),
+            ],
           ),
         );
       } catch {
@@ -84,7 +102,7 @@ function ChatThreadRoute() {
     setDraft('');
     await send(
       text,
-      wikiContextPageId ? { mode: 'page', pageId: wikiContextPageId } : undefined,
+      selectedWikiContext(wikiContextValue, wikiContextOptions),
     );
   };
 
@@ -188,8 +206,8 @@ function ChatThreadRoute() {
             <div className="mb-2 flex items-center gap-2 border-b border-line/70 pb-2">
               <BookOpen className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
               <select
-                value={wikiContextPageId}
-                onChange={(event) => setWikiContextPageId(event.target.value)}
+                value={wikiContextValue}
+                onChange={(event) => setWikiContextValue(event.target.value)}
                 disabled={sending || wikiContextLoading || wikiContextOptions.length === 0}
                 aria-label="Wiki context"
                 data-testid="chat-wiki-context"
@@ -197,8 +215,8 @@ function ChatThreadRoute() {
               >
                 <option value="">No wiki context</option>
                 {wikiContextOptions.map((option) => (
-                  <option key={option.pageId} value={option.pageId}>
-                    {option.rootName} / {option.title}
+                  <option key={option.value} value={option.value}>
+                    {option.mode === 'root' ? 'Root' : option.mode === 'folder' ? 'Folder' : 'Page'} / {option.title}
                   </option>
                 ))}
               </select>
@@ -230,6 +248,18 @@ function ChatThreadRoute() {
       </div>
     </section>
   );
+}
+
+function selectedWikiContext(value: string, options: WikiContextOption[]) {
+  if (!value) return undefined;
+  const option = options.find((candidate) => candidate.value === value);
+  if (!option) return undefined;
+  if (option.mode === 'root' && option.rootId) return { mode: 'root' as const, rootId: option.rootId };
+  if (option.mode === 'folder' && option.rootId && option.folderId) {
+    return { mode: 'folder' as const, rootId: option.rootId, folderId: option.folderId };
+  }
+  if (option.mode === 'page' && option.pageId) return { mode: 'page' as const, pageId: option.pageId };
+  return undefined;
 }
 
 interface MessageRowProps {

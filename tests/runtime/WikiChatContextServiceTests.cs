@@ -57,6 +57,49 @@ public sealed class WikiChatContextServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildAsync_injects_root_context_without_crossing_roots()
+    {
+        var firstRoot = await _wiki.CreateRootAsync("Novel", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(firstRoot.Id, null, "Kazalt", "# Kazalt\n\nRoyal secret.", CancellationToken.None);
+        var secondRoot = await _wiki.CreateRootAsync("Work", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(secondRoot.Id, null, "Roadmap", "# Roadmap\n\nRevenue plan.", CancellationToken.None);
+
+        var prompt = await _service.BuildAsync(
+            "Find contradictions",
+            new WikiChatContextRequest("root", RootId: firstRoot.Id),
+            CancellationToken.None);
+
+        Assert.NotNull(prompt.Attachment);
+        Assert.Equal("root", prompt.Attachment!.Type);
+        Assert.Equal(firstRoot.Id, prompt.Attachment.Id);
+        Assert.Contains("Royal secret.", prompt.Prompt);
+        Assert.DoesNotContain("Revenue plan.", prompt.Prompt);
+    }
+
+    [Fact]
+    public async Task BuildAsync_injects_folder_context_with_descendants()
+    {
+        var root = await _wiki.CreateRootAsync("Novel", null, CancellationToken.None);
+        var characters = await _wiki.CreateFolderAsync(root.Id, "Characters", null, CancellationToken.None);
+        var villains = await _wiki.CreateFolderAsync(root.Id, "Villains", characters.Id, CancellationToken.None);
+        var locations = await _wiki.CreateFolderAsync(root.Id, "Locations", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(root.Id, characters.Id, "Kazalt", "# Kazalt\n\nRoyal secret.", CancellationToken.None);
+        await _wiki.CreatePageAsync(root.Id, villains.Id, "Remora", "# Remora\n\nHidden antagonist.", CancellationToken.None);
+        await _wiki.CreatePageAsync(root.Id, locations.Id, "Leviathan Bay", "# Leviathan Bay\n\nStorm harbor.", CancellationToken.None);
+
+        var prompt = await _service.BuildAsync(
+            "Who is involved?",
+            new WikiChatContextRequest("folder", RootId: root.Id, FolderId: characters.Id),
+            CancellationToken.None);
+
+        Assert.NotNull(prompt.Attachment);
+        Assert.Equal("folder", prompt.Attachment!.Type);
+        Assert.Contains("Royal secret.", prompt.Prompt);
+        Assert.Contains("Hidden antagonist.", prompt.Prompt);
+        Assert.DoesNotContain("Storm harbor.", prompt.Prompt);
+    }
+
+    [Fact]
     public async Task BuildAsync_rejects_missing_page_context()
     {
         await Assert.ThrowsAsync<ArgumentException>(() =>
