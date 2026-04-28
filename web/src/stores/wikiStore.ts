@@ -40,6 +40,7 @@ interface WikiStoreState {
   createFolder: () => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
+  discardDraft: () => void;
   restoreRevision: (revisionId: string) => Promise<void>;
   undoLatestAiEdit: () => Promise<void>;
   askPage: (prompt: string) => Promise<void>;
@@ -96,6 +97,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   selectRoot: async (rootId: string) => {
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before switching roots.' });
+      return;
+    }
     set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
@@ -114,6 +119,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   selectPage: async (pageId: string) => {
+    if (get().dirty && pageId !== get().selectedPageId) {
+      set({ error: 'Save or discard changes before switching pages.' });
+      return;
+    }
     set({ loading: true, error: null, selectedPageId: pageId });
     try {
       const page = await api.getWikiPage(pageId);
@@ -139,6 +148,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   createRoot: async () => {
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before creating a root.' });
+      return;
+    }
     set({ saving: true, error: null });
     try {
       const created = await api.createWikiRoot({ name: `Wiki ${new Date().toLocaleDateString()}` });
@@ -167,6 +180,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   createPage: async () => {
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before creating a page.' });
+      return;
+    }
     const rootId = get().selectedRootId;
     if (!rootId) return;
     const folderId = get().selectedFolderId;
@@ -221,9 +238,19 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     }
   },
 
+  discardDraft: () => {
+    const current = get().page;
+    if (!current) return;
+    set({ draft: current.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false, error: null });
+  },
+
   restoreRevision: async (revisionId: string) => {
     const current = get().page;
     if (!current) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before restoring a revision.' });
+      return;
+    }
     set({ saving: true, error: null });
     try {
       const restored = await api.restoreWikiRevision(
@@ -316,6 +343,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const current = get().page;
     const pendingDraft = get().pageChatDraft;
     if (!current || !pendingDraft) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before applying an AI draft.' });
+      return;
+    }
     set({ saving: true, error: null });
     try {
       const saved = await api.updateWikiPage(current.page.id, {
@@ -368,6 +399,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const current = get().page;
     const pendingDraft = get().selectionRewriteDraft;
     if (!current || !pendingDraft) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before applying an AI rewrite.' });
+      return;
+    }
     set({ saving: true, error: null });
     try {
       const saved = await api.updateWikiPage(current.page.id, {

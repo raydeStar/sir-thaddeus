@@ -69,6 +69,7 @@ function WikiRoute() {
     createFolder,
     createPage,
     savePage,
+    discardDraft,
     restoreRevision,
     undoLatestAiEdit,
     askPage,
@@ -156,6 +157,12 @@ function WikiRoute() {
             <Plus className="h-4 w-4" strokeWidth={1.9} />
             New page
           </button>
+          {dirty ? (
+            <button type="button" className="wiki-command-button" disabled={busy || !page} onClick={discardDraft}>
+              <X className="h-4 w-4" strokeWidth={1.9} />
+              Discard
+            </button>
+          ) : null}
           <button type="button" className="wiki-command-button" disabled={busy || !dirty || !page} onClick={() => void savePage()}>
             <Save className="h-4 w-4" strokeWidth={1.9} />
             Save
@@ -421,7 +428,7 @@ function WikiRoute() {
                         key={revision.id}
                         revision={revision}
                         active={index === 0}
-                        disabled={busy || index === 0}
+                          disabled={busy || dirty || index === 0}
                         onRestore={() => void restoreRevision(revision.id)}
                       />
                     ))}
