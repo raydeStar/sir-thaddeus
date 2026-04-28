@@ -275,6 +275,98 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<WikiFolder?> MoveFolderAsync(
+        string rootId,
+        string folderId,
+        string? parentFolderId,
+        CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        var targetParentFolderId = string.IsNullOrWhiteSpace(parentFolderId) ? null : parentFolderId;
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var current = await GetFolderAsync(connection, folderId, cancellationToken).ConfigureAwait(false);
+            if (current is null) return null;
+            if (!string.Equals(current.RootId, root.Id, StringComparison.Ordinal))
+            {
+                throw new WikiPathException("Folder belongs to a different wiki root.");
+            }
+
+            if (string.Equals(current.ParentFolderId, targetParentFolderId, StringComparison.Ordinal))
+            {
+                return current;
+            }
+
+            var folders = await ListFoldersAsync(connection, cancellationToken).ConfigureAwait(false);
+            var affectedFolderIds = DescendantFolderIds(folders, current.Id);
+            if (string.Equals(targetParentFolderId, current.Id, StringComparison.Ordinal) ||
+                (targetParentFolderId is not null && affectedFolderIds.Contains(targetParentFolderId)))
+            {
+                throw new WikiPathException("Folder cannot be moved into itself or one of its descendants.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(targetParentFolderId))
+            {
+                var targetParent = folders.FirstOrDefault(folder => string.Equals(folder.Id, targetParentFolderId, StringComparison.Ordinal))
+                    ?? throw new KeyNotFoundException($"Folder '{targetParentFolderId}' not found.");
+                if (!string.Equals(targetParent.RootId, root.Id, StringComparison.Ordinal))
+                {
+                    throw new WikiPathException("Folder belongs to a different wiki root.");
+                }
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var existingSlugs = await ExistingSlugsAsync(connection, "folders", "parent_folder_id", targetParentFolderId, cancellationToken).ConfigureAwait(false);
+            existingSlugs.Remove(current.Slug);
+            var moved = current with
+            {
+                ParentFolderId = targetParentFolderId,
+                Slug = UniqueSlug(current.Slug, existingSlugs),
+                SortOrder = await NextFolderSortOrderAsync(connection, targetParentFolderId, cancellationToken).ConfigureAwait(false),
+                UpdatedAt = now,
+            };
+
+            var affectedPages = (await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false))
+                .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
+                .ToArray();
+            var pageBodies = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var page in affectedPages)
+            {
+                pageBodies[page.Id] = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
+            }
+
+            await UpdateFolderAsync(connection, moved, cancellationToken).ConfigureAwait(false);
+            foreach (var page in affectedPages)
+            {
+                var updatedPage = page with
+                {
+                    RelativePath = await BuildPageRelativePathAsync(connection, page.FolderId, page.Slug, cancellationToken).ConfigureAwait(false),
+                    UpdatedAt = now,
+                };
+                var oldPath = ResolvePagePath(root, page.RelativePath);
+                var newPath = ResolvePagePath(root, updatedPage.RelativePath);
+                await WritePageFileAsync(root, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath))
+                {
+                    File.Delete(oldPath);
+                    DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(oldPath));
+                }
+
+                await UpdatePageMetadataAsync(connection, updatedPage, cancellationToken).ConfigureAwait(false);
+            }
+
+            return moved;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<WikiPageDocument> CreatePageAsync(string rootId, string? folderId, string title, string markdown, CancellationToken cancellationToken)
     {
         var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
@@ -811,14 +903,18 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             update folders
-            set name = $name,
+            set parent_folder_id = $parentFolderId,
+                name = $name,
                 slug = $slug,
+                sort_order = $sortOrder,
                 updated_at = $updatedAt
             where id = $id
             """;
         Add(command, "$id", folder.Id);
+        AddNullable(command, "$parentFolderId", folder.ParentFolderId);
         Add(command, "$name", folder.Name);
         Add(command, "$slug", folder.Slug);
+        Add(command, "$sortOrder", folder.SortOrder);
         Add(command, "$updatedAt", Format(folder.UpdatedAt));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

@@ -28,6 +28,12 @@ public interface IWikiStore
         string name,
         CancellationToken cancellationToken);
 
+    Task<WikiFolder?> MoveFolderAsync(
+        string rootId,
+        string folderId,
+        string? parentFolderId,
+        CancellationToken cancellationToken);
+
     Task<WikiPageDocument> CreatePageAsync(
         string rootId,
         string? folderId,

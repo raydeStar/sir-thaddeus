@@ -217,6 +217,45 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Move_folder_updates_descendant_page_paths_and_rejects_cycles()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var parent = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var child = await store.CreateFolderAsync(root.Id, "Archive", parent.Id, CancellationToken.None);
+        var target = await store.CreateFolderAsync(root.Id, "Clients", null, CancellationToken.None);
+        var parentPage = await store.CreatePageAsync(root.Id, parent.Id, "Plan", "parent body", CancellationToken.None);
+        var childPage = await store.CreatePageAsync(root.Id, child.Id, "Notes", "child body", CancellationToken.None);
+        var oldParentPath = Path.Combine(root.Path, parentPage.Page.RelativePath);
+        var oldChildPath = Path.Combine(root.Path, childPage.Page.RelativePath);
+
+        var moved = await store.MoveFolderAsync(root.Id, parent.Id, target.Id, CancellationToken.None);
+
+        Assert.NotNull(moved);
+        Assert.Equal(target.Id, moved!.ParentFolderId);
+        Assert.Equal("projects", moved.Slug);
+        Assert.False(File.Exists(oldParentPath));
+        Assert.False(File.Exists(oldChildPath));
+
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        var movedParentPage = Assert.Single(tree!.Pages, page => page.Id == parentPage.Page.Id);
+        var movedChildPage = Assert.Single(tree.Pages, page => page.Id == childPage.Page.Id);
+        Assert.Equal(Path.Combine("clients", "projects", "plan.md"), movedParentPage.RelativePath);
+        Assert.Equal(Path.Combine("clients", "projects", "archive", "notes.md"), movedChildPage.RelativePath);
+
+        var parentFile = await File.ReadAllTextAsync(Path.Combine(root.Path, movedParentPage.RelativePath));
+        var childFile = await File.ReadAllTextAsync(Path.Combine(root.Path, movedChildPage.RelativePath));
+        Assert.Contains("folderId: " + parent.Id, parentFile);
+        Assert.Contains("folderId: " + child.Id, childFile);
+        Assert.Contains("parent body", parentFile);
+        Assert.Contains("child body", childFile);
+
+        await Assert.ThrowsAsync<WikiPathException>(() =>
+            store.MoveFolderAsync(root.Id, parent.Id, child.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Folder_ids_are_not_valid_across_roots()
     {
         using var store = NewStore();

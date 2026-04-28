@@ -42,6 +42,7 @@ interface WikiStoreState {
   renameRoot: (rootId: string, name: string) => Promise<void>;
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
+  moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
@@ -241,6 +242,40 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectedText: '',
         selectionRewriteDraft: null,
         dirty: false,
+      });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  moveFolder: async (folderId: string, parentFolderId: string | null) => {
+    const rootId = get().selectedRootId;
+    const targetParentFolderId = parentFolderId || null;
+    if (!rootId || !folderId) return;
+    const currentFolder = get().tree?.folders.find((folder) => folder.id === folderId) ?? null;
+    if (!currentFolder || currentFolder.parentFolderId === targetParentFolderId) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before moving this folder.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      const moved = await api.moveWikiFolder(rootId, folderId, { parentFolderId: targetParentFolderId });
+      const tree = await api.getWikiTree(rootId);
+      const currentPage = get().page;
+      const refreshedPage = currentPage ? await api.getWikiPage(currentPage.page.id) : null;
+      set({
+        tree,
+        page: refreshedPage,
+        draft: refreshedPage?.markdown ?? get().draft,
+        selectedFolderId: moved.id,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: 'folder',
       });
     } catch (error) {
       set({ error: (error as Error).message });

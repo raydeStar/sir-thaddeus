@@ -123,6 +123,10 @@ export interface UpdateWikiFolderInput {
   name: string;
 }
 
+export interface MoveWikiFolderInput {
+  parentFolderId?: string | null;
+}
+
 export interface CreateWikiPageInput {
   title?: string;
   folderId?: string | null;
@@ -204,6 +208,23 @@ export async function updateWikiFolder(
   const res = await runtimeFetch(
     token(),
     `/api/wiki/roots/${encodeURIComponent(rootId)}/folders/${encodeURIComponent(folderId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+  return asJson<WikiFolder>(res);
+}
+
+export async function moveWikiFolder(
+  rootId: string,
+  folderId: string,
+  input: MoveWikiFolderInput,
+): Promise<WikiFolder> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/roots/${encodeURIComponent(rootId)}/folders/${encodeURIComponent(folderId)}/location`,
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
