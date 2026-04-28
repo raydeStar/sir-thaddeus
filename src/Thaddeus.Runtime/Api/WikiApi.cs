@@ -142,6 +142,28 @@ public static class WikiApi
             }
         });
 
+        app.MapDelete("/api/wiki/roots/{rootId}/folders/{folderId}", async (string rootId, string folderId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            try
+            {
+                var deleted = await store.DeleteFolderAsync(rootId, folderId, ct).ConfigureAwait(false);
+                if (!deleted) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_FOLDER_DELETED",
+                    Target = folderId,
+                    Details = new() { ["rootId"] = rootId },
+                });
+                return Results.NoContent();
+            }
+            catch (WikiPathException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("invalid_path", ex.Message));
+            }
+        });
+
         app.MapPost("/api/wiki/roots/{rootId}/pages", async (string rootId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
         {
             var req = await ReadAsync(ctx, WikiJsonContext.Default.CreateWikiPageRequest, ct).ConfigureAwait(false);

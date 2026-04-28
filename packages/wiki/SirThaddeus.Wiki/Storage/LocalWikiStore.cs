@@ -367,6 +367,64 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<bool> DeleteFolderAsync(string rootId, string folderId, CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var current = await GetFolderAsync(connection, folderId, cancellationToken).ConfigureAwait(false);
+            if (current is null) return false;
+            if (!string.Equals(current.RootId, root.Id, StringComparison.Ordinal))
+            {
+                throw new WikiPathException("Folder belongs to a different wiki root.");
+            }
+
+            var folders = await ListFoldersAsync(connection, cancellationToken).ConfigureAwait(false);
+            var affectedFolderIds = DescendantFolderIds(folders, current.Id);
+            var affectedPages = (await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false))
+                .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
+                .ToArray();
+
+            foreach (var page in affectedPages)
+            {
+                var path = ResolvePagePath(root, page.RelativePath);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(path));
+                }
+
+                using var deleteRevisions = connection.CreateCommand();
+                deleteRevisions.CommandText = "delete from revisions where page_id = $pageId";
+                Add(deleteRevisions, "$pageId", page.Id);
+                await deleteRevisions.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+                using var deletePage = connection.CreateCommand();
+                deletePage.CommandText = "delete from pages where id = $pageId";
+                Add(deletePage, "$pageId", page.Id);
+                await deletePage.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var id in affectedFolderIds)
+            {
+                using var deleteFolder = connection.CreateCommand();
+                deleteFolder.CommandText = "delete from folders where id = $id";
+                Add(deleteFolder, "$id", id);
+                await deleteFolder.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<WikiPageDocument> CreatePageAsync(string rootId, string? folderId, string title, string markdown, CancellationToken cancellationToken)
     {
         var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);

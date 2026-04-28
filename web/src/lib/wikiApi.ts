@@ -234,6 +234,17 @@ export async function moveWikiFolder(
   return asJson<WikiFolder>(res);
 }
 
+export async function deleteWikiFolder(rootId: string, folderId: string): Promise<void> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/roots/${encodeURIComponent(rootId)}/folders/${encodeURIComponent(folderId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
 export async function createWikiPage(rootId: string, input: CreateWikiPageInput): Promise<WikiPageDocument> {
   const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/pages`, {
     method: 'POST',

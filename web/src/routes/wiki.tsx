@@ -80,6 +80,7 @@ function WikiRoute() {
     createFolder,
     renameFolder,
     moveFolder,
+    deleteFolder,
     createPage,
     savePage,
     renamePage,
@@ -193,6 +194,11 @@ function WikiRoute() {
     }
     await renameFolder(folder.id, trimmed);
     cancelFolderRename();
+  };
+  const confirmFolderDelete = (folder: WikiFolder) => {
+    if (window.confirm(`Delete ${folder.name} and everything inside?`)) {
+      void deleteFolder(folder.id);
+    }
   };
 
   return (
@@ -369,6 +375,7 @@ function WikiRoute() {
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
                       onFolderRenameStart={beginFolderRename}
+                      onFolderDelete={confirmFolderDelete}
                       onFolderRenameCancel={cancelFolderRename}
                       onFolderRenameSubmit={() => void submitFolderRename()}
                       onFolderNameDraftChange={setFolderNameDraft}
@@ -387,6 +394,7 @@ function WikiRoute() {
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
                       onFolderRenameStart={beginFolderRename}
+                      onFolderDelete={confirmFolderDelete}
                       onFolderRenameCancel={cancelFolderRename}
                       onFolderRenameSubmit={() => void submitFolderRename()}
                       onFolderNameDraftChange={setFolderNameDraft}
@@ -714,6 +722,7 @@ function FolderSection({
   onFolderSelect,
   onPageSelect,
   onFolderRenameStart,
+  onFolderDelete,
   onFolderRenameCancel,
   onFolderRenameSubmit,
   onFolderNameDraftChange,
@@ -729,6 +738,7 @@ function FolderSection({
   onFolderSelect: (folderId: string | null) => void;
   onPageSelect: (pageId: string) => void;
   onFolderRenameStart: (folder: WikiFolder) => void;
+  onFolderDelete: (folder: WikiFolder) => void;
   onFolderRenameCancel: () => void;
   onFolderRenameSubmit: () => void;
   onFolderNameDraftChange: (name: string) => void;
@@ -772,15 +782,26 @@ function FolderSection({
             <span className="truncate">{folder?.name ?? 'Pages'}</span>
           </button>
           {folder && isFolderSelected ? (
-            <button
-              type="button"
-              className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
-              title="Rename folder"
-              aria-label="Rename folder"
-              onClick={() => onFolderRenameStart(folder)}
-            >
-              <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
+            <div className="mr-1 flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
+                title="Rename folder"
+                aria-label="Rename folder"
+                onClick={() => onFolderRenameStart(folder)}
+              >
+                <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-ink-subtle transition hover:bg-rose-500/10 hover:text-rose-600"
+                title="Delete folder"
+                aria-label="Delete folder"
+                onClick={() => onFolderDelete(folder)}
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+            </div>
           ) : null}
         </div>
       )}
@@ -817,6 +838,7 @@ function FolderSection({
               onFolderSelect={onFolderSelect}
               onPageSelect={onPageSelect}
               onFolderRenameStart={onFolderRenameStart}
+              onFolderDelete={onFolderDelete}
               onFolderRenameCancel={onFolderRenameCancel}
               onFolderRenameSubmit={onFolderRenameSubmit}
               onFolderNameDraftChange={onFolderNameDraftChange}

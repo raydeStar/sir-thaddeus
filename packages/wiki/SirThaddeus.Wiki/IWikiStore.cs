@@ -34,6 +34,11 @@ public interface IWikiStore
         string? parentFolderId,
         CancellationToken cancellationToken);
 
+    Task<bool> DeleteFolderAsync(
+        string rootId,
+        string folderId,
+        CancellationToken cancellationToken);
+
     Task<WikiPageDocument> CreatePageAsync(
         string rootId,
         string? folderId,

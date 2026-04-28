@@ -280,6 +280,40 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_folder_removes_descendant_pages_folders_files_and_revisions()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var parent = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var child = await store.CreateFolderAsync(root.Id, "Archive", parent.Id, CancellationToken.None);
+        var outside = await store.CreateFolderAsync(root.Id, "Outside", null, CancellationToken.None);
+        var parentPage = await store.CreatePageAsync(root.Id, parent.Id, "Plan", "parent body", CancellationToken.None);
+        var childPage = await store.CreatePageAsync(root.Id, child.Id, "Notes", "child body", CancellationToken.None);
+        var outsidePage = await store.CreatePageAsync(root.Id, outside.Id, "Keep", "outside body", CancellationToken.None);
+        var parentPath = Path.Combine(root.Path, parentPage.Page.RelativePath);
+        var childPath = Path.Combine(root.Path, childPage.Page.RelativePath);
+
+        var deleted = await store.DeleteFolderAsync(root.Id, parent.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.False(File.Exists(parentPath));
+        Assert.False(File.Exists(childPath));
+        Assert.Null(await store.GetPageAsync(parentPage.Page.Id, CancellationToken.None));
+        Assert.Null(await store.GetPageAsync(childPage.Page.Id, CancellationToken.None));
+        Assert.NotNull(await store.GetPageAsync(outsidePage.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.ListRevisionsAsync(parentPage.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.ListRevisionsAsync(childPage.Page.Id, CancellationToken.None));
+
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.DoesNotContain(tree!.Folders, folder => folder.Id == parent.Id || folder.Id == child.Id);
+        Assert.DoesNotContain(tree.Pages, page => page.Id == parentPage.Page.Id || page.Id == childPage.Page.Id);
+        Assert.Contains(tree.Folders, folder => folder.Id == outside.Id);
+        Assert.Contains(tree.Pages, page => page.Id == outsidePage.Page.Id);
+        Assert.False(await store.DeleteFolderAsync(root.Id, parent.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Folder_ids_are_not_valid_across_roots()
     {
         using var store = NewStore();

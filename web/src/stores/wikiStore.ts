@@ -43,6 +43,7 @@ interface WikiStoreState {
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
   moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
+  deleteFolder: (folderId: string) => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
@@ -277,6 +278,42 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectionRewriteDraft: null,
         dirty: false,
         scope: 'folder',
+      });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  deleteFolder: async (folderId: string) => {
+    const rootId = get().selectedRootId;
+    if (!rootId || !folderId) return;
+    const folders = get().tree?.folders ?? [];
+    const currentFolder = folders.find((folder) => folder.id === folderId) ?? null;
+    if (!currentFolder) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before deleting this folder.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      await api.deleteWikiFolder(rootId, folderId);
+      const tree = await api.getWikiTree(rootId);
+      set({
+        tree,
+        page: null,
+        revisions: [],
+        selectedPageId: null,
+        selectedFolderId: currentFolder.parentFolderId,
+        draft: '',
+        pageChatMessages: [],
+        pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: currentFolder.parentFolderId ? 'folder' : 'root',
       });
     } catch (error) {
       set({ error: (error as Error).message });
