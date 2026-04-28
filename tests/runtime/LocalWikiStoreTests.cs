@@ -65,6 +65,25 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Rename_root_updates_registry_name_without_moving_path()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Old Root", null, CancellationToken.None);
+
+        var renamed = await store.RenameRootAsync(root.Id, "New Root", CancellationToken.None);
+
+        Assert.NotNull(renamed);
+        Assert.Equal("New Root", renamed!.Name);
+        Assert.Equal(root.Path, renamed.Path);
+
+        using var reopened = NewStore();
+        var roots = await reopened.ListRootsAsync(CancellationToken.None);
+        var persisted = Assert.Single(roots, candidate => candidate.Id == root.Id);
+        Assert.Equal("New Root", persisted.Name);
+        Assert.Equal(root.Path, persisted.Path);
+    }
+
+    [Fact]
     public async Task Update_page_rejects_stale_expected_version()
     {
         using var store = NewStore();

@@ -39,6 +39,7 @@ interface WikiStoreState {
   selectFolder: (folderId: string | null) => void;
   selectPage: (pageId: string) => Promise<void>;
   createRoot: () => Promise<void>;
+  renameRoot: (rootId: string, name: string) => Promise<void>;
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
   createPage: () => Promise<void>;
@@ -163,6 +164,30 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const created = await api.createWikiRoot({ name: `Wiki ${new Date().toLocaleDateString()}` });
       set((state) => ({ roots: [created, ...state.roots] }));
       await get().selectRoot(created.id);
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  renameRoot: async (rootId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!rootId || !trimmed) return;
+    const currentRoot = get().roots.find((root) => root.id === rootId) ?? null;
+    if (currentRoot && currentRoot.name === trimmed) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before renaming this root.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      const renamed = await api.updateWikiRoot(rootId, { name: trimmed });
+      set((state) => ({
+        roots: state.roots.map((root) => (root.id === renamed.id ? renamed : root)),
+        tree: state.tree?.root.id === renamed.id ? { ...state.tree, root: renamed } : state.tree,
+      }));
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {

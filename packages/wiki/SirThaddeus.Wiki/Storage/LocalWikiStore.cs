@@ -90,6 +90,49 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return root;
     }
 
+    public async Task<WikiRoot?> RenameRootAsync(string rootId, string name, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var current = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        if (current is null) return null;
+
+        var normalizedName = NormalizeName(name, "Untitled Wiki");
+        if (string.Equals(normalizedName, current.Name, StringComparison.Ordinal))
+        {
+            return current;
+        }
+
+        var updated = current with
+        {
+            Name = normalizedName,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var gate = LockForRoot(current.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenRegistryAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                update roots
+                set name = $name,
+                    updated_at = $updatedAt
+                where id = $id
+                """;
+            Add(command, "$id", updated.Id);
+            Add(command, "$name", updated.Name);
+            Add(command, "$updatedAt", Format(updated.UpdatedAt));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        return updated;
+    }
+
     public async Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken)
     {
         var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);

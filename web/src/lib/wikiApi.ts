@@ -110,6 +110,10 @@ export interface CreateWikiRootInput {
   path?: string;
 }
 
+export interface UpdateWikiRootInput {
+  name: string;
+}
+
 export interface CreateWikiFolderInput {
   name?: string;
   parentFolderId?: string | null;
@@ -158,6 +162,15 @@ export async function listWikiRoots(): Promise<WikiRoot[]> {
 export async function createWikiRoot(input: CreateWikiRootInput): Promise<WikiRoot> {
   const res = await runtimeFetch(token(), '/api/wiki/roots', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<WikiRoot>(res);
+}
+
+export async function updateWikiRoot(rootId: string, input: UpdateWikiRootInput): Promise<WikiRoot> {
+  const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });

@@ -43,6 +43,8 @@ function WikiRoute() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pagePrompt, setPagePrompt] = useState('');
   const [pageTitleDraft, setPageTitleDraft] = useState('');
+  const [renamingRoot, setRenamingRoot] = useState(false);
+  const [rootNameDraft, setRootNameDraft] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState('');
   const pageTitleRef = useRef<HTMLInputElement>(null);
@@ -73,6 +75,7 @@ function WikiRoute() {
     selectFolder,
     selectPage,
     createRoot,
+    renameRoot,
     createFolder,
     renameFolder,
     createPage,
@@ -111,6 +114,10 @@ function WikiRoute() {
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
+  useEffect(() => {
+    if (!renamingRoot) setRootNameDraft(selectedRoot?.name ?? '');
+  }, [renamingRoot, selectedRoot?.id, selectedRoot?.name]);
+
   const submitPageAsk = async () => {
     const prompt = pagePrompt.trim();
     if (!prompt) return;
@@ -136,6 +143,24 @@ function WikiRoute() {
       return;
     }
     await renamePage(trimmed);
+  };
+  const beginRootRename = () => {
+    if (!selectedRoot) return;
+    setRootNameDraft(selectedRoot.name);
+    setRenamingRoot(true);
+  };
+  const cancelRootRename = () => {
+    setRenamingRoot(false);
+    setRootNameDraft(selectedRoot?.name ?? '');
+  };
+  const submitRootRename = async () => {
+    const trimmed = rootNameDraft.trim();
+    if (!selectedRoot || !trimmed || trimmed === selectedRoot.name) {
+      cancelRootRename();
+      return;
+    }
+    await renameRoot(selectedRoot.id, trimmed);
+    setRenamingRoot(false);
   };
   const beginFolderRename = (folder: WikiFolder) => {
     setRenamingFolderId(folder.id);
@@ -243,24 +268,57 @@ function WikiRoute() {
           />
           {!leftCollapsed ? (
             <div className="space-y-4 px-4 pb-4">
-              <label className="block text-xs font-medium text-ink-muted" htmlFor="wiki-root-select">
-                Root
-              </label>
-              <div className="relative">
-                <select
-                  id="wiki-root-select"
-                  value={selectedRootId ?? ''}
-                  onChange={(event) => void selectRoot(event.target.value)}
-                  disabled={busy || roots.length === 0}
-                  className="w-full appearance-none rounded-xl border border-line bg-canvas-raised px-3 py-2 pr-8 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
+              <div className="flex items-center justify-between gap-2">
+                <label className="block text-xs font-medium text-ink-muted" htmlFor="wiki-root-select">
+                  Root
+                </label>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink disabled:opacity-40"
+                  title="Rename root"
+                  aria-label="Rename root"
+                  disabled={!selectedRoot || busy || dirty || renamingRoot}
+                  onClick={beginRootRename}
                 >
-                  {roots.length === 0 ? <option value="">No roots</option> : null}
-                  {roots.map((root) => (
-                    <option key={root.id} value={root.id}>{root.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
+                  <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
               </div>
+              {renamingRoot ? (
+                <input
+                  autoFocus
+                  value={rootNameDraft}
+                  onChange={(event) => setRootNameDraft(event.target.value)}
+                  onBlur={() => void submitRootRename()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      cancelRootRename();
+                    }
+                  }}
+                  aria-label="Root name"
+                  className="w-full rounded-xl border border-line bg-canvas-raised px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15"
+                />
+              ) : (
+                <div className="relative">
+                  <select
+                    id="wiki-root-select"
+                    value={selectedRootId ?? ''}
+                    onChange={(event) => void selectRoot(event.target.value)}
+                    disabled={busy || roots.length === 0}
+                    className="w-full appearance-none rounded-xl border border-line bg-canvas-raised px-3 py-2 pr-8 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
+                  >
+                    {roots.length === 0 ? <option value="">No roots</option> : null}
+                    {roots.map((root) => (
+                      <option key={root.id} value={root.id}>{root.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
+                </div>
+              )}
               <p className="truncate text-[11px] text-ink-subtle">{selectedRoot?.path ?? 'Local wiki library'}</p>
 
               <div className="relative">

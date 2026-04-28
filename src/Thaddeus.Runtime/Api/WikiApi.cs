@@ -37,6 +37,25 @@ public static class WikiApi
             }
         });
 
+        app.MapPatch("/api/wiki/roots/{rootId}", async (string rootId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var req = await ReadAsync(ctx, WikiJsonContext.Default.UpdateWikiRootRequest, ct).ConfigureAwait(false);
+            if (req is null) return Results.BadRequest(new WikiErrorResponse("empty_body", "Request body is required."));
+            if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new WikiErrorResponse("name_required", "Root name is required."));
+
+            var root = await store.RenameRootAsync(rootId, req.Name, ct).ConfigureAwait(false);
+            if (root is null) return Results.NotFound();
+
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_ROOT_RENAMED",
+                Target = root.Id,
+                Details = new() { ["name"] = root.Name, ["path"] = root.Path },
+            });
+            return Results.Json(root, WikiJsonContext.Default.WikiRoot);
+        });
+
         app.MapGet("/api/wiki/roots/{rootId}/tree", async (string rootId, IWikiStore store, CancellationToken ct) =>
         {
             var tree = await store.GetTreeAsync(rootId, ct).ConfigureAwait(false);
@@ -301,6 +320,7 @@ public static class WikiApi
 }
 
 public sealed record CreateWikiRootRequest(string? Name, string? Path);
+public sealed record UpdateWikiRootRequest(string? Name);
 public sealed record CreateWikiFolderRequest(string? Name, string? ParentFolderId);
 public sealed record UpdateWikiFolderRequest(string? Name);
 public sealed record CreateWikiPageRequest(string? Title, string? FolderId, string? Markdown);
@@ -335,6 +355,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiErrorResponse))]
 [JsonSerializable(typeof(WikiConflictResponse))]
 [JsonSerializable(typeof(CreateWikiRootRequest))]
+[JsonSerializable(typeof(UpdateWikiRootRequest))]
 [JsonSerializable(typeof(CreateWikiFolderRequest))]
 [JsonSerializable(typeof(UpdateWikiFolderRequest))]
 [JsonSerializable(typeof(CreateWikiPageRequest))]
