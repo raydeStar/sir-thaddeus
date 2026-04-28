@@ -3,6 +3,7 @@ import * as api from '../lib/wikiApi';
 import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
+export type WikiSearchScope = 'root' | 'all';
 
 export interface WikiPageChatMessage {
   id: string;
@@ -20,6 +21,7 @@ interface WikiStoreState {
   selectedFolderId: string | null;
   selectedPageId: string | null;
   scope: WikiScope;
+  searchScope: WikiSearchScope;
   search: string;
   searchResults: WikiSearchResult[];
   draft: string;
@@ -63,6 +65,7 @@ interface WikiStoreState {
   setDraft: (markdown: string) => void;
   setSelectedText: (text: string) => void;
   setSearch: (search: string) => void;
+  setSearchScope: (scope: WikiSearchScope) => void;
   setScope: (scope: WikiScope) => void;
 }
 
@@ -75,6 +78,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   selectedFolderId: null,
   selectedPageId: null,
   scope: 'root',
+  searchScope: 'root',
   search: '',
   searchResults: [],
   draft: '',
@@ -101,7 +105,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       } else if (roots.length > 0) {
         await get().selectRoot(roots[0].id);
       } else {
-        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
+        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
@@ -139,7 +143,9 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     try {
       const page = await api.getWikiPage(pageId);
       const revisions = await api.listWikiRevisions(pageId);
+      const tree = get().tree?.root.id === page.page.rootId ? get().tree : await api.getWikiTree(page.page.rootId);
       set({
+        tree,
         page,
         revisions,
         selectedPageId: page.page.id,
@@ -221,7 +227,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         return;
       }
 
-      set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
+      set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -697,8 +703,9 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   setSearch: (search: string) => {
     set({ search });
     const query = search.trim();
-    const rootId = get().selectedRootId;
-    if (!query || !rootId) {
+    const searchScope = get().searchScope;
+    const rootId = searchScope === 'all' ? null : get().selectedRootId;
+    if (!query || (searchScope === 'root' && !rootId)) {
       set({ searchResults: [], searching: false });
       return;
     }
@@ -706,15 +713,25 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     set({ searching: true, error: null });
     void api.searchWiki(rootId, query)
       .then((results) => {
-        if (get().search.trim() === query && get().selectedRootId === rootId) {
+        const current = get();
+        const rootStillMatches = searchScope === 'all' || current.selectedRootId === rootId;
+        if (current.search.trim() === query && current.searchScope === searchScope && rootStillMatches) {
           set({ searchResults: results, searching: false });
         }
       })
       .catch((error) => {
-        if (get().search.trim() === query && get().selectedRootId === rootId) {
+        const current = get();
+        const rootStillMatches = searchScope === 'all' || current.selectedRootId === rootId;
+        if (current.search.trim() === query && current.searchScope === searchScope && rootStillMatches) {
           set({ error: (error as Error).message, searchResults: [], searching: false });
         }
       });
+  },
+  setSearchScope: (searchScope: WikiSearchScope) => {
+    if (get().searchScope === searchScope) return;
+    set({ searchScope, searchResults: [], searching: false });
+    const query = get().search;
+    if (query.trim()) get().setSearch(query);
   },
   setScope: (scope: WikiScope) => set({ scope }),
 }));

@@ -26,7 +26,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useWikiStore, type WikiPageChatMessage, type WikiScope } from '../stores/wikiStore';
+import { useWikiStore, type WikiPageChatMessage, type WikiScope, type WikiSearchScope } from '../stores/wikiStore';
 import type { WikiFolder, WikiPage, WikiRevision, WikiSearchResult } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
@@ -58,6 +58,7 @@ function WikiRoute() {
     selectedFolderId,
     selectedPageId,
     scope,
+    searchScope,
     search,
     searchResults,
     draft,
@@ -100,6 +101,7 @@ function WikiRoute() {
     setDraft,
     setSelectedText,
     setSearch,
+    setSearchScope,
     setScope,
   } = useWikiStore();
 
@@ -370,10 +372,25 @@ function WikiRoute() {
                   className="w-full rounded-xl border border-line bg-canvas-raised py-2 pl-9 pr-3 text-sm text-ink outline-none transition placeholder:text-ink-subtle focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
                 />
               </div>
+              <div className="grid grid-cols-2 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Search scope">
+                {(['root', 'all'] as WikiSearchScope[]).map((candidate) => (
+                  <button
+                    key={candidate}
+                    type="button"
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition ${searchScope === candidate ? 'bg-accent-soft text-ink shadow-soft' : 'text-ink-muted hover:text-ink'}`}
+                    disabled={!tree || (candidate === 'all' && roots.length < 2)}
+                    onClick={() => setSearchScope(candidate)}
+                  >
+                    {candidate === 'root' ? 'Root' : 'All'}
+                  </button>
+                ))}
+              </div>
 
               {tree && hasSearch ? (
                 <SearchResultsList
                   results={searchResults}
+                  roots={roots}
+                  searchScope={searchScope}
                   searching={searching}
                   selectedPageId={selectedPageId}
                   onPageSelect={(pageId) => void selectPage(pageId)}
@@ -673,11 +690,15 @@ function WikiRoute() {
 
 function SearchResultsList({
   results,
+  roots,
+  searchScope,
   searching,
   selectedPageId,
   onPageSelect,
 }: {
   results: WikiSearchResult[];
+  roots: Array<{ id: string; name: string }>;
+  searchScope: WikiSearchScope;
   searching: boolean;
   selectedPageId: string | null;
   onPageSelect: (pageId: string) => void;
@@ -699,6 +720,8 @@ function SearchResultsList({
     );
   }
 
+  const rootNames = new Map(roots.map((root) => [root.id, root.name]));
+
   return (
     <nav className="space-y-2" aria-label="Wiki search results">
       {results.map((result) => (
@@ -711,7 +734,9 @@ function SearchResultsList({
           <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium">{result.title}</span>
-            <span className="mt-0.5 block truncate text-[11px] text-ink-subtle">{result.relativePath}</span>
+            <span className="mt-0.5 block truncate text-[11px] text-ink-subtle">
+              {searchScope === 'all' ? `${rootNames.get(result.rootId) ?? 'Wiki'} / ` : ''}{result.relativePath}
+            </span>
             {result.excerpt ? <span className="mt-1 line-clamp-2 block text-xs leading-5">{result.excerpt}</span> : null}
           </span>
         </button>
