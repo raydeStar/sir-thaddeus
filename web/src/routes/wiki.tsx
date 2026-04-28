@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Circle,
   Clock3,
+  Eye,
   FileText,
   Folder,
   Library,
@@ -48,6 +49,7 @@ function WikiRoute() {
   const [rootNameDraft, setRootNameDraft] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState('');
+  const [previewRevisionId, setPreviewRevisionId] = useState<string | null>(null);
   const pageTitleRef = useRef<HTMLInputElement>(null);
   const {
     roots,
@@ -113,6 +115,10 @@ function WikiRoute() {
     setPageTitleDraft(page?.page.title ?? '');
   }, [page?.page.id, page?.page.title]);
 
+  useEffect(() => {
+    setPreviewRevisionId(null);
+  }, [page?.page.id]);
+
   const selectedRoot = roots.find((root) => root.id === selectedRootId) ?? tree?.root ?? null;
   const selectedPage = page?.page ?? tree?.pages.find((candidate) => candidate.id === selectedPageId) ?? null;
   const folders = tree?.folders ?? [];
@@ -131,6 +137,7 @@ function WikiRoute() {
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
+  const previewRevision = revisions.find((revision) => revision.id === previewRevisionId) ?? null;
   useEffect(() => {
     if (!renamingRoot) setRootNameDraft(selectedRoot?.name ?? '');
   }, [renamingRoot, selectedRoot?.id, selectedRoot?.name]);
@@ -671,7 +678,9 @@ function WikiRoute() {
                         key={revision.id}
                         revision={revision}
                         active={index === 0}
+                        previewing={previewRevisionId === revision.id}
                         disabled={busy || dirty || index === 0}
+                        onPreview={() => setPreviewRevisionId((current) => (current === revision.id ? null : revision.id))}
                         onRestore={() => void restoreRevision(revision.id)}
                       />
                     ))}
@@ -679,6 +688,13 @@ function WikiRoute() {
                 ) : (
                   <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
                 )}
+                {previewRevision ? (
+                  <RevisionPreview
+                    revision={previewRevision}
+                    currentMarkdown={draft}
+                    onClose={() => setPreviewRevisionId(null)}
+                  />
+                ) : null}
               </section>
             </div>
           ) : null}
@@ -930,12 +946,16 @@ function ScopeChip({ scope, root, folder, page }: { scope: WikiScope; root?: str
 function RevisionItem({
   revision,
   active = false,
+  previewing = false,
   disabled,
+  onPreview,
   onRestore,
 }: {
   revision: WikiRevision;
   active?: boolean;
+  previewing?: boolean;
   disabled: boolean;
+  onPreview: () => void;
   onRestore: () => void;
 }) {
   return (
@@ -950,16 +970,58 @@ function RevisionItem({
             {revision.source} · {formatStamp(revision.createdAt)}
           </p>
         </div>
-        <button
-          type="button"
-          className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled}
-          onClick={onRestore}
-        >
-          Restore
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${previewing ? 'border-accent/40 bg-canvas text-ink' : 'border-line text-ink-muted hover:bg-accent-soft hover:text-ink'}`}
+            onClick={onPreview}
+          >
+            <Eye className="h-3 w-3" strokeWidth={1.8} />
+            Preview
+          </button>
+          <button
+            type="button"
+            className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={disabled}
+            onClick={onRestore}
+          >
+            Restore
+          </button>
+        </div>
       </div>
     </li>
+  );
+}
+
+function RevisionPreview({
+  revision,
+  currentMarkdown,
+  onClose,
+}: {
+  revision: WikiRevision;
+  currentMarkdown: string;
+  onClose: () => void;
+}) {
+  const revisionWords = countWords(revision.markdown);
+  const wordDelta = revisionWords - countWords(currentMarkdown);
+  return (
+    <div className="rounded-xl border border-accent/30 bg-canvas-raised p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-ink">Version {revision.version}</h3>
+          <p className="mt-0.5 text-[11px] text-ink-subtle">
+            {revision.source} · {formatStamp(revision.createdAt)} · {revisionWords} words · {wordDelta >= 0 ? '+' : ''}{wordDelta}
+          </p>
+        </div>
+        <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Close revision preview" onClick={onClose}>
+          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      </div>
+      {revision.summary ? <p className="mt-2 text-xs text-ink-muted">{revision.summary}</p> : null}
+      <pre className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-canvas p-3 text-[11px] leading-5 text-ink-muted">
+        {revision.markdown || '(Empty revision)'}
+      </pre>
+    </div>
   );
 }
 
