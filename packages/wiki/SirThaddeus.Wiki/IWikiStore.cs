@@ -14,6 +14,10 @@ public interface IWikiStore
         string name,
         CancellationToken cancellationToken);
 
+    Task<WikiRoot?> RemoveRootAsync(
+        string rootId,
+        CancellationToken cancellationToken);
+
     Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken);
 
     Task<WikiFolder> CreateFolderAsync(

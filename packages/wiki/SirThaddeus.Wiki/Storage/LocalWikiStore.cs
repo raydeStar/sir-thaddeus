@@ -133,6 +133,32 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return updated;
     }
 
+    public async Task<WikiRoot?> RemoveRootAsync(string rootId, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var current = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        if (current is null) return null;
+
+        var gate = LockForRoot(current.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenRegistryAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "delete from roots where id = $id";
+            Add(command, "$id", current.Id);
+            var removed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (removed == 0) return null;
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        _logger.LogInformation("wiki.root.remove id={RootId} path={RootPath}", current.Id, current.Path);
+        return current;
+    }
+
     public async Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken)
     {
         var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);

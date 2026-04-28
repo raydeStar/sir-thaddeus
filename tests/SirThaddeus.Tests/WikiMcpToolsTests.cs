@@ -45,6 +45,40 @@ public sealed class WikiMcpToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task RootRemove_UnregistersRoot_AndPreservesFiles()
+    {
+        var createJson = await WikiMcpTools.WikiRootCreate("Research");
+        using var createDoc = JsonDocument.Parse(createJson);
+        var root = createDoc.RootElement.GetProperty("root");
+        var rootId = root.GetProperty("id").GetString()!;
+        var rootPath = root.GetProperty("path").GetString()!;
+
+        var pageJson = await WikiMcpTools.WikiPageCreate(rootId, "Notes", "# Notes\n\nKeep on disk.");
+        using var pageDoc = JsonDocument.Parse(pageJson);
+        var page = pageDoc.RootElement.GetProperty("document").GetProperty("page");
+        var pageId = page.GetProperty("id").GetString()!;
+        var pagePath = Path.Combine(rootPath, page.GetProperty("relative_path").GetString()!);
+
+        Assert.True(File.Exists(pagePath));
+
+        var removeJson = await WikiMcpTools.WikiRootRemove(rootId);
+        using var removeDoc = JsonDocument.Parse(removeJson);
+        Assert.True(removeDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(removeDoc.RootElement.GetProperty("removed").GetBoolean());
+        Assert.False(removeDoc.RootElement.GetProperty("files_deleted").GetBoolean());
+
+        var listJson = await WikiMcpTools.WikiRootsList();
+        using var listDoc = JsonDocument.Parse(listJson);
+        Assert.Empty(listDoc.RootElement.GetProperty("roots").EnumerateArray());
+
+        var readJson = await WikiMcpTools.WikiPageRead(pageId);
+        using var readDoc = JsonDocument.Parse(readJson);
+        Assert.False(readDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(Directory.Exists(rootPath));
+        Assert.True(File.Exists(pagePath));
+    }
+
+    [Fact]
     public async Task PageCreate_Search_AndRead_ReturnMarkdown()
     {
         var rootId = await CreateRootAsync();

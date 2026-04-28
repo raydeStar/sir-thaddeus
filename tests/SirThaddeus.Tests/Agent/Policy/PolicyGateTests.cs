@@ -40,6 +40,7 @@ public class PolicyGateTests
         MakeTool("file_list_apply"),
         MakeTool("document_read"),
         MakeTool("wiki_roots_list"),
+        MakeTool("wiki_root_remove"),
         MakeTool("wiki_search"),
         MakeTool("wiki_page_read"),
         MakeTool("wiki_page_update"),

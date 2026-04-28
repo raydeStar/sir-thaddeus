@@ -83,6 +83,26 @@ public static class WikiMcpTools
     }
 
     [McpServerTool(
+        Name = "wiki_root_remove",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = true,
+        OpenWorld = false),
+     Description("Remove a local Wiki Canvas root from the Sir Thaddeus registry without deleting files from disk.")]
+    public static Task<string> WikiRootRemove(
+        [Description("Wiki root id from wiki_roots_list.")] string rootId,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var root = await store.RemoveRootAsync(rootId, ct).ConfigureAwait(false);
+            return root is null
+                ? Fail($"Wiki root '{rootId}' not found.")
+                : new { Ok = true, Removed = true, FilesDeleted = false, Root = root };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "wiki_tree_get",
         ReadOnly = true,
         Idempotent = true,

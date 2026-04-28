@@ -56,6 +56,21 @@ public static class WikiApi
             return Results.Json(root, WikiJsonContext.Default.WikiRoot);
         });
 
+        app.MapDelete("/api/wiki/roots/{rootId}", async (string rootId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var root = await store.RemoveRootAsync(rootId, ct).ConfigureAwait(false);
+            if (root is null) return Results.NotFound();
+
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_ROOT_REMOVED",
+                Target = root.Id,
+                Details = new() { ["name"] = root.Name, ["path"] = root.Path, ["filesDeleted"] = false },
+            });
+            return Results.NoContent();
+        });
+
         app.MapGet("/api/wiki/roots/{rootId}/tree", async (string rootId, IWikiStore store, CancellationToken ct) =>
         {
             var tree = await store.GetTreeAsync(rootId, ct).ConfigureAwait(false);

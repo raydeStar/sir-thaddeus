@@ -40,6 +40,7 @@ interface WikiStoreState {
   selectPage: (pageId: string) => Promise<void>;
   createRoot: () => Promise<void>;
   renameRoot: (rootId: string, name: string) => Promise<void>;
+  deleteRoot: (rootId: string) => Promise<void>;
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
   moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
@@ -192,6 +193,35 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         roots: state.roots.map((root) => (root.id === renamed.id ? renamed : root)),
         tree: state.tree?.root.id === renamed.id ? { ...state.tree, root: renamed } : state.tree,
       }));
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  deleteRoot: async (rootId: string) => {
+    if (!rootId) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before removing this root.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      const wasSelected = get().selectedRootId === rootId;
+      await api.deleteWikiRoot(rootId);
+      const roots = await api.listWikiRoots();
+      set({ roots });
+
+      if (!wasSelected) return;
+
+      if (roots.length > 0) {
+        await get().selectRoot(roots[0].id);
+        return;
+      }
+
+      set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {

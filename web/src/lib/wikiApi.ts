@@ -186,6 +186,15 @@ export async function updateWikiRoot(rootId: string, input: UpdateWikiRootInput)
   return asJson<WikiRoot>(res);
 }
 
+export async function deleteWikiRoot(rootId: string): Promise<void> {
+  const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
 export async function getWikiTree(rootId: string): Promise<WikiTree> {
   const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/tree`);
   return asJson<WikiTree>(res);

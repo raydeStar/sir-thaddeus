@@ -77,6 +77,7 @@ function WikiRoute() {
     selectPage,
     createRoot,
     renameRoot,
+    deleteRoot,
     createFolder,
     renameFolder,
     moveFolder,
@@ -175,6 +176,12 @@ function WikiRoute() {
     }
     await renameRoot(selectedRoot.id, trimmed);
     setRenamingRoot(false);
+  };
+  const confirmRootDelete = () => {
+    if (!selectedRoot) return;
+    if (window.confirm(`Remove ${selectedRoot.name} from Sir Thaddeus? Files stay on disk at ${selectedRoot.path}.`)) {
+      void deleteRoot(selectedRoot.id);
+    }
   };
   const beginFolderRename = (folder: WikiFolder) => {
     setRenamingFolderId(folder.id);
@@ -291,16 +298,28 @@ function WikiRoute() {
                 <label className="block text-xs font-medium text-ink-muted" htmlFor="wiki-root-select">
                   Root
                 </label>
-                <button
-                  type="button"
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink disabled:opacity-40"
-                  title="Rename root"
-                  aria-label="Rename root"
-                  disabled={!selectedRoot || busy || dirty || renamingRoot}
-                  onClick={beginRootRename}
-                >
-                  <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink disabled:opacity-40"
+                    title="Rename root"
+                    aria-label="Rename root"
+                    disabled={!selectedRoot || busy || dirty || renamingRoot}
+                    onClick={beginRootRename}
+                  >
+                    <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-ink-subtle transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-40"
+                    title="Remove root"
+                    aria-label="Remove root"
+                    disabled={!selectedRoot || busy || dirty || renamingRoot}
+                    onClick={confirmRootDelete}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                </div>
               </div>
               {renamingRoot ? (
                 <input

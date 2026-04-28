@@ -65,6 +65,7 @@ public static class ToolGroupPolicy
         ["wiki_search"] = "files",
         ["wiki_root_create"] = "files",
         ["wiki_root_rename"] = "files",
+        ["wiki_root_remove"] = "files",
         ["wiki_folder_create"] = "files",
         ["wiki_folder_rename"] = "files",
         ["wiki_folder_move"] = "files",

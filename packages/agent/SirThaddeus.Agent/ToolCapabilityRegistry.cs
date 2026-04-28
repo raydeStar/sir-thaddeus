@@ -90,6 +90,8 @@ public static class ToolCapabilityRegistry
             ["WikiRootCreate"] = ToolCapability.WikiWrite,
             ["wiki_root_rename"] = ToolCapability.WikiWrite,
             ["WikiRootRename"] = ToolCapability.WikiWrite,
+            ["wiki_root_remove"] = ToolCapability.WikiWrite,
+            ["WikiRootRemove"] = ToolCapability.WikiWrite,
             ["wiki_folder_create"] = ToolCapability.WikiWrite,
             ["WikiFolderCreate"] = ToolCapability.WikiWrite,
             ["wiki_folder_rename"] = ToolCapability.WikiWrite,

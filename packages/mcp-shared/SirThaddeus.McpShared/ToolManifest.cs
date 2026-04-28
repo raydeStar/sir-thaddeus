@@ -499,6 +499,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "wiki_root_remove",
+            Aliases     = ["WikiRootRemove"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Removes a local Wiki Canvas root from the registry without deleting files from disk.",
+            Limits      = "Root id must exist in the local wiki registry. Files are preserved on disk."
+        },
+        new()
+        {
             Name        = "wiki_tree_get",
             Aliases     = ["WikiTreeGet"],
             Category    = "file",

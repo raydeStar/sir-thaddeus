@@ -84,6 +84,32 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Remove_root_unregisters_root_without_deleting_files()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, null, "Notes", "# Notes\n\nKeep on disk.", CancellationToken.None);
+        var pagePath = Path.Combine(root.Path, page.Page.RelativePath);
+
+        Assert.True(Directory.Exists(root.Path));
+        Assert.True(File.Exists(pagePath));
+
+        var removed = await store.RemoveRootAsync(root.Id, CancellationToken.None);
+
+        Assert.NotNull(removed);
+        Assert.Equal(root.Id, removed!.Id);
+        Assert.DoesNotContain(await store.ListRootsAsync(CancellationToken.None), candidate => candidate.Id == root.Id);
+        Assert.Null(await store.GetTreeAsync(root.Id, CancellationToken.None));
+        Assert.Null(await store.GetPageAsync(page.Page.Id, CancellationToken.None));
+        Assert.True(Directory.Exists(root.Path));
+        Assert.True(File.Exists(pagePath));
+
+        using var reopened = NewStore();
+        Assert.DoesNotContain(await reopened.ListRootsAsync(CancellationToken.None), candidate => candidate.Id == root.Id);
+        Assert.True(File.Exists(pagePath));
+    }
+
+    [Fact]
     public async Task Update_page_rejects_stale_expected_version()
     {
         using var store = NewStore();
