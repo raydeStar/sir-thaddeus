@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiTree } from '../lib/wikiApi';
+import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSelectionRewriteDraft, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 
@@ -24,6 +24,8 @@ interface WikiStoreState {
   draft: string;
   pageChatMessages: WikiPageChatMessage[];
   pageChatDraft: WikiPageDraft | null;
+  selectedText: string;
+  selectionRewriteDraft: WikiSelectionRewriteDraft | null;
   dirty: boolean;
   loading: boolean;
   saving: boolean;
@@ -43,7 +45,11 @@ interface WikiStoreState {
   draftPage: (instruction: string) => Promise<void>;
   applyPageDraft: () => Promise<void>;
   clearPageDraft: () => void;
+  rewriteSelection: (instruction: string) => Promise<void>;
+  applySelectionRewrite: () => Promise<void>;
+  clearSelectionRewrite: () => void;
   setDraft: (markdown: string) => void;
+  setSelectedText: (text: string) => void;
   setSearch: (search: string) => void;
   setScope: (scope: WikiScope) => void;
 }
@@ -61,6 +67,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   draft: '',
   pageChatMessages: [],
   pageChatDraft: null,
+  selectedText: '',
+  selectionRewriteDraft: null,
   dirty: false,
   loading: false,
   saving: false,
@@ -79,7 +87,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       } else if (roots.length > 0) {
         await get().selectRoot(roots[0].id);
       } else {
-        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', draft: '', pageChatMessages: [], pageChatDraft: null, dirty: false });
+        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
@@ -87,7 +95,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   selectRoot: async (rootId: string) => {
-    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', pageChatMessages: [], pageChatDraft: null, dirty: false, scope: 'root' });
+    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
       set({ tree, loading: false });
@@ -118,6 +126,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         draft: page.markdown,
         pageChatMessages: [],
         pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
         dirty: false,
         scope: 'page',
         loading: false,
@@ -177,6 +187,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         draft: created.markdown,
         pageChatMessages: [],
         pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
         dirty: false,
         scope: 'page',
       });
@@ -200,7 +212,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       });
       const tree = await api.getWikiTree(saved.page.rootId);
       const revisions = await api.listWikiRevisions(saved.page.id);
-      set({ page: saved, tree, revisions, draft: saved.markdown, dirty: false });
+      set({ page: saved, tree, revisions, draft: saved.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -228,6 +240,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectedFolderId: restored.page.folderId,
         draft: restored.markdown,
         pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
         dirty: false,
         scope: 'page',
       });
@@ -304,7 +318,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       });
       const tree = await api.getWikiTree(saved.page.rootId);
       const revisions = await api.listWikiRevisions(saved.page.id);
-      set({ page: saved, tree, revisions, draft: saved.markdown, dirty: false, pageChatDraft: null });
+      set({ page: saved, tree, revisions, draft: saved.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false, pageChatDraft: null });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -314,7 +328,60 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
 
   clearPageDraft: () => set({ pageChatDraft: null }),
 
-  setDraft: (markdown: string) => set({ draft: markdown, dirty: true }),
+  rewriteSelection: async (instruction: string) => {
+    const current = get().page;
+    const trimmed = instruction.trim();
+    const selectedText = get().selectedText.trim();
+    if (!current || !trimmed || !selectedText) return;
+    set({ pageAssistantBusy: true, error: null, selectionRewriteDraft: null });
+    try {
+      const draft = await api.rewriteWikiSelection(current.page.id, {
+        selectedText,
+        instruction: trimmed,
+        expectedVersion: current.page.version,
+        scope: get().scope,
+      });
+      set((state) => ({
+        selectionRewriteDraft: draft,
+        pageChatMessages: [
+          ...state.pageChatMessages,
+          { id: newLocalMessageId('user'), role: 'user', text: `Rewrite selection: ${trimmed}`, createdAt: new Date().toISOString() },
+          { id: draft.messageId, role: 'assistant', text: draft.assistantText, createdAt: draft.createdAt },
+        ],
+      }));
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ pageAssistantBusy: false });
+    }
+  },
+
+  applySelectionRewrite: async () => {
+    const current = get().page;
+    const pendingDraft = get().selectionRewriteDraft;
+    if (!current || !pendingDraft) return;
+    set({ saving: true, error: null });
+    try {
+      const saved = await api.updateWikiPage(current.page.id, {
+        markdown: pendingDraft.markdown,
+        expectedVersion: current.page.version,
+        source: 'ai',
+        summary: pendingDraft.summary,
+      });
+      const tree = await api.getWikiTree(saved.page.rootId);
+      const revisions = await api.listWikiRevisions(saved.page.id);
+      set({ page: saved, tree, revisions, draft: saved.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  clearSelectionRewrite: () => set({ selectionRewriteDraft: null }),
+
+  setDraft: (markdown: string) => set({ draft: markdown, dirty: true, selectionRewriteDraft: null }),
+  setSelectedText: (text: string) => set({ selectedText: text }),
   setSearch: (search: string) => set({ search }),
   setScope: (scope: WikiScope) => set({ scope }),
 }));

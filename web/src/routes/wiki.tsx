@@ -54,6 +54,8 @@ function WikiRoute() {
     draft,
     pageChatMessages,
     pageChatDraft,
+    selectedText,
+    selectionRewriteDraft,
     dirty,
     loading,
     saving,
@@ -72,7 +74,11 @@ function WikiRoute() {
     draftPage,
     applyPageDraft,
     clearPageDraft,
+    rewriteSelection,
+    applySelectionRewrite,
+    clearSelectionRewrite,
     setDraft,
+    setSelectedText,
     setSearch,
     setScope,
   } = useWikiStore();
@@ -108,6 +114,12 @@ function WikiRoute() {
     if (!prompt) return;
     setPagePrompt('');
     await draftPage(prompt);
+  };
+  const submitSelectionRewrite = async () => {
+    const prompt = pagePrompt.trim();
+    if (!prompt || !selectedText.trim()) return;
+    setPagePrompt('');
+    await rewriteSelection(prompt);
   };
 
   return (
@@ -267,7 +279,7 @@ function WikiRoute() {
             {selectedRoot ? (
               page ? (
                 <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-ink-muted">Loading editor</div>}>
-                  <WikiMarkdownEditor markdown={draft} disabled={busy} onChange={setDraft} />
+                  <WikiMarkdownEditor markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
                 </Suspense>
               ) : (
                 <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-ink-muted">
@@ -351,6 +363,28 @@ function WikiRoute() {
                       </button>
                     </div>
                   ) : null}
+                  {selectionRewriteDraft ? (
+                    <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Selection Rewrite</span>
+                        <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear selection rewrite" disabled={busy} onClick={clearSelectionRewrite}>
+                          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        </button>
+                      </div>
+                      <div className="mt-2 grid gap-2">
+                        <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-subtle">{selectionRewriteDraft.selectedText}</pre>
+                        <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas p-2 text-[11px] leading-5 text-ink-muted">{selectionRewriteDraft.replacementText}</pre>
+                      </div>
+                      <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applySelectionRewrite()}>
+                        Apply replacement
+                      </button>
+                    </div>
+                  ) : null}
+                  {selectedText ? (
+                    <div className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink-muted">
+                      Selected {countWords(selectedText)} words
+                    </div>
+                  ) : null}
                   <textarea
                     value={pagePrompt}
                     onChange={(event) => setPagePrompt(event.target.value)}
@@ -367,6 +401,10 @@ function WikiRoute() {
                     <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
                       <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                       Draft
+                    </button>
+                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
+                      <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Rewrite selection
                     </button>
                   </div>
                 </div>

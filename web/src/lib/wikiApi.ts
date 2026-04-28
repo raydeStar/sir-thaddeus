@@ -83,6 +83,16 @@ export interface WikiPageDraft {
   messageId: string;
 }
 
+export interface WikiSelectionRewriteDraft {
+  selectedText: string;
+  replacementText: string;
+  markdown: string;
+  assistantText: string;
+  summary: string;
+  createdAt: string;
+  messageId: string;
+}
+
 interface WikiRootsResponse {
   roots: WikiRoot[];
 }
@@ -125,6 +135,13 @@ export interface WikiPageChatInput {
 
 export interface WikiPageDraftInput {
   instruction: string;
+  scope?: string;
+}
+
+export interface WikiSelectionRewriteInput {
+  selectedText: string;
+  instruction: string;
+  expectedVersion?: number;
   scope?: string;
 }
 
@@ -217,6 +234,18 @@ export async function draftWikiPage(pageId: string, input: WikiPageDraftInput): 
     body: JSON.stringify(input),
   });
   return asJson<WikiPageDraft>(res);
+}
+
+export async function rewriteWikiSelection(
+  pageId: string,
+  input: WikiSelectionRewriteInput,
+): Promise<WikiSelectionRewriteDraft> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/selection/rewrite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<WikiSelectionRewriteDraft>(res);
 }
 
 export async function searchWiki(rootId: string | null, query: string): Promise<WikiSearchResult[]> {

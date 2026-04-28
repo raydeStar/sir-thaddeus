@@ -20,9 +20,10 @@ interface WikiMarkdownEditorProps {
   markdown: string;
   disabled: boolean;
   onChange: (markdown: string) => void;
+  onSelectionChange?: (selectedText: string) => void;
 }
 
-export function WikiMarkdownEditor({ markdown, disabled, onChange }: WikiMarkdownEditorProps) {
+export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionChange }: WikiMarkdownEditorProps) {
   const applyingExternalContent = useRef(false);
   const lastExternalMarkdown = useRef(markdown);
   const turndown = useMemo(() => {
@@ -54,7 +55,17 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange }: WikiMarkdow
       lastExternalMarkdown.current = nextMarkdown;
       onChange(nextMarkdown);
     },
-  }, [turndown, onChange]);
+    onSelectionUpdate: ({ editor: updatedEditor }) => {
+      const { from, to, empty } = updatedEditor.state.selection;
+      if (empty) {
+        onSelectionChange?.('');
+        return;
+      }
+
+      const selectedText = updatedEditor.state.doc.textBetween(from, to, '\n\n').trim();
+      onSelectionChange?.(selectedText);
+    },
+  }, [turndown, onChange, onSelectionChange]);
 
   useEffect(() => {
     if (!editor) return;

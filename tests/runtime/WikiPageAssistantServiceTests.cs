@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using SirThaddeus.Wiki;
 using SirThaddeus.Wiki.Storage;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Wiki;
@@ -58,6 +59,54 @@ public sealed class WikiPageAssistantServiceTests : IDisposable
         Assert.Equal("# New\n\nBody", draft!.Markdown);
         Assert.Equal("Rewrite it", draft.Summary);
         Assert.Contains("Return only the complete replacement Markdown", assistant.LastUserText);
+    }
+
+    [Fact]
+    public async Task RewriteSelectionAsync_returns_replacement_preview_and_markdown()
+    {
+        using var wiki = NewWikiStore();
+        using var threads = NewThreadStore();
+        var assistant = new CapturingAssistant("Better local plan.");
+        var service = new WikiPageAssistantService(wiki, threads, assistant);
+        var root = await wiki.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await wiki.CreatePageAsync(root.Id, null, "Plans", "# Plans\n\nKeep this local.", CancellationToken.None);
+
+        var draft = await service.RewriteSelectionAsync(
+            page.Page.Id,
+            "Keep this local.",
+            "Make it clearer",
+            page.Page.Version,
+            "page",
+            CancellationToken.None);
+
+        Assert.NotNull(draft);
+        Assert.Equal("Keep this local.", draft!.SelectedText);
+        Assert.Equal("Better local plan.", draft.ReplacementText);
+        Assert.Equal("# Plans\n\nBetter local plan.", draft.Markdown);
+        Assert.Contains("Return only replacement text", assistant.LastUserText);
+        Assert.Contains("[SELECTED TEXT]", assistant.LastUserText);
+        Assert.Contains("Make it clearer", assistant.LastUserText);
+        Assert.Empty(await threads.ListAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RewriteSelectionAsync_rejects_stale_page_version()
+    {
+        using var wiki = NewWikiStore();
+        using var threads = NewThreadStore();
+        var assistant = new CapturingAssistant("Better local plan.");
+        var service = new WikiPageAssistantService(wiki, threads, assistant);
+        var root = await wiki.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await wiki.CreatePageAsync(root.Id, null, "Plans", "# Plans\n\nKeep this local.", CancellationToken.None);
+
+        await Assert.ThrowsAsync<WikiVersionConflictException>(() =>
+            service.RewriteSelectionAsync(
+                page.Page.Id,
+                "Keep this local.",
+                "Make it clearer",
+                page.Page.Version + 1,
+                "page",
+                CancellationToken.None));
     }
 
     private LocalWikiStore NewWikiStore() =>

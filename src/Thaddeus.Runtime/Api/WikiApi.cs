@@ -195,6 +195,43 @@ public static class WikiApi
             return Results.Json(draft, WikiJsonContext.Default.WikiPageDraft);
         });
 
+        app.MapPost("/api/wiki/pages/{pageId}/selection/rewrite", async (string pageId, HttpContext ctx, WikiPageAssistantService assistant, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var req = await ReadAsync(ctx, WikiJsonContext.Default.WikiSelectionRewriteRequest, ct).ConfigureAwait(false);
+            if (req is null) return Results.BadRequest(new WikiErrorResponse("empty_body", "Request body is required."));
+            if (string.IsNullOrWhiteSpace(req.SelectedText)) return Results.BadRequest(new WikiErrorResponse("selection_required", "Selected text is required."));
+            if (string.IsNullOrWhiteSpace(req.Instruction)) return Results.BadRequest(new WikiErrorResponse("instruction_required", "Instruction is required."));
+
+            try
+            {
+                var draft = await assistant.RewriteSelectionAsync(
+                    pageId,
+                    req.SelectedText,
+                    req.Instruction,
+                    req.ExpectedVersion,
+                    req.Scope,
+                    ct).ConfigureAwait(false);
+                if (draft is null) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_SELECTION_REWRITE_DRAFTED",
+                    Target = pageId,
+                    Details = new() { ["scope"] = req.Scope ?? "page" },
+                });
+                return Results.Json(draft, WikiJsonContext.Default.WikiSelectionRewriteDraft);
+            }
+            catch (WikiVersionConflictException ex)
+            {
+                return Results.Conflict(new WikiConflictResponse(ex.PageId, ex.ExpectedVersion, ex.CurrentVersion));
+            }
+            catch (WikiSelectionRewriteException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("selection_mismatch", ex.Message));
+            }
+        });
+
         app.MapGet("/api/wiki/search", async (string? rootId, string? query, IWikiStore store, CancellationToken ct) =>
         {
             var results = await store.SearchAsync(rootId, query ?? string.Empty, ct).ConfigureAwait(false);
@@ -228,6 +265,7 @@ public sealed record UpdateWikiPageRequest(string? Markdown, long? ExpectedVersi
 public sealed record RestoreWikiRevisionRequest(long? ExpectedVersion);
 public sealed record WikiPageChatRequest(string? Prompt, string? Scope);
 public sealed record WikiPageDraftRequest(string? Instruction, string? Scope);
+public sealed record WikiSelectionRewriteRequest(string? SelectedText, string? Instruction, long? ExpectedVersion, string? Scope);
 public sealed record WikiRootsResponse(IReadOnlyList<WikiRoot> Roots);
 public sealed record WikiRevisionsResponse(IReadOnlyList<WikiRevision> Revisions);
 public sealed record WikiSearchResponse(IReadOnlyList<WikiSearchResult> Results);
@@ -247,6 +285,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiIndexRebuildResult))]
 [JsonSerializable(typeof(WikiPageAssistantReply))]
 [JsonSerializable(typeof(WikiPageDraft))]
+[JsonSerializable(typeof(WikiSelectionRewriteDraft))]
 [JsonSerializable(typeof(WikiRootsResponse))]
 [JsonSerializable(typeof(WikiRevisionsResponse))]
 [JsonSerializable(typeof(WikiSearchResponse))]
@@ -259,6 +298,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(RestoreWikiRevisionRequest))]
 [JsonSerializable(typeof(WikiPageChatRequest))]
 [JsonSerializable(typeof(WikiPageDraftRequest))]
+[JsonSerializable(typeof(WikiSelectionRewriteRequest))]
 public partial class WikiJsonContext : JsonSerializerContext
 {
 }
