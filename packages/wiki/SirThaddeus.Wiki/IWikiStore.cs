@@ -63,6 +63,10 @@ public interface IWikiStore
         long? expectedVersion,
         CancellationToken cancellationToken);
 
+    Task<bool> DeletePageAsync(
+        string pageId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(
         string pageId,
         CancellationToken cancellationToken);

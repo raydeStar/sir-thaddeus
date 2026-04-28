@@ -266,6 +266,15 @@ export async function moveWikiPage(pageId: string, input: MoveWikiPageInput): Pr
   return asJson<WikiPageDocument>(res);
 }
 
+export async function deleteWikiPage(pageId: string): Promise<void> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
 export async function listWikiRevisions(pageId: string): Promise<WikiRevision[]> {
   const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/revisions`);
   return (await asJson<WikiRevisionsResponse>(res)).revisions;

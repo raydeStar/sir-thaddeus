@@ -21,6 +21,7 @@ import {
   Send,
   Settings2,
   Sparkles,
+  Trash2,
   Undo2,
   WandSparkles,
   X,
@@ -83,6 +84,7 @@ function WikiRoute() {
     savePage,
     renamePage,
     movePage,
+    deletePage,
     discardDraft,
     restoreRevision,
     undoLatestAiEdit,
@@ -461,6 +463,20 @@ function WikiRoute() {
                   }}
                 >
                   <Settings2 className="h-4 w-4" strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="wiki-icon-button"
+                  title="Delete page"
+                  aria-label="Delete page"
+                  disabled={!page || busy || dirty}
+                  onClick={() => {
+                    if (window.confirm(`Delete ${page?.page.title ?? 'this page'}?`)) {
+                      void deletePage();
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
                 <button type="button" className="wiki-icon-button" title="Undo latest AI edit" aria-label="Undo latest AI edit" disabled={busy || !canUndoLatestAiEdit} onClick={() => void undoLatestAiEdit()}>
                   <Undo2 className="h-4 w-4" strokeWidth={1.8} />

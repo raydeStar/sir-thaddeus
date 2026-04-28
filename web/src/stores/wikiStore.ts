@@ -47,6 +47,7 @@ interface WikiStoreState {
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
   movePage: (folderId: string | null) => Promise<void>;
+  deletePage: () => Promise<void>;
   discardDraft: () => void;
   restoreRevision: (revisionId: string) => Promise<void>;
   undoLatestAiEdit: () => Promise<void>;
@@ -398,6 +399,39 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         selectionRewriteDraft: null,
         dirty: false,
         scope: 'page',
+      });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  deletePage: async () => {
+    const current = get().page;
+    if (!current) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before deleting this page.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      await api.deleteWikiPage(current.page.id);
+      const tree = await api.getWikiTree(current.page.rootId);
+      set({
+        tree,
+        page: null,
+        revisions: [],
+        selectedPageId: null,
+        selectedFolderId: current.page.folderId,
+        draft: '',
+        pageChatMessages: [],
+        pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: current.page.folderId ? 'folder' : 'root',
       });
     } catch (error) {
       set({ error: (error as Error).message });

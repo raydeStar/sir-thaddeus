@@ -245,6 +245,15 @@ public static class WikiApi
             }
         });
 
+        app.MapDelete("/api/wiki/pages/{pageId}", async (string pageId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var deleted = await store.DeletePageAsync(pageId, ct).ConfigureAwait(false);
+            if (!deleted) return Results.NotFound();
+
+            audit.Append(new AuditEvent { Actor = "user", Action = "WIKI_PAGE_DELETED", Target = pageId });
+            return Results.NoContent();
+        });
+
         app.MapGet("/api/wiki/pages/{pageId}/revisions", async (string pageId, IWikiStore store, CancellationToken ct) =>
         {
             var revisions = await store.ListRevisionsAsync(pageId, ct).ConfigureAwait(false);

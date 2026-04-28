@@ -184,6 +184,30 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_page_removes_file_metadata_and_revisions()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, folder.Id, "Plan", "first", CancellationToken.None);
+        var updated = await store.UpdatePageAsync(page.Page.Id, "second", page.Page.Version, "user", "Manual save", CancellationToken.None);
+        Assert.NotNull(updated);
+        var filePath = Path.Combine(root.Path, updated!.Page.RelativePath);
+        Assert.True(File.Exists(filePath));
+
+        var deleted = await store.DeletePageAsync(page.Page.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.False(File.Exists(filePath));
+        Assert.Null(await store.GetPageAsync(page.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None));
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.DoesNotContain(tree!.Pages, candidate => candidate.Id == page.Page.Id);
+        Assert.False(await store.DeletePageAsync(page.Page.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Rename_folder_updates_descendant_page_paths_and_frontmatter()
     {
         using var store = NewStore();

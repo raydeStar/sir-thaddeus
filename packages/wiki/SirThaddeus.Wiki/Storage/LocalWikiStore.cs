@@ -619,6 +619,42 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<bool> DeletePageAsync(string pageId, CancellationToken cancellationToken)
+    {
+        var gate = LockForPage(pageId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
+            if (located is null) return false;
+
+            var root = located.Value.Root;
+            var page = located.Value.Page;
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var path = ResolvePagePath(root, page.RelativePath);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(path));
+            }
+
+            using var deleteRevisions = connection.CreateCommand();
+            deleteRevisions.CommandText = "delete from revisions where page_id = $pageId";
+            Add(deleteRevisions, "$pageId", pageId);
+            await deleteRevisions.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            using var deletePage = connection.CreateCommand();
+            deletePage.CommandText = "delete from pages where id = $pageId";
+            Add(deletePage, "$pageId", pageId);
+            await deletePage.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(string pageId, CancellationToken cancellationToken)
     {
         var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
