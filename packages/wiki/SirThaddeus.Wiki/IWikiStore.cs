@@ -17,6 +17,12 @@ public interface IWikiStore
         string? parentFolderId,
         CancellationToken cancellationToken);
 
+    Task<WikiFolder?> RenameFolderAsync(
+        string rootId,
+        string folderId,
+        string name,
+        CancellationToken cancellationToken);
+
     Task<WikiPageDocument> CreatePageAsync(
         string rootId,
         string? folderId,

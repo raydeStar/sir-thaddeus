@@ -128,6 +128,39 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Rename_folder_updates_descendant_page_paths_and_frontmatter()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var parent = await store.CreateFolderAsync(root.Id, "Old Projects", null, CancellationToken.None);
+        var child = await store.CreateFolderAsync(root.Id, "Archive", parent.Id, CancellationToken.None);
+        var parentPage = await store.CreatePageAsync(root.Id, parent.Id, "Plan", "parent body", CancellationToken.None);
+        var childPage = await store.CreatePageAsync(root.Id, child.Id, "Notes", "child body", CancellationToken.None);
+        var oldParentPath = Path.Combine(root.Path, parentPage.Page.RelativePath);
+        var oldChildPath = Path.Combine(root.Path, childPage.Page.RelativePath);
+
+        var renamed = await store.RenameFolderAsync(root.Id, parent.Id, "New Projects", CancellationToken.None);
+
+        Assert.NotNull(renamed);
+        Assert.Equal("New Projects", renamed!.Name);
+        Assert.Equal("new-projects", renamed.Slug);
+        Assert.False(File.Exists(oldParentPath));
+        Assert.False(File.Exists(oldChildPath));
+
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        var renamedParentPage = Assert.Single(tree!.Pages, page => page.Id == parentPage.Page.Id);
+        var renamedChildPage = Assert.Single(tree.Pages, page => page.Id == childPage.Page.Id);
+        Assert.Equal(Path.Combine("new-projects", "plan.md"), renamedParentPage.RelativePath);
+        Assert.Equal(Path.Combine("new-projects", "archive", "notes.md"), renamedChildPage.RelativePath);
+
+        var parentFile = await File.ReadAllTextAsync(Path.Combine(root.Path, renamedParentPage.RelativePath));
+        var childFile = await File.ReadAllTextAsync(Path.Combine(root.Path, renamedChildPage.RelativePath));
+        Assert.Contains("parent body", parentFile);
+        Assert.Contains("child body", childFile);
+    }
+
+    [Fact]
     public async Task Folder_ids_are_not_valid_across_roots()
     {
         using var store = NewStore();

@@ -40,6 +40,7 @@ interface WikiStoreState {
   selectPage: (pageId: string) => Promise<void>;
   createRoot: () => Promise<void>;
   createFolder: () => Promise<void>;
+  renameFolder: (folderId: string, name: string) => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
@@ -177,6 +178,39 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const created = await api.createWikiFolder(rootId, { name: 'New Folder', parentFolderId: null });
       const tree = await api.getWikiTree(rootId);
       set({ tree, selectedFolderId: created.id, scope: 'folder' });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  renameFolder: async (folderId: string, name: string) => {
+    const rootId = get().selectedRootId;
+    const trimmed = name.trim();
+    if (!rootId || !folderId || !trimmed) return;
+    const currentFolder = get().tree?.folders.find((folder) => folder.id === folderId) ?? null;
+    if (currentFolder && currentFolder.name === trimmed) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before renaming this folder.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      const renamed = await api.updateWikiFolder(rootId, folderId, { name: trimmed });
+      const tree = await api.getWikiTree(rootId);
+      const currentPage = get().page;
+      const refreshedPage = currentPage ? await api.getWikiPage(currentPage.page.id) : null;
+      set({
+        tree,
+        page: refreshedPage,
+        draft: refreshedPage?.markdown ?? get().draft,
+        selectedFolderId: renamed.id,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+      });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {

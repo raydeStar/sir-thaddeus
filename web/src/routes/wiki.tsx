@@ -14,6 +14,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  PencilLine,
   Plus,
   Save,
   Search,
@@ -42,6 +43,8 @@ function WikiRoute() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pagePrompt, setPagePrompt] = useState('');
   const [pageTitleDraft, setPageTitleDraft] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [folderNameDraft, setFolderNameDraft] = useState('');
   const pageTitleRef = useRef<HTMLInputElement>(null);
   const {
     roots,
@@ -71,6 +74,7 @@ function WikiRoute() {
     selectPage,
     createRoot,
     createFolder,
+    renameFolder,
     createPage,
     savePage,
     renamePage,
@@ -132,6 +136,25 @@ function WikiRoute() {
       return;
     }
     await renamePage(trimmed);
+  };
+  const beginFolderRename = (folder: WikiFolder) => {
+    setRenamingFolderId(folder.id);
+    setFolderNameDraft(folder.name);
+  };
+  const cancelFolderRename = () => {
+    setRenamingFolderId(null);
+    setFolderNameDraft('');
+  };
+  const submitFolderRename = async () => {
+    if (!renamingFolderId) return;
+    const folder = tree?.folders.find((candidate) => candidate.id === renamingFolderId) ?? null;
+    const trimmed = folderNameDraft.trim();
+    if (!folder || !trimmed || trimmed === folder.name) {
+      cancelFolderRename();
+      return;
+    }
+    await renameFolder(folder.id, trimmed);
+    cancelFolderRename();
   };
 
   return (
@@ -269,8 +292,14 @@ function WikiRoute() {
                       selectedFolderId={selectedFolderId}
                       selectedPageId={selectedPageId}
                       scope={scope}
+                      renamingFolderId={renamingFolderId}
+                      folderNameDraft={folderNameDraft}
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
+                      onFolderRenameStart={beginFolderRename}
+                      onFolderRenameCancel={cancelFolderRename}
+                      onFolderRenameSubmit={() => void submitFolderRename()}
+                      onFolderNameDraftChange={setFolderNameDraft}
                     />
                   ))}
                   {rootPages.length > 0 ? (
@@ -280,8 +309,14 @@ function WikiRoute() {
                       selectedFolderId={selectedFolderId}
                       selectedPageId={selectedPageId}
                       scope={scope}
+                      renamingFolderId={renamingFolderId}
+                      folderNameDraft={folderNameDraft}
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
+                      onFolderRenameStart={beginFolderRename}
+                      onFolderRenameCancel={cancelFolderRename}
+                      onFolderRenameSubmit={() => void submitFolderRename()}
+                      onFolderNameDraftChange={setFolderNameDraft}
                     />
                   ) : null}
                   {tree.folders.length === 0 && tree.pages.length === 0 ? (
@@ -553,28 +588,78 @@ function FolderSection({
   selectedFolderId,
   selectedPageId,
   scope,
+  renamingFolderId,
+  folderNameDraft,
   onFolderSelect,
   onPageSelect,
+  onFolderRenameStart,
+  onFolderRenameCancel,
+  onFolderRenameSubmit,
+  onFolderNameDraftChange,
 }: {
   folder: WikiFolder | null;
   pages: WikiPage[];
   selectedFolderId: string | null;
   selectedPageId: string | null;
   scope: WikiScope;
+  renamingFolderId: string | null;
+  folderNameDraft: string;
   onFolderSelect: (folderId: string | null) => void;
   onPageSelect: (pageId: string) => void;
+  onFolderRenameStart: (folder: WikiFolder) => void;
+  onFolderRenameCancel: () => void;
+  onFolderRenameSubmit: () => void;
+  onFolderNameDraftChange: (name: string) => void;
 }) {
   const isFolderSelected = folder ? selectedFolderId === folder.id && scope === 'folder' : !selectedFolderId && scope === 'root';
+  const isRenaming = folder ? renamingFolderId === folder.id : false;
   return (
     <section>
-      <button
-        type="button"
-        onClick={() => onFolderSelect(folder?.id ?? null)}
-        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium uppercase tracking-[0.08em] transition ${isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-subtle hover:text-ink'}`}
-      >
-        <Folder className="h-3.5 w-3.5" strokeWidth={1.8} />
-        <span className="truncate">{folder?.name ?? 'Pages'}</span>
-      </button>
+      {isRenaming ? (
+        <div className="flex w-full items-center gap-2 rounded-lg bg-accent-soft px-2 py-1.5 text-xs font-medium text-ink">
+          <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+          <input
+            autoFocus
+            value={folderNameDraft}
+            onChange={(event) => onFolderNameDraftChange(event.target.value)}
+            onBlur={onFolderRenameSubmit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                onFolderRenameCancel();
+              }
+            }}
+            aria-label="Folder name"
+            className="min-w-0 flex-1 rounded-md border border-accent/30 bg-canvas-raised px-2 py-0.5 text-xs font-medium text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/15"
+          />
+        </div>
+      ) : (
+        <div className={`flex w-full items-center gap-1 rounded-lg transition ${isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-subtle hover:text-ink'}`}>
+          <button
+            type="button"
+            onClick={() => onFolderSelect(folder?.id ?? null)}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs font-medium uppercase tracking-[0.08em]"
+          >
+            <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">{folder?.name ?? 'Pages'}</span>
+          </button>
+          {folder && isFolderSelected ? (
+            <button
+              type="button"
+              className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
+              title="Rename folder"
+              aria-label="Rename folder"
+              onClick={() => onFolderRenameStart(folder)}
+            >
+              <PencilLine className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </button>
+          ) : null}
+        </div>
+      )}
       <ul className="mt-1 space-y-1">
         {pages.map((page) => (
           <li key={page.id}>

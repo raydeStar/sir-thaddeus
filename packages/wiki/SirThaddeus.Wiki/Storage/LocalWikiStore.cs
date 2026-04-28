@@ -157,6 +157,81 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<WikiFolder?> RenameFolderAsync(
+        string rootId,
+        string folderId,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        var normalizedName = NormalizeName(name, "Untitled Folder");
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var current = await GetFolderAsync(connection, folderId, cancellationToken).ConfigureAwait(false);
+            if (current is null) return null;
+            if (!string.Equals(current.RootId, root.Id, StringComparison.Ordinal))
+            {
+                throw new WikiPathException("Folder belongs to a different wiki root.");
+            }
+
+            if (string.Equals(normalizedName, current.Name, StringComparison.Ordinal))
+            {
+                return current;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var existingSlugs = await ExistingSlugsAsync(connection, "folders", "parent_folder_id", current.ParentFolderId, cancellationToken).ConfigureAwait(false);
+            existingSlugs.Remove(current.Slug);
+            var renamed = current with
+            {
+                Name = normalizedName,
+                Slug = UniqueSlug(Slugify(normalizedName), existingSlugs),
+                UpdatedAt = now,
+            };
+
+            var folders = await ListFoldersAsync(connection, cancellationToken).ConfigureAwait(false);
+            var affectedFolderIds = DescendantFolderIds(folders, current.Id);
+            var affectedPages = (await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false))
+                .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
+                .ToArray();
+            var pageBodies = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var page in affectedPages)
+            {
+                pageBodies[page.Id] = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
+            }
+
+            await UpdateFolderAsync(connection, renamed, cancellationToken).ConfigureAwait(false);
+            foreach (var page in affectedPages)
+            {
+                var updatedPage = page with
+                {
+                    RelativePath = await BuildPageRelativePathAsync(connection, page.FolderId, page.Slug, cancellationToken).ConfigureAwait(false),
+                    UpdatedAt = now,
+                };
+                var oldPath = ResolvePagePath(root, page.RelativePath);
+                var newPath = ResolvePagePath(root, updatedPage.RelativePath);
+                await WritePageFileAsync(root, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath))
+                {
+                    File.Delete(oldPath);
+                    DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(oldPath));
+                }
+
+                await UpdatePageMetadataAsync(connection, updatedPage, cancellationToken).ConfigureAwait(false);
+            }
+
+            return renamed;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<WikiPageDocument> CreatePageAsync(string rootId, string? folderId, string title, string markdown, CancellationToken cancellationToken)
     {
         var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
@@ -579,6 +654,25 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadFolder(reader) : null;
     }
 
+    private static HashSet<string> DescendantFolderIds(IReadOnlyList<WikiFolder> folders, string folderId)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal) { folderId };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var folder in folders)
+            {
+                if (folder.ParentFolderId is not null && ids.Contains(folder.ParentFolderId) && ids.Add(folder.Id))
+                {
+                    changed = true;
+                }
+            }
+        }
+
+        return ids;
+    }
+
     private async Task<WikiPage?> GetPageMetadataAsync(SqliteConnection connection, string pageId, CancellationToken cancellationToken)
     {
         using var command = connection.CreateCommand();
@@ -590,6 +684,23 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         Add(command, "$id", pageId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadPage(reader) : null;
+    }
+
+    private async Task UpdateFolderAsync(SqliteConnection connection, WikiFolder folder, CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            update folders
+            set name = $name,
+                slug = $slug,
+                updated_at = $updatedAt
+            where id = $id
+            """;
+        Add(command, "$id", folder.Id);
+        Add(command, "$name", folder.Name);
+        Add(command, "$slug", folder.Slug);
+        Add(command, "$updatedAt", Format(folder.UpdatedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task InsertPageAsync(SqliteConnection connection, WikiPage page, CancellationToken cancellationToken)
@@ -805,6 +916,24 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             && !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal)
             && !Path.IsPathRooted(relative);
+    }
+
+    private static void DeleteEmptyDirectoriesUpToRoot(string rootPath, string? startDirectory)
+    {
+        var root = Path.GetFullPath(rootPath);
+        var current = string.IsNullOrWhiteSpace(startDirectory) ? null : Path.GetFullPath(startDirectory);
+        while (!string.IsNullOrWhiteSpace(current)
+            && !current.Equals(root, StringComparison.OrdinalIgnoreCase)
+            && IsPathUnderRoot(root, current))
+        {
+            if (!Directory.Exists(current) || Directory.EnumerateFileSystemEntries(current).Any())
+            {
+                break;
+            }
+
+            Directory.Delete(current);
+            current = Path.GetDirectoryName(current);
+        }
     }
 
     private async Task<SqliteConnection> OpenRegistryAsync(CancellationToken cancellationToken)

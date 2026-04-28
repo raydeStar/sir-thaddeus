@@ -64,6 +64,36 @@ public static class WikiApi
             }
         });
 
+        app.MapPatch("/api/wiki/roots/{rootId}/folders/{folderId}", async (string rootId, string folderId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var req = await ReadAsync(ctx, WikiJsonContext.Default.UpdateWikiFolderRequest, ct).ConfigureAwait(false);
+            if (req is null) return Results.BadRequest(new WikiErrorResponse("empty_body", "Request body is required."));
+            if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new WikiErrorResponse("name_required", "Folder name is required."));
+
+            try
+            {
+                var folder = await store.RenameFolderAsync(rootId, folderId, req.Name, ct).ConfigureAwait(false);
+                if (folder is null) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_FOLDER_RENAMED",
+                    Target = folder.Id,
+                    Details = new() { ["rootId"] = rootId, ["name"] = folder.Name },
+                });
+                return Results.Json(folder, WikiJsonContext.Default.WikiFolder);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (WikiPathException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("invalid_path", ex.Message));
+            }
+        });
+
         app.MapPost("/api/wiki/roots/{rootId}/pages", async (string rootId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
         {
             var req = await ReadAsync(ctx, WikiJsonContext.Default.CreateWikiPageRequest, ct).ConfigureAwait(false);
@@ -272,6 +302,7 @@ public static class WikiApi
 
 public sealed record CreateWikiRootRequest(string? Name, string? Path);
 public sealed record CreateWikiFolderRequest(string? Name, string? ParentFolderId);
+public sealed record UpdateWikiFolderRequest(string? Name);
 public sealed record CreateWikiPageRequest(string? Title, string? FolderId, string? Markdown);
 public sealed record UpdateWikiPageRequest(string? Markdown, long? ExpectedVersion, string? Source, string? Summary, string? Title = null);
 public sealed record RestoreWikiRevisionRequest(long? ExpectedVersion);
@@ -305,6 +336,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiConflictResponse))]
 [JsonSerializable(typeof(CreateWikiRootRequest))]
 [JsonSerializable(typeof(CreateWikiFolderRequest))]
+[JsonSerializable(typeof(UpdateWikiFolderRequest))]
 [JsonSerializable(typeof(CreateWikiPageRequest))]
 [JsonSerializable(typeof(UpdateWikiPageRequest))]
 [JsonSerializable(typeof(RestoreWikiRevisionRequest))]
