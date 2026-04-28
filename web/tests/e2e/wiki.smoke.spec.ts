@@ -126,6 +126,36 @@ test.describe('wiki canvas smoke', () => {
 
     await page.screenshot({ path: 'test-results/wiki-04-page-saved.png', fullPage: true });
 
+    // ---------- Phase 4b: AI write auto-applies and rolls back ----------
+    await page.route('**/api/wiki/pages/*/draft', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          markdown: '# Untitled Page\n\nHello from Playwright. This page validates the Wiki Canvas.\n\nAI auto-applied paragraph.',
+          assistantText: 'Added the paragraph directly to the page.',
+          summary: 'Added an auto-applied paragraph',
+          createdAt: new Date().toISOString(),
+          messageId: 'playwright-auto-draft',
+        }),
+      });
+    });
+
+    await page.getByLabel('Page chat prompt').fill('Add an auto-applied paragraph.');
+    await page.getByRole('button', { name: 'Write', exact: true }).click();
+    await expect(editorContent).toContainText('AI auto-applied paragraph.', { timeout: 15_000 });
+
+    const rollbackButton = page.getByRole('button', { name: 'Rollback', exact: true });
+    await expect(rollbackButton).toBeVisible({ timeout: 10_000 });
+    await expect(rollbackButton).toBeEnabled();
+    await page.screenshot({ path: 'test-results/wiki-04b-ai-auto-applied.png', fullPage: true });
+
+    await rollbackButton.click();
+    await expect(editorContent).not.toContainText('AI auto-applied paragraph.', { timeout: 15_000 });
+    await page.unroute('**/api/wiki/pages/*/draft');
+
+    await page.screenshot({ path: 'test-results/wiki-04c-ai-rollback.png', fullPage: true });
+
     // ---------- Phase 5: scope chips, search scope toggle ----------
     // Scope controls: workspace/folder/page. Folder is disabled with no folder
     // selected, but page should be selectable now.

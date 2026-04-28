@@ -655,21 +655,55 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const current = get().page;
     const trimmed = instruction.trim();
     if (!current || !trimmed) return;
-    set({ pageAssistantBusy: true, error: null, pageChatDraft: null });
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before asking AI to write this page.' });
+      return;
+    }
+
+    const userMessage: WikiPageChatMessage = {
+      id: newLocalMessageId('user'),
+      role: 'user',
+      text: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      pageAssistantBusy: true,
+      saving: true,
+      error: null,
+      pageChatDraft: null,
+      pageChatMessages: [...state.pageChatMessages, userMessage],
+    }));
     try {
-      const draft = await api.draftWikiPage(current.page.id, { instruction: trimmed, scope: get().scope });
+      const aiDraft = await api.draftWikiPage(current.page.id, { instruction: trimmed, scope: get().scope });
+      const saved = await api.updateWikiPage(current.page.id, {
+        markdown: aiDraft.markdown,
+        expectedVersion: current.page.version,
+        source: 'ai',
+        summary: aiDraft.summary,
+      });
+      const tree = await api.getWikiTree(saved.page.rootId);
+      const revisions = await api.listWikiRevisions(saved.page.id);
       set((state) => ({
-        pageChatDraft: draft,
+        page: saved,
+        tree,
+        revisions,
+        draft: saved.markdown,
+        selectedPageId: saved.page.id,
+        selectedFolderId: saved.page.folderId,
+        pageChatDraft: null,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: 'page',
         pageChatMessages: [
           ...state.pageChatMessages,
-          { id: newLocalMessageId('user'), role: 'user', text: trimmed, createdAt: new Date().toISOString() },
-          { id: draft.messageId, role: 'assistant', text: draft.assistantText, createdAt: draft.createdAt },
+          { id: aiDraft.messageId, role: 'assistant', text: aiDraft.assistantText, createdAt: aiDraft.createdAt },
         ],
       }));
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
-      set({ pageAssistantBusy: false });
+      set({ pageAssistantBusy: false, saving: false });
     }
   },
 
@@ -706,26 +740,59 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const trimmed = instruction.trim();
     const selectedText = get().selectedText.trim();
     if (!current || !trimmed || !selectedText) return;
-    set({ pageAssistantBusy: true, error: null, selectionRewriteDraft: null });
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before asking AI to rewrite this selection.' });
+      return;
+    }
+
+    const userMessage: WikiPageChatMessage = {
+      id: newLocalMessageId('user'),
+      role: 'user',
+      text: `Rewrite selection: ${trimmed}`,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      pageAssistantBusy: true,
+      saving: true,
+      error: null,
+      selectionRewriteDraft: null,
+      pageChatMessages: [...state.pageChatMessages, userMessage],
+    }));
     try {
-      const draft = await api.rewriteWikiSelection(current.page.id, {
+      const rewriteDraft = await api.rewriteWikiSelection(current.page.id, {
         selectedText,
         instruction: trimmed,
         expectedVersion: current.page.version,
         scope: get().scope,
       });
+      const saved = await api.updateWikiPage(current.page.id, {
+        markdown: rewriteDraft.markdown,
+        expectedVersion: current.page.version,
+        source: 'ai',
+        summary: rewriteDraft.summary,
+      });
+      const tree = await api.getWikiTree(saved.page.rootId);
+      const revisions = await api.listWikiRevisions(saved.page.id);
       set((state) => ({
-        selectionRewriteDraft: draft,
+        page: saved,
+        tree,
+        revisions,
+        draft: saved.markdown,
+        selectedPageId: saved.page.id,
+        selectedFolderId: saved.page.folderId,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        pageChatDraft: null,
+        dirty: false,
         pageChatMessages: [
           ...state.pageChatMessages,
-          { id: newLocalMessageId('user'), role: 'user', text: `Rewrite selection: ${trimmed}`, createdAt: new Date().toISOString() },
-          { id: draft.messageId, role: 'assistant', text: draft.assistantText, createdAt: draft.createdAt },
+          { id: rewriteDraft.messageId, role: 'assistant', text: rewriteDraft.assistantText, createdAt: rewriteDraft.createdAt },
         ],
       }));
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
-      set({ pageAssistantBusy: false });
+      set({ pageAssistantBusy: false, saving: false });
     }
   },
 

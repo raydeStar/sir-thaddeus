@@ -64,9 +64,7 @@ function WikiRoute() {
     searchResults,
     draft,
     pageChatMessages,
-    pageChatDraft,
     selectedText,
-    selectionRewriteDraft,
     dirty,
     loading,
     saving,
@@ -94,11 +92,7 @@ function WikiRoute() {
     undoLatestAiEdit,
     askPage,
     draftPage,
-    applyPageDraft,
-    clearPageDraft,
     rewriteSelection,
-    applySelectionRewrite,
-    clearSelectionRewrite,
     setDraft,
     setSelectedText,
     setSearch,
@@ -288,6 +282,12 @@ function WikiRoute() {
             <button type="button" className="wiki-command-button" disabled={busy || !page} onClick={discardDraft}>
               <X className="h-4 w-4" strokeWidth={1.9} />
               Discard
+            </button>
+          ) : null}
+          {canUndoLatestAiEdit ? (
+            <button type="button" className="wiki-command-button border-accent/40 bg-accent-soft text-ink" disabled={busy || dirty} onClick={() => void undoLatestAiEdit()}>
+              <Undo2 className="h-4 w-4" strokeWidth={1.9} />
+              Rollback
             </button>
           ) : null}
           <button
@@ -568,7 +568,7 @@ function WikiRoute() {
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
-                <button type="button" className="wiki-icon-button" title="Undo latest AI edit" aria-label="Undo latest AI edit" disabled={busy || !canUndoLatestAiEdit} onClick={() => void undoLatestAiEdit()}>
+                <button type="button" className="wiki-icon-button" title="Rollback latest AI edit" aria-label="Rollback latest AI edit" disabled={busy || dirty || !canUndoLatestAiEdit} onClick={() => void undoLatestAiEdit()}>
                   <Undo2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
               </div>
@@ -577,7 +577,7 @@ function WikiRoute() {
             {selectedRoot ? (
               page ? (
                 <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-ink-muted">Loading editor</div>}>
-                  <WikiMarkdownEditor markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
+                  <WikiMarkdownEditor key={`${page.page.id}:${page.page.version}`} markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
                 </Suspense>
               ) : (
                 <div className="flex flex-1 items-center justify-center px-6 text-center">
@@ -660,37 +660,6 @@ function WikiRoute() {
                         </div>
                       ) : null}
                     </div>
-                    {pageChatDraft ? (
-                      <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Draft</span>
-                          <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear draft" disabled={busy} onClick={clearPageDraft}>
-                            <X className="h-3.5 w-3.5" strokeWidth={1.8} />
-                          </button>
-                        </div>
-                        <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-muted">{pageChatDraft.markdown}</pre>
-                        <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applyPageDraft()}>
-                          Apply draft
-                        </button>
-                      </div>
-                    ) : null}
-                    {selectionRewriteDraft ? (
-                      <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Selection Rewrite</span>
-                          <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear selection rewrite" disabled={busy} onClick={clearSelectionRewrite}>
-                            <X className="h-3.5 w-3.5" strokeWidth={1.8} />
-                          </button>
-                        </div>
-                        <div className="mt-2 grid gap-2">
-                          <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-subtle">{selectionRewriteDraft.selectedText}</pre>
-                          <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas p-2 text-[11px] leading-5 text-ink-muted">{selectionRewriteDraft.replacementText}</pre>
-                        </div>
-                        <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applySelectionRewrite()}>
-                          Apply replacement
-                        </button>
-                      </div>
-                    ) : null}
                     {selectedText ? (
                       <div className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink-muted">
                         Selected {countWords(selectedText)} words
@@ -710,11 +679,11 @@ function WikiRoute() {
                         <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
                         Ask
                       </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || dirty || !pagePrompt.trim()} title={dirty ? 'Save or discard changes before AI writes to the page' : undefined} onClick={() => void submitPageDraft()}>
                         <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-                        Draft
+                        Write
                       </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || dirty || !pagePrompt.trim() || !selectedText.trim()} title={dirty ? 'Save or discard changes before AI rewrites the selection' : undefined} onClick={() => void submitSelectionRewrite()}>
                         <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                         Rewrite selection
                       </button>
