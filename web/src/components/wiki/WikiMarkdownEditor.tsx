@@ -122,44 +122,56 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-canvas">
-      <div className="flex min-h-11 items-center gap-1 overflow-x-auto border-b border-line px-3 py-1.5">
-        <ToolbarButton label="Paragraph" active={editor?.isActive('paragraph') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
-          <Pilcrow className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Heading 1" active={editor?.isActive('heading', { level: 1 }) ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
-          <Heading1 className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Heading 2" active={editor?.isActive('heading', { level: 2 }) ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
-          <Heading2 className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <div className="mx-1 h-5 w-px shrink-0 bg-line" />
-        <ToolbarButton label="Bold" active={editor?.isActive('bold') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBold().run()}>
-          <Bold className="h-4 w-4" strokeWidth={1.9} />
-        </ToolbarButton>
-        <ToolbarButton label="Italic" active={editor?.isActive('italic') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleItalic().run()}>
-          <Italic className="h-4 w-4" strokeWidth={1.9} />
-        </ToolbarButton>
-        <ToolbarButton label="Code" active={editor?.isActive('codeBlock') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleCodeBlock().run()}>
-          <Code className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Link" active={editor?.isActive('link') ?? false} disabled={!editor || disabled} onClick={applyLink}>
-          <LinkIcon className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Remove link" active={false} disabled={!editor || disabled || !editor.isActive('link')} onClick={() => editor?.chain().focus().extendMarkRange('link').unsetLink().run()}>
-          <Unlink className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <div className="mx-1 h-5 w-px shrink-0 bg-line" />
-        <ToolbarButton label="Bullet list" active={editor?.isActive('bulletList') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>
-          <List className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Numbered list" active={editor?.isActive('orderedList') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
-          <ListOrdered className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
-        <ToolbarButton label="Quote" active={editor?.isActive('blockquote') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()}>
-          <Quote className="h-4 w-4" strokeWidth={1.8} />
-        </ToolbarButton>
+      <div className="flex min-h-11 items-center gap-2 overflow-x-auto border-b border-line px-3 py-1.5" role="toolbar" aria-label="Markdown formatting">
+        <ToolbarGroup label="Block style">
+          <ToolbarButton label="Paragraph" active={editor?.isActive('paragraph') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
+            <Pilcrow className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Heading 1" active={editor?.isActive('heading', { level: 1 }) ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
+            <Heading1 className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Heading 2" active={editor?.isActive('heading', { level: 2 }) ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
+            <Heading2 className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup label="Inline formatting">
+          <ToolbarButton label="Bold" active={editor?.isActive('bold') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBold().run()}>
+            <Bold className="h-4 w-4" strokeWidth={1.9} />
+          </ToolbarButton>
+          <ToolbarButton label="Italic" active={editor?.isActive('italic') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleItalic().run()}>
+            <Italic className="h-4 w-4" strokeWidth={1.9} />
+          </ToolbarButton>
+          <ToolbarButton label="Code" active={editor?.isActive('codeBlock') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleCodeBlock().run()}>
+            <Code className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Link" active={editor?.isActive('link') ?? false} disabled={!editor || disabled} onClick={applyLink}>
+            <LinkIcon className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Remove link" active={false} disabled={!editor || disabled || !editor.isActive('link')} onClick={() => editor?.chain().focus().extendMarkRange('link').unsetLink().run()}>
+            <Unlink className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup label="Lists and quote">
+          <ToolbarButton label="Bullet list" active={editor?.isActive('bulletList') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>
+            <List className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Numbered list" active={editor?.isActive('orderedList') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
+            <ListOrdered className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+          <ToolbarButton label="Quote" active={editor?.isActive('blockquote') ?? false} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()}>
+            <Quote className="h-4 w-4" strokeWidth={1.8} />
+          </ToolbarButton>
+        </ToolbarGroup>
       </div>
       <EditorContent editor={editor} className="wiki-editor min-h-0 flex-1 overflow-y-auto" />
+    </div>
+  );
+}
+
+function ToolbarGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={label} className="flex h-9 shrink-0 items-center gap-0.5 rounded-xl border border-line bg-canvas-raised p-0.5">
+      {children}
     </div>
   );
 }

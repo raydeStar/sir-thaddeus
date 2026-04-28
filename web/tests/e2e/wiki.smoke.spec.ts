@@ -65,7 +65,7 @@ test.describe('wiki canvas smoke', () => {
     await page.screenshot({ path: 'test-results/wiki-02-root-ready.png', fullPage: true });
 
     // ---------- Phase 3: create a page ----------
-    await page.getByRole('button', { name: 'New page', exact: true }).click();
+    await page.getByRole('button', { name: 'New page', exact: true }).first().click();
 
     // The editor area mounts the Tiptap content. The page title becomes
     // editable in the header.
@@ -163,7 +163,7 @@ test.describe('wiki canvas smoke', () => {
     await page.screenshot({ path: 'test-results/wiki-06-left-collapsed.png', fullPage: true });
     await page.getByRole('button', { name: 'Open Roots' }).click();
 
-    // Right "Page" panel: collapse + re-expand.
+    // Right "Assistant" panel: collapse + re-expand.
     await page.getByRole('button', { name: 'Collapse Assistant' }).click();
     await expect(page.getByRole('button', { name: 'Open Assistant' })).toBeVisible();
     await page.getByRole('button', { name: 'Open Assistant' }).click();

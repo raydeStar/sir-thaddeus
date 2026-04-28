@@ -263,10 +263,12 @@ function WikiRoute() {
             {scope === 'page' && selectedPage ? null : (
               <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
             )}
-            <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted">
-              <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
-              {dirty ? 'Unsaved' : 'Saved'}
-            </span>
+            {selectedPage ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted" aria-live="polite">
+                <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
+                {dirty ? 'Unsaved' : 'Saved'}
+              </span>
+            ) : null}
             {busy ? <Loader2 className="h-4 w-4 animate-spin text-ink-subtle" strokeWidth={1.8} /> : null}
           </div>
         </div>
@@ -294,10 +296,11 @@ function WikiRoute() {
             disabled={busy || !dirty || !page}
             onClick={() => void savePage()}
             title="Save (Ctrl+S)"
+            aria-label="Save"
           >
             <Save className="h-4 w-4" strokeWidth={1.9} />
             Save
-            <kbd className={`ml-1 hidden rounded border px-1 text-[10px] font-mono leading-4 sm:inline-flex ${dirty && !busy && page ? 'border-white/40 text-white/80' : 'border-line text-ink-subtle'}`}>
+            <kbd aria-hidden="true" className={`ml-1 hidden rounded border px-1 text-[10px] font-mono leading-4 sm:inline-flex ${dirty && !busy && page ? 'border-white/40 text-white/80' : 'border-line text-ink-subtle'}`}>
               Ctrl+S
             </kbd>
           </button>
@@ -390,7 +393,7 @@ function WikiRoute() {
                   <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
                 </div>
               )}
-              <p className="truncate text-[11px] text-ink-muted" title={selectedRoot?.path ?? 'Local wiki library'}>{selectedRoot?.path ?? 'Local wiki library'}</p>
+              <p className="truncate font-mono text-xs text-ink-muted" title={selectedRoot?.path ?? 'Local wiki library'}>{selectedRoot?.path ?? 'Local wiki library'}</p>
 
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
@@ -565,8 +568,17 @@ function WikiRoute() {
                   <WikiMarkdownEditor markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
                 </Suspense>
               ) : (
-                <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-ink-muted">
-                  Create or select a page
+                <div className="flex flex-1 items-center justify-center px-6 text-center">
+                  <div className="flex max-w-xs flex-col items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-line bg-canvas-raised text-ink-muted">
+                      <FileText className="h-5 w-5" strokeWidth={1.8} />
+                    </div>
+                    <p className="text-sm font-medium text-ink">No page selected</p>
+                    <button type="button" className="wiki-command-button" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
+                      <Plus className="h-4 w-4" strokeWidth={1.9} />
+                      New page
+                    </button>
+                  </div>
                 </div>
               )
             ) : (
@@ -605,7 +617,7 @@ function WikiRoute() {
                       type="button"
                       onClick={() => setScope(candidate)}
                       disabled={candidate === 'folder' ? !selectedFolder : candidate === 'page' ? !selectedPage : !selectedRoot}
-                      className={`rounded-full border px-3 py-1 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-40 ${scope === candidate ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-muted hover:text-ink'}`}
+                      className={`rounded-full border px-3 py-1 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-55 ${scope === candidate ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-muted hover:text-ink'}`}
                     >
                       {candidate}
                     </button>
@@ -613,84 +625,87 @@ function WikiRoute() {
                 </div>
               </section>
 
-              <section className="space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
-                <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
-                  <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                    {pageChatMessages.length > 0 ? (
-                      pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
-                    ) : null}
-                    {pageAssistantBusy ? (
-                      <div className="flex items-center gap-2 text-xs text-ink-subtle">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-                        Thinking
-                      </div>
-                    ) : null}
-                  </div>
-                  {pageChatDraft ? (
-                    <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Draft</span>
-                        <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear draft" disabled={busy} onClick={clearPageDraft}>
-                          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+              {page ? (
+                <>
+                  <section className="space-y-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
+                  <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
+                    <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                      {pageChatMessages.length > 0 ? (
+                        pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
+                      ) : null}
+                      {pageAssistantBusy ? (
+                        <div className="flex items-center gap-2 text-xs text-ink-subtle">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                          Thinking
+                        </div>
+                      ) : null}
+                    </div>
+                    {pageChatDraft ? (
+                      <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Draft</span>
+                          <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear draft" disabled={busy} onClick={clearPageDraft}>
+                            <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                          </button>
+                        </div>
+                        <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-muted">{pageChatDraft.markdown}</pre>
+                        <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applyPageDraft()}>
+                          Apply draft
                         </button>
                       </div>
-                      <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-muted">{pageChatDraft.markdown}</pre>
-                      <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applyPageDraft()}>
-                        Apply draft
-                      </button>
-                    </div>
-                  ) : null}
-                  {selectionRewriteDraft ? (
-                    <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Selection Rewrite</span>
-                        <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear selection rewrite" disabled={busy} onClick={clearSelectionRewrite}>
-                          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    ) : null}
+                    {selectionRewriteDraft ? (
+                      <div className="rounded-xl border border-accent/30 bg-accent-soft p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Selection Rewrite</span>
+                          <button type="button" className="wiki-icon-button h-7 w-7" aria-label="Clear selection rewrite" disabled={busy} onClick={clearSelectionRewrite}>
+                            <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                          </button>
+                        </div>
+                        <div className="mt-2 grid gap-2">
+                          <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-subtle">{selectionRewriteDraft.selectedText}</pre>
+                          <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas p-2 text-[11px] leading-5 text-ink-muted">{selectionRewriteDraft.replacementText}</pre>
+                        </div>
+                        <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applySelectionRewrite()}>
+                          Apply replacement
                         </button>
                       </div>
-                      <div className="mt-2 grid gap-2">
-                        <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-2 text-[11px] leading-5 text-ink-subtle">{selectionRewriteDraft.selectedText}</pre>
-                        <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas p-2 text-[11px] leading-5 text-ink-muted">{selectionRewriteDraft.replacementText}</pre>
+                    ) : null}
+                    {selectedText ? (
+                      <div className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink-muted">
+                        Selected {countWords(selectedText)} words
                       </div>
-                      <button type="button" className="btn-primary mt-3 h-8 px-3 text-xs" disabled={busy || !page} onClick={() => void applySelectionRewrite()}>
-                        Apply replacement
+                    ) : null}
+                    <textarea
+                      value={pagePrompt}
+                      onChange={(event) => setPagePrompt(event.target.value)}
+                      disabled={busy}
+                      rows={3}
+                      placeholder="Ask about this page"
+                      aria-label="Page chat prompt"
+                      className="field-input min-h-20 resize-none"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageAsk()}>
+                        <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        Ask
+                      </button>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
+                        <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        Draft
+                      </button>
+                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
+                        <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        Rewrite selection
                       </button>
                     </div>
-                  ) : null}
-                  {selectedText ? (
-                    <div className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink-muted">
-                      Selected {countWords(selectedText)} words
-                    </div>
-                  ) : null}
-                  <textarea
-                    value={pagePrompt}
-                    onChange={(event) => setPagePrompt(event.target.value)}
-                    disabled={!page || busy}
-                    rows={3}
-                    placeholder="Ask about this page"
-                    className="field-input min-h-20 resize-none"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim()} onClick={() => void submitPageAsk()}>
-                      <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      Ask
-                    </button>
-                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
-                      <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      Draft
-                    </button>
-                    <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={!page || busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
-                      <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      Rewrite selection
-                    </button>
                   </div>
-                </div>
-              </section>
+                  </section>
 
-              <section className="space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Revisions</h2>
-                {revisions.length > 0 ? (
+                  <section className="space-y-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Revisions</h2>
+                    {revisions.length > 0 ? (
                   <ol className="space-y-2">
                     {revisions.map((revision, index) => (
                       <RevisionItem
@@ -704,17 +719,24 @@ function WikiRoute() {
                       />
                     ))}
                   </ol>
-                ) : (
+                    ) : (
                   <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
-                )}
-                {previewRevision ? (
+                    )}
+                    {previewRevision ? (
                   <RevisionPreview
                     revision={previewRevision}
                     currentMarkdown={draft}
                     onClose={() => setPreviewRevisionId(null)}
                   />
-                ) : null}
-              </section>
+                    ) : null}
+                  </section>
+                </>
+              ) : (
+                <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center">
+                  <FileText className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.8} />
+                  <p className="mt-2 text-sm font-medium text-ink">No page context</p>
+                </div>
+              )}
             </div>
           ) : null}
         </aside>
@@ -769,7 +791,7 @@ function SearchResultsList({
           <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium">{result.title}</span>
-            <span className="mt-0.5 block truncate text-[11px] text-ink-subtle">
+            <span className="mt-0.5 block truncate text-[11px] text-ink-muted">
               {searchScope === 'all' ? `${rootNames.get(result.rootId) ?? 'Wiki'} / ` : ''}{result.relativePath}
             </span>
             {result.excerpt ? <span className="mt-1 line-clamp-2 block text-xs leading-5">{result.excerpt}</span> : null}
@@ -895,7 +917,7 @@ function FolderSection({
               <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{page.title}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-ink-subtle">{formatStamp(page.updatedAt)}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{formatStamp(page.updatedAt)}</span>
               </span>
             </button>
           </li>
@@ -985,7 +1007,7 @@ function RevisionItem({
             <Clock3 className="h-4 w-4" strokeWidth={1.8} />
             Version {revision.version}
           </div>
-          <p className="mt-0.5 text-[11px] text-ink-subtle">
+          <p className="mt-0.5 text-[11px] text-ink-muted">
             {revision.source} · {formatStamp(revision.createdAt)}
           </p>
         </div>
@@ -1028,7 +1050,7 @@ function RevisionPreview({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-ink">Version {revision.version}</h3>
-          <p className="mt-0.5 text-[11px] text-ink-subtle">
+          <p className="mt-0.5 text-[11px] text-ink-muted">
             {revision.source} · {formatStamp(revision.createdAt)} · {revisionWords} words · {wordDelta >= 0 ? '+' : ''}{wordDelta}
           </p>
         </div>
