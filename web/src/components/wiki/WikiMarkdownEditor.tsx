@@ -180,7 +180,7 @@ function ToolbarButton({
   return (
     <button
       type="button"
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40 ${active ? 'border-accent bg-accent-soft text-ink' : 'border-transparent text-ink-muted hover:border-line hover:bg-canvas-raised hover:text-ink'}`}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-55 ${active ? 'border-accent bg-accent-soft text-ink' : 'border-transparent text-ink-muted hover:border-line hover:bg-canvas-raised hover:text-ink'}`}
       title={label}
       aria-label={label}
       disabled={disabled}

@@ -371,7 +371,10 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const created = await api.createWikiPage(rootId, {
         title: 'Untitled Page',
         folderId,
-        markdown: '# Untitled Page\n',
+        // Trailing blank line gives Tiptap an empty paragraph below the
+        // seeded H1 so a user typing immediately starts a new line
+        // instead of concatenating into the heading.
+        markdown: '# Untitled Page\n\n',
       });
       const tree = await api.getWikiTree(rootId);
       const revisions = await api.listWikiRevisions(created.page.id);
@@ -698,7 +701,19 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
 
   clearSelectionRewrite: () => set({ selectionRewriteDraft: null }),
 
-  setDraft: (markdown: string) => set({ draft: markdown, dirty: true, selectionRewriteDraft: null }),
+  setDraft: (markdown: string) => set((state) => {
+    // Tiptap roundtrip on mount can emit a markdown string that is
+    // semantically identical to the persisted page (e.g. trailing
+    // whitespace differences). Compare normalized values so a freshly
+    // created or freshly loaded page does not falsely show "Unsaved".
+    const normalize = (value: string) => value.replace(/\s+$/g, '');
+    const persisted = state.page?.markdown ?? '';
+    return {
+      draft: markdown,
+      dirty: normalize(markdown) !== normalize(persisted),
+      selectionRewriteDraft: null,
+    };
+  }),
   setSelectedText: (text: string) => set({ selectedText: text }),
   setSearch: (search: string) => {
     set({ search });

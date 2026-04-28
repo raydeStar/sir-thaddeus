@@ -21,7 +21,6 @@ import {
   Search,
   Send,
   Settings2,
-  Sparkles,
   Trash2,
   Undo2,
   WandSparkles,
@@ -142,6 +141,20 @@ function WikiRoute() {
     if (!renamingRoot) setRootNameDraft(selectedRoot?.name ?? '');
   }, [renamingRoot, selectedRoot?.id, selectedRoot?.name]);
 
+  // Cmd/Ctrl+S → save the current page when there are unsaved changes.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.key === 's' || event.key === 'S')) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      if (busy || !dirty || !page) return;
+      void savePage();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [busy, dirty, page, savePage]);
+
   const submitPageAsk = async () => {
     const prompt = pagePrompt.trim();
     if (!prompt) return;
@@ -247,7 +260,9 @@ function WikiRoute() {
                 {selectedRoot?.name ?? 'Wiki'}
               </h1>
             )}
-            <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
+            {scope === 'page' && selectedPage ? null : (
+              <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
+            )}
             <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted">
               <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
               {dirty ? 'Unsaved' : 'Saved'}
@@ -273,9 +288,18 @@ function WikiRoute() {
               Discard
             </button>
           ) : null}
-          <button type="button" className="wiki-command-button" disabled={busy || !dirty || !page} onClick={() => void savePage()}>
+          <button
+            type="button"
+            className={`wiki-command-button ${dirty && !busy && page ? 'border-accent bg-accent text-white hover:bg-accent hover:border-accent' : ''}`}
+            disabled={busy || !dirty || !page}
+            onClick={() => void savePage()}
+            title="Save (Ctrl+S)"
+          >
             <Save className="h-4 w-4" strokeWidth={1.9} />
             Save
+            <kbd className={`ml-1 hidden rounded border px-1 text-[10px] font-mono leading-4 sm:inline-flex ${dirty && !busy && page ? 'border-white/40 text-white/80' : 'border-line text-ink-subtle'}`}>
+              Ctrl+S
+            </kbd>
           </button>
         </div>
       </header>
@@ -366,7 +390,7 @@ function WikiRoute() {
                   <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
                 </div>
               )}
-              <p className="truncate text-[11px] text-ink-subtle">{selectedRoot?.path ?? 'Local wiki library'}</p>
+              <p className="truncate text-[11px] text-ink-muted" title={selectedRoot?.path ?? 'Local wiki library'}>{selectedRoot?.path ?? 'Local wiki library'}</p>
 
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
@@ -564,7 +588,7 @@ function WikiRoute() {
 
         <aside className="min-h-0 border-t border-line bg-canvas md:border-l md:border-t-0" aria-label="Page chat and revisions">
           <PanelHeader
-            title="Page"
+            title="Assistant"
             collapsed={rightCollapsed}
             onToggle={() => setRightCollapsed((value) => !value)}
             collapsedIcon={<PanelRightOpen className="h-4 w-4" strokeWidth={1.8} />}
@@ -595,12 +619,7 @@ function WikiRoute() {
                   <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
                     {pageChatMessages.length > 0 ? (
                       pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
-                    ) : (
-                      <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2 text-sm text-ink-subtle">
-                        <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-                        Ask about this page
-                      </div>
-                    )}
+                    ) : null}
                     {pageAssistantBusy ? (
                       <div className="flex items-center gap-2 text-xs text-ink-subtle">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
