@@ -1,0 +1,136 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using SirThaddeus.Wiki;
+using SirThaddeus.Wiki.Storage;
+
+namespace Thaddeus.Runtime.Tests;
+
+public sealed class LocalWikiStoreTests : IDisposable
+{
+    private readonly string _tempDir;
+
+    public LocalWikiStoreTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "thaddeus-wiki-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
+    }
+
+    [Fact]
+    public async Task Create_root_folder_page_persists_markdown_and_tree()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(
+            root.Id,
+            folder.Id,
+            "Canvas Plan",
+            "# Canvas Plan\n\nVersioned local markdown.",
+            CancellationToken.None);
+
+        Assert.StartsWith("root_", root.Id);
+        Assert.StartsWith("folder_", folder.Id);
+        Assert.StartsWith("page_", page.Page.Id);
+        Assert.Equal("projects", folder.Slug);
+        Assert.Equal(Path.Combine("projects", "canvas-plan.md"), page.Page.RelativePath);
+
+        var filePath = Path.Combine(root.Path, page.Page.RelativePath);
+        Assert.True(File.Exists(filePath));
+        Assert.Contains("id: " + page.Page.Id, await File.ReadAllTextAsync(filePath));
+
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.Equal(root.Id, tree!.Root.Id);
+        Assert.Contains(tree.Folders, item => item.Id == folder.Id);
+        Assert.Contains(tree.Pages, item => item.Id == page.Page.Id);
+
+        using var reopened = NewStore();
+        var fetched = await reopened.GetPageAsync(page.Page.Id, CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal("# Canvas Plan\n\nVersioned local markdown.", fetched!.Markdown);
+    }
+
+    [Fact]
+    public async Task Create_root_rejects_paths_outside_library()
+    {
+        using var store = NewStore();
+        var outside = Path.Combine(Path.GetTempPath(), "thaddeus-wiki-outside-" + Guid.NewGuid().ToString("N"));
+
+        await Assert.ThrowsAsync<WikiPathException>(() =>
+            store.CreateRootAsync("Outside", outside, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Update_page_rejects_stale_expected_version()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, null, "Notes", "first", CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<WikiVersionConflictException>(() =>
+            store.UpdatePageAsync(page.Page.Id, "second", expectedVersion: 99, source: "user", summary: null, CancellationToken.None));
+
+        Assert.Equal(page.Page.Id, ex.PageId);
+        Assert.Equal(1, ex.CurrentVersion);
+    }
+
+    [Fact]
+    public async Task Ai_update_creates_revision_with_source_and_new_version()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, null, "Notes", "first", CancellationToken.None);
+
+        var updated = await store.UpdatePageAsync(
+            page.Page.Id,
+            "second",
+            expectedVersion: 1,
+            source: "ai",
+            summary: "AI rewrite",
+            CancellationToken.None);
+
+        Assert.NotNull(updated);
+        Assert.Equal(2, updated!.Page.Version);
+
+        var revisions = await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None);
+        var aiRevision = Assert.Single(revisions.Where(revision => revision.Source == "ai"));
+        Assert.Equal(2, aiRevision.Version);
+        Assert.Equal("second", aiRevision.Markdown);
+        Assert.Equal("AI rewrite", aiRevision.Summary);
+    }
+
+    [Fact]
+    public async Task Folder_ids_are_not_valid_across_roots()
+    {
+        using var store = NewStore();
+        var firstRoot = await store.CreateRootAsync("First", null, CancellationToken.None);
+        var secondRoot = await store.CreateRootAsync("Second", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(firstRoot.Id, "Only Here", null, CancellationToken.None);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            store.CreatePageAsync(secondRoot.Id, folder.Id, "Wrong Root", "body", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Search_returns_matching_page_inside_selected_root()
+    {
+        using var store = NewStore();
+        var firstRoot = await store.CreateRootAsync("First", null, CancellationToken.None);
+        var secondRoot = await store.CreateRootAsync("Second", null, CancellationToken.None);
+        var firstPage = await store.CreatePageAsync(firstRoot.Id, null, "Alpha", "needle in first root", CancellationToken.None);
+        await store.CreatePageAsync(secondRoot.Id, null, "Beta", "needle in second root", CancellationToken.None);
+
+        var results = await store.SearchAsync(firstRoot.Id, "needle", CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Equal(firstRoot.Id, result.RootId);
+        Assert.Equal(firstPage.Page.Id, result.PageId);
+    }
+
+    private LocalWikiStore NewStore() =>
+        new(_tempDir, NullLogger<LocalWikiStore>.Instance);
+}

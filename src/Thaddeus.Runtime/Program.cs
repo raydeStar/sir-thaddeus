@@ -18,6 +18,8 @@ using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Wiki;
+using SirThaddeus.Wiki.Storage;
 
 namespace Thaddeus.Runtime;
 
@@ -149,6 +151,21 @@ public static class Program
                     dir,
                     sp.GetRequiredService<ILogger<JsonFileRoutineStore>>());
             });
+            builder.Services.AddSingleton<IWikiStore>(sp =>
+            {
+                var libraryDir = builder.Configuration.GetValue<string>("Wiki:LibraryDirectory");
+                if (string.IsNullOrWhiteSpace(libraryDir))
+                {
+                    var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                    libraryDir = string.IsNullOrWhiteSpace(documents)
+                        ? Path.Combine(Path.GetDirectoryName(options.LockFilePath)!, "wiki-library")
+                        : Path.Combine(documents, "Sir Thaddeus Wiki");
+                }
+
+                return new LocalWikiStore(
+                    libraryDir,
+                    sp.GetRequiredService<ILogger<LocalWikiStore>>());
+            });
             builder.Services.AddHostedService<RoutineSeeder>();
             // MCP tool client. Spawns the SirThaddeus.McpServer child process,
             // handshakes asynchronously, and exposes IMcpToolClient to the
@@ -241,6 +258,7 @@ public static class Program
             app.MapSettingsApi();
             app.MapMemoryApi();
             app.MapRoutinesApi();
+            app.MapWikiApi();
             app.MapAudioApi();
             app.MapVoiceApi();
             app.MapPermissionsApi();

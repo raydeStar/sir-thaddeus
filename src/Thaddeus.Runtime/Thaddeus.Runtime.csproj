@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
     <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
     <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
+    <ProjectReference Include="..\..\packages\wiki\SirThaddeus.Wiki\SirThaddeus.Wiki.csproj" />
   </ItemGroup>
 
   <ItemGroup>
