@@ -15,6 +15,8 @@ public static class WikiMcpTools
     private const int MaxPageReadChars = 60_000;
     private const int DefaultSearchResults = 10;
     private const int MaxSearchResults = 50;
+    private const int DefaultRevisionItems = 20;
+    private const int MaxRevisionItems = 100;
     private const int MaxTreeItems = 500;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -56,6 +58,27 @@ public static class WikiMcpTools
         {
             Ok = true,
             Root = await store.CreateRootAsync(name, NormalizeOptional(path), ct).ConfigureAwait(false)
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_root_rename",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Rename a local Wiki Canvas root without moving its directory.")]
+    public static Task<string> WikiRootRename(
+        [Description("Wiki root id from wiki_roots_list.")] string rootId,
+        [Description("New root display name.")] string name,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var root = await store.RenameRootAsync(rootId, name, ct).ConfigureAwait(false);
+            return root is null
+                ? Fail($"Wiki root '{rootId}' not found.")
+                : new { Ok = true, Root = root };
         }, cancellationToken);
     }
 
@@ -111,6 +134,71 @@ public static class WikiMcpTools
         {
             Ok = true,
             Folder = await store.CreateFolderAsync(rootId, name, NormalizeOptional(parentFolderId), ct).ConfigureAwait(false)
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_folder_rename",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Rename a Wiki Canvas folder and update descendant page paths.")]
+    public static Task<string> WikiFolderRename(
+        [Description("Wiki root id from wiki_roots_list.")] string rootId,
+        [Description("Folder id from wiki_tree_get.")] string folderId,
+        [Description("New folder display name.")] string name,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var folder = await store.RenameFolderAsync(rootId, folderId, name, ct).ConfigureAwait(false);
+            return folder is null
+                ? Fail($"Wiki folder '{folderId}' not found.")
+                : new { Ok = true, Folder = folder };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_folder_move",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Move a Wiki Canvas folder to another parent folder or to the root, rejecting cycles.")]
+    public static Task<string> WikiFolderMove(
+        [Description("Wiki root id from wiki_roots_list.")] string rootId,
+        [Description("Folder id from wiki_tree_get.")] string folderId,
+        [Description("Optional destination parent folder id from wiki_tree_get. Omit or blank to move to root.")] string? parentFolderId = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var folder = await store.MoveFolderAsync(rootId, folderId, NormalizeOptional(parentFolderId), ct).ConfigureAwait(false);
+            return folder is null
+                ? Fail($"Wiki folder '{folderId}' not found.")
+                : new { Ok = true, Folder = folder };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_folder_delete",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = true,
+        OpenWorld = false),
+     Description("Delete a Wiki Canvas folder and every descendant folder, page, page file, and revision.")]
+    public static Task<string> WikiFolderDelete(
+        [Description("Wiki root id from wiki_roots_list.")] string rootId,
+        [Description("Folder id from wiki_tree_get.")] string folderId,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var deleted = await store.DeleteFolderAsync(rootId, folderId, ct).ConfigureAwait(false);
+            return deleted
+                ? new { Ok = true, Deleted = true, FolderId = folderId }
+                : Fail($"Wiki folder '{folderId}' not found.");
         }, cancellationToken);
     }
 
@@ -199,6 +287,78 @@ public static class WikiMcpTools
     }
 
     [McpServerTool(
+        Name = "wiki_page_rename",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Rename a Wiki Canvas page using expected-version concurrency and create a revision.")]
+    public static Task<string> WikiPageRename(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("New page title.")] string title,
+        [Description("Current page version from wiki_page_read.")] long expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.RenamePageAsync(pageId, title, expectedVersion, ct).ConfigureAwait(false);
+            return document is null
+                ? Fail($"Wiki page '{pageId}' not found.")
+                : new { Ok = true, Document = document };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_page_move",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Move a Wiki Canvas page to another folder or to the root using expected-version concurrency.")]
+    public static Task<string> WikiPageMove(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("Optional destination folder id from wiki_tree_get. Omit or blank to move to root.")] string? folderId,
+        [Description("Current page version from wiki_page_read.")] long expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.MovePageAsync(pageId, NormalizeOptional(folderId), expectedVersion, ct).ConfigureAwait(false);
+            return document is null
+                ? Fail($"Wiki page '{pageId}' not found.")
+                : new { Ok = true, Document = document };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_page_delete",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = true,
+        OpenWorld = false),
+     Description("Delete a Wiki Canvas page, its Markdown file, and all revisions. Optional expected version prevents deleting stale content.")]
+    public static Task<string> WikiPageDelete(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("Optional current page version from wiki_page_read. When provided, stale versions are rejected.")] long? expectedVersion = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.GetPageAsync(pageId, ct).ConfigureAwait(false);
+            if (document is null)
+                return Fail($"Wiki page '{pageId}' not found.");
+
+            if (expectedVersion.HasValue && expectedVersion.Value != document.Page.Version)
+                return Fail($"Wiki page '{pageId}' is at version {document.Page.Version}, not {expectedVersion.Value}.");
+
+            var deleted = await store.DeletePageAsync(pageId, ct).ConfigureAwait(false);
+            return deleted
+                ? new { Ok = true, Deleted = true, PageId = pageId }
+                : Fail($"Wiki page '{pageId}' not found.");
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "wiki_page_patch_selection",
         ReadOnly = false,
         Idempotent = false,
@@ -246,6 +406,77 @@ public static class WikiMcpTools
             return updated is null
                 ? Fail($"Wiki page '{pageId}' not found.")
                 : new { Ok = true, Document = updated };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_page_revisions_list",
+        ReadOnly = true,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false),
+     Description("List revisions for a Wiki Canvas page, returning bounded Markdown bodies for inspection before restore.")]
+    public static Task<string> WikiPageRevisionsList(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("Maximum revisions to return, clamped to 100.")] int maxItems = DefaultRevisionItems,
+        [Description("Maximum Markdown characters per revision, clamped to 60000.")] int maxMarkdownChars = 4_000,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.GetPageAsync(pageId, ct).ConfigureAwait(false);
+            if (document is null)
+                return Fail($"Wiki page '{pageId}' not found.");
+
+            var revisions = await store.ListRevisionsAsync(pageId, ct).ConfigureAwait(false);
+            var limit = Clamp(maxItems, 1, MaxRevisionItems);
+            var boundedRevisions = revisions.Take(limit).Select(revision =>
+            {
+                var markdown = Bound(revision.Markdown, maxMarkdownChars, out var truncated);
+                return new
+                {
+                    revision.Id,
+                    revision.PageId,
+                    revision.Version,
+                    revision.Source,
+                    revision.CreatedAt,
+                    revision.Summary,
+                    Markdown = markdown,
+                    MarkdownLength = revision.Markdown.Length,
+                    Truncated = truncated
+                };
+            });
+
+            return new
+            {
+                Ok = true,
+                Page = document.Page,
+                RevisionCount = revisions.Count,
+                Revisions = boundedRevisions,
+                Truncated = revisions.Count > limit
+            };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "wiki_page_revision_restore",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Restore one Wiki Canvas page revision using expected-version concurrency and create a new restore revision.")]
+    public static Task<string> WikiPageRevisionRestore(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("Revision id from wiki_page_revisions_list.")] string revisionId,
+        [Description("Current page version from wiki_page_read.")] long expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.RestoreRevisionAsync(pageId, revisionId, expectedVersion, ct).ConfigureAwait(false);
+            return document is null
+                ? Fail($"Wiki page '{pageId}' or revision '{revisionId}' not found.")
+                : new { Ok = true, Document = document };
         }, cancellationToken);
     }
 
