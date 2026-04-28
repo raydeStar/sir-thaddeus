@@ -39,6 +39,10 @@ public class PolicyGateTests
         MakeTool("file_list_preview"),
         MakeTool("file_list_apply"),
         MakeTool("document_read"),
+        MakeTool("wiki_roots_list"),
+        MakeTool("wiki_search"),
+        MakeTool("wiki_page_read"),
+        MakeTool("wiki_page_update"),
         MakeTool("clipboard_read"),
         MakeTool("clipboard_write"),
         MakeTool("system_execute"),
@@ -346,6 +350,18 @@ public class PolicyGateTests
 
         Assert.DoesNotContain(filtered,
             t => t.Function.Name.Equals("mystery_unmapped_tool", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(Intents.GeneralTool)]
+    [InlineData(Intents.FileTask)]
+    public void WikiTools_AreHiddenUntilWikiContextPolicyExists(string intent)
+    {
+        var policy = PolicyGate.Evaluate(Route(intent));
+        var filtered = PolicyGate.FilterTools(AllTools, policy);
+
+        Assert.DoesNotContain(filtered,
+            t => t.Function.Name.StartsWith("wiki_", StringComparison.OrdinalIgnoreCase));
     }
 
     // ─────────────────────────────────────────────────────────────────

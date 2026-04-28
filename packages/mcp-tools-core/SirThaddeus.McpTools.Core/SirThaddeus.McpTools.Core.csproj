@@ -27,5 +27,6 @@
     <ProjectReference Include="..\..\llm-client\SirThaddeus.LlmClient\SirThaddeus.LlmClient.csproj" />
     <ProjectReference Include="..\..\mcp-shared\SirThaddeus.McpShared\SirThaddeus.McpShared.csproj" />
     <ProjectReference Include="..\..\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
+    <ProjectReference Include="..\..\wiki\SirThaddeus.Wiki\SirThaddeus.Wiki.csproj" />
   </ItemGroup>
 </Project>

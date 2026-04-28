@@ -15,6 +15,8 @@ public enum ToolCapability
     ScreenCapture,
     MemoryRead,
     MemoryWrite,
+    WikiRead,
+    WikiWrite,
     Meta,
     TimeRead
 }

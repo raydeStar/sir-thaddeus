@@ -467,6 +467,86 @@ public static class ToolManifest
             Description = "Appends an entry to today's journal markdown file in a configured knowledge-store root.",
             Limits      = "Configured roots only. Writes to journal/yyyy-MM-dd.md."
         },
+        new()
+        {
+            Name        = "wiki_roots_list",
+            Aliases     = ["WikiRootsList"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Lists local Wiki Canvas roots with ids, names, paths, and timestamps.",
+            Limits      = "Bounded to configured local wiki library roots."
+        },
+        new()
+        {
+            Name        = "wiki_root_create",
+            Aliases     = ["WikiRootCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a local Wiki Canvas root inside the configured wiki library directory.",
+            Limits      = "Root path must stay inside the wiki library directory."
+        },
+        new()
+        {
+            Name        = "wiki_tree_get",
+            Aliases     = ["WikiTreeGet"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Gets folders and page metadata for one Wiki Canvas root.",
+            Limits      = "Returns metadata only. Folder/page list clamped to 500 each."
+        },
+        new()
+        {
+            Name        = "wiki_folder_create",
+            Aliases     = ["WikiFolderCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a folder inside a Wiki Canvas root.",
+            Limits      = "Folder must belong to the requested wiki root."
+        },
+        new()
+        {
+            Name        = "wiki_page_create",
+            Aliases     = ["WikiPageCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a Markdown page in a Wiki Canvas root or folder.",
+            Limits      = "Markdown is persisted as the canonical page body."
+        },
+        new()
+        {
+            Name        = "wiki_page_read",
+            Aliases     = ["WikiPageRead"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Reads one Wiki Canvas page by id, including bounded Markdown body and current version.",
+            Limits      = "Default 24000 chars; max 60000 chars."
+        },
+        new()
+        {
+            Name        = "wiki_page_update",
+            Aliases     = ["WikiPageUpdate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces a Wiki Canvas page Markdown body using expected-version concurrency.",
+            Limits      = "Requires current version from wiki_page_read. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_search",
+            Aliases     = ["WikiSearch"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Searches local Wiki Canvas pages by title, excerpt, or Markdown body.",
+            Limits      = "Optional root filter. Max 50 results."
+        },
 
         // ── System Tools ─────────────────────────────────────────────
         new()

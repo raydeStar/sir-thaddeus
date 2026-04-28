@@ -59,6 +59,14 @@ public static class ToolGroupPolicy
         ["knowledge_store_create_file"] = "files",
         ["knowledge_store_append_to_file"] = "files",
         ["knowledge_store_journal_log_entry"] = "files",
+        ["wiki_roots_list"] = "files",
+        ["wiki_tree_get"] = "files",
+        ["wiki_page_read"] = "files",
+        ["wiki_search"] = "files",
+        ["wiki_root_create"] = "files",
+        ["wiki_folder_create"] = "files",
+        ["wiki_page_create"] = "files",
+        ["wiki_page_update"] = "files",
 
         // System
         ["system_execute"]       = "system",

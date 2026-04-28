@@ -78,6 +78,22 @@ public static class ToolCapabilityRegistry
             ["KnowledgeStoreAppendToFile"] = ToolCapability.FileWrite,
             ["knowledge_store_journal_log_entry"] = ToolCapability.FileWrite,
             ["KnowledgeStoreJournalLogEntry"] = ToolCapability.FileWrite,
+            ["wiki_roots_list"] = ToolCapability.WikiRead,
+            ["WikiRootsList"] = ToolCapability.WikiRead,
+            ["wiki_tree_get"] = ToolCapability.WikiRead,
+            ["WikiTreeGet"] = ToolCapability.WikiRead,
+            ["wiki_page_read"] = ToolCapability.WikiRead,
+            ["WikiPageRead"] = ToolCapability.WikiRead,
+            ["wiki_search"] = ToolCapability.WikiRead,
+            ["WikiSearch"] = ToolCapability.WikiRead,
+            ["wiki_root_create"] = ToolCapability.WikiWrite,
+            ["WikiRootCreate"] = ToolCapability.WikiWrite,
+            ["wiki_folder_create"] = ToolCapability.WikiWrite,
+            ["WikiFolderCreate"] = ToolCapability.WikiWrite,
+            ["wiki_page_create"] = ToolCapability.WikiWrite,
+            ["WikiPageCreate"] = ToolCapability.WikiWrite,
+            ["wiki_page_update"] = ToolCapability.WikiWrite,
+            ["WikiPageUpdate"] = ToolCapability.WikiWrite,
 
             // System
             // Clipboard is treated as a system capability for routing.
