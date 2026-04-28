@@ -94,6 +94,8 @@ public static class ToolCapabilityRegistry
             ["WikiPageCreate"] = ToolCapability.WikiWrite,
             ["wiki_page_update"] = ToolCapability.WikiWrite,
             ["WikiPageUpdate"] = ToolCapability.WikiWrite,
+            ["wiki_page_patch_selection"] = ToolCapability.WikiWrite,
+            ["WikiPagePatchSelection"] = ToolCapability.WikiWrite,
 
             // System
             // Clipboard is treated as a system capability for routing.

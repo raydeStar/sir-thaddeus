@@ -539,6 +539,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "wiki_page_patch_selection",
+            Aliases     = ["WikiPagePatchSelection"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces exactly one selected text passage in a Wiki Canvas page.",
+            Limits      = "Requires current version and exact selected text match. Creates a revision."
+        },
+        new()
+        {
             Name        = "wiki_search",
             Aliases     = ["WikiSearch"],
             Category    = "file",

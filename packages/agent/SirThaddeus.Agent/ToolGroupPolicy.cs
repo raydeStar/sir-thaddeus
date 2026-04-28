@@ -67,6 +67,7 @@ public static class ToolGroupPolicy
         ["wiki_folder_create"] = "files",
         ["wiki_page_create"] = "files",
         ["wiki_page_update"] = "files",
+        ["wiki_page_patch_selection"] = "files",
 
         // System
         ["system_execute"]       = "system",

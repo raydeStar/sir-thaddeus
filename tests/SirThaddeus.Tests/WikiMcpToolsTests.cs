@@ -91,6 +91,50 @@ public sealed class WikiMcpToolsTests : IDisposable
         Assert.Contains("version", staleDoc.RootElement.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task PagePatchSelection_ReplacesOnlySelectedText_AndCreatesNewVersion()
+    {
+        var rootId = await CreateRootAsync();
+        var createJson = await WikiMcpTools.WikiPageCreate(rootId, "Runbook", "# Runbook\n\nOriginal step.\n\nKeep this line.");
+        using var createDoc = JsonDocument.Parse(createJson);
+        var pageId = createDoc.RootElement.GetProperty("document").GetProperty("page").GetProperty("id").GetString()!;
+
+        var patchJson = await WikiMcpTools.WikiPagePatchSelection(
+            pageId,
+            "Original step.",
+            "Updated step.",
+            1,
+            "Selection patch");
+        using var patchDoc = JsonDocument.Parse(patchJson);
+
+        Assert.True(patchDoc.RootElement.GetProperty("ok").GetBoolean());
+        var document = patchDoc.RootElement.GetProperty("document");
+        Assert.Equal(2, document.GetProperty("page").GetProperty("version").GetInt64());
+        Assert.Contains("Updated step.", document.GetProperty("markdown").GetString());
+        Assert.Contains("Keep this line.", document.GetProperty("markdown").GetString());
+        Assert.DoesNotContain("Original step.", document.GetProperty("markdown").GetString());
+    }
+
+    [Fact]
+    public async Task PagePatchSelection_RejectsAmbiguousSelectedText()
+    {
+        var rootId = await CreateRootAsync();
+        var createJson = await WikiMcpTools.WikiPageCreate(rootId, "Runbook", "Repeat me.\n\nRepeat me.");
+        using var createDoc = JsonDocument.Parse(createJson);
+        var pageId = createDoc.RootElement.GetProperty("document").GetProperty("page").GetProperty("id").GetString()!;
+
+        var patchJson = await WikiMcpTools.WikiPagePatchSelection(
+            pageId,
+            "Repeat me.",
+            "Updated.",
+            1,
+            "Ambiguous patch");
+        using var patchDoc = JsonDocument.Parse(patchJson);
+
+        Assert.False(patchDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("more than once", patchDoc.RootElement.GetProperty("message").GetString());
+    }
+
     private static async Task<string> CreateRootAsync()
     {
         var json = await WikiMcpTools.WikiRootCreate("Harness Wiki");

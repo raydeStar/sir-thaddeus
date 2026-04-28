@@ -199,6 +199,57 @@ public static class WikiMcpTools
     }
 
     [McpServerTool(
+        Name = "wiki_page_patch_selection",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = false,
+        OpenWorld = false),
+     Description("Replace exactly one selected text passage in a Wiki Canvas page. Requires current version and rejects missing or ambiguous selections.")]
+    public static Task<string> WikiPagePatchSelection(
+        [Description("Wiki page id from wiki_page_read.")] string pageId,
+        [Description("Exact selected text to replace. Must appear exactly once in the Markdown body.")] string selectedText,
+        [Description("Replacement text for the selected passage only.")] string replacementText,
+        [Description("Current page version from wiki_page_read.")] long expectedVersion,
+        [Description("Optional short revision summary.")] string? summary = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async (store, ct) =>
+        {
+            var document = await store.GetPageAsync(pageId, ct).ConfigureAwait(false);
+            if (document is null)
+                return Fail($"Wiki page '{pageId}' not found.");
+
+            if (expectedVersion != document.Page.Version)
+                return Fail($"Wiki page '{pageId}' is at version {document.Page.Version}, not {expectedVersion}.");
+
+            var selection = selectedText?.Trim();
+            if (string.IsNullOrWhiteSpace(selection))
+                return Fail("Selected text is required.");
+
+            var occurrenceCount = CountOccurrences(document.Markdown, selection);
+            if (occurrenceCount != 1)
+            {
+                return Fail(occurrenceCount == 0
+                    ? "Selected text no longer matches this page."
+                    : "Selected text appears more than once; provide a more specific passage.");
+            }
+
+            var markdown = ReplaceFirst(document.Markdown, selection, replacementText ?? string.Empty);
+            var updated = await store.UpdatePageAsync(
+                pageId,
+                markdown,
+                expectedVersion,
+                "agent",
+                NormalizeOptional(summary) ?? "Selection patch",
+                ct).ConfigureAwait(false);
+
+            return updated is null
+                ? Fail($"Wiki page '{pageId}' not found.")
+                : new { Ok = true, Document = updated };
+        }, cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "wiki_search",
         ReadOnly = true,
         Idempotent = true,
@@ -351,5 +402,26 @@ public static class WikiMcpTools
         var limit = Clamp(maxChars, 1_000, MaxPageReadChars);
         truncated = value.Length > limit;
         return truncated ? value[..limit] : value;
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        if (source.Length == 0 || value.Length == 0) return 0;
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+        return count;
+    }
+
+    private static string ReplaceFirst(string source, string value, string replacement)
+    {
+        var index = source.IndexOf(value, StringComparison.Ordinal);
+        return index < 0
+            ? source
+            : string.Concat(source.AsSpan(0, index), replacement, source.AsSpan(index + value.Length));
     }
 }

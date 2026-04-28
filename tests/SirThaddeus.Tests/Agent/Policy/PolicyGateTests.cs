@@ -43,6 +43,7 @@ public class PolicyGateTests
         MakeTool("wiki_search"),
         MakeTool("wiki_page_read"),
         MakeTool("wiki_page_update"),
+        MakeTool("wiki_page_patch_selection"),
         MakeTool("clipboard_read"),
         MakeTool("clipboard_write"),
         MakeTool("system_execute"),
