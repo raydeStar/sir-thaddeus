@@ -1102,15 +1102,17 @@ public sealed partial class SearchOrchestrator
         List<ToolCallRecord> toolCallsMade,
         CancellationToken ct)
     {
+        var effectiveUserMessage = userMessage ?? string.Empty;
+
         // Proximity-without-location guard. If the user said "bakeries near
         // me" / "local florists" / etc. and we have NO location context to
         // resolve from (no inline city, no profile location), the deep-dive
         // path will issue a useless places_discover call and let the LLM
         // fabricate a vague clarifying question. Surface the deterministic
         // settings prompt instead — same UX as SearchFact already does.
-        var lowerForGuard = (userMessage ?? string.Empty).ToLowerInvariant();
+        var lowerForGuard = effectiveUserMessage.ToLowerInvariant();
         if (IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerForGuard) &&
-            string.IsNullOrWhiteSpace(ResolveLocalBusinessLocationContext(userMessage ?? string.Empty)))
+            string.IsNullOrWhiteSpace(ResolveLocalBusinessLocationContext(effectiveUserMessage)))
         {
             return new AgentResponse
             {
@@ -1129,7 +1131,7 @@ public sealed partial class SearchOrchestrator
         // clean entity-only query (e.g. "San Francisco Street Bakery")
         // so the deep-dive coordinator searches for the right thing and
         // the briefing card shows a tidy query label.
-        var query = SanitizeDeepDiveQuery(userMessage);
+        var query = SanitizeDeepDiveQuery(effectiveUserMessage);
 
         var timezone = TimeZoneInfo.Local.Id;
         var locale = CultureInfo.CurrentCulture.Name;
@@ -1176,7 +1178,7 @@ public sealed partial class SearchOrchestrator
             now: now);
 
         Session.LastWasLocalBusinessDiscovery =
-            IntentFeatureExtractor.HasLocalBusinessProximitySignals(userMessage.ToLowerInvariant());
+            IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerForGuard);
 
         return new AgentResponse
         {
