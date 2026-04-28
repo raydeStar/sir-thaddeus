@@ -137,6 +137,11 @@ export interface UpdateWikiPageInput {
   summary?: string;
 }
 
+export interface MoveWikiPageInput {
+  folderId?: string | null;
+  expectedVersion?: number;
+}
+
 export interface WikiPageChatInput {
   prompt: string;
   scope?: string;
@@ -224,6 +229,15 @@ export async function getWikiPage(pageId: string): Promise<WikiPageDocument> {
 
 export async function updateWikiPage(pageId: string, input: UpdateWikiPageInput): Promise<WikiPageDocument> {
   const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return asJson<WikiPageDocument>(res);
+}
+
+export async function moveWikiPage(pageId: string, input: MoveWikiPageInput): Promise<WikiPageDocument> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/location`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),

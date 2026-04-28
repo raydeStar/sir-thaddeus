@@ -450,6 +450,83 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<WikiPageDocument?> MovePageAsync(
+        string pageId,
+        string? folderId,
+        long? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var gate = LockForPage(pageId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
+            if (located is null) return null;
+            var root = located.Value.Root;
+            var current = located.Value.Page;
+            if (expectedVersion.HasValue && expectedVersion.Value != current.Version)
+            {
+                throw new WikiVersionConflictException(pageId, expectedVersion.Value, current.Version);
+            }
+
+            var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
+            var markdown = await ReadPageBodyAsync(root, current, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(current.FolderId, targetFolderId, StringComparison.Ordinal))
+            {
+                return new WikiPageDocument(current, markdown);
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(targetFolderId))
+            {
+                var folder = await GetFolderAsync(connection, targetFolderId, cancellationToken).ConfigureAwait(false)
+                    ?? throw new KeyNotFoundException($"Folder '{targetFolderId}' not found.");
+                if (!string.Equals(folder.RootId, root.Id, StringComparison.Ordinal))
+                {
+                    throw new WikiPathException("Folder belongs to a different wiki root.");
+                }
+            }
+
+            var slug = await UniquePageSlugAsync(connection, targetFolderId, current.Slug, cancellationToken).ConfigureAwait(false);
+            var relativePath = await BuildPageRelativePathAsync(connection, targetFolderId, slug, cancellationToken).ConfigureAwait(false);
+            var updated = current with
+            {
+                FolderId = targetFolderId,
+                Slug = slug,
+                RelativePath = relativePath,
+                Version = current.Version + 1,
+                UpdatedAt = now,
+            };
+
+            var oldPath = ResolvePagePath(root, current.RelativePath);
+            var newPath = ResolvePagePath(root, updated.RelativePath);
+            await WritePageFileAsync(root, updated, markdown, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath))
+            {
+                File.Delete(oldPath);
+                DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(oldPath));
+            }
+
+            await UpdatePageMetadataAsync(connection, updated, cancellationToken).ConfigureAwait(false);
+            await InsertRevisionAsync(
+                connection,
+                updated.Id,
+                updated.Version,
+                "user",
+                now,
+                "Moved page",
+                markdown,
+                cancellationToken).ConfigureAwait(false);
+            return new WikiPageDocument(updated, markdown);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(string pageId, CancellationToken cancellationToken)
     {
         var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
@@ -762,7 +839,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             update pages
-            set title = $title,
+            set folder_id = $folderId,
+                title = $title,
                 slug = $slug,
                 relative_path = $relativePath,
                 version = $version,

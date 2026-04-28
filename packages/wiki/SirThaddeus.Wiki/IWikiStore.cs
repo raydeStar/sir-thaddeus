@@ -51,6 +51,12 @@ public interface IWikiStore
         long? expectedVersion,
         CancellationToken cancellationToken);
 
+    Task<WikiPageDocument?> MovePageAsync(
+        string pageId,
+        string? folderId,
+        long? expectedVersion,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(
         string pageId,
         CancellationToken cancellationToken);

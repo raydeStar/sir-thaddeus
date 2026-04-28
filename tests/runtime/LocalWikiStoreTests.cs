@@ -147,6 +147,43 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Move_page_updates_metadata_frontmatter_path_and_version()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var source = await store.CreateFolderAsync(root.Id, "Inbox", null, CancellationToken.None);
+        var parent = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var target = await store.CreateFolderAsync(root.Id, "Archive", parent.Id, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, source.Id, "Plan", "body", CancellationToken.None);
+        var sourcePath = Path.Combine(root.Path, page.Page.RelativePath);
+
+        var moved = await store.MovePageAsync(page.Page.Id, target.Id, page.Page.Version, CancellationToken.None);
+
+        Assert.NotNull(moved);
+        Assert.Equal(target.Id, moved!.Page.FolderId);
+        Assert.Equal(2, moved.Page.Version);
+        Assert.Equal(Path.Combine("projects", "archive", "plan.md"), moved.Page.RelativePath);
+        Assert.False(File.Exists(sourcePath));
+        var nestedFile = await File.ReadAllTextAsync(Path.Combine(root.Path, moved.Page.RelativePath));
+        Assert.Contains("folderId: " + target.Id, nestedFile);
+        Assert.Contains("version: 2", nestedFile);
+        Assert.Contains("body", nestedFile);
+
+        var movedToRoot = await store.MovePageAsync(page.Page.Id, null, moved.Page.Version, CancellationToken.None);
+
+        Assert.NotNull(movedToRoot);
+        Assert.Null(movedToRoot!.Page.FolderId);
+        Assert.Equal(3, movedToRoot.Page.Version);
+        Assert.Equal("plan.md", movedToRoot.Page.RelativePath);
+        var rootFile = await File.ReadAllTextAsync(Path.Combine(root.Path, movedToRoot.Page.RelativePath));
+        Assert.DoesNotContain("folderId:", rootFile);
+
+        var revisions = await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None);
+        Assert.Contains(revisions, revision => revision.Version == 2 && revision.Summary == "Moved page");
+        Assert.Contains(revisions, revision => revision.Version == 3 && revision.Summary == "Moved page");
+    }
+
+    [Fact]
     public async Task Rename_folder_updates_descendant_page_paths_and_frontmatter()
     {
         using var store = NewStore();

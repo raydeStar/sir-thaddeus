@@ -45,6 +45,7 @@ interface WikiStoreState {
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
+  movePage: (folderId: string | null) => Promise<void>;
   discardDraft: () => void;
   restoreRevision: (revisionId: string) => Promise<void>;
   undoLatestAiEdit: () => Promise<void>;
@@ -326,6 +327,43 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const tree = await api.getWikiTree(renamed.page.rootId);
       const revisions = await api.listWikiRevisions(renamed.page.id);
       set({ page: renamed, tree, revisions, draft: renamed.markdown, selectedPageId: renamed.page.id, selectedText: '', selectionRewriteDraft: null, dirty: false });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  movePage: async (folderId: string | null) => {
+    const current = get().page;
+    if (!current) return;
+    const targetFolderId = folderId || null;
+    if (current.page.folderId === targetFolderId) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before moving this page.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      const moved = await api.moveWikiPage(current.page.id, {
+        folderId: targetFolderId,
+        expectedVersion: current.page.version,
+      });
+      const tree = await api.getWikiTree(moved.page.rootId);
+      const revisions = await api.listWikiRevisions(moved.page.id);
+      set({
+        page: moved,
+        tree,
+        revisions,
+        draft: moved.markdown,
+        selectedPageId: moved.page.id,
+        selectedFolderId: moved.page.folderId,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        scope: 'page',
+      });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {

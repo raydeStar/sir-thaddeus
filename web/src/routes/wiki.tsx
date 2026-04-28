@@ -81,6 +81,7 @@ function WikiRoute() {
     createPage,
     savePage,
     renamePage,
+    movePage,
     discardDraft,
     restoreRevision,
     undoLatestAiEdit,
@@ -113,6 +114,7 @@ function WikiRoute() {
   const filteredPages = tree?.pages ?? [];
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
   const rootFolders = folders.filter((folder) => !folder.parentFolderId);
+  const folderOptions = folders.map((folder) => ({ id: folder.id, label: formatFolderPath(folders, folder) }));
   const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
@@ -408,6 +410,23 @@ function WikiRoute() {
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
+                {page ? (
+                  <div className="relative hidden min-w-[176px] sm:block">
+                    <select
+                      aria-label="Page folder"
+                      value={page.page.folderId ?? ''}
+                      disabled={busy || dirty}
+                      onChange={(event) => void movePage(event.target.value || null)}
+                      className="w-full appearance-none rounded-lg border border-line bg-canvas-raised py-1.5 pl-2.5 pr-8 text-xs text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
+                    >
+                      <option value="">Root</option>
+                      {folderOptions.map((folder) => (
+                        <option key={folder.id} value={folder.id}>{folder.label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2 top-2 h-3.5 w-3.5 text-ink-subtle" strokeWidth={1.8} />
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="wiki-icon-button"
