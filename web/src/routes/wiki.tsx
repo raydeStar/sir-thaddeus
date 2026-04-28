@@ -132,6 +132,11 @@ function WikiRoute() {
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
   const previewRevision = revisions.find((revision) => revision.id === previewRevisionId) ?? null;
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  // Track the previous selection state so we only auto-focus the prompt at
+  // the moment a selection is *acquired* — not on every re-render while a
+  // selection happens to exist (which would steal focus while the user types).
+  const hadSelectionRef = useRef(false);
 
   // Pop the assistant pane open the moment the user highlights text in the
   // editor — they almost certainly want to do something with it, and finding a
@@ -140,6 +145,23 @@ function WikiRoute() {
     if (selectedText.trim().length > 0 && rightCollapsed) {
       setRightCollapsed(false);
     }
+  }, [selectedText, rightCollapsed]);
+
+  // When a selection is *acquired* (transition from empty → non-empty),
+  // move focus into the prompt textarea so the user has a clear visual signal
+  // that the assistant pane is ready for instructions. The textarea is only
+  // mounted when the right pane is expanded, so we wait until both conditions
+  // hold before focusing.
+  useEffect(() => {
+    const hasSelection = selectedText.trim().length > 0;
+    if (hasSelection && !hadSelectionRef.current && !rightCollapsed) {
+      // Defer one tick so the freshly-expanded pane has mounted the textarea.
+      const id = window.setTimeout(() => promptRef.current?.focus(), 0);
+      hadSelectionRef.current = true;
+      return () => window.clearTimeout(id);
+    }
+    hadSelectionRef.current = hasSelection;
+    return undefined;
   }, [selectedText, rightCollapsed]);
 
   // Keep the chat transcript pinned to the bottom as messages stream in. The
@@ -669,7 +691,7 @@ function WikiRoute() {
                   <section className="space-y-2">
                     <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
                   <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
-                    <div ref={chatScrollRef} className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                    <div ref={chatScrollRef} aria-live="polite" className="max-h-64 space-y-2 overflow-y-auto pr-1">
                       {pageChatMessages.length > 0 ? (
                         pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
                       ) : (
@@ -687,14 +709,14 @@ function WikiRoute() {
                       ) : null}
                     </div>
                     {selectedText ? (
-                      <div className="rounded-lg border border-accent/40 bg-accent-soft/60 px-3 py-2">
+                      <div className="rounded-lg border border-accent bg-accent-soft px-3 py-2">
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
                             Selected · {countWords(selectedText)} words
                           </p>
                           <button
                             type="button"
-                            className="text-ink-subtle hover:text-ink"
+                            className="shrink-0 rounded p-0.5 text-ink-subtle hover:bg-canvas hover:text-ink"
                             onClick={() => setSelectedText('')}
                             title="Clear selection"
                             aria-label="Clear selection"
@@ -708,9 +730,14 @@ function WikiRoute() {
                       </div>
                     ) : null}
                     <textarea
+                      ref={promptRef}
                       value={pagePrompt}
                       onChange={(event) => setPagePrompt(event.target.value)}
                       onKeyDown={(event) => {
+                        // Guard against IME composition: Japanese/Chinese input
+                        // methods fire Enter to confirm a candidate; submitting
+                        // there would steal the keystroke from the IME.
+                        if (event.nativeEvent.isComposing) return;
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
                           if (busy || !pagePrompt.trim()) return;
