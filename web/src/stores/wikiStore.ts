@@ -196,11 +196,16 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   createFolder: async () => {
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before creating a folder.' });
+      return;
+    }
     const rootId = get().selectedRootId;
     if (!rootId) return;
+    const parentFolderId = get().scope === 'folder' ? get().selectedFolderId : null;
     set({ saving: true, error: null });
     try {
-      const created = await api.createWikiFolder(rootId, { name: 'New Folder', parentFolderId: null });
+      const created = await api.createWikiFolder(rootId, { name: 'New Folder', parentFolderId });
       const tree = await api.getWikiTree(rootId);
       set({ tree, selectedFolderId: created.id, scope: 'folder' });
     } catch (error) {

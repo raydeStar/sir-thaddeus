@@ -110,6 +110,7 @@ function WikiRoute() {
   const selectedFolder = tree?.folders.find((folder) => folder.id === selectedFolderId) ?? null;
   const filteredPages = tree?.pages ?? [];
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
+  const rootFolders = tree?.folders.filter((folder) => !folder.parentFolderId) ?? [];
   const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
@@ -225,7 +226,7 @@ function WikiRoute() {
           <button type="button" className="wiki-icon-button" title="New root" aria-label="New root" disabled={busy} onClick={() => void createRoot()}>
             <Library className="h-4 w-4" strokeWidth={1.8} />
           </button>
-          <button type="button" className="wiki-icon-button" title="New folder" aria-label="New folder" disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
+          <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
             <Folder className="h-4 w-4" strokeWidth={1.8} />
           </button>
           <button type="button" className="wiki-command-button" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
@@ -342,11 +343,12 @@ function WikiRoute() {
                 />
               ) : tree ? (
                 <nav className="space-y-3" aria-label="Wiki folders">
-                  {tree.folders.map((folder) => (
+                  {rootFolders.map((folder) => (
                     <FolderSection
                       key={folder.id}
                       folder={folder}
-                      pages={filteredPages.filter((candidate) => candidate.folderId === folder.id)}
+                      folders={tree.folders}
+                      pages={filteredPages}
                       selectedFolderId={selectedFolderId}
                       selectedPageId={selectedPageId}
                       scope={scope}
@@ -364,6 +366,7 @@ function WikiRoute() {
                     <FolderSection
                       folder={null}
                       pages={rootPages}
+                      folders={tree.folders}
                       selectedFolderId={selectedFolderId}
                       selectedPageId={selectedPageId}
                       scope={scope}
@@ -642,6 +645,7 @@ function PageChatBubble({ message }: { message: WikiPageChatMessage }) {
 
 function FolderSection({
   folder,
+  folders,
   pages,
   selectedFolderId,
   selectedPageId,
@@ -656,6 +660,7 @@ function FolderSection({
   onFolderNameDraftChange,
 }: {
   folder: WikiFolder | null;
+  folders: WikiFolder[];
   pages: WikiPage[];
   selectedFolderId: string | null;
   selectedPageId: string | null;
@@ -671,6 +676,8 @@ function FolderSection({
 }) {
   const isFolderSelected = folder ? selectedFolderId === folder.id && scope === 'folder' : !selectedFolderId && scope === 'root';
   const isRenaming = folder ? renamingFolderId === folder.id : false;
+  const childFolders = folder ? folders.filter((candidate) => candidate.parentFolderId === folder.id) : [];
+  const sectionPages = folder ? pages.filter((page) => page.folderId === folder.id) : pages;
   return (
     <section>
       {isRenaming ? (
@@ -719,7 +726,7 @@ function FolderSection({
         </div>
       )}
       <ul className="mt-1 space-y-1">
-        {pages.map((page) => (
+        {sectionPages.map((page) => (
           <li key={page.id}>
             <button
               type="button"
@@ -735,6 +742,29 @@ function FolderSection({
           </li>
         ))}
       </ul>
+      {childFolders.length > 0 ? (
+        <div className="mt-2 space-y-2 border-l border-line/70 pl-3">
+          {childFolders.map((childFolder) => (
+            <FolderSection
+              key={childFolder.id}
+              folder={childFolder}
+              folders={folders}
+              pages={pages}
+              selectedFolderId={selectedFolderId}
+              selectedPageId={selectedPageId}
+              scope={scope}
+              renamingFolderId={renamingFolderId}
+              folderNameDraft={folderNameDraft}
+              onFolderSelect={onFolderSelect}
+              onPageSelect={onPageSelect}
+              onFolderRenameStart={onFolderRenameStart}
+              onFolderRenameCancel={onFolderRenameCancel}
+              onFolderRenameSubmit={onFolderRenameSubmit}
+              onFolderNameDraftChange={onFolderNameDraftChange}
+            />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
