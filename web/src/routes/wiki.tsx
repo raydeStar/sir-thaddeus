@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   BookOpenText,
@@ -25,7 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { useWikiStore, type WikiPageChatMessage, type WikiScope } from '../stores/wikiStore';
-import type { WikiFolder, WikiPage, WikiRevision } from '../lib/wikiApi';
+import type { WikiFolder, WikiPage, WikiRevision, WikiSearchResult } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
   import('../components/wiki/WikiMarkdownEditor').then((module) => ({
@@ -51,6 +51,7 @@ function WikiRoute() {
     selectedPageId,
     scope,
     search,
+    searchResults,
     draft,
     pageChatMessages,
     pageChatDraft,
@@ -59,6 +60,7 @@ function WikiRoute() {
     dirty,
     loading,
     saving,
+    searching,
     pageAssistantBusy,
     error,
     loadRoots,
@@ -92,17 +94,9 @@ function WikiRoute() {
   const selectedRoot = roots.find((root) => root.id === selectedRootId) ?? tree?.root ?? null;
   const selectedPage = page?.page ?? tree?.pages.find((candidate) => candidate.id === selectedPageId) ?? null;
   const selectedFolder = tree?.folders.find((folder) => folder.id === selectedFolderId) ?? null;
-  const filteredPages = useMemo(() => {
-    const pages = tree?.pages ?? [];
-    const query = search.trim().toLowerCase();
-    if (!query) return pages;
-    return pages.filter((candidate) => {
-      return candidate.title.toLowerCase().includes(query)
-        || candidate.excerpt.toLowerCase().includes(query)
-        || candidate.relativePath.toLowerCase().includes(query);
-    });
-  }, [search, tree?.pages]);
+  const filteredPages = tree?.pages ?? [];
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
+  const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
@@ -225,7 +219,14 @@ function WikiRoute() {
                 />
               </div>
 
-              {tree ? (
+              {tree && hasSearch ? (
+                <SearchResultsList
+                  results={searchResults}
+                  searching={searching}
+                  selectedPageId={selectedPageId}
+                  onPageSelect={(pageId) => void selectPage(pageId)}
+                />
+              ) : tree ? (
                 <nav className="space-y-3" aria-label="Wiki folders">
                   {tree.folders.map((folder) => (
                     <FolderSection
@@ -428,7 +429,7 @@ function WikiRoute() {
                         key={revision.id}
                         revision={revision}
                         active={index === 0}
-                          disabled={busy || dirty || index === 0}
+                        disabled={busy || dirty || index === 0}
                         onRestore={() => void restoreRevision(revision.id)}
                       />
                     ))}
@@ -442,6 +443,55 @@ function WikiRoute() {
         </aside>
       </div>
     </section>
+  );
+}
+
+function SearchResultsList({
+  results,
+  searching,
+  selectedPageId,
+  onPageSelect,
+}: {
+  results: WikiSearchResult[];
+  searching: boolean;
+  selectedPageId: string | null;
+  onPageSelect: (pageId: string) => void;
+}) {
+  if (searching) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">
+        <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
+        Searching
+      </div>
+    );
+  }
+
+  if (results.length === 0) {
+    return (
+      <p className="rounded-xl border border-line bg-canvas-raised px-3 py-6 text-center text-sm text-ink-muted">
+        No matching pages
+      </p>
+    );
+  }
+
+  return (
+    <nav className="space-y-2" aria-label="Wiki search results">
+      {results.map((result) => (
+        <button
+          key={result.pageId}
+          type="button"
+          onClick={() => onPageSelect(result.pageId)}
+          className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition ${selectedPageId === result.pageId ? 'border-accent/40 bg-accent-soft text-ink' : 'border-line bg-canvas-raised text-ink-muted hover:text-ink'}`}
+        >
+          <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">{result.title}</span>
+            <span className="mt-0.5 block truncate text-[11px] text-ink-subtle">{result.relativePath}</span>
+            {result.excerpt ? <span className="mt-1 line-clamp-2 block text-xs leading-5">{result.excerpt}</span> : null}
+          </span>
+        </button>
+      ))}
+    </nav>
   );
 }
 

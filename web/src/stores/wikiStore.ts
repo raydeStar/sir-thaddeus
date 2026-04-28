@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSelectionRewriteDraft, WikiTree } from '../lib/wikiApi';
+import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 
@@ -21,6 +21,7 @@ interface WikiStoreState {
   selectedPageId: string | null;
   scope: WikiScope;
   search: string;
+  searchResults: WikiSearchResult[];
   draft: string;
   pageChatMessages: WikiPageChatMessage[];
   pageChatDraft: WikiPageDraft | null;
@@ -29,6 +30,7 @@ interface WikiStoreState {
   dirty: boolean;
   loading: boolean;
   saving: boolean;
+  searching: boolean;
   pageAssistantBusy: boolean;
   error: string | null;
 
@@ -66,6 +68,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   selectedPageId: null,
   scope: 'root',
   search: '',
+  searchResults: [],
   draft: '',
   pageChatMessages: [],
   pageChatDraft: null,
@@ -74,6 +77,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   dirty: false,
   loading: false,
   saving: false,
+  searching: false,
   pageAssistantBusy: false,
   error: null,
 
@@ -89,7 +93,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       } else if (roots.length > 0) {
         await get().selectRoot(roots[0].id);
       } else {
-        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
+        set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
@@ -101,7 +105,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set({ error: 'Save or discard changes before switching roots.' });
       return;
     }
-    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
+    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], searching: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
       set({ tree, loading: false });
@@ -425,7 +429,28 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
 
   setDraft: (markdown: string) => set({ draft: markdown, dirty: true, selectionRewriteDraft: null }),
   setSelectedText: (text: string) => set({ selectedText: text }),
-  setSearch: (search: string) => set({ search }),
+  setSearch: (search: string) => {
+    set({ search });
+    const query = search.trim();
+    const rootId = get().selectedRootId;
+    if (!query || !rootId) {
+      set({ searchResults: [], searching: false });
+      return;
+    }
+
+    set({ searching: true, error: null });
+    void api.searchWiki(rootId, query)
+      .then((results) => {
+        if (get().search.trim() === query && get().selectedRootId === rootId) {
+          set({ searchResults: results, searching: false });
+        }
+      })
+      .catch((error) => {
+        if (get().search.trim() === query && get().selectedRootId === rootId) {
+          set({ error: (error as Error).message, searchResults: [], searching: false });
+        }
+      });
+  },
   setScope: (scope: WikiScope) => set({ scope }),
 }));
 
