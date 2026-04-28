@@ -160,6 +160,23 @@ export async function listWikiRevisions(pageId: string): Promise<WikiRevision[]>
   return (await asJson<WikiRevisionsResponse>(res)).revisions;
 }
 
+export async function restoreWikiRevision(
+  pageId: string,
+  revisionId: string,
+  expectedVersion?: number,
+): Promise<WikiPageDocument> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}/restore`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedVersion }),
+    },
+  );
+  return asJson<WikiPageDocument>(res);
+}
+
 export async function searchWiki(rootId: string | null, query: string): Promise<WikiSearchResult[]> {
   const params = new URLSearchParams({ query });
   if (rootId) params.set('rootId', rootId);

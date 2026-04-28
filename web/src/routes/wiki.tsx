@@ -54,6 +54,7 @@ function WikiRoute() {
     createFolder,
     createPage,
     savePage,
+    restoreRevision,
     setDraft,
     setSearch,
     setScope,
@@ -303,7 +304,13 @@ function WikiRoute() {
                 {revisions.length > 0 ? (
                   <ol className="space-y-2">
                     {revisions.map((revision, index) => (
-                      <RevisionItem key={revision.id} revision={revision} active={index === 0} />
+                      <RevisionItem
+                        key={revision.id}
+                        revision={revision}
+                        active={index === 0}
+                        disabled={busy || index === 0}
+                        onRestore={() => void restoreRevision(revision.id)}
+                      />
                     ))}
                   </ol>
                 ) : (
@@ -400,16 +407,38 @@ function ScopeChip({ scope, root, folder, page }: { scope: WikiScope; root?: str
   );
 }
 
-function RevisionItem({ revision, active = false }: { revision: WikiRevision; active?: boolean }) {
+function RevisionItem({
+  revision,
+  active = false,
+  disabled,
+  onRestore,
+}: {
+  revision: WikiRevision;
+  active?: boolean;
+  disabled: boolean;
+  onRestore: () => void;
+}) {
   return (
     <li className={`rounded-xl border px-3 py-2 ${active ? 'border-accent/40 bg-accent-soft' : 'border-line bg-canvas-raised'}`}>
-      <div className="flex items-center gap-2 text-sm font-medium text-ink">
-        <Clock3 className="h-4 w-4" strokeWidth={1.8} />
-        Version {revision.version}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
+            <Clock3 className="h-4 w-4" strokeWidth={1.8} />
+            Version {revision.version}
+          </div>
+          <p className="mt-0.5 text-[11px] text-ink-subtle">
+            {revision.source} · {formatStamp(revision.createdAt)}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={disabled}
+          onClick={onRestore}
+        >
+          Restore
+        </button>
       </div>
-      <p className="mt-0.5 text-[11px] text-ink-subtle">
-        {revision.source} · {formatStamp(revision.createdAt)}
-      </p>
     </li>
   );
 }

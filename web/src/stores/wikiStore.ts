@@ -28,6 +28,7 @@ interface WikiStoreState {
   createFolder: () => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
+  restoreRevision: (revisionId: string) => Promise<void>;
   setDraft: (markdown: string) => void;
   setSearch: (search: string) => void;
   setScope: (scope: WikiScope) => void;
@@ -179,6 +180,35 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const tree = await api.getWikiTree(saved.page.rootId);
       const revisions = await api.listWikiRevisions(saved.page.id);
       set({ page: saved, tree, revisions, draft: saved.markdown, dirty: false });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  restoreRevision: async (revisionId: string) => {
+    const current = get().page;
+    if (!current) return;
+    set({ saving: true, error: null });
+    try {
+      const restored = await api.restoreWikiRevision(
+        current.page.id,
+        revisionId,
+        current.page.version,
+      );
+      const tree = await api.getWikiTree(restored.page.rootId);
+      const revisions = await api.listWikiRevisions(restored.page.id);
+      set({
+        page: restored,
+        tree,
+        revisions,
+        selectedPageId: restored.page.id,
+        selectedFolderId: restored.page.folderId,
+        draft: restored.markdown,
+        dirty: false,
+        scope: 'page',
+      });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
