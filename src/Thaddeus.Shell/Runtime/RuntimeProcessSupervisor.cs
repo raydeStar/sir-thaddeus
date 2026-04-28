@@ -17,6 +17,14 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
     private readonly string _lockFilePath;
     private Process? _process;
 
+    /// <summary>
+    /// Raised when the supervised runtime process exits unexpectedly (or after
+    /// a graceful <c>/api/runtime/stop</c>). Subscribers should treat this as
+    /// the cue to tear the shell down — without it the workspace window would
+    /// stay open pointing at a dead backend.
+    /// </summary>
+    public event EventHandler? RuntimeExited;
+
     /// <summary>Wires the supervisor.</summary>
     public RuntimeProcessSupervisor(ILogger<RuntimeProcessSupervisor> logger)
     {
@@ -51,6 +59,23 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         _logger.LogInformation("runtime.spawning command={Cmd} args={Args}", psi.FileName, string.Join(' ', psi.ArgumentList));
         _process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to spawn runtime process.");
+
+        // Surface child-process exit so the shell can tear itself down when the
+        // runtime is killed (web "kill app" button, /api/runtime/stop, crash).
+        try
+        {
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (_, _) =>
+            {
+                _logger.LogInformation("runtime.process_exited pid={Pid}", _process?.Id);
+                try { RuntimeExited?.Invoke(this, EventArgs.Empty); }
+                catch (Exception ex) { _logger.LogWarning(ex, "runtime.exited_handler_failed"); }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.exited_subscribe_failed");
+        }
 
         return await WaitForLockFileAsync(ct).ConfigureAwait(false);
     }

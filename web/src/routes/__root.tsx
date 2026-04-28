@@ -16,6 +16,7 @@ import { useRuntimeStore } from '../stores/runtimeStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
 import { useToolActivityStore } from '../stores/toolActivityStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
+import { KillAppButton } from '../components/KillAppButton';
 import { PermissionModal } from '../components/PermissionModal';
 import { readRuntimeMetadata } from '../lib/runtime';
 
@@ -114,6 +115,7 @@ function RootLayout() {
           </nav>
           <div className="hidden md:block" />
           <div className="flex items-center gap-3 text-xs text-ink-muted">
+            <KillAppButton />
             <RuntimeStateBadge />
           </div>
         </header>

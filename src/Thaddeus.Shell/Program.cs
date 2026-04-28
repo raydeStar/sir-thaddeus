@@ -68,6 +68,16 @@ public static class Program
             var window = new WorkspaceWindow(loggerFactory.CreateLogger<WorkspaceWindow>());
             ShellSessionController? shellSession = null;
 
+            // When the supervised runtime process exits — whether from the web
+            // "kill app" button, a crash, or a tray Stop All — pull the shell
+            // window down with it. Without this the workspace stays open
+            // pointing at a dead backend.
+            supervisor.RuntimeExited += (_, _) =>
+            {
+                try { shellSession?.ExitAsync().GetAwaiter().GetResult(); }
+                catch (Exception ex) { log.LogWarning(ex, "shell.runtime_exit_handler_failed"); }
+            };
+
             // Phase 2.4 builds the compact panel launcher; Phase 2.5 wires it to a
             // real Windows global shortcut (Ctrl+Shift+Space → toggle). Other OSes
             // fall back to the stub adapter and the env-var smoke-test path.
