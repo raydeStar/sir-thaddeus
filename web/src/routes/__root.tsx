@@ -8,6 +8,7 @@ import {
   Gauge,
   History,
   Home,
+  Library,
   MessageSquareText,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ interface NavEntry {
 const primaryNav: ReadonlyArray<NavEntry> = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/chat', label: 'Chat', icon: MessageSquareText },
+  { to: '/wiki', label: 'Wiki', icon: Library },
   { to: '/history', label: 'History', icon: History },
   { to: '/activity', label: 'Activity', icon: Activity },
 ];

@@ -112,6 +112,14 @@
     @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink transition hover:bg-accent-soft hover:border-line-strong disabled:opacity-50;
   }
 
+  .wiki-icon-button {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-canvas-raised text-ink-muted transition hover:border-line-strong hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .wiki-command-button {
+    @apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-canvas-raised px-3 text-sm font-medium text-ink transition hover:border-line-strong hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
   /* Low-chrome container. No shadow — just a barely-there bg wash + thin hairline.
      Intentionally minimal so pages feel composed of content, not boxes. */
   .surface {
