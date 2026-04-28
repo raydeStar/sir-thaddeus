@@ -200,4 +200,17 @@
     @apply font-semibold text-ink;
     background: var(--color-canvas-sunken);
   }
+
+  .wiki-editor .ProseMirror {
+    min-height: 100%;
+    outline: none;
+  }
+
+  .wiki-editor .ProseMirror p.is-editor-empty:first-child::before {
+    color: var(--color-ink-subtle);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
 }

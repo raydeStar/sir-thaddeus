@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   BookOpenText,
@@ -23,6 +23,12 @@ import {
 } from 'lucide-react';
 import { useWikiStore, type WikiScope } from '../stores/wikiStore';
 import type { WikiFolder, WikiPage, WikiRevision } from '../lib/wikiApi';
+
+const WikiMarkdownEditor = lazy(() =>
+  import('../components/wiki/WikiMarkdownEditor').then((module) => ({
+    default: module.WikiMarkdownEditor,
+  })),
+);
 
 export const Route = createFileRoute('/wiki')({
   component: WikiRoute,
@@ -236,15 +242,15 @@ function WikiRoute() {
             </div>
 
             {selectedRoot ? (
-              <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                spellCheck
-                disabled={!page}
-                placeholder={page ? '' : 'Create or select a page'}
-                className="min-h-0 flex-1 resize-none bg-canvas px-5 py-5 font-mono text-sm leading-6 text-ink outline-none placeholder:text-ink-subtle disabled:text-ink-muted md:px-8"
-                aria-label="Wiki markdown canvas"
-              />
+              page ? (
+                <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-ink-muted">Loading editor</div>}>
+                  <WikiMarkdownEditor markdown={draft} disabled={busy} onChange={setDraft} />
+                </Suspense>
+              ) : (
+                <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-ink-muted">
+                  Create or select a page
+                </div>
+              )
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
                 <p className="text-base font-medium text-ink">No wiki roots yet</p>
