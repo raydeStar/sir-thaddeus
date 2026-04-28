@@ -41,6 +41,7 @@ interface WikiStoreState {
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   restoreRevision: (revisionId: string) => Promise<void>;
+  undoLatestAiEdit: () => Promise<void>;
   askPage: (prompt: string) => Promise<void>;
   draftPage: (instruction: string) => Promise<void>;
   applyPageDraft: () => Promise<void>;
@@ -250,6 +251,13 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     } finally {
       set({ saving: false });
     }
+  },
+
+  undoLatestAiEdit: async () => {
+    const latest = get().revisions[0];
+    const previous = get().revisions[1];
+    if (!latest || !previous || latest.source !== 'ai') return;
+    await get().restoreRevision(previous.id);
   },
 
   askPage: async (prompt: string) => {

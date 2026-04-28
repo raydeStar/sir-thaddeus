@@ -70,6 +70,7 @@ function WikiRoute() {
     createPage,
     savePage,
     restoreRevision,
+    undoLatestAiEdit,
     askPage,
     draftPage,
     applyPageDraft,
@@ -103,6 +104,7 @@ function WikiRoute() {
   const rootPages = filteredPages.filter((candidate) => !candidate.folderId);
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
+  const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
   const submitPageAsk = async () => {
     const prompt = pagePrompt.trim();
     if (!prompt) return;
@@ -270,7 +272,7 @@ function WikiRoute() {
                 <button type="button" className="wiki-icon-button" title="Page settings" aria-label="Page settings" disabled={!page}>
                   <Settings2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
-                <button type="button" className="wiki-icon-button" title="Undo AI edit" aria-label="Undo AI edit" disabled={!page || revisions.every((revision) => revision.source !== 'ai')}>
+                <button type="button" className="wiki-icon-button" title="Undo latest AI edit" aria-label="Undo latest AI edit" disabled={busy || !canUndoLatestAiEdit} onClick={() => void undoLatestAiEdit()}>
                   <Undo2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
               </div>
