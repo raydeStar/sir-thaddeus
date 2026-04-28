@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, BookOpen } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowUp, BookOpen, FileText, Folder, Library, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
@@ -37,6 +37,10 @@ function ChatThreadRoute() {
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const selectedWikiContextOption = useMemo(
+    () => wikiContextOptions.find((option) => option.value === wikiContextValue) ?? null,
+    [wikiContextOptions, wikiContextValue],
+  );
 
   useEffect(() => {
     void openThread(threadId);
@@ -102,7 +106,7 @@ function ChatThreadRoute() {
     setDraft('');
     await send(
       text,
-      selectedWikiContext(wikiContextValue, wikiContextOptions),
+      selectedWikiContext(selectedWikiContextOption),
     );
   };
 
@@ -203,23 +207,49 @@ function ChatThreadRoute() {
             data-testid="chat-composer"
             className="rounded-2xl border border-line bg-canvas-raised px-4 py-3 transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
           >
-            <div className="mb-2 flex items-center gap-2 border-b border-line/70 pb-2">
-              <BookOpen className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
-              <select
-                value={wikiContextValue}
-                onChange={(event) => setWikiContextValue(event.target.value)}
-                disabled={sending || wikiContextLoading || wikiContextOptions.length === 0}
-                aria-label="Wiki context"
-                data-testid="chat-wiki-context"
-                className="min-w-0 flex-1 border-0 bg-transparent text-xs text-ink-muted outline-none focus:text-ink disabled:opacity-60"
-              >
-                <option value="">No wiki context</option>
-                {wikiContextOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.mode === 'root' ? 'Root' : option.mode === 'folder' ? 'Folder' : 'Page'} / {option.title}
-                  </option>
-                ))}
-              </select>
+            <div className="mb-2 border-b border-line/70 pb-2">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
+                <select
+                  value={wikiContextValue}
+                  onChange={(event) => setWikiContextValue(event.target.value)}
+                  disabled={sending || wikiContextLoading || wikiContextOptions.length === 0}
+                  aria-label="Wiki context"
+                  data-testid="chat-wiki-context"
+                  className="min-w-0 flex-1 border-0 bg-transparent text-xs text-ink-muted outline-none focus:text-ink disabled:opacity-60"
+                >
+                  <option value="">No wiki context</option>
+                  {wikiContextOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {wikiContextKind(option.mode)} / {option.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedWikiContextOption ? (
+                <div
+                  className="mt-2 flex min-w-0 items-center justify-between gap-2 rounded-lg border border-accent/25 bg-accent-soft px-2.5 py-1.5 text-xs text-ink"
+                  data-testid="chat-wiki-context-active"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <WikiContextGlyph mode={selectedWikiContextOption.mode} />
+                    <span className="shrink-0 font-medium text-ink-muted">
+                      {wikiContextKind(selectedWikiContextOption.mode)}
+                    </span>
+                    <span className="truncate">{selectedWikiContextOption.title}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setWikiContextValue('')}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
+                    aria-label="Clear wiki context"
+                    title="Clear wiki context"
+                    disabled={sending}
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="flex items-end gap-2">
               <textarea
@@ -250,9 +280,7 @@ function ChatThreadRoute() {
   );
 }
 
-function selectedWikiContext(value: string, options: WikiContextOption[]) {
-  if (!value) return undefined;
-  const option = options.find((candidate) => candidate.value === value);
+function selectedWikiContext(option: WikiContextOption | null) {
   if (!option) return undefined;
   if (option.mode === 'root' && option.rootId) return { mode: 'root' as const, rootId: option.rootId };
   if (option.mode === 'folder' && option.rootId && option.folderId) {
@@ -260,6 +288,18 @@ function selectedWikiContext(value: string, options: WikiContextOption[]) {
   }
   if (option.mode === 'page' && option.pageId) return { mode: 'page' as const, pageId: option.pageId };
   return undefined;
+}
+
+function wikiContextKind(mode: WikiContextOption['mode']) {
+  if (mode === 'root') return 'Root';
+  if (mode === 'folder') return 'Folder';
+  return 'Page';
+}
+
+function WikiContextGlyph({ mode }: { mode: WikiContextOption['mode'] }) {
+  if (mode === 'root') return <Library className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
+  if (mode === 'folder') return <Folder className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
+  return <FileText className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
 }
 
 interface MessageRowProps {
