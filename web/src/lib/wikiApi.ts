@@ -122,7 +122,8 @@ export interface CreateWikiPageInput {
 }
 
 export interface UpdateWikiPageInput {
-  markdown: string;
+  markdown?: string;
+  title?: string;
   expectedVersion?: number;
   source?: 'user' | 'ai' | 'restore';
   summary?: string;

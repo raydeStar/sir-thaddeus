@@ -104,6 +104,30 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Rename_page_updates_metadata_frontmatter_path_and_version()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Projects", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, folder.Id, "Old Title", "body", CancellationToken.None);
+        var oldPath = Path.Combine(root.Path, page.Page.RelativePath);
+
+        var renamed = await store.RenamePageAsync(page.Page.Id, "New Title", page.Page.Version, CancellationToken.None);
+
+        Assert.NotNull(renamed);
+        Assert.Equal("New Title", renamed!.Page.Title);
+        Assert.Equal(2, renamed.Page.Version);
+        Assert.Equal(Path.Combine("projects", "new-title.md"), renamed.Page.RelativePath);
+        Assert.False(File.Exists(oldPath));
+        var newFile = await File.ReadAllTextAsync(Path.Combine(root.Path, renamed.Page.RelativePath));
+        Assert.Contains("title: New Title", newFile);
+        Assert.Contains("body", newFile);
+
+        var revisions = await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None);
+        Assert.Contains(revisions, revision => revision.Version == 2 && revision.Summary == "Renamed page");
+    }
+
+    [Fact]
     public async Task Folder_ids_are_not_valid_across_roots()
     {
         using var store = NewStore();

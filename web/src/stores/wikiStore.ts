@@ -42,6 +42,7 @@ interface WikiStoreState {
   createFolder: () => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
+  renamePage: (title: string) => Promise<void>;
   discardDraft: () => void;
   restoreRevision: (revisionId: string) => Promise<void>;
   undoLatestAiEdit: () => Promise<void>;
@@ -235,6 +236,32 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       const tree = await api.getWikiTree(saved.page.rootId);
       const revisions = await api.listWikiRevisions(saved.page.id);
       set({ page: saved, tree, revisions, draft: saved.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  renamePage: async (title: string) => {
+    const current = get().page;
+    const trimmed = title.trim();
+    if (!current || !trimmed || trimmed === current.page.title) return;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before renaming this page.' });
+      return;
+    }
+    set({ saving: true, error: null });
+    try {
+      const renamed = await api.updateWikiPage(current.page.id, {
+        title: trimmed,
+        expectedVersion: current.page.version,
+        source: 'user',
+        summary: 'Renamed page',
+      });
+      const tree = await api.getWikiTree(renamed.page.rootId);
+      const revisions = await api.listWikiRevisions(renamed.page.id);
+      set({ page: renamed, tree, revisions, draft: renamed.markdown, selectedPageId: renamed.page.id, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {

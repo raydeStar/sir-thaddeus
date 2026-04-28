@@ -41,6 +41,7 @@ function WikiRoute() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pagePrompt, setPagePrompt] = useState('');
+  const [pageTitleDraft, setPageTitleDraft] = useState('');
   const {
     roots,
     tree,
@@ -71,6 +72,7 @@ function WikiRoute() {
     createFolder,
     createPage,
     savePage,
+    renamePage,
     discardDraft,
     restoreRevision,
     undoLatestAiEdit,
@@ -90,6 +92,10 @@ function WikiRoute() {
   useEffect(() => {
     void loadRoots();
   }, [loadRoots]);
+
+  useEffect(() => {
+    setPageTitleDraft(page?.page.title ?? '');
+  }, [page?.page.id, page?.page.title]);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId) ?? tree?.root ?? null;
   const selectedPage = page?.page ?? tree?.pages.find((candidate) => candidate.id === selectedPageId) ?? null;
@@ -118,6 +124,14 @@ function WikiRoute() {
     setPagePrompt('');
     await rewriteSelection(prompt);
   };
+  const submitPageTitle = async () => {
+    const trimmed = pageTitleDraft.trim();
+    if (!selectedPage || !trimmed || trimmed === selectedPage.title) {
+      setPageTitleDraft(selectedPage?.title ?? '');
+      return;
+    }
+    await renamePage(trimmed);
+  };
 
   return (
     <section className="flex min-h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
@@ -128,9 +142,26 @@ function WikiRoute() {
             Wiki Canvas
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-semibold text-ink">
-              {selectedPage?.title ?? selectedRoot?.name ?? 'Wiki'}
-            </h1>
+            {selectedPage ? (
+              <input
+                value={pageTitleDraft}
+                onChange={(event) => setPageTitleDraft(event.target.value)}
+                onBlur={() => void submitPageTitle()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                }}
+                disabled={busy || dirty}
+                aria-label="Page title"
+                className="min-w-0 max-w-[360px] rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold text-ink outline-none transition hover:border-line focus:border-accent focus:bg-canvas-raised focus:ring-2 focus:ring-accent/15 disabled:opacity-70"
+              />
+            ) : (
+              <h1 className="truncate text-xl font-semibold text-ink">
+                {selectedRoot?.name ?? 'Wiki'}
+              </h1>
+            )}
             <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolder?.name} page={selectedPage?.title} />
             <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted">
               <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />

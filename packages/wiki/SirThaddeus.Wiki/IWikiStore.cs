@@ -34,6 +34,12 @@ public interface IWikiStore
         string? summary,
         CancellationToken cancellationToken);
 
+    Task<WikiPageDocument?> RenamePageAsync(
+        string pageId,
+        string title,
+        long? expectedVersion,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(
         string pageId,
         CancellationToken cancellationToken);

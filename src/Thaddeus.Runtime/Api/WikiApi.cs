@@ -98,13 +98,25 @@ public static class WikiApi
 
             try
             {
-                var updated = await store.UpdatePageAsync(
-                    pageId,
-                    req.Markdown ?? string.Empty,
-                    req.ExpectedVersion,
-                    req.Source ?? "user",
-                    req.Summary,
-                    ct).ConfigureAwait(false);
+                WikiPageDocument? updated;
+                if (!string.IsNullOrWhiteSpace(req.Title) && req.Markdown is null)
+                {
+                    updated = await store.RenamePageAsync(pageId, req.Title, req.ExpectedVersion, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    updated = await store.UpdatePageAsync(
+                        pageId,
+                        req.Markdown ?? string.Empty,
+                        req.ExpectedVersion,
+                        req.Source ?? "user",
+                        req.Summary,
+                        ct).ConfigureAwait(false);
+                    if (updated is not null && !string.IsNullOrWhiteSpace(req.Title))
+                    {
+                        updated = await store.RenamePageAsync(pageId, req.Title, updated.Page.Version, ct).ConfigureAwait(false);
+                    }
+                }
                 if (updated is null) return Results.NotFound();
 
                 audit.Append(new AuditEvent
@@ -112,7 +124,7 @@ public static class WikiApi
                     Actor = req.Source is "ai" ? "assistant" : "user",
                     Action = "WIKI_PAGE_UPDATED",
                     Target = pageId,
-                    Details = new() { ["version"] = updated.Page.Version, ["source"] = req.Source ?? "user" },
+                    Details = new() { ["version"] = updated.Page.Version, ["source"] = req.Source ?? "user", ["title"] = updated.Page.Title },
                 });
                 return Results.Json(updated, WikiJsonContext.Default.WikiPageDocument);
             }
@@ -261,7 +273,7 @@ public static class WikiApi
 public sealed record CreateWikiRootRequest(string? Name, string? Path);
 public sealed record CreateWikiFolderRequest(string? Name, string? ParentFolderId);
 public sealed record CreateWikiPageRequest(string? Title, string? FolderId, string? Markdown);
-public sealed record UpdateWikiPageRequest(string? Markdown, long? ExpectedVersion, string? Source, string? Summary);
+public sealed record UpdateWikiPageRequest(string? Markdown, long? ExpectedVersion, string? Source, string? Summary, string? Title = null);
 public sealed record RestoreWikiRevisionRequest(long? ExpectedVersion);
 public sealed record WikiPageChatRequest(string? Prompt, string? Scope);
 public sealed record WikiPageDraftRequest(string? Instruction, string? Scope);

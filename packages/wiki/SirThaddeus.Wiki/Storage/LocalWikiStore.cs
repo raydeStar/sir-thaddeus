@@ -263,6 +263,75 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<WikiPageDocument?> RenamePageAsync(
+        string pageId,
+        string title,
+        long? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var gate = LockForPage(pageId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
+            if (located is null) return null;
+            var root = located.Value.Root;
+            var current = located.Value.Page;
+            if (expectedVersion.HasValue && expectedVersion.Value != current.Version)
+            {
+                throw new WikiVersionConflictException(pageId, expectedVersion.Value, current.Version);
+            }
+
+            var normalizedTitle = NormalizeName(title, "Untitled Page");
+            if (string.Equals(normalizedTitle, current.Title, StringComparison.Ordinal))
+            {
+                var currentMarkdown = await ReadPageBodyAsync(root, current, cancellationToken).ConfigureAwait(false);
+                return new WikiPageDocument(current, currentMarkdown);
+            }
+
+            var markdown = await ReadPageBodyAsync(root, current, cancellationToken).ConfigureAwait(false);
+            var now = DateTimeOffset.UtcNow;
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var existingSlugs = await ExistingSlugsAsync(connection, "pages", "folder_id", current.FolderId, cancellationToken).ConfigureAwait(false);
+            existingSlugs.Remove(current.Slug);
+            var slug = UniqueSlug(Slugify(normalizedTitle), existingSlugs);
+            var relativePath = await BuildPageRelativePathAsync(connection, current.FolderId, slug, cancellationToken).ConfigureAwait(false);
+            var updated = current with
+            {
+                Title = normalizedTitle,
+                Slug = slug,
+                RelativePath = relativePath,
+                Version = current.Version + 1,
+                UpdatedAt = now,
+            };
+
+            var oldPath = ResolvePagePath(root, current.RelativePath);
+            var newPath = ResolvePagePath(root, updated.RelativePath);
+            await WritePageFileAsync(root, updated, markdown, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath))
+            {
+                File.Delete(oldPath);
+            }
+
+            await UpdatePageMetadataAsync(connection, updated, cancellationToken).ConfigureAwait(false);
+            await InsertRevisionAsync(
+                connection,
+                updated.Id,
+                updated.Version,
+                "user",
+                now,
+                "Renamed page",
+                markdown,
+                cancellationToken).ConfigureAwait(false);
+            return new WikiPageDocument(updated, markdown);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(string pageId, CancellationToken cancellationToken)
     {
         var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
