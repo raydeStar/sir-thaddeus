@@ -213,4 +213,22 @@
     height: 0;
     pointer-events: none;
   }
+
+  /*
+   * TipTap adds `.ProseMirror-hideselection` when the editor blurs, which
+   * removes the native ::selection paint. The result was that the moment the
+   * user clicked into the page-chat textarea, their highlighted passage
+   * appeared unselected — so they had no visual confirmation of what was
+   * about to be rewritten. Force the highlight to stay painted with the
+   * accent colour so the selection is always visible while the rewrite is
+   * being composed.
+   */
+  .wiki-editor .ProseMirror-hideselection ::selection,
+  .wiki-editor .ProseMirror-hideselection *::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+  .wiki-editor .ProseMirror-hideselection {
+    caret-color: transparent;
+  }
 }

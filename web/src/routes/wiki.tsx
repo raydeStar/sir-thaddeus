@@ -131,6 +131,26 @@ function WikiRoute() {
   const busy = loading || saving || pageAssistantBusy;
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
   const previewRevision = revisions.find((revision) => revision.id === previewRevisionId) ?? null;
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Pop the assistant pane open the moment the user highlights text in the
+  // editor — they almost certainly want to do something with it, and finding a
+  // collapsed sidebar shut on top of their selection was the #1 confusion.
+  useEffect(() => {
+    if (selectedText.trim().length > 0 && rightCollapsed) {
+      setRightCollapsed(false);
+    }
+  }, [selectedText, rightCollapsed]);
+
+  // Keep the chat transcript pinned to the bottom as messages stream in. The
+  // container is short (max-h-52) and previously stayed scrolled to the top,
+  // so users only saw their own prompt and never the assistant's reply.
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [pageChatMessages.length, pageAssistantBusy]);
+
   useEffect(() => {
     if (!renamingRoot) setRootNameDraft(selectedRoot?.name ?? '');
   }, [renamingRoot, selectedRoot?.id, selectedRoot?.name]);
@@ -649,43 +669,94 @@ function WikiRoute() {
                   <section className="space-y-2">
                     <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
                   <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
-                    <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                    <div ref={chatScrollRef} className="max-h-64 space-y-2 overflow-y-auto pr-1">
                       {pageChatMessages.length > 0 ? (
                         pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
-                      ) : null}
+                      ) : (
+                        <p className="px-1 text-xs text-ink-subtle">
+                          {selectedText.trim()
+                            ? 'Tell Sir Thaddeus how to rewrite the highlighted passage.'
+                            : 'Ask anything about this page, or highlight text to rewrite it.'}
+                        </p>
+                      )}
                       {pageAssistantBusy ? (
-                        <div className="flex items-center gap-2 text-xs text-ink-subtle">
+                        <div className="flex items-center gap-2 px-1 text-xs text-ink-subtle">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
                           Thinking
                         </div>
                       ) : null}
                     </div>
                     {selectedText ? (
-                      <div className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink-muted">
-                        Selected {countWords(selectedText)} words
+                      <div className="rounded-lg border border-accent/40 bg-accent-soft/60 px-3 py-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+                            Selected · {countWords(selectedText)} words
+                          </p>
+                          <button
+                            type="button"
+                            className="text-ink-subtle hover:text-ink"
+                            onClick={() => setSelectedText('')}
+                            title="Clear selection"
+                            aria-label="Clear selection"
+                          >
+                            <X className="h-3 w-3" strokeWidth={2} />
+                          </button>
+                        </div>
+                        <p className="mt-1 line-clamp-3 text-xs italic text-ink">
+                          “{truncateForPreview(selectedText)}”
+                        </p>
                       </div>
                     ) : null}
                     <textarea
                       value={pagePrompt}
                       onChange={(event) => setPagePrompt(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          if (busy || !pagePrompt.trim()) return;
+                          void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk());
+                        }
+                      }}
                       disabled={busy}
-                      rows={3}
-                      placeholder="Ask about this page"
+                      rows={2}
+                      placeholder={selectedText.trim() ? 'How should this be rewritten?' : 'Ask about this page'}
                       aria-label="Page chat prompt"
-                      className="field-input min-h-20 resize-none"
+                      className="field-input min-h-16 resize-none"
                     />
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageAsk()}>
-                        <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
-                        Ask
-                      </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim()} onClick={() => void submitPageDraft()}>
-                        <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-                        Write
-                      </button>
-                      <button type="button" className="btn-quiet h-8 px-3 text-xs" disabled={busy || !pagePrompt.trim() || !selectedText.trim()} onClick={() => void submitSelectionRewrite()}>
-                        <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-                        Rewrite selection
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
+                        {!selectedText.trim() ? (
+                          <button
+                            type="button"
+                            className="rounded px-1.5 py-0.5 hover:bg-canvas hover:text-ink disabled:cursor-not-allowed disabled:opacity-55"
+                            disabled={busy || !pagePrompt.trim()}
+                            onClick={() => void submitPageDraft()}
+                            title="Draft a new section into the page"
+                          >
+                            <WandSparkles className="mr-1 inline h-3 w-3" strokeWidth={1.8} />
+                            Write
+                          </button>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-subtle"
+                        disabled={busy || !pagePrompt.trim()}
+                        onClick={() =>
+                          void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk())
+                        }
+                      >
+                        {selectedText.trim() ? (
+                          <>
+                            <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            Rewrite selection
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            Ask
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1068,6 +1139,13 @@ function RevisionPreview({
 
 function countWords(markdown: string): number {
   return markdown.trim().length === 0 ? 0 : markdown.trim().split(/\s+/).length;
+}
+
+function truncateForPreview(text: string, max = 140): string {
+  // Collapse whitespace so the inline preview reads as a single quoted line
+  // even when the user highlighted across paragraphs.
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
 function formatStamp(value: string): string {
