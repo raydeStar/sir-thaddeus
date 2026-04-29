@@ -38,6 +38,11 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         if (TryAttachExisting(out var existing))
         {
             _logger.LogInformation("runtime.attached pid={Pid} port={Port}", existing!.Pid, existing.Port);
+            // We didn't spawn this runtime, but we still need to know when it
+            // exits — otherwise the kill-app button (which calls
+            // /api/runtime/stop on the attached runtime) would tear the
+            // backend down without ever notifying the shell.
+            TryWatchAttachedProcess(existing.Pid);
             return existing;
         }
 
@@ -94,6 +99,28 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         {
             lockFile = null;
             return false;
+        }
+    }
+
+    private void TryWatchAttachedProcess(int pid)
+    {
+        try
+        {
+            // We hold our own Process handle (not via `using`) so it stays
+            // open for the lifetime of the supervisor and the Exited event
+            // can still fire. Disposed in DisposeAsync().
+            _process = Process.GetProcessById(pid);
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (_, _) =>
+            {
+                _logger.LogInformation("runtime.process_exited pid={Pid} (attached)", pid);
+                try { RuntimeExited?.Invoke(this, EventArgs.Empty); }
+                catch (Exception ex) { _logger.LogWarning(ex, "runtime.exited_handler_failed"); }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.attach_watch_failed pid={Pid}", pid);
         }
     }
 

@@ -118,7 +118,28 @@ public sealed class WorkspaceWindow : IWorkspaceWindowSurface
         }
 
         _logger.LogInformation("workspace.window.close_requested");
-        _window.Close();
+        // Photino windows are tied to the message-pump thread that called
+        // ShowBlocking. Calling Close() from another thread (e.g. the
+        // supervisor's Process.Exited handler firing on the thread pool) is a
+        // silent no-op on Windows because the WM_CLOSE message never reaches
+        // the right thread. Marshal through Photino's Invoke() so the close
+        // actually fires.
+        try
+        {
+            _window.Invoke(() =>
+            {
+                try { _window?.Close(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "workspace.window.close_inner_failed"); }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "workspace.window.close_invoke_failed");
+            // Best-effort fallback in case Invoke is unavailable on this
+            // platform; on the UI thread Close() works directly.
+            try { _window.Close(); }
+            catch (Exception inner) { _logger.LogWarning(inner, "workspace.window.close_direct_failed"); }
+        }
     }
 
     private bool OnClosing(object? sender, EventArgs e)

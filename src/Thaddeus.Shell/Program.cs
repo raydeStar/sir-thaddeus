@@ -76,6 +76,19 @@ public static class Program
             {
                 try { shellSession?.ExitAsync().GetAwaiter().GetResult(); }
                 catch (Exception ex) { log.LogWarning(ex, "shell.runtime_exit_handler_failed"); }
+
+                // Safety net: if the workspace window does not actually
+                // tear down within a couple of seconds (e.g. Photino's
+                // message loop is blocked, the close was suppressed, or we
+                // never wired the supervisor at all), force the whole
+                // shell process to exit. The runtime is already gone, so
+                // there's nothing useful to keep alive.
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    log.LogWarning("shell.runtime_exit.force_exit");
+                    Environment.Exit(0);
+                });
             };
 
             // Phase 2.4 builds the compact panel launcher; Phase 2.5 wires it to a
