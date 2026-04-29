@@ -306,57 +306,66 @@ function WikiRoute() {
 
   return (
     <section className="flex min-h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
-      <header className="flex min-h-[72px] flex-col gap-3 border-b border-line px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-            <Library className="h-3.5 w-3.5" strokeWidth={1.8} />
+      <header className="flex flex-col gap-3 border-b border-line px-4 py-4 md:flex-row md:items-start md:justify-between md:gap-6 md:px-6">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+            <Library className="h-3 w-3" strokeWidth={1.8} />
             Wiki Canvas
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" strokeWidth={1.8} /> : null}
           </div>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            {selectedPage || isDraftPage ? (
-              <input
-                ref={pageTitleRef}
-                value={pageTitleDraft}
-                onChange={(event) => {
-                  setPageTitleDraft(event.target.value);
-                  if (isDraftPage) setDraftTitle(event.target.value);
-                }}
-                onBlur={() => void submitPageTitle()}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    event.currentTarget.blur();
-                  }
-                }}
-                disabled={busy || (!isDraftPage && dirty)}
-                aria-label="Page title"
-                placeholder={isDraftPage ? 'Untitled — type a title or start writing' : undefined}
-                className="min-w-0 max-w-[420px] rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold text-ink outline-none transition placeholder:text-ink-subtle placeholder:font-medium hover:border-line focus:border-accent focus:bg-canvas-raised focus:ring-2 focus:ring-accent/15 disabled:opacity-70"
-              />
-            ) : (
-              <h1 className="truncate text-xl font-semibold text-ink">
-                {selectedRoot?.name ?? 'Wiki'}
-              </h1>
-            )}
-            {scope === 'page' && (selectedPage || isDraftPage) ? null : (
-              <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
-            )}
+          {selectedPage || isDraftPage ? (
+            <input
+              ref={pageTitleRef}
+              value={pageTitleDraft}
+              onChange={(event) => {
+                setPageTitleDraft(event.target.value);
+                if (isDraftPage) setDraftTitle(event.target.value);
+              }}
+              onBlur={() => void submitPageTitle()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
+              disabled={busy || (!isDraftPage && dirty)}
+              aria-label="Page title"
+              placeholder={isDraftPage ? 'Untitled' : undefined}
+              className="mt-1.5 block w-full min-w-0 rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-2xl font-semibold leading-tight text-ink outline-none transition placeholder:text-ink-subtle placeholder:font-medium hover:border-line focus:border-accent focus:bg-canvas-raised focus:ring-2 focus:ring-accent/15 disabled:opacity-70"
+            />
+          ) : (
+            <h1 className="mt-1.5 truncate text-2xl font-semibold leading-tight text-ink">
+              {selectedRoot?.name ?? 'Wiki'}
+            </h1>
+          )}
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-ink-muted">
+            {selectedRoot ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5">
+                <Library className="h-3 w-3 text-ink-subtle" strokeWidth={1.8} />
+                <span className="font-medium text-ink">{selectedRoot.name}</span>
+              </span>
+            ) : null}
+            {selectedFolderPath ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5">
+                <Folder className="h-3 w-3 text-ink-subtle" strokeWidth={1.8} />
+                <span className="truncate text-ink">{selectedFolderPath}</span>
+              </span>
+            ) : null}
             {isDraftPage ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-ink" aria-live="polite">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 font-medium text-ink" aria-live="polite">
                 <Circle className="h-2 w-2 fill-accent text-accent" />
                 Draft
               </span>
             ) : selectedPage ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted" aria-live="polite">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5" aria-live="polite">
                 <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
                 {dirty ? 'Unsaved' : 'Saved'}
               </span>
             ) : null}
-            {busy ? <Loader2 className="h-4 w-4 animate-spin text-ink-subtle" strokeWidth={1.8} /> : null}
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 md:pt-5">
           <button type="button" className="wiki-icon-button" title="New workspace" aria-label="New workspace" disabled={busy} onClick={() => void createRoot()}>
             <Library className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -1247,17 +1256,6 @@ function PanelHeader({
         {collapsed ? collapsedIcon : expandedIcon}
       </button>
     </div>
-  );
-}
-
-function ScopeChip({ scope, root, folder, page }: { scope: WikiScope; root?: string; folder?: string; page?: string }) {
-  const label = scope === 'root' ? root : scope === 'folder' ? folder ?? root : page ?? root;
-  const scopeLabel = scope === 'root' ? 'Workspace' : scope;
-  return (
-    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
-      <span className="capitalize text-ink-muted">{scopeLabel}</span>
-      <span className="max-w-[220px] truncate">{label ?? 'None'}</span>
-    </span>
   );
 }
 
