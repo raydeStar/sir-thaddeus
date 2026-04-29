@@ -120,6 +120,10 @@
     @apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-canvas-raised px-3 text-sm font-medium text-ink transition hover:border-line-strong hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  .chat-composer-icon-button {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-canvas text-ink-muted transition hover:border-line-strong hover:bg-accent-soft hover:text-ink;
+  }
+
   /* Low-chrome container. No shadow — just a barely-there bg wash + thin hairline.
      Intentionally minimal so pages feel composed of content, not boxes. */
   .surface {

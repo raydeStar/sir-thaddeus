@@ -1,6 +1,18 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, BookOpen, FileText, Folder, Library, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowUp,
+  BookOpen,
+  ChevronDown,
+  FileText,
+  Folder,
+  History,
+  Library,
+  Loader2,
+  Plus,
+  X,
+} from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
@@ -127,6 +139,14 @@ function ChatThreadRoute() {
 
   const messages = thread?.messages ?? [];
   const empty = messages.length === 0 && !activeTurn;
+  const canSend = !sending && draft.trim().length > 0;
+  const wikiContextLabel = selectedWikiContextOption
+    ? 'Change wiki context'
+    : wikiContextLoading
+      ? 'Loading wiki context'
+      : wikiContextOptions.length > 0
+        ? 'Add wiki context'
+        : 'Wiki context unavailable';
 
   return (
     <section
@@ -196,11 +216,15 @@ function ChatThreadRoute() {
         {/* Fade-out so long threads don't crash against the composer. */}
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-canvas"
+          className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-canvas"
         />
         <div className="mx-auto w-full max-w-[720px]">
           {error ? (
-            <p className="mb-2 text-xs text-rose-500" data-testid="chat-thread-error">
+            <p
+              role="alert"
+              className="mb-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300"
+              data-testid="chat-thread-error"
+            >
               {error}
             </p>
           ) : null}
@@ -208,18 +232,42 @@ function ChatThreadRoute() {
           <form
             onSubmit={onSubmit}
             data-testid="chat-composer"
-            className="rounded-2xl border border-line bg-canvas-raised px-4 py-3 transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
+            className="rounded-2xl border border-line bg-canvas-raised p-2 shadow-sm transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
           >
-            <div className="mb-2 border-b border-line/70 pb-2">
-              <div className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
+            <textarea
+              ref={composerRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Message Sir Thaddeus…"
+              rows={1}
+              data-testid="chat-input"
+              disabled={sending}
+              className="min-h-[44px] max-h-[220px] w-full resize-none border-0 bg-transparent px-2 py-2 text-[15px] leading-6 text-ink placeholder:text-ink-subtle focus:outline-none disabled:opacity-60"
+            />
+            <div className="flex flex-wrap items-center gap-2 border-t border-line px-1 pt-2">
+              <label
+                className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+                  selectedWikiContextOption
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : 'border-line bg-canvas text-ink-muted hover:border-line-strong hover:text-ink'
+                } ${sending || wikiContextLoading || wikiContextOptions.length === 0 ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                title={selectedWikiContextOption ? selectedWikiContextOption.title : 'Choose wiki context'}
+              >
+                {selectedWikiContextOption ? (
+                  <WikiContextGlyph mode={selectedWikiContextOption.mode} />
+                ) : (
+                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.75} aria-hidden />
+                )}
+                <span className="min-w-0 truncate font-medium">{wikiContextLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
                 <select
                   value={wikiContextValue}
                   onChange={(event) => setWikiContextValue(event.target.value)}
                   disabled={sending || wikiContextLoading || wikiContextOptions.length === 0}
                   aria-label="Wiki context"
                   data-testid="chat-wiki-context"
-                  className="min-w-0 flex-1 border-0 bg-transparent text-xs text-ink-muted outline-none focus:text-ink disabled:opacity-60"
+                  className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
                 >
                   <option value="">No wiki context</option>
                   {wikiContextOptions.map((option) => (
@@ -228,7 +276,40 @@ function ChatThreadRoute() {
                     </option>
                   ))}
                 </select>
+              </label>
+
+              <div className="ml-auto flex items-center gap-1">
+                <Link
+                  to="/"
+                  className="chat-composer-icon-button"
+                  aria-label="New chat"
+                  title="New chat"
+                >
+                  <Plus className="h-4 w-4" strokeWidth={1.9} />
+                </Link>
+                <Link
+                  to="/history"
+                  className="chat-composer-icon-button"
+                  aria-label="Chat history"
+                  title="Chat history"
+                >
+                  <History className="h-4 w-4" strokeWidth={1.8} />
+                </Link>
+                <button
+                  type="submit"
+                  data-testid="chat-send"
+                  disabled={!canSend}
+                  aria-label="Send message"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:bg-line-strong disabled:text-ink-subtle"
+                >
+                  {sending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.1} />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
+                  )}
+                </button>
               </div>
+
               {selectedWikiContextOption ? (
                 <div
                   className={wikiContextChipClass(selectedWikiContextOption.mode)}
@@ -253,28 +334,6 @@ function ChatThreadRoute() {
                   </button>
                 </div>
               ) : null}
-            </div>
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={composerRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Message Sir Thaddeus…"
-                rows={1}
-                data-testid="chat-input"
-                disabled={sending}
-                className="min-h-[24px] max-h-[220px] flex-1 resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-subtle focus:outline-none disabled:opacity-60"
-              />
-              <button
-                type="submit"
-                data-testid="chat-send"
-                disabled={sending || !draft.trim()}
-                aria-label="Send message"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:bg-line-strong disabled:text-ink-subtle"
-              >
-                <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-              </button>
             </div>
           </form>
         </div>
@@ -307,7 +366,7 @@ function wikiContextOptionLabel(option: WikiContextOption) {
 }
 
 function wikiContextChipClass(mode: WikiContextOption['mode']) {
-  const base = 'mt-2 flex min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-ink';
+  const base = 'flex min-w-0 basis-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-ink';
   return mode === 'all'
     ? `${base} border-amber-500/35 bg-amber-500/10`
     : `${base} border-accent/25 bg-accent-soft`;
