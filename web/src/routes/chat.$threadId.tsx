@@ -1,34 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ArrowLeft,
-  ArrowUp,
-  BookOpen,
-  ChevronDown,
-  FileText,
-  Folder,
-  History,
-  Library,
-  Loader2,
-  Plus,
-  X,
-} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Plus } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
 import { ToolActivityPills } from '../components/ToolActivityPills';
 import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
+import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
-import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
-
-interface WikiContextOption {
-  value: string;
-  mode: 'all' | 'root' | 'folder' | 'page';
-  rootId?: string;
-  folderId?: string;
-  pageId?: string;
-  title: string;
-}
 
 export const Route = createFileRoute('/chat/$threadId')({
   component: ChatThreadRoute,
@@ -44,109 +23,24 @@ function ChatThreadRoute() {
   const send = useChatStore((s) => s.send);
 
   const [draft, setDraft] = useState('');
-  const [wikiContextValue, setWikiContextValue] = useState('');
-  const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
-  const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const selectedWikiContextOption = useMemo(
-    () => wikiContextOptions.find((option) => option.value === wikiContextValue) ?? null,
-    [wikiContextOptions, wikiContextValue],
-  );
 
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
 
   useEffect(() => {
-    let disposed = false;
-    const loadWikiContextOptions = async () => {
-      setWikiContextLoading(true);
-      try {
-        const roots = await listWikiRoots();
-        const trees = await Promise.all(
-          roots.map(async (root) => ({ root, tree: await getWikiTree(root.id) })),
-        );
-        if (disposed) return;
-        setWikiContextOptions(
-          [
-            ...(roots.length > 0
-              ? [{ value: 'all', mode: 'all' as const, title: 'Every wiki root' }]
-              : []),
-            ...trees.flatMap(({ root, tree }) => [
-              { value: `root:${root.id}`, mode: 'root' as const, rootId: root.id, title: `${root.name}` },
-              ...tree.folders.map((folder) => ({
-                value: `folder:${root.id}:${folder.id}`,
-                mode: 'folder' as const,
-                rootId: root.id,
-                folderId: folder.id,
-                title: `${root.name} / ${folder.name}`,
-              })),
-              ...tree.pages.map((page) => ({
-                value: `page:${page.id}`,
-                mode: 'page' as const,
-                pageId: page.id,
-                title: `${root.name} / ${page.title}`,
-              })),
-            ]),
-          ],
-        );
-      } catch {
-        if (!disposed) setWikiContextOptions([]);
-      } finally {
-        if (!disposed) setWikiContextLoading(false);
-      }
-    };
-
-    void loadWikiContextOptions();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [thread?.messages.length, activeTurn?.text]);
 
-  useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [draft]);
-
-  const submit = async () => {
-    if (!draft.trim() || sending) return;
-    const text = draft;
+  const onSubmit = async (text: string, wikiContext?: WikiContextSelection) => {
+    if (sending) return;
     setDraft('');
-    await send(
-      text,
-      selectedWikiContext(selectedWikiContextOption),
-    );
-  };
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await submit();
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      void submit();
-    }
+    await send(text, wikiContext);
   };
 
   const messages = thread?.messages ?? [];
   const empty = messages.length === 0 && !activeTurn;
-  const canSend = !sending && draft.trim().length > 0;
-  const wikiContextLabel = selectedWikiContextOption
-    ? 'Change wiki context'
-    : wikiContextLoading
-      ? 'Loading wiki context'
-      : wikiContextOptions.length > 0
-        ? 'Add wiki context'
-        : 'Wiki context unavailable';
 
   return (
     <section
@@ -229,154 +123,28 @@ function ChatThreadRoute() {
             </p>
           ) : null}
 
-          <form
+          <ChatComposer
+            value={draft}
+            onChange={setDraft}
             onSubmit={onSubmit}
-            data-testid="chat-composer"
-            className="rounded-2xl border border-line bg-canvas-raised p-2 shadow-sm transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
-          >
-            <textarea
-              ref={composerRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Message Sir Thaddeus…"
-              rows={1}
-              data-testid="chat-input"
-              disabled={sending}
-              className="min-h-[44px] max-h-[220px] w-full resize-none border-0 bg-transparent px-2 py-2 text-[15px] leading-6 text-ink placeholder:text-ink-subtle focus:outline-none disabled:opacity-60"
-            />
-            <div className="flex flex-wrap items-center gap-2 border-t border-line px-1 pt-2">
-              <label
-                className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
-                  selectedWikiContextOption
-                    ? 'border-accent bg-accent-soft text-ink'
-                    : 'border-line bg-canvas text-ink-muted hover:border-line-strong hover:text-ink'
-                } ${sending || wikiContextLoading || wikiContextOptions.length === 0 ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-                title={selectedWikiContextOption ? selectedWikiContextOption.title : 'Choose wiki context'}
+            sending={sending}
+            inputTestId="chat-input"
+            sendTestId="chat-send"
+            rightActions={
+              <Link
+                to="/"
+                className="chat-composer-icon-button"
+                aria-label="New chat"
+                title="New chat"
               >
-                {selectedWikiContextOption ? (
-                  <WikiContextGlyph mode={selectedWikiContextOption.mode} />
-                ) : (
-                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.75} aria-hidden />
-                )}
-                <span className="min-w-0 truncate font-medium">{wikiContextLabel}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
-                <select
-                  value={wikiContextValue}
-                  onChange={(event) => setWikiContextValue(event.target.value)}
-                  disabled={sending || wikiContextLoading || wikiContextOptions.length === 0}
-                  aria-label="Wiki context"
-                  data-testid="chat-wiki-context"
-                  className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                >
-                  <option value="">No wiki context</option>
-                  {wikiContextOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {wikiContextOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="ml-auto flex items-center gap-1">
-                <Link
-                  to="/"
-                  className="chat-composer-icon-button"
-                  aria-label="New chat"
-                  title="New chat"
-                >
-                  <Plus className="h-4 w-4" strokeWidth={1.9} />
-                </Link>
-                <Link
-                  to="/history"
-                  className="chat-composer-icon-button"
-                  aria-label="Chat history"
-                  title="Chat history"
-                >
-                  <History className="h-4 w-4" strokeWidth={1.8} />
-                </Link>
-                <button
-                  type="submit"
-                  data-testid="chat-send"
-                  disabled={!canSend}
-                  aria-label="Send message"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:bg-line-strong disabled:text-ink-subtle"
-                >
-                  {sending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.1} />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-                  )}
-                </button>
-              </div>
-
-              {selectedWikiContextOption ? (
-                <div
-                  className={wikiContextChipClass(selectedWikiContextOption.mode)}
-                  data-testid="chat-wiki-context-active"
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <WikiContextGlyph mode={selectedWikiContextOption.mode} />
-                    <span className="shrink-0 font-medium text-ink-muted">
-                      {wikiContextKind(selectedWikiContextOption.mode)}
-                    </span>
-                    <span className="truncate">{selectedWikiContextOption.title}</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setWikiContextValue('')}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
-                    aria-label="Clear wiki context"
-                    title="Clear wiki context"
-                    disabled={sending}
-                  >
-                    <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </form>
+                <Plus className="h-4 w-4" strokeWidth={1.9} />
+              </Link>
+            }
+          />
         </div>
       </div>
     </section>
   );
-}
-
-function selectedWikiContext(option: WikiContextOption | null) {
-  if (!option) return undefined;
-  if (option.mode === 'all') return { mode: 'all' as const };
-  if (option.mode === 'root' && option.rootId) return { mode: 'root' as const, rootId: option.rootId };
-  if (option.mode === 'folder' && option.rootId && option.folderId) {
-    return { mode: 'folder' as const, rootId: option.rootId, folderId: option.folderId };
-  }
-  if (option.mode === 'page' && option.pageId) return { mode: 'page' as const, pageId: option.pageId };
-  return undefined;
-}
-
-function wikiContextKind(mode: WikiContextOption['mode']) {
-  if (mode === 'all') return 'All Roots';
-  if (mode === 'root') return 'Root';
-  if (mode === 'folder') return 'Folder';
-  return 'Page';
-}
-
-function wikiContextOptionLabel(option: WikiContextOption) {
-  if (option.mode === 'all') return 'All roots';
-  return `${wikiContextKind(option.mode)} / ${option.title}`;
-}
-
-function wikiContextChipClass(mode: WikiContextOption['mode']) {
-  const base = 'flex min-w-0 basis-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-ink';
-  return mode === 'all'
-    ? `${base} border-amber-500/35 bg-amber-500/10`
-    : `${base} border-accent/25 bg-accent-soft`;
-}
-
-function WikiContextGlyph({ mode }: { mode: WikiContextOption['mode'] }) {
-  if (mode === 'all') return <Library className="h-3.5 w-3.5 shrink-0 text-amber-600" strokeWidth={1.8} aria-hidden />;
-  if (mode === 'root') return <Library className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
-  if (mode === 'folder') return <Folder className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
-  return <FileText className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} aria-hidden />;
 }
 
 interface MessageRowProps {

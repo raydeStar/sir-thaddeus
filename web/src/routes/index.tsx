@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
+import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
@@ -18,30 +19,20 @@ function HomeRoute() {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     void loadThreads();
-    textareaRef.current?.focus();
   }, [loadThreads]);
 
-  // Auto-grow the textarea to fit content, capped so the page never gets overtaken.
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-  }, [draft]);
-
-  const start = async () => {
-    if (!draft.trim() || busy) return;
+  const start = async (text: string, wikiContext?: WikiContextSelection) => {
+    if (busy) return;
     setBusy(true);
     setLocalError(null);
     try {
       const t = await newThread();
       void navigate({ to: '/chat/$threadId', params: { threadId: t.id } });
       await useChatStore.getState().openThread(t.id);
-      await send(draft.trim());
+      await send(text, wikiContext);
       setDraft('');
     } catch (e) {
       // Surface the failure so the user doesn't hit Send and see nothing
@@ -54,14 +45,6 @@ function HomeRoute() {
   };
 
   const displayError = localError ?? storeError;
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      void start();
-    }
-  };
-
   const recent = threads.slice(0, 6);
 
   return (
@@ -71,7 +54,7 @@ function HomeRoute() {
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
       <div
-        className="mx-auto mb-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent"
+        className="mx-auto mb-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent shadow-[0_8px_24px_-12px_rgba(217,119,87,0.55)]"
         aria-hidden
       >
         <Sparkles className="h-5 w-5" strokeWidth={1.6} />
@@ -85,38 +68,17 @@ function HomeRoute() {
         Ask anything, or pick up where you left off.
       </p>
 
-      {/* Prompt. Deliberately minimal — no visible card border until focus. */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void start();
-        }}
-        className="mt-10"
-      >
-        <div
-          className="group/prompt flex items-end gap-2 rounded-2xl border border-line bg-canvas-raised px-4 py-3 transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
-        >
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Message Sir Thaddeus…"
-            rows={1}
-            data-testid="home-prompt"
-            className="min-h-[24px] max-h-[240px] flex-1 resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-subtle focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim() || busy}
-            aria-label="Send"
-            data-testid="home-send"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:bg-line-strong disabled:text-ink-subtle"
-          >
-            <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-          </button>
-        </div>
-        <p className="mt-2 text-center text-[11px] text-ink-subtle">
+      <div className="mt-10">
+        <ChatComposer
+          value={draft}
+          onChange={setDraft}
+          onSubmit={start}
+          sending={busy}
+          inputTestId="home-prompt"
+          sendTestId="home-send"
+          autoFocus
+        />
+        <p className="mt-3 text-center text-[11px] text-ink-subtle">
           Press <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> to send
           <span className="mx-2">·</span>
           <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Shift</kbd>
@@ -132,7 +94,7 @@ function HomeRoute() {
             {displayError}
           </div>
         ) : null}
-      </form>
+      </div>
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}
       {recent.length > 0 ? (
