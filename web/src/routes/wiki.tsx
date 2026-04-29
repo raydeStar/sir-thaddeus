@@ -58,6 +58,8 @@ function WikiRoute() {
     selectedRootId,
     selectedFolderId,
     selectedPageId,
+    isDraftPage,
+    draftTitle,
     scope,
     searchScope,
     search,
@@ -88,6 +90,7 @@ function WikiRoute() {
     movePage,
     deletePage,
     discardDraft,
+    setDraftTitle,
     restoreRevision,
     undoLatestAiEdit,
     askPage,
@@ -105,8 +108,12 @@ function WikiRoute() {
   }, [loadRoots]);
 
   useEffect(() => {
-    setPageTitleDraft(page?.page.title ?? '');
-  }, [page?.page.id, page?.page.title]);
+    if (isDraftPage) {
+      setPageTitleDraft(draftTitle);
+    } else {
+      setPageTitleDraft(page?.page.title ?? '');
+    }
+  }, [page?.page.id, page?.page.title, isDraftPage, draftTitle]);
 
   useEffect(() => {
     setPreviewRevisionId(null);
@@ -177,19 +184,26 @@ function WikiRoute() {
     if (!renamingRoot) setRootNameDraft(selectedRoot?.name ?? '');
   }, [renamingRoot, selectedRoot?.id, selectedRoot?.name]);
 
-  // Cmd/Ctrl+S → save the current page when there are unsaved changes.
+  // Cmd/Ctrl+S → save the current page when there are unsaved changes, or
+  // commit a draft when the user has typed a title or content.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!(event.key === 's' || event.key === 'S')) return;
       if (!(event.metaKey || event.ctrlKey)) return;
       if (event.shiftKey || event.altKey) return;
       event.preventDefault();
-      if (busy || !dirty || !page) return;
+      if (busy) return;
+      if (isDraftPage) {
+        if (!draft.trim() && !draftTitle.trim() && !pageTitleDraft.trim()) return;
+        void savePage();
+        return;
+      }
+      if (!dirty || !page) return;
       void savePage();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [busy, dirty, page, savePage]);
+  }, [busy, dirty, page, savePage, isDraftPage, draft, draftTitle, pageTitleDraft]);
 
   const submitPageAsk = async () => {
     const prompt = pagePrompt.trim();
@@ -211,6 +225,11 @@ function WikiRoute() {
   };
   const submitPageTitle = async () => {
     const trimmed = pageTitleDraft.trim();
+    if (isDraftPage) {
+      setDraftTitle(trimmed);
+      setPageTitleDraft(trimmed);
+      return;
+    }
     if (!selectedPage || !trimmed || trimmed === selectedPage.title) {
       setPageTitleDraft(selectedPage?.title ?? '');
       return;
@@ -275,11 +294,14 @@ function WikiRoute() {
             Wiki Canvas
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            {selectedPage ? (
+            {selectedPage || isDraftPage ? (
               <input
                 ref={pageTitleRef}
                 value={pageTitleDraft}
-                onChange={(event) => setPageTitleDraft(event.target.value)}
+                onChange={(event) => {
+                  setPageTitleDraft(event.target.value);
+                  if (isDraftPage) setDraftTitle(event.target.value);
+                }}
                 onBlur={() => void submitPageTitle()}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -287,19 +309,25 @@ function WikiRoute() {
                     event.currentTarget.blur();
                   }
                 }}
-                disabled={busy || dirty}
+                disabled={busy || (!isDraftPage && dirty)}
                 aria-label="Page title"
-                className="min-w-0 max-w-[360px] rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold text-ink outline-none transition hover:border-line focus:border-accent focus:bg-canvas-raised focus:ring-2 focus:ring-accent/15 disabled:opacity-70"
+                placeholder={isDraftPage ? 'Untitled — type a title or start writing' : undefined}
+                className="min-w-0 max-w-[420px] rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold text-ink outline-none transition placeholder:text-ink-subtle placeholder:font-medium hover:border-line focus:border-accent focus:bg-canvas-raised focus:ring-2 focus:ring-accent/15 disabled:opacity-70"
               />
             ) : (
               <h1 className="truncate text-xl font-semibold text-ink">
                 {selectedRoot?.name ?? 'Wiki'}
               </h1>
             )}
-            {scope === 'page' && selectedPage ? null : (
+            {scope === 'page' && (selectedPage || isDraftPage) ? null : (
               <ScopeChip scope={scope} root={selectedRoot?.name} folder={selectedFolderPath ?? undefined} page={selectedPage?.title} />
             )}
-            {selectedPage ? (
+            {isDraftPage ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-ink" aria-live="polite">
+                <Circle className="h-2 w-2 fill-accent text-accent" />
+                Draft
+              </span>
+            ) : selectedPage ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted" aria-live="polite">
                 <Circle className={`h-2 w-2 ${dirty ? 'fill-amber-500 text-amber-500' : 'fill-emerald-500 text-emerald-500'}`} />
                 {dirty ? 'Unsaved' : 'Saved'}
@@ -321,7 +349,7 @@ function WikiRoute() {
             New page
           </button>
           {dirty ? (
-            <button type="button" className="wiki-command-button" disabled={busy || !page} onClick={discardDraft}>
+            <button type="button" className="wiki-command-button" disabled={busy || (!page && !isDraftPage)} onClick={discardDraft}>
               <X className="h-4 w-4" strokeWidth={1.9} />
               Discard
             </button>
@@ -334,15 +362,15 @@ function WikiRoute() {
           ) : null}
           <button
             type="button"
-            className={`wiki-command-button ${dirty && !busy && page ? 'border-accent bg-accent text-white hover:bg-accent hover:border-accent' : ''}`}
-            disabled={busy || !dirty || !page}
+            className={`wiki-command-button ${(dirty || isDraftPage) && !busy && (page || (isDraftPage && (draft.trim() || pageTitleDraft.trim()))) ? 'border-accent bg-accent text-white hover:bg-accent hover:border-accent' : ''}`}
+            disabled={busy || (isDraftPage ? !draft.trim() && !pageTitleDraft.trim() : !dirty || !page)}
             onClick={() => void savePage()}
             title="Save (Ctrl+S)"
             aria-label="Save"
           >
             <Save className="h-4 w-4" strokeWidth={1.9} />
             Save
-            <kbd aria-hidden="true" className={`ml-1 hidden rounded border px-1 text-[10px] font-mono leading-4 sm:inline-flex ${dirty && !busy && page ? 'border-white/40 text-white/80' : 'border-line text-ink-subtle'}`}>
+            <kbd aria-hidden="true" className={`ml-1 hidden rounded border px-1 text-[10px] font-mono leading-4 sm:inline-flex ${(dirty || isDraftPage) && !busy && (page || (isDraftPage && (draft.trim() || pageTitleDraft.trim()))) ? 'border-white/40 text-white/80' : 'border-line text-ink-subtle'}`}>
               Ctrl+S
             </kbd>
           </button>
@@ -617,9 +645,9 @@ function WikiRoute() {
             </div>
 
             {selectedRoot ? (
-              page ? (
+              page || isDraftPage ? (
                 <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-ink-muted">Loading editor</div>}>
-                  <WikiMarkdownEditor key={`${page.page.id}:${page.page.version}`} markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
+                  <WikiMarkdownEditor key={page ? `${page.page.id}:${page.page.version}` : 'draft'} markdown={draft} disabled={busy} onChange={setDraft} onSelectionChange={setSelectedText} />
                 </Suspense>
               ) : (
                 <div className="flex flex-1 items-center justify-center px-6 text-center">
@@ -654,7 +682,7 @@ function WikiRoute() {
 
             <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2 text-[11px] text-ink-subtle md:px-5">
               <span>{markdownWordCount} words</span>
-              <span>{selectedPage ? `Version ${selectedPage.version} · ${formatStamp(selectedPage.updatedAt)}` : 'No page selected'}</span>
+              <span>{selectedPage ? `Version ${selectedPage.version} · ${formatStamp(selectedPage.updatedAt)}` : isDraftPage ? 'New page · not saved' : 'No page selected'}</span>
             </footer>
           </div>
         </main>

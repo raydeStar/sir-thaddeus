@@ -5,7 +5,50 @@ import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearc
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
 
-const STARTER_PAGE_MARKDOWN = '# Untitled Page\n\n';
+const LEGACY_UNTITLED_TITLE = 'Untitled Page';
+const UNTITLED_CLEANUP_FLAG = 'sirthaddeus.wiki.cleanup.untitled-pages.v1';
+
+// Derive a human-readable title from page content. Prefers the first
+// markdown heading; falls back to the first non-empty line. Strips basic
+// emphasis/link syntax and clamps to a sensible length.
+export function deriveTitleFromMarkdown(markdown: string): string {
+  if (!markdown) return '';
+  for (const raw of markdown.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = /^#{1,6}\s+(.+)$/.exec(line);
+    const source = (heading ? heading[1] : line).trim();
+    const cleaned = source
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[`*_~]/g, '')
+      .trim();
+    if (cleaned) return cleaned.length > 80 ? cleaned.slice(0, 80).trimEnd() : cleaned;
+  }
+  return '';
+}
+
+async function purgeLegacyUntitledPages(roots: WikiRoot[]): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    if (window.localStorage?.getItem(UNTITLED_CLEANUP_FLAG)) return;
+  } catch {
+    // localStorage unavailable (private mode, sandbox); skip cleanup.
+    return;
+  }
+  for (const root of roots) {
+    try {
+      const tree = await api.getWikiTree(root.id);
+      const offending = tree.pages.filter((p) => p.title === LEGACY_UNTITLED_TITLE);
+      for (const page of offending) {
+        try { await api.deleteWikiPage(page.id); } catch { /* ignore individual failures */ }
+      }
+    } catch {
+      // tree fetch failed; skip this root
+    }
+  }
+  try { window.localStorage?.setItem(UNTITLED_CLEANUP_FLAG, '1'); } catch { /* ignore */ }
+}
 
 export interface WikiPageChatMessage {
   id: string;
@@ -22,6 +65,12 @@ interface WikiStoreState {
   selectedRootId: string | null;
   selectedFolderId: string | null;
   selectedPageId: string | null;
+  // True when the user has clicked "New page" (or opened an empty workspace)
+  // but no content has been persisted yet. Nothing is written to disk until
+  // the user provides content or a title and triggers save.
+  isDraftPage: boolean;
+  draftTitle: string;
+  draftFolderId: string | null;
   scope: WikiScope;
   searchScope: WikiSearchScope;
   search: string;
@@ -55,6 +104,7 @@ interface WikiStoreState {
   movePage: (folderId: string | null) => Promise<void>;
   deletePage: () => Promise<void>;
   discardDraft: () => void;
+  setDraftTitle: (title: string) => void;
   restoreRevision: (revisionId: string) => Promise<void>;
   undoLatestAiEdit: () => Promise<void>;
   askPage: (prompt: string) => Promise<void>;
@@ -79,6 +129,9 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   selectedRootId: null,
   selectedFolderId: null,
   selectedPageId: null,
+  isDraftPage: false,
+  draftTitle: '',
+  draftFolderId: null,
   scope: 'root',
   searchScope: 'root',
   search: '',
@@ -98,7 +151,11 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   loadRoots: async () => {
     set({ loading: true, error: null });
     try {
-      const roots = await api.listWikiRoots();
+      let roots = await api.listWikiRoots();
+      // One-shot cleanup: delete the historical "Untitled Page" rows that
+      // accumulated from earlier auto-create paths. Idempotent, guarded by a
+      // localStorage flag so it never runs twice.
+      await purgeLegacyUntitledPages(roots);
       set({ roots, loading: false });
       const selectedRootId = get().selectedRootId;
       const selectedRootStillExists = selectedRootId ? roots.some((root) => root.id === selectedRootId) : false;
@@ -108,7 +165,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         await get().selectRoot(roots[0].id);
       } else {
         const createdRoot = await api.createWikiRoot({ name: 'My Wiki' });
-        set({ roots: [createdRoot] });
+        roots = [createdRoot];
+        set({ roots });
         await get().selectRoot(createdRoot.id);
       }
     } catch (error) {
@@ -121,7 +179,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set({ error: 'Save or discard changes before switching workspaces.' });
       return;
     }
-    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], searching: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'root' });
+    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], searching: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, isDraftPage: false, draftTitle: '', draftFolderId: null, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
       const firstPage = tree.pages[0];
@@ -131,25 +189,23 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         return;
       }
 
-      const createdPage = await api.createWikiPage(rootId, {
-        title: 'Untitled Page',
-        markdown: STARTER_PAGE_MARKDOWN,
-      });
-      const refreshedTree = await api.getWikiTree(rootId);
-      const revisions = await api.listWikiRevisions(createdPage.page.id);
+      // Empty workspace: open an in-memory draft so the editor is immediately
+      // usable, but do NOT persist anything until the user provides content.
       set({
-        tree: refreshedTree,
-        page: createdPage,
-        revisions,
-        selectedRootId: rootId,
-        selectedFolderId: createdPage.page.folderId,
-        selectedPageId: createdPage.page.id,
-        draft: createdPage.markdown,
+        tree,
+        page: null,
+        revisions: [],
+        selectedFolderId: null,
+        selectedPageId: null,
+        draft: '',
         pageChatMessages: [],
         pageChatDraft: null,
         selectedText: '',
         selectionRewriteDraft: null,
         dirty: false,
+        isDraftPage: true,
+        draftTitle: '',
+        draftFolderId: null,
         scope: 'page',
         loading: false,
       });
@@ -167,7 +223,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set({ error: 'Save or discard changes before switching pages.' });
       return;
     }
-    set({ loading: true, error: null, selectedPageId: pageId });
+    set({ loading: true, error: null, selectedPageId: pageId, isDraftPage: false, draftTitle: '', draftFolderId: null });
     try {
       const page = await api.getWikiPage(pageId);
       const revisions = await api.listWikiRevisions(pageId);
@@ -189,36 +245,19 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         loading: false,
       });
     } catch (error) {
-      const rootId = get().selectedRootId;
-      if (rootId && isRuntimeNotFound(error)) {
-        try {
-          const createdPage = await api.createWikiPage(rootId, {
-            title: 'Untitled Page',
-            markdown: STARTER_PAGE_MARKDOWN,
-          });
-          const refreshedTree = await api.getWikiTree(rootId);
-          const revisions = await api.listWikiRevisions(createdPage.page.id);
-          set({
-            tree: refreshedTree,
-            page: createdPage,
-            revisions,
-            selectedPageId: createdPage.page.id,
-            selectedFolderId: createdPage.page.folderId,
-            draft: createdPage.markdown,
-            pageChatMessages: [],
-            pageChatDraft: null,
-            selectedText: '',
-            selectionRewriteDraft: null,
-            dirty: false,
-            scope: 'page',
-            loading: false,
-            error: null,
-          });
-          return;
-        } catch (fallbackError) {
-          set({ error: (fallbackError as Error).message, loading: false });
-          return;
-        }
+      if (isRuntimeNotFound(error)) {
+        // Stale/persisted id no longer exists. Clear selection and let the
+        // empty state render — do NOT silently create a replacement page.
+        set({
+          page: null,
+          revisions: [],
+          selectedPageId: null,
+          draft: '',
+          dirty: false,
+          loading: false,
+          error: null,
+        });
+        return;
       }
       set({ error: (error as Error).message, loading: false });
     }
@@ -424,38 +463,76 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     }
     const rootId = get().selectedRootId;
     if (!rootId) return;
-    const folderId = get().selectedFolderId;
-    set({ saving: true, error: null });
-    try {
-      const created = await api.createWikiPage(rootId, {
-        title: 'Untitled Page',
-        folderId,
-        markdown: STARTER_PAGE_MARKDOWN,
-      });
-      const tree = await api.getWikiTree(rootId);
-      const revisions = await api.listWikiRevisions(created.page.id);
-      set({
-        tree,
-        page: created,
-        revisions,
-        selectedPageId: created.page.id,
-        selectedFolderId: created.page.folderId,
-        draft: created.markdown,
-        pageChatMessages: [],
-        pageChatDraft: null,
-        selectedText: '',
-        selectionRewriteDraft: null,
-        dirty: false,
-        scope: 'page',
-      });
-    } catch (error) {
-      set({ error: (error as Error).message });
-    } finally {
-      set({ saving: false });
-    }
+    // Open an in-memory draft. Nothing hits the backend until the user adds
+    // a title or content and triggers save (manually or via Ctrl+S).
+    set({
+      page: null,
+      revisions: [],
+      selectedPageId: null,
+      draft: '',
+      pageChatMessages: [],
+      pageChatDraft: null,
+      selectedText: '',
+      selectionRewriteDraft: null,
+      dirty: false,
+      isDraftPage: true,
+      draftTitle: '',
+      draftFolderId: get().selectedFolderId,
+      scope: 'page',
+      error: null,
+    });
   },
 
   savePage: async () => {
+    // Draft path: persist the in-memory draft as a brand-new page, deriving
+    // a title from the user-supplied title or the first heading/line of the
+    // markdown. Refuses to save when both are empty.
+    if (get().isDraftPage) {
+      const rootId = get().selectedRootId;
+      if (!rootId) return;
+      const draft = get().draft;
+      const explicitTitle = get().draftTitle.trim();
+      const derivedTitle = deriveTitleFromMarkdown(draft);
+      const title = explicitTitle || derivedTitle;
+      if (!title && !draft.trim()) {
+        set({ error: 'Add a title or some content before saving.' });
+        return;
+      }
+      const finalTitle = title || 'Untitled';
+      set({ saving: true, error: null });
+      try {
+        const created = await api.createWikiPage(rootId, {
+          title: finalTitle,
+          folderId: get().draftFolderId,
+          markdown: draft,
+        });
+        const tree = await api.getWikiTree(rootId);
+        const revisions = await api.listWikiRevisions(created.page.id);
+        set({
+          tree,
+          page: created,
+          revisions,
+          selectedPageId: created.page.id,
+          selectedFolderId: created.page.folderId,
+          draft: created.markdown,
+          pageChatMessages: [],
+          pageChatDraft: null,
+          selectedText: '',
+          selectionRewriteDraft: null,
+          dirty: false,
+          isDraftPage: false,
+          draftTitle: '',
+          draftFolderId: null,
+          scope: 'page',
+        });
+      } catch (error) {
+        set({ error: (error as Error).message });
+      } finally {
+        set({ saving: false });
+      }
+      return;
+    }
+
     const current = get().page;
     if (!current || !get().dirty) return;
     set({ saving: true, error: null });
@@ -573,9 +650,33 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   },
 
   discardDraft: () => {
+    if (get().isDraftPage) {
+      // Drop the in-memory draft entirely. Nothing was written, so there is
+      // no rollback to perform.
+      set({
+        draft: '',
+        draftTitle: '',
+        draftFolderId: null,
+        isDraftPage: false,
+        selectedText: '',
+        selectionRewriteDraft: null,
+        dirty: false,
+        error: null,
+        scope: get().selectedFolderId ? 'folder' : 'root',
+      });
+      return;
+    }
     const current = get().page;
     if (!current) return;
     set({ draft: current.markdown, selectedText: '', selectionRewriteDraft: null, dirty: false, error: null });
+  },
+
+  setDraftTitle: (title: string) => {
+    if (!get().isDraftPage) return;
+    set((state) => ({
+      draftTitle: title,
+      dirty: title.trim().length > 0 || state.draft.trim().length > 0,
+    }));
   },
 
   restoreRevision: async (revisionId: string) => {
@@ -838,6 +939,17 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     // whitespace differences). Compare normalized values so a freshly
     // created or freshly loaded page does not falsely show "Unsaved".
     const normalize = (value: string) => value.replace(/\s+$/g, '');
+    if (state.isDraftPage) {
+      // For a draft, dirty is true as soon as the user adds any content or
+      // a title. Anything blank stays clean so navigation does not get
+      // blocked by an empty draft.
+      const hasContent = normalize(markdown).length > 0 || state.draftTitle.trim().length > 0;
+      return {
+        draft: markdown,
+        dirty: hasContent,
+        selectionRewriteDraft: null,
+      };
+    }
     const persisted = state.page?.markdown ?? '';
     return {
       draft: markdown,
