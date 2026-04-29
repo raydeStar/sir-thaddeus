@@ -55,6 +55,11 @@ export interface WikiPageChatMessage {
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
+  // 'message' is a normal chat reply; 'canvas' is a compact pill the UI
+  // renders to indicate the assistant wrote directly to the page (so we
+  // don't echo the entire edited page back into the transcript).
+  kind?: 'message' | 'canvas';
+  summary?: string;
 }
 
 interface WikiStoreState {
@@ -802,7 +807,14 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         scope: 'page',
         pageChatMessages: [
           ...state.pageChatMessages,
-          { id: aiDraft.messageId, role: 'assistant', text: aiDraft.assistantText, createdAt: aiDraft.createdAt },
+          {
+            id: aiDraft.messageId,
+            role: 'assistant',
+            text: aiDraft.summary || aiDraft.assistantText || 'Updated the page.',
+            summary: aiDraft.summary || aiDraft.assistantText || 'Updated the page.',
+            kind: 'canvas',
+            createdAt: aiDraft.createdAt,
+          },
         ],
       }));
     } catch (error) {
@@ -895,7 +907,14 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         dirty: false,
         pageChatMessages: [
           ...state.pageChatMessages,
-          { id: rewriteDraft.messageId, role: 'assistant', text: rewriteDraft.assistantText, createdAt: rewriteDraft.createdAt },
+          {
+            id: rewriteDraft.messageId,
+            role: 'assistant',
+            text: rewriteDraft.summary || rewriteDraft.assistantText || 'Rewrote the selection.',
+            summary: rewriteDraft.summary || rewriteDraft.assistantText || 'Rewrote the selection.',
+            kind: 'canvas',
+            createdAt: rewriteDraft.createdAt,
+          },
         ],
       }));
     } catch (error) {

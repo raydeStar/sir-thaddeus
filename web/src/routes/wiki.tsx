@@ -687,7 +687,7 @@ function WikiRoute() {
           </div>
         </main>
 
-        <aside className="min-h-0 border-t border-line bg-canvas md:border-l md:border-t-0" aria-label="Page chat and revisions">
+        <aside className="flex min-h-0 flex-col border-t border-line bg-canvas md:border-l md:border-t-0" aria-label="Page chat and revisions">
           <PanelHeader
             title="Assistant"
             collapsed={rightCollapsed}
@@ -696,8 +696,8 @@ function WikiRoute() {
             expandedIcon={<PanelRightClose className="h-4 w-4" strokeWidth={1.8} />}
           />
           {!rightCollapsed ? (
-            <div className="space-y-5 px-4 pb-4">
-              <section className="space-y-2">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <section className="shrink-0 space-y-2 px-4 pt-3">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Context</h2>
                 <div className="flex flex-wrap gap-2">
                   {(['root', 'folder', 'page'] as WikiScope[]).map((candidate) => (
@@ -714,28 +714,28 @@ function WikiRoute() {
                 </div>
               </section>
 
-              {page ? (
-                <>
-                  <section className="space-y-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Page Chat</h2>
-                  <div className="space-y-3 rounded-xl border border-line bg-canvas-raised p-3">
-                    <div ref={chatScrollRef} aria-live="polite" className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                      {pageChatMessages.length > 0 ? (
-                        pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
-                      ) : (
-                        <p className="px-1 text-xs text-ink-subtle">
-                          {selectedText.trim()
+              {selectedRoot ? (
+                <section className="mt-3 flex min-h-0 flex-1 flex-col border-t border-line" aria-label="Page chat">
+                  <div ref={chatScrollRef} aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
+                    {pageChatMessages.length > 0 ? (
+                      pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
+                    ) : (
+                      <p className="text-xs text-ink-subtle">
+                        {!page
+                          ? 'Save this page to chat with the assistant about it.'
+                          : selectedText.trim()
                             ? 'Tell Sir Thaddeus how to rewrite the highlighted passage.'
                             : 'Ask anything about this page, or highlight text to rewrite it.'}
-                        </p>
-                      )}
-                      {pageAssistantBusy ? (
-                        <div className="flex items-center gap-2 px-1 text-xs text-ink-subtle">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-                          Thinking
-                        </div>
-                      ) : null}
-                    </div>
+                      </p>
+                    )}
+                    {pageAssistantBusy ? (
+                      <div className="flex items-center gap-2 text-xs text-ink-subtle">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                        Thinking
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0 space-y-2 border-t border-line bg-canvas px-3 pt-3 pb-3">
                     {selectedText ? (
                       <div className="rounded-lg border border-accent bg-accent-soft px-3 py-2">
                         <div className="flex items-start justify-between gap-2">
@@ -768,19 +768,19 @@ function WikiRoute() {
                         if (event.nativeEvent.isComposing) return;
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
-                          if (busy || !pagePrompt.trim()) return;
+                          if (busy || !pagePrompt.trim() || !page) return;
                           void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk());
                         }
                       }}
-                      disabled={busy}
+                      disabled={busy || !page}
                       rows={2}
-                      placeholder={selectedText.trim() ? 'How should this be rewritten?' : 'Ask about this page'}
+                      placeholder={!page ? 'Save the page to start chatting' : selectedText.trim() ? 'How should this be rewritten?' : 'Ask about this page'}
                       aria-label="Page chat prompt"
                       className="field-input min-h-16 resize-none"
                     />
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-                        {!selectedText.trim() ? (
+                        {!selectedText.trim() && page ? (
                           <button
                             type="button"
                             className="rounded px-1.5 py-0.5 hover:bg-canvas hover:text-ink disabled:cursor-not-allowed disabled:opacity-55"
@@ -796,7 +796,7 @@ function WikiRoute() {
                       <button
                         type="button"
                         className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-subtle"
-                        disabled={busy || !pagePrompt.trim()}
+                        disabled={busy || !pagePrompt.trim() || !page}
                         onClick={() =>
                           void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk())
                         }
@@ -815,48 +815,47 @@ function WikiRoute() {
                       </button>
                     </div>
                   </div>
-                  </section>
+                </section>
+              ) : (
+                <div className="mx-4 mt-4 rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center">
+                  <FileText className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.8} />
+                  <p className="mt-2 text-sm font-medium text-ink">No workspace</p>
+                </div>
+              )}
 
-                  <section className="space-y-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Revisions</h2>
+              {page ? (
+                <details className="shrink-0 border-t border-line" open={false}>
+                  <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle hover:text-ink">
+                    Revisions <span className="ml-1 normal-case tracking-normal text-ink-subtle">({revisions.length})</span>
+                  </summary>
+                  <div className="space-y-2 px-4 pb-4">
                     {revisions.length > 0 ? (
-                  <ol className="space-y-2">
-                    {revisions.map((revision, index) => (
-                      <RevisionItem
-                        key={revision.id}
-                        revision={revision}
-                        active={index === 0}
-                        previewing={previewRevisionId === revision.id}
-                        disabled={busy || dirty || index === 0}
-                        onPreview={() => setPreviewRevisionId((current) => (current === revision.id ? null : revision.id))}
-                        onRestore={() => void restoreRevision(revision.id)}
-                      />
-                    ))}
-                  </ol>
+                      <ol className="space-y-2">
+                        {revisions.map((revision, index) => (
+                          <RevisionItem
+                            key={revision.id}
+                            revision={revision}
+                            active={index === 0}
+                            previewing={previewRevisionId === revision.id}
+                            disabled={busy || dirty || index === 0}
+                            onPreview={() => setPreviewRevisionId((current) => (current === revision.id ? null : revision.id))}
+                            onRestore={() => void restoreRevision(revision.id)}
+                          />
+                        ))}
+                      </ol>
                     ) : (
-                  <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
+                      <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
                     )}
                     {previewRevision ? (
-                  <RevisionPreview
-                    revision={previewRevision}
-                    currentMarkdown={draft}
-                    onClose={() => setPreviewRevisionId(null)}
-                  />
+                      <RevisionPreview
+                        revision={previewRevision}
+                        currentMarkdown={draft}
+                        onClose={() => setPreviewRevisionId(null)}
+                      />
                     ) : null}
-                  </section>
-                </>
-              ) : (
-                loading || selectedPageId ? (
-                  <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center text-sm text-ink-muted">
-                    Opening page
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-line bg-canvas-raised px-3 py-7 text-center">
-                    <FileText className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.8} />
-                    <p className="mt-2 text-sm font-medium text-ink">No page context</p>
-                  </div>
-                )
-              )}
+                </details>
+              ) : null}
             </div>
           ) : null}
         </aside>
@@ -923,10 +922,20 @@ function SearchResultsList({
 }
 
 function PageChatBubble({ message }: { message: WikiPageChatMessage }) {
+  if (message.kind === 'canvas') {
+    return (
+      <div className="flex items-center gap-2 self-start rounded-full border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-ink">
+        <WandSparkles className="h-3.5 w-3.5 text-accent" strokeWidth={2} />
+        <span className="font-medium">Added to canvas</span>
+        {message.summary ? (
+          <span className="truncate text-ink-muted" title={message.summary}>— {message.summary}</span>
+        ) : null}
+      </div>
+    );
+  }
   return (
-    <div className={`rounded-xl px-3 py-2 text-sm ${message.role === 'user' ? 'bg-accent-soft text-ink' : 'bg-canvas text-ink-muted'}`}>
+    <div className={`rounded-xl px-3 py-2 text-sm ${message.role === 'user' ? 'self-end bg-accent-soft text-ink' : 'self-start bg-canvas-raised text-ink'}`}>
       <p className="whitespace-pre-wrap leading-5">{message.text}</p>
-      <p className="mt-1 text-[10px] uppercase tracking-[0.08em] text-ink-subtle">{message.role}</p>
     </div>
   );
 }
