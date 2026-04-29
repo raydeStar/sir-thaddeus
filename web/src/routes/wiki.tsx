@@ -48,6 +48,10 @@ function WikiRoute() {
   const [rootNameDraft, setRootNameDraft] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState('');
+  // Folder id currently being hovered as a drop target during a drag, or
+  // the sentinel '__root__' for the workspace-root drop zone. null when no
+  // drag is in progress over a target.
+  const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null);
   const [previewRevisionId, setPreviewRevisionId] = useState<string | null>(null);
   const pageTitleRef = useRef<HTMLInputElement>(null);
   const {
@@ -264,6 +268,21 @@ function WikiRoute() {
     setRenamingFolderId(folder.id);
     setFolderNameDraft(folder.name);
   };
+  // Create a folder and immediately drop the user into rename mode on it,
+  // matching the VS Code 'New Folder' UX. The store action mutates state
+  // synchronously after the await, so the new folder id is available on the
+  // store snapshot once the promise settles.
+  const handleCreateFolder = async () => {
+    await createFolder();
+    const state = useWikiStore.getState();
+    const newId = state.selectedFolderId;
+    if (!newId) return;
+    const created = state.tree?.folders.find((candidate) => candidate.id === newId);
+    if (created) {
+      setRenamingFolderId(created.id);
+      setFolderNameDraft(created.name);
+    }
+  };
   const cancelFolderRename = () => {
     setRenamingFolderId(null);
     setFolderNameDraft('');
@@ -341,7 +360,7 @@ function WikiRoute() {
           <button type="button" className="wiki-icon-button" title="New workspace" aria-label="New workspace" disabled={busy} onClick={() => void createRoot()}>
             <Library className="h-4 w-4" strokeWidth={1.8} />
           </button>
-          <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
+          <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void handleCreateFolder()}>
             <Folder className="h-4 w-4" strokeWidth={1.8} />
           </button>
           <button type="button" className="wiki-command-button" disabled={busy || !selectedRootId} onClick={() => void createPage()}>
@@ -470,7 +489,7 @@ function WikiRoute() {
                   <Plus className="h-4 w-4" strokeWidth={1.9} />
                   Page
                 </button>
-                <button type="button" className="wiki-command-button justify-center px-2" disabled={busy || !selectedRootId} onClick={() => void createFolder()}>
+                <button type="button" className="wiki-command-button justify-center px-2" disabled={busy || !selectedRootId} onClick={() => void handleCreateFolder()}>
                   <Folder className="h-4 w-4" strokeWidth={1.8} />
                   Folder
                 </button>
@@ -514,6 +533,31 @@ function WikiRoute() {
                 />
               ) : tree ? (
                 <nav className="space-y-1" aria-label="Pages">
+                  {selectedRoot ? (
+                    <RootRow
+                      name={selectedRoot.name}
+                      selected={scope === 'root' && !selectedFolderId}
+                      isDropTarget={dropTargetFolderId === '__root__'}
+                      onSelect={() => {
+                        selectFolder(null);
+                        setScope('root');
+                      }}
+                      onDragOver={(event) => {
+                        if (!event.dataTransfer.types.includes('application/x-wiki-folder-id')) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDropTargetFolderId('__root__');
+                      }}
+                      onDragLeave={() => setDropTargetFolderId((current) => (current === '__root__' ? null : current))}
+                      onDrop={(event) => {
+                        const draggedId = event.dataTransfer.getData('application/x-wiki-folder-id');
+                        setDropTargetFolderId(null);
+                        if (!draggedId) return;
+                        event.preventDefault();
+                        void moveFolder(draggedId, null);
+                      }}
+                    />
+                  ) : null}
                   {rootFolders.map((folder) => (
                     <FolderSection
                       key={folder.id}
@@ -525,6 +569,7 @@ function WikiRoute() {
                       scope={scope}
                       renamingFolderId={renamingFolderId}
                       folderNameDraft={folderNameDraft}
+                      dropTargetFolderId={dropTargetFolderId}
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
                       onFolderRenameStart={beginFolderRename}
@@ -532,6 +577,26 @@ function WikiRoute() {
                       onFolderRenameCancel={cancelFolderRename}
                       onFolderRenameSubmit={() => void submitFolderRename()}
                       onFolderNameDraftChange={setFolderNameDraft}
+                      onFolderDragStart={(event, dragged) => {
+                        event.dataTransfer.setData('application/x-wiki-folder-id', dragged.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onFolderDragOver={(event, target) => {
+                        if (!event.dataTransfer.types.includes('application/x-wiki-folder-id')) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDropTargetFolderId(target.id);
+                      }}
+                      onFolderDragLeave={(target) => setDropTargetFolderId((current) => (current === target.id ? null : current))}
+                      onFolderDrop={(event, target) => {
+                        const draggedId = event.dataTransfer.getData('application/x-wiki-folder-id');
+                        setDropTargetFolderId(null);
+                        if (!draggedId || draggedId === target.id) return;
+                        // Block dropping a folder onto its own descendant — that would orphan the subtree.
+                        if (isFolderDescendant(tree.folders, draggedId, target.id)) return;
+                        event.preventDefault();
+                        void moveFolder(draggedId, target.id);
+                      }}
                     />
                   ))}
                   {rootPages.length > 0 ? (
@@ -544,6 +609,7 @@ function WikiRoute() {
                       scope={scope}
                       renamingFolderId={renamingFolderId}
                       folderNameDraft={folderNameDraft}
+                      dropTargetFolderId={dropTargetFolderId}
                       onFolderSelect={selectFolder}
                       onPageSelect={(pageId) => void selectPage(pageId)}
                       onFolderRenameStart={beginFolderRename}
@@ -967,6 +1033,7 @@ function FolderSection({
   scope,
   renamingFolderId,
   folderNameDraft,
+  dropTargetFolderId,
   onFolderSelect,
   onPageSelect,
   onFolderRenameStart,
@@ -974,6 +1041,10 @@ function FolderSection({
   onFolderRenameCancel,
   onFolderRenameSubmit,
   onFolderNameDraftChange,
+  onFolderDragStart,
+  onFolderDragOver,
+  onFolderDragLeave,
+  onFolderDrop,
 }: {
   folder: WikiFolder | null;
   folders: WikiFolder[];
@@ -983,6 +1054,7 @@ function FolderSection({
   scope: WikiScope;
   renamingFolderId: string | null;
   folderNameDraft: string;
+  dropTargetFolderId?: string | null;
   onFolderSelect: (folderId: string | null) => void;
   onPageSelect: (pageId: string) => void;
   onFolderRenameStart: (folder: WikiFolder) => void;
@@ -990,9 +1062,14 @@ function FolderSection({
   onFolderRenameCancel: () => void;
   onFolderRenameSubmit: () => void;
   onFolderNameDraftChange: (name: string) => void;
+  onFolderDragStart?: (event: React.DragEvent<HTMLDivElement>, folder: WikiFolder) => void;
+  onFolderDragOver?: (event: React.DragEvent<HTMLDivElement>, folder: WikiFolder) => void;
+  onFolderDragLeave?: (folder: WikiFolder) => void;
+  onFolderDrop?: (event: React.DragEvent<HTMLDivElement>, folder: WikiFolder) => void;
 }) {
   const isFolderSelected = folder ? selectedFolderId === folder.id && scope === 'folder' : false;
   const isRenaming = folder ? renamingFolderId === folder.id : false;
+  const isDropTarget = folder ? dropTargetFolderId === folder.id : false;
   const childFolders = folder ? folders.filter((candidate) => candidate.parentFolderId === folder.id) : [];
   const sectionPages = folder ? pages.filter((page) => page.folderId === folder.id) : pages;
   const pageItems = (
@@ -1041,7 +1118,14 @@ function FolderSection({
           />
         </div>
       ) : (
-        <div className={`flex h-8 w-full items-center gap-1 rounded-lg transition ${isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}>
+        <div
+          draggable
+          onDragStart={(event) => onFolderDragStart?.(event, folder)}
+          onDragOver={(event) => onFolderDragOver?.(event, folder)}
+          onDragLeave={() => onFolderDragLeave?.(folder)}
+          onDrop={(event) => onFolderDrop?.(event, folder)}
+          className={`flex h-8 w-full items-center gap-1 rounded-lg transition ${isDropTarget ? 'bg-accent/15 ring-1 ring-accent/40' : isFolderSelected ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}
+        >
           <button
             type="button"
             onClick={() => onFolderSelect(folder.id)}
@@ -1088,6 +1172,7 @@ function FolderSection({
               scope={scope}
               renamingFolderId={renamingFolderId}
               folderNameDraft={folderNameDraft}
+              dropTargetFolderId={dropTargetFolderId}
               onFolderSelect={onFolderSelect}
               onPageSelect={onPageSelect}
               onFolderRenameStart={onFolderRenameStart}
@@ -1095,11 +1180,50 @@ function FolderSection({
               onFolderRenameCancel={onFolderRenameCancel}
               onFolderRenameSubmit={onFolderRenameSubmit}
               onFolderNameDraftChange={onFolderNameDraftChange}
+              onFolderDragStart={onFolderDragStart}
+              onFolderDragOver={onFolderDragOver}
+              onFolderDragLeave={onFolderDragLeave}
+              onFolderDrop={onFolderDrop}
             />
           ))}
         </div>
       ) : null}
     </section>
+  );
+}
+
+// Selectable workspace-root row at the top of the page tree. Doubles as a
+// drop target so dragging a folder onto the workspace pulls it back to the
+// top level (parentFolderId = null).
+function RootRow({
+  name,
+  selected,
+  isDropTarget,
+  onSelect,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}: {
+  name: string;
+  selected: boolean;
+  isDropTarget: boolean;
+  onSelect: () => void;
+  onDragOver: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDragLeave: () => void;
+  onDrop: (event: React.DragEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm font-medium transition ${isDropTarget ? 'bg-accent/15 ring-1 ring-accent/40 text-ink' : selected ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-raised/70 hover:text-ink'}`}
+    >
+      <Library className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+      <span className="min-w-0 flex-1 truncate uppercase tracking-[0.06em] text-[11px]">{name}</span>
+    </button>
   );
 }
 
