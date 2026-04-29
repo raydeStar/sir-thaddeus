@@ -44,6 +44,7 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        link: false,
       }),
       LinkExtension.configure({
         autolink: true,

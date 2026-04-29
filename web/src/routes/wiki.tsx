@@ -175,9 +175,12 @@ function WikiRoute() {
     return undefined;
   }, [selectedText, rightCollapsed]);
 
-  // Keep the chat transcript pinned to the bottom as messages stream in. The
-  // container is short (max-h-52) and previously stayed scrolled to the top,
-  // so users only saw their own prompt and never the assistant's reply.
+  useEffect(() => {
+    setPagePrompt('');
+  }, [selectedRootId, selectedPageId]);
+
+  // Keep the chat transcript pinned to the bottom as messages stream in so
+  // users see the latest assistant reply without hunting through the pane.
   useEffect(() => {
     const el = chatScrollRef.current;
     if (!el) return;
@@ -776,6 +779,39 @@ function WikiRoute() {
           />
           {!rightCollapsed ? (
             <div className="flex min-h-0 flex-1 flex-col">
+              {page ? (
+                <details className="shrink-0 border-b border-line" open={false}>
+                  <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle hover:text-ink">
+                    Revisions <span className="ml-1 normal-case tracking-normal text-ink-subtle">({revisions.length})</span>
+                  </summary>
+                  <div className="max-h-48 space-y-2 overflow-y-auto px-4 pb-4">
+                    {revisions.length > 0 ? (
+                      <ol className="space-y-2">
+                        {revisions.map((revision, index) => (
+                          <RevisionItem
+                            key={revision.id}
+                            revision={revision}
+                            active={index === 0}
+                            previewing={previewRevisionId === revision.id}
+                            disabled={busy || dirty || index === 0}
+                            onPreview={() => setPreviewRevisionId((current) => (current === revision.id ? null : revision.id))}
+                            onRestore={() => void restoreRevision(revision.id)}
+                          />
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
+                    )}
+                    {previewRevision ? (
+                      <RevisionPreview
+                        revision={previewRevision}
+                        currentMarkdown={draft}
+                        onClose={() => setPreviewRevisionId(null)}
+                      />
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
               {selectedRoot ? (
                 <section className="flex min-h-0 flex-1 flex-col" aria-label="Page chat">
                   <div ref={chatScrollRef} aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
@@ -902,40 +938,6 @@ function WikiRoute() {
                   <p className="mt-2 text-sm font-medium text-ink">No workspace</p>
                 </div>
               )}
-
-              {page ? (
-                <details className="shrink-0 border-t border-line" open={false}>
-                  <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle hover:text-ink">
-                    Revisions <span className="ml-1 normal-case tracking-normal text-ink-subtle">({revisions.length})</span>
-                  </summary>
-                  <div className="space-y-2 px-4 pb-4">
-                    {revisions.length > 0 ? (
-                      <ol className="space-y-2">
-                        {revisions.map((revision, index) => (
-                          <RevisionItem
-                            key={revision.id}
-                            revision={revision}
-                            active={index === 0}
-                            previewing={previewRevisionId === revision.id}
-                            disabled={busy || dirty || index === 0}
-                            onPreview={() => setPreviewRevisionId((current) => (current === revision.id ? null : revision.id))}
-                            onRestore={() => void restoreRevision(revision.id)}
-                          />
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="rounded-xl border border-line bg-canvas-raised px-3 py-4 text-sm text-ink-muted">No revisions</p>
-                    )}
-                    {previewRevision ? (
-                      <RevisionPreview
-                        revision={previewRevision}
-                        currentMarkdown={draft}
-                        onClose={() => setPreviewRevisionId(null)}
-                      />
-                    ) : null}
-                  </div>
-                </details>
-              ) : null}
             </div>
           ) : null}
         </aside>
