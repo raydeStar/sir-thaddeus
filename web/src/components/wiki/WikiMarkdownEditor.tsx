@@ -40,6 +40,21 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
     return service;
   }, []);
 
+  // Tiptap v3 `useEditor` destroys and recreates the editor whenever a
+  // non-empty deps array changes. If the editor is rebuilt mid-drag, the
+  // browser selection is wiped and the user only ends up with whatever was
+  // selected at the very first mousemove tick (often a single character).
+  // Stabilize the callbacks behind refs and pass an empty deps array so the
+  // editor instance survives for the lifetime of the component.
+  const onChangeRef = useRef(onChange);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -67,12 +82,12 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
       if (applyingExternalContent.current) return;
       const nextMarkdown = turndown.turndown(updatedEditor.getHTML());
       lastExternalMarkdown.current = nextMarkdown;
-      onChange(nextMarkdown);
+      onChangeRef.current(nextMarkdown);
     },
     onSelectionUpdate: ({ editor: updatedEditor }) => {
       const { from, to, empty } = updatedEditor.state.selection;
       if (empty) {
-        onSelectionChange?.('');
+        onSelectionChangeRef.current?.('');
         return;
       }
 
@@ -98,9 +113,9 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         selectedMarkdown = updatedEditor.state.doc.textBetween(from, to, '\n\n').trim();
       }
 
-      onSelectionChange?.(selectedMarkdown);
+      onSelectionChangeRef.current?.(selectedMarkdown);
     },
-  }, [turndown, onChange, onSelectionChange]);
+  }, []);
 
   const applyLink = () => {
     if (!editor) return;

@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   BookOpenText,
@@ -137,7 +137,7 @@ function WikiRoute() {
         .filter((folder) => folder.id !== selectedFolder.id && !isFolderDescendant(folders, selectedFolder.id, folder.id))
         .map((folder) => ({ id: folder.id, label: formatFolderPath(folders, folder) }))
     : [];
-  const quickSearchChips = extractWikiQuickSearchChips(draft);
+  const quickSearchChips = useMemo(() => extractWikiQuickSearchChips(draft), [draft]);
   const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
