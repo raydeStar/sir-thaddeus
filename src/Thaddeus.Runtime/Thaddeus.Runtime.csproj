@@ -60,18 +60,36 @@
     <NpmCommand Condition="'$(NpmCommand)'==''">npm</NpmCommand>
   </PropertyGroup>
 
-  <Target Name="BuildWebBundle" BeforeTargets="BeforeBuild" Condition="'$(SkipWebBuild)' != 'true'">
+  <ItemGroup Condition="'$(SkipWebBuild)' != 'true'">
+    <_WebBundleInput Include="$(WebSourceDir)\index.html" />
+    <_WebBundleInput Include="$(WebSourceDir)\package.json" />
+    <_WebBundleInput Include="$(WebSourceDir)\package-lock.json" />
+    <_WebBundleInput Include="$(WebSourceDir)\postcss.config.*" />
+    <_WebBundleInput Include="$(WebSourceDir)\tailwind.config.*" />
+    <_WebBundleInput Include="$(WebSourceDir)\tsconfig*.json" />
+    <_WebBundleInput Include="$(WebSourceDir)\vite.config.*" />
+    <_WebBundleInput Include="$(WebSourceDir)\public\**\*.*" />
+    <_WebBundleInput Include="$(WebSourceDir)\src\**\*.*" />
+  </ItemGroup>
+
+  <Target Name="BuildWebBundle"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(SkipWebBuild)' != 'true'"
+          Inputs="@(_WebBundleInput)"
+          Outputs="$(WebDistDir)\index.html">
     <Message Importance="high" Text="[hybrid-shell] Web auto-sync: SkipNpmBuild=$(SkipNpmBuild) WebDistDir=$(WebDistDir)" />
     <!-- Install npm deps if missing. tsr/vite/etc. live in node_modules/.bin
          so a fresh CI checkout fails `npm run build` without this. -->
     <Exec Command="$(NpmCommand) ci"
           WorkingDirectory="$(WebSourceDir)"
-          Condition="!Exists('$(WebSourceDir)\node_modules') And !Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' != 'true'" />
+          Condition="!Exists('$(WebSourceDir)\node_modules') And '$(SkipNpmBuild)' != 'true'" />
     <Exec Command="$(NpmCommand) run build"
           WorkingDirectory="$(WebSourceDir)"
-          Condition="!Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' != 'true'" />
+          Condition="'$(SkipNpmBuild)' != 'true'" />
     <Warning Text="[hybrid-shell] web/dist/index.html missing and SkipNpmBuild=true — runtime will serve a stale or empty bundle."
              Condition="!Exists('$(WebDistDir)\index.html')" />
+    <Warning Text="[hybrid-shell] web inputs changed but SkipNpmBuild=true — runtime may serve a stale bundle from web/dist."
+             Condition="Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' == 'true'" />
   </Target>
 
   <Target Name="SyncWebBundle" AfterTargets="BuildWebBundle" BeforeTargets="BeforeBuild" Condition="'$(SkipWebBuild)' != 'true' And Exists('$(WebDistDir)\index.html')">

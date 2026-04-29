@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
 using Thaddeus.Runtime.Events;
@@ -66,6 +67,31 @@ public static class StateApi
         })
             .WithName("StopRuntime");
 
+        // Hard shutdown used by the red header kill switch. Graceful
+        // StopApplication() is not enough here: if a hosted service hangs during
+        // shutdown, the runtime process remains alive and the shell never gets a
+        // process-exit signal. When managed by the shell, kill the shell process
+        // tree directly; that takes the workspace, runtime, compact panel, and
+        // child sidecars down in one deterministic action.
+        app.MapPost("/api/runtime/kill", (IHostApplicationLifetime lifetime, Hosting.RuntimeOptions opts) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(150).ConfigureAwait(false);
+                if (opts.ParentPid.HasValue)
+                {
+                    HardKillProcessTree(opts.ParentPid.Value);
+                    return;
+                }
+
+                TryStopApplication(lifetime);
+                await Task.Delay(350).ConfigureAwait(false);
+                HardKillProcessTree(Environment.ProcessId);
+            });
+            return Results.Accepted(value: new { status = "killing" });
+        })
+            .WithName("KillRuntimeTree");
+
         // Panic button. Cancels in-flight voice work and tears down managed sidecars
         // such as the MCP server without terminating the workspace itself.
         app.MapPost("/api/stop-all", async (RuntimeStopAllService stopAll, HttpContext context) =>
@@ -89,6 +115,33 @@ public static class StateApi
             return Results.Ok(new { applied = ok, current = machine.Current.ToString() });
         })
             .WithName("DebugTriggerState");
+    }
+
+    private static void TryStopApplication(IHostApplicationLifetime lifetime)
+    {
+        try { lifetime.StopApplication(); }
+        catch { /* hard-kill endpoint; best effort before Process.Kill */ }
+    }
+
+    private static void HardKillProcessTree(int rootPid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(rootPid);
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            try
+            {
+                using var current = Process.GetCurrentProcess();
+                current.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                Environment.Exit(0);
+            }
+        }
     }
 
     /// <summary>Body for the debug state-trigger endpoint.</summary>

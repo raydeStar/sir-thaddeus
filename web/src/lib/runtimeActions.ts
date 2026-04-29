@@ -29,7 +29,7 @@ export async function killApp(): Promise<void> {
   // Stop sidecars first so the runtime exit doesn't orphan them. Bounded so
   // the user gets immediate feedback even if the server is mid-shutdown.
   await postWithTimeout(tk, '/api/stop-all', 1500);
-  await postWithTimeout(tk, '/api/runtime/stop', 1500);
+  await postWithTimeout(tk, '/api/runtime/kill', 1500);
 }
 
 async function postWithTimeout(tk: string, path: string, timeoutMs: number): Promise<void> {
