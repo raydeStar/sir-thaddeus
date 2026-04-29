@@ -26,38 +26,46 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Folder_silo_blocks_cross_folder_bleed()
+    public async Task Book_root_allows_cross_folder_reference_without_crossing_roots()
     {
         var root = await _wiki.CreateRootAsync("Book", null, CancellationToken.None);
         var characters = await _wiki.CreateFolderAsync(root.Id, "Characters", null, CancellationToken.None);
         var world = await _wiki.CreateFolderAsync(root.Id, "World", null, CancellationToken.None);
+        var chapters = await _wiki.CreateFolderAsync(root.Id, "Chapters", null, CancellationToken.None);
 
         var current = await _wiki.CreatePageAsync(
+            root.Id, chapters.Id,
+            "Chapter 4",
+            "# Chapter 4\n\nKazalt reaches Leviathan Bay while King Edrin waits for news.",
+            CancellationToken.None);
+        await _wiki.CreatePageAsync(
             root.Id, characters.Id,
             "Kazalt the Knight",
             "# Kazalt\n\nA loyal knight sworn to King Edrin.",
             CancellationToken.None);
         await _wiki.CreatePageAsync(
-            root.Id, characters.Id,
-            "King Edrin",
-            "# King Edrin\n\nThe ruler of the realm. Kazalt serves him.",
-            CancellationToken.None);
-        await _wiki.CreatePageAsync(
             root.Id, world.Id,
-            "Kazalt Castle",
-            "# Kazalt Castle\n\nA fortress built by the legendary knight Kazalt.",
+            "Leviathan Bay",
+            "# Leviathan Bay\n\nA storm harbor where the tide exposes ancient stone roads.",
+            CancellationToken.None);
+        var otherRoot = await _wiki.CreateRootAsync("Other Book", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(
+            otherRoot.Id, null,
+            "Kazalt Mirror",
+            "# Kazalt Mirror\n\nThis matching page belongs to a different book and must not appear.",
             CancellationToken.None);
 
         var siblings = await _retriever.RetrieveSiblingsAsync(
-            current, "Tell me about Kazalt and Edrin", charBudget: 4_000, CancellationToken.None);
+            current, "continue the scene", charBudget: 4_000, CancellationToken.None);
 
-        Assert.Contains(siblings, s => s.Page.Title == "King Edrin");
-        Assert.DoesNotContain(siblings, s => s.Page.Title == "Kazalt Castle");
+        Assert.Contains(siblings, s => s.Page.Title == "Kazalt the Knight");
+        Assert.Contains(siblings, s => s.Page.Title == "Leviathan Bay");
+        Assert.DoesNotContain(siblings, s => s.Page.Title == "Kazalt Mirror");
         Assert.DoesNotContain(siblings, s => s.Page.Id == current.Page.Id);
     }
 
     [Fact]
-    public async Task Descendant_folder_pages_are_visible_within_silo()
+    public async Task Descendant_folder_pages_are_visible_within_same_book()
     {
         var root = await _wiki.CreateRootAsync("Book", null, CancellationToken.None);
         var characters = await _wiki.CreateFolderAsync(root.Id, "Characters", null, CancellationToken.None);
@@ -76,7 +84,7 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Root_level_page_only_sees_other_root_level_pages()
+    public async Task Root_level_page_can_see_folder_pages_in_same_book()
     {
         var root = await _wiki.CreateRootAsync("Notes", null, CancellationToken.None);
         var folder = await _wiki.CreateFolderAsync(root.Id, "Drafts", null, CancellationToken.None);
@@ -89,12 +97,17 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
         await _wiki.CreatePageAsync(
             root.Id, folder.Id, "Draft One", "# Draft One\n\nProject alpha draft notes.",
             CancellationToken.None);
+        var otherRoot = await _wiki.CreateRootAsync("Other Notes", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(
+            otherRoot.Id, null, "Alpha Leak", "# Alpha Leak\n\nProject alpha draft glossary from another root.",
+            CancellationToken.None);
 
         var siblings = await _retriever.RetrieveSiblingsAsync(
-            current, "alpha project glossary", charBudget: 4_000, CancellationToken.None);
+            current, "alpha project glossary draft", charBudget: 4_000, CancellationToken.None);
 
         Assert.Contains(siblings, s => s.Page.Title == "Glossary");
-        Assert.DoesNotContain(siblings, s => s.Page.Title == "Draft One");
+        Assert.Contains(siblings, s => s.Page.Title == "Draft One");
+        Assert.DoesNotContain(siblings, s => s.Page.Title == "Alpha Leak");
     }
 
     [Fact]
@@ -125,7 +138,7 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Budget_is_respected_when_silo_overflows()
+    public async Task Budget_is_respected_when_book_context_overflows()
     {
         var root = await _wiki.CreateRootAsync("Book", null, CancellationToken.None);
         var characters = await _wiki.CreateFolderAsync(root.Id, "Characters", null, CancellationToken.None);
@@ -151,7 +164,7 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
     {
         var root = await _wiki.CreateRootAsync("Book", null, CancellationToken.None);
         var current = await _wiki.CreatePageAsync(
-            root.Id, null, "Page", "# Page\n\nBody.", CancellationToken.None);
+            root.Id, null, "The", "# The\n\nAnd for.", CancellationToken.None);
         await _wiki.CreatePageAsync(
             root.Id, null, "Other", "# Other\n\nAlso body.", CancellationToken.None);
 

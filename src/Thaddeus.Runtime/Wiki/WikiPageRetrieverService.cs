@@ -5,13 +5,11 @@ using SirThaddeus.Wiki;
 namespace Thaddeus.Runtime.Wiki;
 
 /// <summary>
-/// Retrieves sibling wiki pages relevant to a query, scoped to a folder silo.
+/// Retrieves sibling wiki pages relevant to a query, scoped to a wiki root/book.
 ///
-/// Silo rule: a page that belongs to a folder only "sees" pages in that folder's
-/// subtree. A page at the root level only "sees" other root-level pages. Cross-folder
-/// content never bleeds in. This matches the user's mental model where folders like
-/// BOOK/Characters and BOOK/World are independent contexts that can each get bigger
-/// than the prompt budget without polluting each other.
+/// Silo rule: a wiki root is the boundary. A book can keep Characters, World,
+/// Chapters, Plot, and Lore in separate folders while still letting those folders
+/// reference each other. Content from a different root never bleeds in.
 ///
 /// Scoring is intentionally simple (token-overlap with title/heading boost) so the
 /// implementation has zero new persisted state and zero schema migration risk.
@@ -22,6 +20,7 @@ public sealed class WikiPageRetrieverService
 {
     private const int SnippetWindowChars = 600;
     private const int MinSiblingSnippetChars = 200;
+    private const int MaxContextTerms = 32;
 
     private static readonly HashSet<string> Stopwords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -51,13 +50,13 @@ public sealed class WikiPageRetrieverService
         ArgumentNullException.ThrowIfNull(currentPage);
         if (charBudget <= 0) return Array.Empty<RetrievedSiblingPage>();
 
-        var queryTerms = ExtractQueryTerms(query);
-        if (queryTerms.Count == 0) return Array.Empty<RetrievedSiblingPage>();
+        var weightedTerms = BuildWeightedTerms(query, currentPage);
+        if (weightedTerms.Count == 0) return Array.Empty<RetrievedSiblingPage>();
 
         var tree = await _wiki.GetTreeAsync(currentPage.Page.RootId, cancellationToken).ConfigureAwait(false);
         if (tree is null) return Array.Empty<RetrievedSiblingPage>();
 
-        var candidates = SelectSiloCandidates(tree, currentPage.Page);
+        var candidates = SelectBookCandidates(tree, currentPage.Page);
         if (candidates.Count == 0) return Array.Empty<RetrievedSiblingPage>();
 
         var scored = new List<ScoredCandidate>();
@@ -66,7 +65,7 @@ public sealed class WikiPageRetrieverService
             cancellationToken.ThrowIfCancellationRequested();
             var document = await _wiki.GetPageAsync(candidate.Id, cancellationToken).ConfigureAwait(false);
             if (document is null) continue;
-            var score = Score(document, queryTerms);
+            var score = Score(document, weightedTerms);
             if (score.Total <= 0) continue;
             scored.Add(new ScoredCandidate(document, score));
         }
@@ -79,7 +78,7 @@ public sealed class WikiPageRetrieverService
         foreach (var item in scored)
         {
             if (remaining < MinSiblingSnippetChars) break;
-            var snippet = BuildSnippet(item.Document.Markdown, queryTerms, Math.Min(SnippetWindowChars, remaining));
+            var snippet = BuildSnippet(item.Document.Markdown, weightedTerms.Keys, Math.Min(SnippetWindowChars, remaining));
             if (snippet.Length == 0) continue;
             results.Add(new RetrievedSiblingPage(item.Document.Page, snippet, item.Score.Total));
             remaining -= snippet.Length;
@@ -103,56 +102,67 @@ public sealed class WikiPageRetrieverService
         return terms;
     }
 
-    private static IReadOnlyList<WikiPage> SelectSiloCandidates(WikiTree tree, WikiPage currentPage)
-    {
-        // Folder-scoped page: include every other page whose folder is a descendant of the current folder.
-        if (!string.IsNullOrEmpty(currentPage.FolderId))
-        {
-            var folderIds = DescendantFolderIds(tree, currentPage.FolderId);
-            return tree.Pages
-                .Where(page => page.Id != currentPage.Id
-                    && page.FolderId is not null
-                    && folderIds.Contains(page.FolderId))
-                .ToArray();
-        }
-
-        // Root-level page: only see other root-level pages.
-        return tree.Pages
-            .Where(page => page.Id != currentPage.Id && string.IsNullOrEmpty(page.FolderId))
+    private static IReadOnlyList<WikiPage> SelectBookCandidates(WikiTree tree, WikiPage currentPage)
+        => tree.Pages
+            .Where(page => page.Id != currentPage.Id)
             .ToArray();
-    }
 
-    private static HashSet<string> DescendantFolderIds(WikiTree tree, string folderId)
+    private static Dictionary<string, double> BuildWeightedTerms(string query, WikiPageDocument currentPage)
     {
-        var ids = new HashSet<string>(StringComparer.Ordinal) { folderId };
-        var changed = true;
-        while (changed)
+        var terms = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var term in ExtractQueryTerms(query))
         {
-            changed = false;
-            foreach (var folder in tree.Folders)
-            {
-                if (folder.ParentFolderId is not null && ids.Contains(folder.ParentFolderId) && ids.Add(folder.Id))
-                    changed = true;
-            }
+            terms[term] = 1.0;
         }
-        return ids;
+
+        foreach (var term in ExtractCurrentPageContextTerms(currentPage).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxContextTerms))
+        {
+            if (!terms.ContainsKey(term))
+                terms[term] = 0.35;
+        }
+
+        return terms;
     }
 
-    private static PageScore Score(WikiPageDocument document, IReadOnlyCollection<string> queryTerms)
+    private static IEnumerable<string> ExtractCurrentPageContextTerms(WikiPageDocument currentPage)
     {
-        var titleHits = CountDistinctTermHits(document.Page.Title, queryTerms);
-        var headingHits = 0;
+        foreach (var term in ExtractQueryTerms(currentPage.Page.Title))
+            yield return term;
+
+        foreach (Match match in HeadingLine.Matches(currentPage.Markdown))
+        {
+            foreach (var term in ExtractQueryTerms(match.Groups["text"].Value))
+                yield return term;
+        }
+
+        foreach (var term in ExtractCapitalizedTerms(currentPage.Markdown))
+            yield return term;
+    }
+
+    private static IEnumerable<string> ExtractCapitalizedTerms(string markdown)
+    {
+        foreach (var raw in TokenSplit.Split(markdown))
+        {
+            if (raw.Length < 3 || Stopwords.Contains(raw)) continue;
+            if (char.IsUpper(raw[0])) yield return raw.ToLowerInvariant();
+        }
+    }
+
+    private static PageScore Score(WikiPageDocument document, IReadOnlyDictionary<string, double> weightedTerms)
+    {
+        var titleHits = CountDistinctTermHits(document.Page.Title, weightedTerms);
+        var headingHits = 0d;
         foreach (Match match in HeadingLine.Matches(document.Markdown))
         {
-            headingHits += CountDistinctTermHits(match.Groups["text"].Value, queryTerms);
+            headingHits += CountDistinctTermHits(match.Groups["text"].Value, weightedTerms);
         }
 
-        var bodyHits = 0;
-        foreach (var term in queryTerms)
+        var bodyHits = 0d;
+        foreach (var (term, weight) in weightedTerms)
         {
             // Cap per-term contributions so a giant page that mentions one term 200 times
             // doesn't drown out a focused page that hits three terms cleanly.
-            bodyHits += Math.Min(8, CountTermOccurrences(document.Markdown, term));
+            bodyHits += Math.Min(8, CountTermOccurrences(document.Markdown, term)) * weight;
         }
 
         // Title is the strongest signal for retrieval — a "Characters" page should win for
@@ -161,13 +171,13 @@ public sealed class WikiPageRetrieverService
         return new PageScore(titleHits, headingHits, bodyHits, total);
     }
 
-    private static int CountDistinctTermHits(string text, IReadOnlyCollection<string> terms)
+    private static double CountDistinctTermHits(string text, IReadOnlyDictionary<string, double> terms)
     {
         if (string.IsNullOrEmpty(text)) return 0;
-        var hits = 0;
-        foreach (var term in terms)
+        var hits = 0d;
+        foreach (var (term, weight) in terms)
         {
-            if (text.Contains(term, StringComparison.OrdinalIgnoreCase)) hits++;
+            if (text.Contains(term, StringComparison.OrdinalIgnoreCase)) hits += weight;
         }
         return hits;
     }
@@ -246,7 +256,7 @@ public sealed class WikiPageRetrieverService
         return index;
     }
 
-    private readonly record struct PageScore(int TitleHits, int HeadingHits, int BodyHits, int Total);
+    private readonly record struct PageScore(double TitleHits, double HeadingHits, double BodyHits, double Total);
 
     private readonly record struct ScoredCandidate(WikiPageDocument Document, PageScore Score);
 }

@@ -9,7 +9,7 @@ namespace Thaddeus.Runtime.Wiki;
 public sealed class WikiPageAssistantService
 {
     private const int MaxPageContextChars = 24_000;
-    // Folder-siloed sibling pages get their own retrieval budget on top of the
+    // Book/root-scoped sibling pages get their own retrieval budget on top of the
     // current page's content. Total prompt size stays bounded; for a chapter that
     // already fills 8-10K, this leaves room for ~3-5 related Characters / World
     // pages without crowding out the focal content.
@@ -236,13 +236,13 @@ public sealed class WikiPageAssistantService
 
         if (siblings is null || siblings.Count == 0) return;
 
-        // Related sibling pages from the same folder silo. Snippets only — never the
+        // Related sibling pages from the same wiki root/book. Snippets only — never the
         // full body — so a chapter doesn't get drowned by world-building or character
         // notes. The model is told to use these as background reference, not the
         // primary subject of the request.
         builder.AppendLine();
-        builder.AppendLine("[RELATED PAGES IN THIS FOLDER]");
-        builder.AppendLine("These are excerpts from sibling pages that look relevant to the request. Use them as background only.");
+        builder.AppendLine("[RELATED PAGES IN THIS BOOK]");
+        builder.AppendLine("These are excerpts from relevant pages in the same wiki root/book. Use them as background only.");
         foreach (var sibling in siblings)
         {
             builder.AppendLine();
