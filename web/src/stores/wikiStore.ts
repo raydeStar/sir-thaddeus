@@ -96,6 +96,14 @@ interface WikiStoreState {
   selectedText: string;
   selectionRewriteDraft: WikiSelectionRewriteDraft | null;
   dirty: boolean;
+  // The first markdown the Tiptap editor emits after a (re)mount establishes
+  // the baseline used for dirty detection. This avoids false "Unsaved" flags
+  // caused by lossless markdown round-trip differences (whitespace, list
+  // bullet style, paragraph collapsing) between the persisted markdown and
+  // what Tiptap+Turndown produce. Tracked per page-version key so navigating
+  // to a new page or saving (which bumps version) forces a fresh baseline.
+  editorBaseline: string;
+  editorBaselineKey: string | null;
   loading: boolean;
   saving: boolean;
   searching: boolean;
@@ -157,6 +165,8 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   selectedText: '',
   selectionRewriteDraft: null,
   dirty: false,
+  editorBaseline: '',
+  editorBaselineKey: null,
   loading: false,
   saving: false,
   searching: false,
@@ -1057,10 +1067,6 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   clearSelectionRewrite: () => set({ selectionRewriteDraft: null }),
 
   setDraft: (markdown: string) => set((state) => {
-    // Tiptap roundtrip on mount can emit a markdown string that is
-    // semantically identical to the persisted page (e.g. trailing
-    // whitespace differences). Compare normalized values so a freshly
-    // created or freshly loaded page does not falsely show "Unsaved".
     const normalize = (value: string) => value.replace(/\s+$/g, '');
     if (state.isDraftPage) {
       // For a draft, dirty is true as soon as the user adds any content or
@@ -1070,13 +1076,30 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       return {
         draft: markdown,
         dirty: hasContent,
+        editorBaseline: '',
+        editorBaselineKey: 'draft',
         selectionRewriteDraft: null,
       };
     }
-    const persisted = state.page?.markdown ?? '';
+    // Use Tiptap's own first-emit as the dirty baseline so lossless
+    // round-trip differences (whitespace / list spacing / collapsed inline
+    // labels) don't falsely flag a freshly loaded page as Unsaved.
+    const currentKey = state.page ? `${state.page.page.id}:${state.page.page.version}` : null;
+    if (currentKey === null) {
+      return { draft: markdown, selectionRewriteDraft: null };
+    }
+    if (state.editorBaselineKey !== currentKey) {
+      return {
+        draft: markdown,
+        editorBaseline: markdown,
+        editorBaselineKey: currentKey,
+        dirty: false,
+        selectionRewriteDraft: null,
+      };
+    }
     return {
       draft: markdown,
-      dirty: normalize(markdown) !== normalize(persisted),
+      dirty: normalize(markdown) !== normalize(state.editorBaseline),
       selectionRewriteDraft: null,
     };
   }),
