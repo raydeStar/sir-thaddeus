@@ -722,7 +722,7 @@ function WikiRoute() {
                     ) : (
                       <p className="text-xs text-ink-subtle">
                         {!page
-                          ? 'Save this page to chat with the assistant about it.'
+                          ? 'Tell Sir Thaddeus what this page should be about. Hit Enter and the page is created with whatever it writes — nothing saves until then.'
                           : selectedText.trim()
                             ? 'Tell Sir Thaddeus how to rewrite the highlighted passage.'
                             : 'Ask anything about this page, or highlight text to rewrite it.'}
@@ -768,13 +768,20 @@ function WikiRoute() {
                         if (event.nativeEvent.isComposing) return;
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
-                          if (busy || !pagePrompt.trim() || !page) return;
-                          void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk());
+                          if (busy || !pagePrompt.trim()) return;
+                          if (selectedText.trim()) {
+                            void submitSelectionRewrite();
+                          } else if (!page) {
+                            // Draft mode: the prompt creates the page itself.
+                            void submitPageDraft();
+                          } else {
+                            void submitPageAsk();
+                          }
                         }
                       }}
-                      disabled={busy || !page}
+                      disabled={busy}
                       rows={2}
-                      placeholder={!page ? 'Save the page to start chatting' : selectedText.trim() ? 'How should this be rewritten?' : 'Ask about this page'}
+                      placeholder={!page ? 'Describe what this page should be about…' : selectedText.trim() ? 'How should this be rewritten?' : 'Ask about this page'}
                       aria-label="Page chat prompt"
                       className="field-input min-h-16 resize-none"
                     />
@@ -796,15 +803,26 @@ function WikiRoute() {
                       <button
                         type="button"
                         className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-subtle"
-                        disabled={busy || !pagePrompt.trim() || !page}
-                        onClick={() =>
-                          void (selectedText.trim() ? submitSelectionRewrite() : submitPageAsk())
-                        }
+                        disabled={busy || !pagePrompt.trim()}
+                        onClick={() => {
+                          if (selectedText.trim()) {
+                            void submitSelectionRewrite();
+                          } else if (!page) {
+                            void submitPageDraft();
+                          } else {
+                            void submitPageAsk();
+                          }
+                        }}
                       >
                         {selectedText.trim() ? (
                           <>
                             <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
                             Rewrite selection
+                          </>
+                        ) : !page ? (
+                          <>
+                            <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            Create
                           </>
                         ) : (
                           <>

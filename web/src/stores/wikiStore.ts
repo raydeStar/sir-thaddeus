@@ -8,6 +8,16 @@ export type WikiSearchScope = 'root' | 'all';
 const LEGACY_UNTITLED_TITLE = 'Untitled Page';
 const UNTITLED_CLEANUP_FLAG = 'sirthaddeus.wiki.cleanup.untitled-pages.v1';
 
+// Derive a short placeholder title from a chat prompt so we can create a
+// page row before the AI has produced markdown. The real title is refined
+// from the AI output once it lands.
+function deriveTitleFromPrompt(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return 'New page';
+  const words = cleaned.split(' ').slice(0, 8).join(' ');
+  return words.length > 60 ? words.slice(0, 60).trimEnd() : words;
+}
+
 // Derive a human-readable title from page content. Prefers the first
 // markdown heading; falls back to the first non-empty line. Strips basic
 // emphasis/link syntax and clamps to a sensible length.
@@ -761,6 +771,39 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     const trimmed = instruction.trim();
     if (!trimmed) return;
     let current = get().page;
+    // Draft-mode bootstrap: there is no saved page yet, so create one with a
+    // placeholder title derived from the prompt. If the AI fails or returns
+    // empty markdown below, we delete the page so nothing empty is persisted.
+    let bootstrappedPageId: string | null = null;
+    if (!current && get().isDraftPage) {
+      const rootId = get().selectedRootId;
+      if (!rootId) return;
+      const placeholder = get().draftTitle.trim() || deriveTitleFromPrompt(trimmed);
+      try {
+        const created = await api.createWikiPage(rootId, {
+          title: placeholder,
+          folderId: get().draftFolderId,
+          markdown: '',
+        });
+        bootstrappedPageId = created.page.id;
+        set({
+          page: created,
+          revisions: [],
+          selectedPageId: created.page.id,
+          selectedFolderId: created.page.folderId,
+          draft: created.markdown,
+          isDraftPage: false,
+          draftTitle: '',
+          draftFolderId: null,
+          scope: 'page',
+          dirty: false,
+        });
+        current = created;
+      } catch (error) {
+        set({ error: (error as Error).message });
+        return;
+      }
+    }
     if (!current) return;
     // Auto-flush any pending user edits so the AI works against the latest content.
     if (get().dirty) {
@@ -785,21 +828,64 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     }));
     try {
       const aiDraft = await api.draftWikiPage(current.page.id, { instruction: trimmed, scope: get().scope });
+      // Empty AI output on a brand-new page would leave a blank row behind.
+      // Roll the bootstrap back so the user sees nothing was saved.
+      if (bootstrappedPageId && !aiDraft.markdown.trim()) {
+        try { await api.deleteWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
+        const tree = await api.getWikiTree(current.page.rootId);
+        set((state) => ({
+          tree,
+          page: null,
+          revisions: [],
+          selectedPageId: null,
+          draft: '',
+          isDraftPage: true,
+          draftTitle: '',
+          draftFolderId: get().selectedFolderId,
+          scope: 'page',
+          pageChatMessages: [
+            ...state.pageChatMessages,
+            {
+              id: aiDraft.messageId,
+              role: 'assistant',
+              text: aiDraft.assistantText || 'No content was generated, so nothing was saved.',
+              createdAt: aiDraft.createdAt,
+            },
+          ],
+        }));
+        return;
+      }
       const saved = await api.updateWikiPage(current.page.id, {
         markdown: aiDraft.markdown,
         expectedVersion: current.page.version,
         source: 'ai',
         summary: aiDraft.summary,
       });
-      const tree = await api.getWikiTree(saved.page.rootId);
-      const revisions = await api.listWikiRevisions(saved.page.id);
+      // After the AI drops content into a freshly-bootstrapped page, prefer a
+      // title derived from that content over the placeholder we created with.
+      let finalSaved = saved;
+      if (bootstrappedPageId) {
+        const derived = deriveTitleFromMarkdown(saved.markdown);
+        if (derived && derived !== saved.page.title) {
+          try {
+            finalSaved = await api.updateWikiPage(saved.page.id, {
+              title: derived,
+              expectedVersion: saved.page.version,
+              source: 'ai',
+              summary: 'Derived title from generated content',
+            });
+          } catch { /* keep placeholder title on rename failure */ }
+        }
+      }
+      const tree = await api.getWikiTree(finalSaved.page.rootId);
+      const revisions = await api.listWikiRevisions(finalSaved.page.id);
       set((state) => ({
-        page: saved,
+        page: finalSaved,
         tree,
         revisions,
-        draft: saved.markdown,
-        selectedPageId: saved.page.id,
-        selectedFolderId: saved.page.folderId,
+        draft: finalSaved.markdown,
+        selectedPageId: finalSaved.page.id,
+        selectedFolderId: finalSaved.page.folderId,
         pageChatDraft: null,
         selectedText: '',
         selectionRewriteDraft: null,
@@ -818,6 +904,24 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         ],
       }));
     } catch (error) {
+      // If the AI call failed during bootstrap, delete the placeholder page so
+      // we don't leave a blank row behind.
+      if (bootstrappedPageId) {
+        try { await api.deleteWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
+        const rootId = get().selectedRootId;
+        const tree = rootId ? await api.getWikiTree(rootId).catch(() => get().tree) : get().tree;
+        set({
+          tree,
+          page: null,
+          revisions: [],
+          selectedPageId: null,
+          draft: '',
+          isDraftPage: true,
+          draftTitle: '',
+          draftFolderId: get().selectedFolderId,
+          scope: 'page',
+        });
+      }
       set({ error: (error as Error).message });
     } finally {
       set({ pageAssistantBusy: false, saving: false });
