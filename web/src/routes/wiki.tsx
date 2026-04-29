@@ -305,8 +305,12 @@ function WikiRoute() {
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
-      <header className="flex flex-col gap-3 border-b border-line px-4 py-4 md:flex-row md:items-start md:justify-between md:gap-6 md:px-6">
+    // Pin to exactly the viewport height under the 44px AppShell titlebar.
+    // A min-h here lets the page grow taller than the viewport, which makes
+    // AppShell's <main> scroll and pushes the right-pane chat composer off
+    // the bottom of the screen.
+    <section className="flex h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
+      <header className="flex shrink-0 flex-col gap-3 border-b border-line px-4 py-4 md:flex-row md:items-start md:justify-between md:gap-6 md:px-6">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-subtle">
             <Library className="h-3 w-3" strokeWidth={1.8} />
@@ -644,7 +648,7 @@ function WikiRoute() {
         </aside>
 
         <main className="min-h-0 overflow-hidden">
-          <div className="flex h-full min-h-[640px] flex-col">
+          <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-center justify-between border-b border-line px-4 py-2 md:px-5">
               <div className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
                 <BookOpenText className="h-4 w-4 shrink-0" strokeWidth={1.8} />
