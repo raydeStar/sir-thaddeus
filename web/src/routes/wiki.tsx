@@ -772,25 +772,8 @@ function WikiRoute() {
           />
           {!rightCollapsed ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <section className="shrink-0 space-y-2 px-4 pt-3">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Context</h2>
-                <div className="flex flex-wrap gap-2">
-                  {(['root', 'folder', 'page'] as WikiScope[]).map((candidate) => (
-                    <button
-                      key={candidate}
-                      type="button"
-                      onClick={() => setScope(candidate)}
-                      disabled={candidate === 'folder' ? !selectedFolder : candidate === 'page' ? !selectedPage : !selectedRoot}
-                      className={`rounded-full border px-3 py-1 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-55 ${scope === candidate ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-muted hover:text-ink'}`}
-                    >
-                      {candidate === 'root' ? 'Workspace' : candidate}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
               {selectedRoot ? (
-                <section className="mt-3 flex min-h-0 flex-1 flex-col border-t border-line" aria-label="Page chat">
+                <section className="flex min-h-0 flex-1 flex-col" aria-label="Page chat">
                   <div ref={chatScrollRef} aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
                     {pageChatMessages.length > 0 ? (
                       pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
