@@ -140,48 +140,7 @@ public static class ChatApi
                     ThreadId: id,
                     Detail: null));
 
-                // Kick off the stub assistant on a background task. The HTTP caller
-                // returns immediately with the user message; the assistant reply is
-                // streamed over /ws and persisted to the store when complete.
-                _ = Task.Run(async () =>
-                {
-                    var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
-                    var status = ActivityStatus.Ok;
-                    string? detail = null;
-                    // Use ApplicationStopping rather than the request CT (which cancels
-                    // the moment the HTTP handler returns) so shutdown drains the
-                    // assistant cleanly. CancellationToken.None would let work outlive
-                    // process shutdown indefinitely.
-                    var bgCt = lifetime.ApplicationStopping;
-                    try
-                    {
-                        var reply = await assistant.RespondAsync(id, prompt.Prompt, bgCt)
-                            .ConfigureAwait(false);
-                        detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
-                    }
-                    catch (OperationCanceledException) when (bgCt.IsCancellationRequested)
-                    {
-                        status = ActivityStatus.Failed;
-                        detail = "cancelled by shutdown";
-                        log.LogInformation("stub_assistant.cancelled_by_shutdown thread={ThreadId}", id);
-                    }
-                    catch (Exception ex)
-                    {
-                        status = ActivityStatus.Failed;
-                        detail = ex.Message;
-                        log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", id);
-                    }
-                    finally
-                    {
-                        // Stub assistant is text-only; close the loop back to Idle.
-                        machine.TryTransition(StateTrigger.PlanTextOnly);
-                        activity.Update(
-                            activityEntry.Id,
-                            status: status,
-                            completedAt: DateTimeOffset.UtcNow,
-                            detail: detail);
-                    }
-                });
+                StartAssistantTurn(id, prompt.Prompt, assistant, machine, activity, loggerFactory, lifetime, activityEntry);
 
                 return Results.Json(
                     new AppendMessageResponse(message, updated),
@@ -194,6 +153,97 @@ public static class ChatApi
             }
         })
             .WithName("AppendMessage");
+
+        app.MapPost("/api/threads/{id}/messages/retry",
+            async (string id, IThreadStore store, IAssistant assistant,
+                RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
+                IHostApplicationLifetime lifetime,
+                CancellationToken ct) =>
+        {
+            var thread = await store.GetAsync(id, ct).ConfigureAwait(false);
+            if (thread is null) return Results.NotFound();
+            if (thread.Messages.Count == 0)
+                return Results.BadRequest(new { error = "no assistant response to retry" });
+
+            var latest = thread.Messages[^1];
+            if (latest.Role != ChatRole.Assistant || string.IsNullOrWhiteSpace(latest.Text))
+                return Results.BadRequest(new { error = "latest message is not an assistant response" });
+
+            var userMessage = thread.Messages
+                .Take(thread.Messages.Count - 1)
+                .LastOrDefault(m => m.Role == ChatRole.User && !string.IsNullOrWhiteSpace(m.Text));
+            if (userMessage is null)
+                return Results.BadRequest(new { error = "no user message to retry from" });
+
+            var updated = await store.RemoveMessageAsync(id, latest.Id, ct).ConfigureAwait(false);
+            if (updated is null) return Results.NotFound();
+
+            machine.TryTransition(StateTrigger.UserTextSubmitted);
+            var now = DateTimeOffset.UtcNow;
+            var activityEntry = activity.Append(new ActivityEntry(
+                Id: InMemoryActivityLog.NewId(),
+                Kind: ActivityKind.ChatTurn,
+                Summary: "Retry: " + SummariseUserText(userMessage.Text),
+                Status: ActivityStatus.Running,
+                StartedAt: now,
+                CompletedAt: null,
+                ThreadId: id,
+                Detail: null));
+
+            StartAssistantTurn(id, userMessage.Text, assistant, machine, activity, loggerFactory, lifetime, activityEntry);
+
+            return Results.Json(
+                new RetryAssistantResponse(updated),
+                ChatJsonContext.Default.RetryAssistantResponse,
+                statusCode: StatusCodes.Status202Accepted);
+        })
+            .WithName("RetryLatestAssistantResponse");
+    }
+
+    private static void StartAssistantTurn(
+        string threadId,
+        string prompt,
+        IAssistant assistant,
+        RuntimeStateMachine machine,
+        IActivityLog activity,
+        ILoggerFactory loggerFactory,
+        IHostApplicationLifetime lifetime,
+        ActivityEntry activityEntry)
+    {
+        _ = Task.Run(async () =>
+        {
+            var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
+            var status = ActivityStatus.Ok;
+            string? detail = null;
+            var bgCt = lifetime.ApplicationStopping;
+            try
+            {
+                var reply = await assistant.RespondAsync(threadId, prompt, bgCt)
+                    .ConfigureAwait(false);
+                detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
+            }
+            catch (OperationCanceledException) when (bgCt.IsCancellationRequested)
+            {
+                status = ActivityStatus.Failed;
+                detail = "cancelled by shutdown";
+                log.LogInformation("stub_assistant.cancelled_by_shutdown thread={ThreadId}", threadId);
+            }
+            catch (Exception ex)
+            {
+                status = ActivityStatus.Failed;
+                detail = ex.Message;
+                log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", threadId);
+            }
+            finally
+            {
+                machine.TryTransition(StateTrigger.PlanTextOnly);
+                activity.Update(
+                    activityEntry.Id,
+                    status: status,
+                    completedAt: DateTimeOffset.UtcNow,
+                    detail: detail);
+            }
+        });
     }
 
     private static string NewMessageId() =>
@@ -217,6 +267,9 @@ public sealed record AppendMessageRequest(string Text, WikiChatContextRequest? W
 
 /// <summary>Response for POST /api/threads/{id}/messages.</summary>
 public sealed record AppendMessageResponse(ChatMessage Message, ChatThread Thread);
+
+/// <summary>Response for POST /api/threads/{id}/messages/retry.</summary>
+public sealed record RetryAssistantResponse(ChatThread Thread);
 
 /// <summary>Compact thread summary for the chat list view.</summary>
 public sealed record ThreadSummary(
@@ -255,6 +308,7 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(WikiChatContextPrompt))]
 [JsonSerializable(typeof(WikiChatContextAttachment))]
 [JsonSerializable(typeof(AppendMessageResponse))]
+[JsonSerializable(typeof(RetryAssistantResponse))]
 public partial class ChatJsonContext : JsonSerializerContext
 {
 }

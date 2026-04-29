@@ -21,6 +21,9 @@ public interface IThreadStore
     /// <exception cref="KeyNotFoundException">If the thread does not exist.</exception>
     Task<ChatThread> AppendMessageAsync(string threadId, ChatMessage message, CancellationToken ct);
 
+    /// <summary>Remove one message from the thread. Returns the updated thread, or null if not found.</summary>
+    Task<ChatThread?> RemoveMessageAsync(string threadId, string messageId, CancellationToken ct);
+
     /// <summary>Rename a thread. Returns the updated thread, or null if not found.</summary>
     Task<ChatThread?> RenameAsync(string threadId, string newTitle, CancellationToken ct);
 

@@ -41,6 +41,7 @@ interface ChatStoreState {
   openThread: (id: string) => Promise<void>;
   newThread: (title?: string) => Promise<ChatThread>;
   send: (text: string, wikiContext?: WikiChatContextInput) => Promise<void>;
+  retryLatestResponse: () => Promise<void>;
   destroy: () => void;
   ingestEvent: (evt: RuntimeEvent<unknown>) => void;
 }
@@ -133,6 +134,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     ensureSocket((evt) => get().ingestEvent(evt));
     try {
       const updated = await api.appendMessage(id, text.trim(), wikiContext);
+      set({ activeThread: updated, sending: false });
+    } catch (e) {
+      set({ error: (e as Error).message, sending: false });
+    }
+  },
+
+  retryLatestResponse: async () => {
+    const id = get().activeThreadId;
+    if (!id || get().sending || get().activeTurn) return;
+    set({ sending: true, error: null });
+    ensureSocket((evt) => get().ingestEvent(evt));
+    try {
+      const updated = await api.retryLatestResponse(id);
       set({ activeThread: updated, sending: false });
     } catch (e) {
       set({ error: (e as Error).message, sending: false });

@@ -52,6 +52,14 @@ export async function appendMessage(
   return body.thread;
 }
 
+export async function retryLatestResponse(threadId: string): Promise<ChatThread> {
+  const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(threadId)}/messages/retry`, {
+    method: 'POST',
+  });
+  const body = await asJson<{ thread: ChatThread }>(res);
+  return body.thread;
+}
+
 export async function deleteThread(id: string): Promise<void> {
   const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(id)}`, {
     method: 'DELETE',

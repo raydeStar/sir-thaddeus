@@ -101,6 +101,30 @@ public sealed class JsonFileThreadStore : IThreadStore, IDisposable
         finally { gate.Release(); }
     }
 
+    public async Task<ChatThread?> RemoveMessageAsync(string threadId, string messageId, CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        var gate = LockFor(threadId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_threads.TryGetValue(threadId, out var current)) return null;
+
+            var messages = current.Messages.Where(m => !string.Equals(m.Id, messageId, StringComparison.Ordinal)).ToList();
+            if (messages.Count == current.Messages.Count) return current;
+
+            var updated = current with
+            {
+                Messages = messages,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            _threads[threadId] = updated;
+            await WriteAsync(updated, ct).ConfigureAwait(false);
+            return updated;
+        }
+        finally { gate.Release(); }
+    }
+
     public async Task<bool> DeleteAsync(string threadId, CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);

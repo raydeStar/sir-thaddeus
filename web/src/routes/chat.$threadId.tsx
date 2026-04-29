@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Plus, RotateCcw } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
@@ -21,6 +21,7 @@ function ChatThreadRoute() {
   const error = useChatStore((s) => s.error);
   const openThread = useChatStore((s) => s.openThread);
   const send = useChatStore((s) => s.send);
+  const retryLatestResponse = useChatStore((s) => s.retryLatestResponse);
 
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -40,6 +41,11 @@ function ChatThreadRoute() {
   };
 
   const messages = thread?.messages ?? [];
+  const latestMessage = messages[messages.length - 1];
+  const latestAssistantResponseId =
+    !activeTurn && String(latestMessage?.role || '').toLowerCase() === 'assistant' && latestMessage?.text?.trim()
+      ? latestMessage.id
+      : null;
   const empty = messages.length === 0 && !activeTurn;
 
   return (
@@ -87,6 +93,9 @@ function ChatThreadRoute() {
                     text={m.text}
                     sources={m.sources ?? null}
                     messageId={m.id}
+                    isLatestAssistantResponse={m.id === latestAssistantResponseId}
+                    onRetryLatest={() => void retryLatestResponse()}
+                    retryDisabled={sending || Boolean(activeTurn)}
                     testId={`chat-message-${m.id}`}
                   />
                 );
@@ -153,12 +162,41 @@ interface MessageRowProps {
   sources?: ChatMessageSource[] | null;
   messageId?: string;
   streaming?: boolean;
+  isLatestAssistantResponse?: boolean;
+  onRetryLatest?: () => void;
+  retryDisabled?: boolean;
   testId: string;
 }
 
-function MessageRow({ role, text, sources, messageId, streaming, testId }: MessageRowProps) {
+function MessageRow({
+  role,
+  text,
+  sources,
+  messageId,
+  streaming,
+  isLatestAssistantResponse,
+  onRetryLatest,
+  retryDisabled,
+  testId,
+}: MessageRowProps) {
   const normalized = String(role || '').toLowerCase();
   const isUser = normalized === 'user';
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const onCopy = async () => {
+    try {
+      await copyToClipboard(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   if (isUser) {
     return (
@@ -188,6 +226,31 @@ function MessageRow({ role, text, sources, messageId, streaming, testId }: Messa
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
       <Markdown>{text}</Markdown>
       {sources && sources.length > 0 ? <SourceCards sources={sources} /> : null}
+      {isLatestAssistantResponse ? (
+        <div className="mt-3 flex items-center gap-1 text-ink-subtle" data-testid="chat-latest-response-actions">
+          <button
+            type="button"
+            onClick={onCopy}
+            data-testid="chat-copy-latest-response"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent transition hover:border-line hover:bg-canvas-sunken hover:text-ink"
+            aria-label={copied ? 'Copied latest response' : 'Copy latest response'}
+            title={copied ? 'Copied' : 'Copy'}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.9} />}
+          </button>
+          <button
+            type="button"
+            onClick={onRetryLatest}
+            disabled={retryDisabled}
+            data-testid="chat-retry-latest-response"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent transition hover:border-line hover:bg-canvas-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+            aria-label="Retry latest response"
+            title="Retry"
+          >
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.9} />
+          </button>
+        </div>
+      ) : null}
       {streaming ? (
         <span
           className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-1 animate-pulse bg-accent align-middle"
@@ -196,4 +259,21 @@ function MessageRow({ role, text, sources, messageId, streaming, testId }: Messa
       ) : null}
     </div>
   );
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
 }

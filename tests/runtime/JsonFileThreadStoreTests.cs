@@ -79,6 +79,34 @@ public class JsonFileThreadStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveMessage_removes_message_and_persists()
+    {
+        string threadId;
+        string assistantId;
+        using (var store = NewStore())
+        {
+            var thread = await store.CreateAsync("conv", CancellationToken.None);
+            threadId = thread.Id;
+            await store.AppendMessageAsync(threadId, NewUserMessage("hello"), CancellationToken.None);
+            var assistant = NewAssistantMessage("old reply");
+            assistantId = assistant.Id;
+            await store.AppendMessageAsync(threadId, assistant, CancellationToken.None);
+
+            var updated = await store.RemoveMessageAsync(threadId, assistantId, CancellationToken.None);
+
+            Assert.NotNull(updated);
+            Assert.Single(updated!.Messages);
+            Assert.Equal(ChatRole.User, updated.Messages[0].Role);
+        }
+
+        using var reopened = NewStore();
+        var loaded = await reopened.GetAsync(threadId, CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.DoesNotContain(loaded!.Messages, m => m.Id == assistantId);
+        Assert.Single(loaded.Messages);
+    }
+
+    [Fact]
     public async Task Get_returns_null_for_unknown_thread()
     {
         using var store = NewStore();
