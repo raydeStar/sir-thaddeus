@@ -4,12 +4,18 @@ import {
   ArrowUp,
   BookOpen,
   ChevronDown,
+  ClipboardList,
+  Code,
   FileText,
   Folder,
   History,
   Library,
   Loader2,
+  PencilLine,
+  Search,
+  Sparkles,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
 import type { WikiChatContextInput } from '../lib/chatApi';
@@ -49,6 +55,64 @@ export interface ChatComposerProps {
   autoFocus?: boolean;
 }
 
+interface PromptCommand {
+  name: string;
+  description: string;
+  icon: LucideIcon;
+  build: (input: string) => string;
+}
+
+const PROMPT_COMMANDS: PromptCommand[] = [
+  {
+    name: 'summarize',
+    description: 'Summarize selected text or attached content.',
+    icon: FileText,
+    build: (input) => promptWithInput('Summarize the following clearly and briefly:', input),
+  },
+  {
+    name: 'explain',
+    description: 'Explain this in plain language.',
+    icon: Sparkles,
+    build: (input) => promptWithInput('Explain this clearly, with the important details first:', input),
+  },
+  {
+    name: 'debug',
+    description: 'Find likely causes and smallest checks.',
+    icon: Code,
+    build: (input) => promptWithInput('Help me debug this. Start with likely causes, then give the smallest verification steps:', input),
+  },
+  {
+    name: 'rewrite',
+    description: 'Rewrite while preserving meaning.',
+    icon: PencilLine,
+    build: (input) => promptWithInput('Rewrite this for clarity while preserving the meaning and tone:', input),
+  },
+  {
+    name: 'research',
+    description: 'Separate facts from uncertainty.',
+    icon: Search,
+    build: (input) => promptWithInput('Research this and separate known facts from uncertainty:', input),
+  },
+  {
+    name: 'test-plan',
+    description: 'Create a focused verification plan.',
+    icon: ClipboardList,
+    build: (input) => promptWithInput('Create a focused test plan for this. Include what to verify, likely edge cases, and the fastest confidence checks:', input),
+  },
+  {
+    name: 'pr-review',
+    description: 'Review for regressions and missing tests.',
+    icon: Code,
+    build: (input) => promptWithInput('Review this like a pull request. Lead with bugs, regressions, risks, and missing tests:', input),
+  },
+  {
+    name: 'commit',
+    description: 'Draft a concise commit message.',
+    icon: FileText,
+    build: (input) => promptWithInput('Draft a concise commit message for these changes:', input),
+  },
+];
+
 /**
  * Sleek chat composer surface used by both the home hero and the thread view.
  *
@@ -73,11 +137,32 @@ export function ChatComposer({
   const [wikiContextValue, setWikiContextValue] = useState('');
   const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
+  const [highlightedCommandIndex, setHighlightedCommandIndex] = useState(0);
+  const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(null);
 
   const selectedWikiContextOption = useMemo(
     () => wikiContextOptions.find((o) => o.value === wikiContextValue) ?? null,
     [wikiContextOptions, wikiContextValue],
   );
+
+  const slashCommandState = useMemo(() => parseSlashCommand(value), [value]);
+  const matchingPromptCommands = useMemo(() => {
+    if (!slashCommandState) return [];
+    return PROMPT_COMMANDS.filter((command) => command.name.includes(slashCommandState.query));
+  }, [slashCommandState]);
+  const slashMenuOpen = Boolean(
+    slashCommandState && matchingPromptCommands.length > 0 && dismissedSlashValue !== value,
+  );
+
+  useEffect(() => {
+    setHighlightedCommandIndex(0);
+  }, [slashCommandState?.query]);
+
+  useEffect(() => {
+    if (highlightedCommandIndex >= matchingPromptCommands.length) {
+      setHighlightedCommandIndex(Math.max(0, matchingPromptCommands.length - 1));
+    }
+  }, [highlightedCommandIndex, matchingPromptCommands.length]);
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus();
@@ -138,6 +223,12 @@ export function ChatComposer({
 
   const canSend = !sending && value.trim().length > 0;
 
+  const applyPromptCommand = (command: PromptCommand) => {
+    const input = slashCommandState?.input ?? '';
+    onChange(command.build(input));
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const submit = async () => {
     if (!canSend) return;
     await onSubmit(value.trim(), selectionFor(selectedWikiContextOption));
@@ -149,6 +240,29 @@ export function ChatComposer({
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashMenuOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setHighlightedCommandIndex((index) => (index + 1) % matchingPromptCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setHighlightedCommandIndex((index) => (index - 1 + matchingPromptCommands.length) % matchingPromptCommands.length);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setDismissedSlashValue(value);
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        applyPromptCommand(matchingPromptCommands[highlightedCommandIndex]);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void submit();
@@ -165,6 +279,43 @@ export function ChatComposer({
 
   return (
     <form onSubmit={handleSubmit} data-testid="chat-composer" className="composer-shell">
+      {slashMenuOpen ? (
+        <div
+          data-testid="chat-slash-menu"
+          className="absolute inset-x-0 bottom-full z-20 mb-2 max-h-72 overflow-auto rounded-2xl border border-line bg-canvas-raised p-1.5 shadow-soft"
+          role="listbox"
+          aria-label="Prompt commands"
+        >
+          {matchingPromptCommands.map((command, index) => {
+            const Icon = command.icon;
+            const active = index === highlightedCommandIndex;
+            return (
+              <button
+                key={command.name}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlightedCommandIndex(index)}
+                onClick={() => applyPromptCommand(command)}
+                data-testid={`chat-slash-command-${command.name}`}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
+                  active ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-canvas-sunken hover:text-ink'
+                }`}
+                role="option"
+                aria-selected={active}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-canvas text-ink-muted">
+                  <Icon className="h-4 w-4" strokeWidth={1.8} aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-ink">/{command.name}</span>
+                  <span className="block truncate text-xs text-ink-muted">{command.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <textarea
         ref={textareaRef}
         value={value}
@@ -269,6 +420,19 @@ export function ChatComposer({
       </div>
     </form>
   );
+}
+
+function parseSlashCommand(value: string): { query: string; input: string } | null {
+  const match = value.match(/^\/([a-z-]*)\s*([\s\S]*)$/i);
+  if (!match) return null;
+  return {
+    query: match[1].toLowerCase(),
+    input: match[2].trimStart(),
+  };
+}
+
+function promptWithInput(prefix: string, input: string): string {
+  return input.trim() ? `${prefix}\n\n${input.trim()}` : `${prefix}\n\n`;
 }
 
 function selectionFor(option: WikiContextOption | null): WikiContextSelection | undefined {
