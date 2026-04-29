@@ -4,8 +4,6 @@ import {
   ArrowUp,
   BookOpen,
   ChevronDown,
-  ClipboardList,
-  Code,
   FileText,
   Folder,
   History,
@@ -76,12 +74,6 @@ const PROMPT_COMMANDS: PromptCommand[] = [
     build: (input) => promptWithInput('Explain this clearly, with the important details first:', input),
   },
   {
-    name: 'debug',
-    description: 'Find likely causes and smallest checks.',
-    icon: Code,
-    build: (input) => promptWithInput('Help me debug this. Start with likely causes, then give the smallest verification steps:', input),
-  },
-  {
     name: 'rewrite',
     description: 'Rewrite while preserving meaning.',
     icon: PencilLine,
@@ -92,24 +84,6 @@ const PROMPT_COMMANDS: PromptCommand[] = [
     description: 'Separate facts from uncertainty.',
     icon: Search,
     build: (input) => promptWithInput('Research this and separate known facts from uncertainty:', input),
-  },
-  {
-    name: 'test-plan',
-    description: 'Create a focused verification plan.',
-    icon: ClipboardList,
-    build: (input) => promptWithInput('Create a focused test plan for this. Include what to verify, likely edge cases, and the fastest confidence checks:', input),
-  },
-  {
-    name: 'pr-review',
-    description: 'Review for regressions and missing tests.',
-    icon: Code,
-    build: (input) => promptWithInput('Review this like a pull request. Lead with bugs, regressions, risks, and missing tests:', input),
-  },
-  {
-    name: 'commit',
-    description: 'Draft a concise commit message.',
-    icon: FileText,
-    build: (input) => promptWithInput('Draft a concise commit message for these changes:', input),
   },
 ];
 
