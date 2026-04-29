@@ -112,6 +112,7 @@ public static class Program
             builder.Services.AddSingleton<ISpeechToTextProvider, SettingsDrivenSpeechToTextProvider>();
             builder.Services.AddSingleton<ITextToSpeechProvider, SettingsDrivenTextToSpeechProvider>();
             builder.Services.AddSingleton<VoiceModeController>();
+            builder.Services.AddSingleton<VoiceHostProcessSupervisor>();
             builder.Services.AddSingleton<IThreadStore>(sp =>
             {
                 var lockDir = Path.GetDirectoryName(options.LockFilePath)!;

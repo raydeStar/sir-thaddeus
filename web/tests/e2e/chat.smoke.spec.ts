@@ -96,6 +96,7 @@ test.describe('chat smoke', () => {
     await expect(page.getByTestId('chat-source-cards')).toContainText('example.com');
     await expect(page.getByTestId('chat-source-cards')).toContainText('Markets are reacting to new transit risk assessments');
     await expect(page.getByTestId('chat-latest-response-actions')).toBeVisible();
+    await expect(page.getByTestId('chat-speak-response')).toBeVisible();
     await expect(page.getByTestId('chat-copy-latest-response')).toBeVisible();
     await expect(page.getByTestId('chat-retry-latest-response')).toBeVisible();
     await page.screenshot({ path: 'test-results/chat-source-cards-review.png', fullPage: true });
