@@ -137,6 +137,7 @@ function WikiRoute() {
         .filter((folder) => folder.id !== selectedFolder.id && !isFolderDescendant(folders, selectedFolder.id, folder.id))
         .map((folder) => ({ id: folder.id, label: formatFolderPath(folders, folder) }))
     : [];
+  const quickSearchChips = extractWikiQuickSearchChips(draft);
   const hasSearch = search.trim().length > 0;
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
@@ -369,6 +370,18 @@ function WikiRoute() {
                 {dirty ? 'Unsaved' : 'Saved'}
               </span>
             ) : null}
+            {quickSearchChips.map((chip) => (
+              <button
+                key={`${chip.kind}:${chip.searchValue}`}
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-ink-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!tree}
+                onClick={() => setSearch(chip.searchValue)}
+                title={`Search for ${chip.searchValue}`}
+              >
+                {chip.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -1332,6 +1345,74 @@ function RevisionPreview({
 
 function countWords(markdown: string): number {
   return markdown.trim().length === 0 ? 0 : markdown.trim().split(/\s+/).length;
+}
+
+interface WikiQuickSearchChip {
+  kind: 'tag' | 'type' | 'marker';
+  label: string;
+  searchValue: string;
+}
+
+function extractWikiQuickSearchChips(markdown: string): WikiQuickSearchChip[] {
+  const chips: WikiQuickSearchChip[] = [];
+  const seen = new Set<string>();
+  const add = (kind: WikiQuickSearchChip['kind'], label: string, searchValue = label) => {
+    const normalizedLabel = label.trim();
+    const normalizedSearch = searchValue.trim();
+    if (!normalizedLabel || !normalizedSearch) return;
+    const key = normalizedSearch.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    chips.push({ kind, label: normalizedLabel, searchValue: normalizedSearch });
+  };
+
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const tags = extractInlineMetadataValue(line, 'tags?');
+    if (tags) {
+      for (const tag of parseTagLine(tags)) add('tag', tag, tag);
+    }
+
+    const type = extractInlineMetadataValue(line, 'type');
+    if (type) {
+      add('type', `type: ${type}`, `Type: ${type}`);
+    }
+
+    const marker = extractInlineMetadataValue(line, 'continuity marker');
+    if (marker) {
+      add('marker', marker, marker);
+    }
+  }
+
+  for (const match of markdown.matchAll(/\b[A-Z0-9]+(?:-[A-Z0-9]+){2,}\b/g)) {
+    add('marker', match[0], match[0]);
+  }
+
+  return chips.slice(0, 8);
+}
+
+function extractInlineMetadataValue(line: string, labelPattern: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${labelPattern}:\\s*(?<value>.+)`, 'i').exec(line);
+  const raw = match?.groups?.value;
+  if (!raw) return null;
+
+  const nextField = /\s[A-Z][A-Za-z]*(?:\s+[A-Za-z]+){0,3}:\s/.exec(raw);
+  const value = nextField && nextField.index > 0 ? raw.slice(0, nextField.index) : raw;
+  return value.replace(/[.;]+$/g, '').trim() || null;
+}
+
+function parseTagLine(value: string): string[] {
+  const explicit = Array.from(value.matchAll(/#[\p{L}\p{Nd}][\p{L}\p{Nd}_-]*/gu), (match) => match[0].toLowerCase());
+  if (explicit.length > 0) return explicit;
+
+  const parts = value.includes(',') ? value.split(',') : value.split(/\s+/);
+  return parts
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .map((part) => `#${part.replace(/[^\p{L}\p{Nd}_-]+/gu, '-').replace(/^-+|-+$/g, '')}`)
+    .filter((part) => part.length > 1);
 }
 
 function truncateForPreview(text: string, max = 140): string {
