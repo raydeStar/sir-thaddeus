@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiAssistantSource, WikiDownload, WikiPageDocument, WikiPageDraft, WikiPageGraph, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiDownload, WikiImportPreview, WikiImportResult, WikiPageDocument, WikiPageDraft, WikiPageGraph, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
@@ -130,6 +130,8 @@ interface WikiStoreState {
   renameRoot: (rootId: string, name: string) => Promise<void>;
   deleteRoot: (rootId: string) => Promise<void>;
   exportRoot: (rootId: string) => Promise<WikiDownload | null>;
+  previewImport: (rootId: string, archive: Blob) => Promise<WikiImportPreview | null>;
+  importRoot: (rootId: string, archive: Blob, policy: 'skip' | 'overwrite') => Promise<WikiImportResult | null>;
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
   moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
@@ -391,6 +393,39 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     set({ saving: true, error: null });
     try {
       return await api.exportWikiRoot(rootId);
+    } catch (error) {
+      set({ error: (error as Error).message });
+      return null;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  previewImport: async (rootId: string, archive: Blob) => {
+    if (!rootId) return null;
+    set({ saving: true, error: null });
+    try {
+      return await api.previewWikiImport(rootId, archive);
+    } catch (error) {
+      set({ error: (error as Error).message });
+      return null;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  importRoot: async (rootId: string, archive: Blob, policy: 'skip' | 'overwrite') => {
+    if (!rootId) return null;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before importing into this workspace.' });
+      return null;
+    }
+    set({ saving: true, error: null });
+    try {
+      const result = await api.importWikiRoot(rootId, archive, policy);
+      // Refresh tree so newly created pages/folders appear.
+      await get().selectRoot(rootId);
+      return result;
     } catch (error) {
       set({ error: (error as Error).message });
       return null;

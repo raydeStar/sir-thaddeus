@@ -570,6 +570,127 @@ public sealed class LocalWikiStoreTests : IDisposable
         Assert.Equal(source.Page.Id, tagged.PageId);
     }
 
+    [Fact]
+    public async Task Import_preview_classifies_new_conflict_invalid_entries()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Vault", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Notes", null, CancellationToken.None);
+        await store.CreatePageAsync(root.Id, folder.Id, "Existing Page", "old body", CancellationToken.None);
+
+        var zip = BuildZip(new[]
+        {
+            ("vault/notes/existing-page.md", "fresh contents"),
+            ("vault/notes/new-page.md", "# New Page\n\nFresh contents."),
+            ("vault/notes/new-page.md", "duplicate"),
+            ("vault/.sir-thaddeus/should-skip.md", "internal"),
+        });
+
+        var preview = await store.PreviewImportAsync(root.Id, zip, CancellationToken.None);
+
+        Assert.NotNull(preview);
+        Assert.Equal(root.Id, preview!.RootId);
+        Assert.Equal(3, preview.TotalMarkdownFiles);
+        Assert.Equal(1, preview.NewCount);
+        Assert.Equal(1, preview.ConflictCount);
+        Assert.Equal(1, preview.InvalidCount);
+        Assert.Contains(preview.Entries, entry => entry.Status == "conflict" && entry.TargetRelativePath.EndsWith("existing-page.md", StringComparison.Ordinal));
+        Assert.Contains(preview.Entries, entry => entry.Status == "new" && entry.TargetRelativePath.EndsWith("new-page.md", StringComparison.Ordinal));
+        Assert.Contains(preview.Entries, entry => entry.Status == "invalid" && (entry.Reason ?? string.Empty).Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Import_skip_creates_new_pages_and_preserves_existing()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Vault", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Notes", null, CancellationToken.None);
+        var existing = await store.CreatePageAsync(root.Id, folder.Id, "Existing Page", "original body", CancellationToken.None);
+
+        var zip = BuildZip(new[]
+        {
+            ("vault/notes/existing-page.md", "imported overwrite body"),
+            ("vault/notes/imported-page.md", "imported body"),
+        });
+
+        var result = await store.ImportRootAsync(root.Id, zip, new WikiImportOptions("skip"), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.CreatedCount);
+        Assert.Equal(0, result.OverwrittenCount);
+        Assert.Equal(1, result.SkippedCount);
+
+        var preserved = await store.GetPageAsync(existing.Page.Id, CancellationToken.None);
+        Assert.NotNull(preserved);
+        Assert.Equal("original body", preserved!.Markdown);
+
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.Contains(tree!.Pages, page => page.RelativePath.EndsWith("imported-page.md", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Import_overwrite_replaces_existing_page_body()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Vault", null, CancellationToken.None);
+        var folder = await store.CreateFolderAsync(root.Id, "Notes", null, CancellationToken.None);
+        var existing = await store.CreatePageAsync(root.Id, folder.Id, "Existing Page", "original body", CancellationToken.None);
+
+        var zip = BuildZip(new[]
+        {
+            ("vault/notes/existing-page.md", "replaced body"),
+        });
+
+        var result = await store.ImportRootAsync(root.Id, zip, new WikiImportOptions("overwrite"), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result!.CreatedCount);
+        Assert.Equal(1, result.OverwrittenCount);
+        Assert.Equal(0, result.SkippedCount);
+
+        var updated = await store.GetPageAsync(existing.Page.Id, CancellationToken.None);
+        Assert.NotNull(updated);
+        Assert.Equal("replaced body", updated!.Markdown);
+        Assert.Equal(2, updated.Page.Version);
+    }
+
+    [Fact]
+    public async Task Import_strips_frontmatter_from_archive_payload()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Vault", null, CancellationToken.None);
+
+        var withFrontmatter = "---\nid: foreign-id\ntitle: Foreign\n---\nactual body content\n";
+        var zip = BuildZip(new[] { ("vault/with-frontmatter.md", withFrontmatter) });
+
+        var result = await store.ImportRootAsync(root.Id, zip, new WikiImportOptions("skip"), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.CreatedCount);
+        var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        var imported = Assert.Single(tree!.Pages, page => page.RelativePath.EndsWith("with-frontmatter.md", StringComparison.OrdinalIgnoreCase));
+        var doc = await store.GetPageAsync(imported.Id, CancellationToken.None);
+        Assert.NotNull(doc);
+        Assert.Equal("actual body content\n", doc!.Markdown);
+    }
+
+    private static byte[] BuildZip(IEnumerable<(string Path, string Contents)> entries)
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (path, contents) in entries)
+            {
+                var entry = archive.CreateEntry(path);
+                using var stream = entry.Open();
+                using var writer = new StreamWriter(stream);
+                writer.Write(contents);
+            }
+        }
+        return buffer.ToArray();
+    }
+
     private LocalWikiStore NewStore() =>
         new(_tempDir, NullLogger<LocalWikiStore>.Instance);
 }

@@ -122,4 +122,15 @@ public interface IWikiStore
     Task<WikiIndexRebuildResult?> RebuildIndexAsync(
         string rootId,
         CancellationToken cancellationToken);
+
+    Task<WikiImportPreview?> PreviewImportAsync(
+        string rootId,
+        byte[] zipBytes,
+        CancellationToken cancellationToken);
+
+    Task<WikiImportResult?> ImportRootAsync(
+        string rootId,
+        byte[] zipBytes,
+        WikiImportOptions options,
+        CancellationToken cancellationToken);
 }

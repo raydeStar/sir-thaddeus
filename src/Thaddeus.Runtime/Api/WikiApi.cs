@@ -523,7 +523,51 @@ public static class WikiApi
             return result is null ? Results.NotFound() : Results.Json(result, WikiJsonContext.Default.WikiIndexRebuildResult);
         });
 
+        app.MapPost("/api/wiki/roots/{rootId}/import/preview", async (string rootId, HttpContext ctx, IWikiStore store, CancellationToken ct) =>
+        {
+            var bytes = await ReadRequestBytesAsync(ctx, ct).ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0) return Results.BadRequest(new WikiErrorResponse("empty_body", "An archive payload is required."));
+            var preview = await store.PreviewImportAsync(rootId, bytes, ct).ConfigureAwait(false);
+            return preview is null ? Results.NotFound() : Results.Json(preview, WikiJsonContext.Default.WikiImportPreview);
+        });
+
+        app.MapPost("/api/wiki/roots/{rootId}/import", async (string rootId, string? policy, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var bytes = await ReadRequestBytesAsync(ctx, ct).ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0) return Results.BadRequest(new WikiErrorResponse("empty_body", "An archive payload is required."));
+            var options = new WikiImportOptions(string.IsNullOrWhiteSpace(policy) ? "skip" : policy);
+            var result = await store.ImportRootAsync(rootId, bytes, options, ct).ConfigureAwait(false);
+            if (result is null) return Results.NotFound();
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_ROOT_IMPORTED",
+                Target = result.RootId,
+                Details = new()
+                {
+                    ["created"] = result.CreatedCount,
+                    ["overwritten"] = result.OverwrittenCount,
+                    ["skipped"] = result.SkippedCount,
+                    ["invalid"] = result.InvalidCount,
+                    ["policy"] = options.CollisionPolicy,
+                },
+            });
+            return Results.Json(result, WikiJsonContext.Default.WikiImportResult);
+        });
+
         return app;
+    }
+
+    private static async Task<byte[]?> ReadRequestBytesAsync(HttpContext ctx, CancellationToken ct)
+    {
+        try
+        {
+            using var buffer = new MemoryStream();
+            await ctx.Request.Body.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            return buffer.ToArray();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
     }
 
     private static async Task<T?> ReadAsync<T>(HttpContext ctx, JsonTypeInfo<T> info, CancellationToken ct)
@@ -570,6 +614,9 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiSearchResult))]
 [JsonSerializable(typeof(WikiTrashItem))]
 [JsonSerializable(typeof(WikiIndexRebuildResult))]
+[JsonSerializable(typeof(WikiImportEntry))]
+[JsonSerializable(typeof(WikiImportPreview))]
+[JsonSerializable(typeof(WikiImportResult))]
 [JsonSerializable(typeof(WikiAssistantSource))]
 [JsonSerializable(typeof(WikiPageAssistantReply))]
 [JsonSerializable(typeof(WikiPageDraft))]

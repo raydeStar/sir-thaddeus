@@ -107,6 +107,32 @@ export interface WikiDownload {
   fileName: string;
 }
 
+export interface WikiImportEntry {
+  sourcePath: string;
+  targetRelativePath: string;
+  title: string;
+  status: 'new' | 'conflict' | 'invalid' | 'created' | 'overwritten' | 'skipped';
+  reason?: string | null;
+}
+
+export interface WikiImportPreview {
+  rootId: string;
+  totalMarkdownFiles: number;
+  newCount: number;
+  conflictCount: number;
+  invalidCount: number;
+  entries: WikiImportEntry[];
+}
+
+export interface WikiImportResult {
+  rootId: string;
+  createdCount: number;
+  overwrittenCount: number;
+  skippedCount: number;
+  invalidCount: number;
+  entries: WikiImportEntry[];
+}
+
 export interface WikiPageAssistantReply {
   answer: string;
   createdAt: string;
@@ -251,6 +277,32 @@ export async function exportWikiRoot(rootId: string): Promise<WikiDownload> {
     blob: await res.blob(),
     fileName: parseDownloadFilename(res, `wiki-${rootId}.zip`),
   };
+}
+
+export async function previewWikiImport(rootId: string, archive: Blob | ArrayBuffer): Promise<WikiImportPreview> {
+  const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/import/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/zip' },
+    body: archive,
+  });
+  return asJson<WikiImportPreview>(res);
+}
+
+export async function importWikiRoot(
+  rootId: string,
+  archive: Blob | ArrayBuffer,
+  policy: 'skip' | 'overwrite',
+): Promise<WikiImportResult> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/roots/${encodeURIComponent(rootId)}/import?policy=${policy}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip' },
+      body: archive,
+    },
+  );
+  return asJson<WikiImportResult>(res);
 }
 
 export async function getWikiTree(rootId: string): Promise<WikiTree> {

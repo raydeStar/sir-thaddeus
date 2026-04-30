@@ -25,11 +25,12 @@ import {
   Tags,
   Trash2,
   Undo2,
+  Upload,
   WandSparkles,
   X,
 } from 'lucide-react';
 import { useWikiStore, type WikiPageChatMessage, type WikiScope, type WikiSearchScope } from '../stores/wikiStore';
-import type { WikiAssistantSource, WikiFolder, WikiPage, WikiPageGraph, WikiPageReference, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiFolder, WikiImportPreview, WikiPage, WikiPageGraph, WikiPageReference, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
   import('../components/wiki/WikiMarkdownEditor').then((module) => ({
@@ -62,7 +63,9 @@ function WikiRoute() {
   // drag is in progress over a target.
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null);
   const [previewRevisionId, setPreviewRevisionId] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<{ archive: Blob; preview: WikiImportPreview; fileName: string } | null>(null);
   const pageTitleRef = useRef<HTMLInputElement>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const {
     roots,
     tree,
@@ -97,6 +100,8 @@ function WikiRoute() {
     renameRoot,
     deleteRoot,
     exportRoot,
+    previewImport,
+    importRoot,
     createFolder,
     renameFolder,
     moveFolder,
@@ -294,6 +299,23 @@ function WikiRoute() {
     if (!download) return;
     triggerFileDownload(download.blob, download.fileName);
   };
+  const handleImportClick = () => {
+    if (!selectedRoot || dirty) return;
+    importFileInputRef.current?.click();
+  };
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !selectedRoot) return;
+    const preview = await previewImport(selectedRoot.id, file);
+    if (preview) setImportPreview({ archive: file, preview, fileName: file.name });
+  };
+  const handleConfirmImport = async (policy: 'skip' | 'overwrite') => {
+    if (!importPreview || !selectedRoot) return;
+    const result = await importRoot(selectedRoot.id, importPreview.archive, policy);
+    if (result) setImportPreview(null);
+  };
+  const handleCancelImport = () => setImportPreview(null);
   const beginFolderRename = (folder: WikiFolder) => {
     setRenamingFolderId(folder.id);
     setFolderNameDraft(folder.name);
@@ -433,6 +455,17 @@ function WikiRoute() {
             <Download className="h-4 w-4" strokeWidth={1.8} />
             Export
           </button>
+          <button type="button" className="wiki-command-button" title="Import workspace from .zip" aria-label="Import workspace" disabled={busy || !selectedRootId || dirty} onClick={handleImportClick}>
+            <Upload className="h-4 w-4" strokeWidth={1.8} />
+            Import
+          </button>
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={(event) => void handleImportFileChange(event)}
+          />
           <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void handleCreateFolder()}>
             <Folder className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -1042,6 +1075,16 @@ function WikiRoute() {
         onConfirm={runPendingAction}
       />
     ) : null}
+    {importPreview ? (
+      <WikiImportDialog
+        fileName={importPreview.fileName}
+        preview={importPreview.preview}
+        rootName={selectedRoot?.name ?? ''}
+        busy={busy}
+        onCancel={handleCancelImport}
+        onConfirm={(policy) => void handleConfirmImport(policy)}
+      />
+    ) : null}
     </>
   );
 }
@@ -1245,6 +1288,83 @@ function WikiConfirmDialog({
             onClick={onConfirm}
           >
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WikiImportDialog({
+  fileName,
+  preview,
+  rootName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  fileName: string;
+  preview: WikiImportPreview;
+  rootName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (policy: 'skip' | 'overwrite') => void;
+}) {
+  const conflictEntries = preview.entries.filter((entry) => entry.status === 'conflict');
+  const newEntries = preview.entries.filter((entry) => entry.status === 'new');
+  const invalidEntries = preview.entries.filter((entry) => entry.status === 'invalid');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4" role="presentation" onMouseDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiki-import-title"
+        className="w-full max-w-xl rounded-xl border border-line bg-canvas p-4 shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="wiki-import-title" className="text-base font-semibold text-ink">Import into {rootName || 'workspace'}</h2>
+        <p className="mt-1 text-xs text-ink-muted">{fileName} · {preview.totalMarkdownFiles} markdown {preview.totalMarkdownFiles === 1 ? 'file' : 'files'}</p>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded-lg border border-line bg-canvas-raised px-3 py-2"><span className="block text-ink-muted">New</span><span className="text-base font-semibold text-ink">{preview.newCount}</span></div>
+          <div className="rounded-lg border border-line bg-canvas-raised px-3 py-2"><span className="block text-ink-muted">Conflict</span><span className="text-base font-semibold text-ink">{preview.conflictCount}</span></div>
+          <div className="rounded-lg border border-line bg-canvas-raised px-3 py-2"><span className="block text-ink-muted">Invalid</span><span className="text-base font-semibold text-ink">{preview.invalidCount}</span></div>
+        </div>
+        <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-line bg-canvas-raised">
+          {preview.entries.length === 0 ? (
+            <p className="px-3 py-4 text-center text-xs text-ink-muted">No markdown files found in archive.</p>
+          ) : (
+            <ul className="divide-y divide-line text-xs">
+              {[...conflictEntries, ...invalidEntries, ...newEntries].slice(0, 200).map((entry, index) => (
+                <li key={`${entry.sourcePath}-${index}`} className="flex items-start gap-2 px-3 py-2">
+                  <span className={`mt-0.5 inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase ${entry.status === 'conflict' ? 'bg-amber-500/15 text-amber-600' : entry.status === 'invalid' ? 'bg-rose-500/15 text-rose-600' : 'bg-emerald-500/15 text-emerald-600'}`}>{entry.status}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-ink">{entry.targetRelativePath || entry.sourcePath || '(unnamed)'}</div>
+                    {entry.reason ? <div className="truncate text-ink-muted">{entry.reason}</div> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <p className="mt-3 text-xs text-ink-muted">
+          {preview.conflictCount > 0
+            ? `${preview.conflictCount} ${preview.conflictCount === 1 ? 'page' : 'pages'} already exist at the same path. Choose how to handle them.`
+            : 'No collisions detected.'}
+        </p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <button type="button" className="wiki-command-button" disabled={busy} onClick={onCancel}>Cancel</button>
+          {preview.conflictCount > 0 ? (
+            <button type="button" className="wiki-command-button" disabled={busy} onClick={() => onConfirm('overwrite')}>
+              Overwrite conflicts
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="wiki-command-button border-accent bg-accent text-white hover:bg-accent hover:border-accent"
+            disabled={busy || preview.newCount === 0}
+            onClick={() => onConfirm('skip')}
+          >
+            Import {preview.newCount} new
           </button>
         </div>
       </div>

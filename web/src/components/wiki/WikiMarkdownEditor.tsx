@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import LinkExtension from '@tiptap/extension-link';
 import StarterKit from '@tiptap/starter-kit';
@@ -30,6 +30,7 @@ interface WikiMarkdownEditorProps {
 export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionChange }: WikiMarkdownEditorProps) {
   const applyingExternalContent = useRef(false);
   const lastExternalMarkdown = useRef(markdown);
+  const [linkDialog, setLinkDialog] = useState<{ href: string; text: string; hasSelection: boolean; hasExistingLink: boolean } | null>(null);
   const turndown = useMemo(() => {
     const service = new TurndownService({
       bulletListMarker: '-',
@@ -119,29 +120,71 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
 
   const applyLink = () => {
     if (!editor) return;
-    const currentHref = editor.getAttributes('link').href as string | undefined;
-    const href = window.prompt('Link URL', currentHref ?? '');
-    if (href === null) return;
+    const currentHref = (editor.getAttributes('link').href as string | undefined) ?? '';
+    let initialText = '';
+    if (editor.state.selection.empty && !currentHref) {
+      initialText = '';
+    } else if (currentHref) {
+      // Extend mark range so the existing text is captured for editing.
+      const { from, to } = editor.state.selection;
+      initialText = editor.state.doc.textBetween(from, to, '\n').trim();
+    } else {
+      const { from, to } = editor.state.selection;
+      initialText = editor.state.doc.textBetween(from, to, '\n').trim();
+    }
+    setLinkDialog({ href: currentHref, text: initialText, hasSelection: !editor.state.selection.empty, hasExistingLink: Boolean(currentHref) });
+  };
 
+  const closeLinkDialog = () => setLinkDialog(null);
+
+  const handleLinkSubmit = (href: string, text: string) => {
+    if (!editor) {
+      setLinkDialog(null);
+      return;
+    }
     const trimmedHref = href.trim();
     if (!trimmedHref) {
       editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      setLinkDialog(null);
       return;
     }
-
-    if (editor.state.selection.empty) {
-      const label = window.prompt('Link text', trimmedHref);
-      if (label === null) return;
-      const text = label.trim() || trimmedHref;
+    if (!isValidLinkHref(trimmedHref)) {
+      // Surface validation by leaving the dialog open — caller already shows the message.
+      return;
+    }
+    if (editor.state.selection.empty && !linkDialog?.hasExistingLink) {
+      const label = text.trim() || trimmedHref;
       editor.chain().focus().insertContent({
         type: 'text',
-        text,
+        text: label,
         marks: [{ type: 'link', attrs: { href: trimmedHref } }],
       }).run();
+    } else if (linkDialog?.hasExistingLink) {
+      // Editing an existing link: replace its text + href across the full mark range.
+      const chain = editor.chain().focus().extendMarkRange('link');
+      const label = text.trim();
+      if (label) {
+        chain.insertContent({
+          type: 'text',
+          text: label,
+          marks: [{ type: 'link', attrs: { href: trimmedHref } }],
+        }).run();
+      } else {
+        chain.setLink({ href: trimmedHref }).run();
+      }
+    } else {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: trimmedHref }).run();
+    }
+    setLinkDialog(null);
+  };
+
+  const handleLinkRemove = () => {
+    if (!editor) {
+      setLinkDialog(null);
       return;
     }
-
-    editor.chain().focus().extendMarkRange('link').setLink({ href: trimmedHref }).run();
+    editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    setLinkDialog(null);
   };
 
   useEffect(() => {
@@ -202,6 +245,17 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         </ToolbarGroup>
       </div>
       <EditorContent editor={editor} className="wiki-editor min-h-0 flex-1 overflow-y-auto" />
+      {linkDialog ? (
+        <WikiLinkDialog
+          initialHref={linkDialog.href}
+          initialText={linkDialog.text}
+          allowTextEdit={!linkDialog.hasSelection || linkDialog.hasExistingLink}
+          canRemove={linkDialog.hasExistingLink}
+          onCancel={closeLinkDialog}
+          onSubmit={handleLinkSubmit}
+          onRemove={handleLinkRemove}
+        />
+      ) : null}
     </div>
   );
 }
@@ -243,4 +297,121 @@ function ToolbarButton({
 
 function markdownToHtml(markdown: string): string {
   return marked.parse(markdown || '', { async: false }) as string;
+}
+
+export function isValidLinkHref(href: string): boolean {
+  const trimmed = href.trim();
+  if (!trimmed) return false;
+  // Allow internal page anchors and relative-root paths (e.g. #section, /pages/foo).
+  if (trimmed.startsWith('#') || trimmed.startsWith('/')) return true;
+  // Allow common scheme-less hostnames by parsing against an https base.
+  try {
+    const parsed = new URL(trimmed, 'https://placeholder.local/');
+    if (!parsed.protocol) return false;
+    const allowed = new Set(['http:', 'https:', 'mailto:', 'ftp:', 'ftps:', 'tel:', 'sms:']);
+    return allowed.has(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function WikiLinkDialog({
+  initialHref,
+  initialText,
+  allowTextEdit,
+  canRemove,
+  onCancel,
+  onSubmit,
+  onRemove,
+}: {
+  initialHref: string;
+  initialText: string;
+  allowTextEdit: boolean;
+  canRemove: boolean;
+  onCancel: () => void;
+  onSubmit: (href: string, text: string) => void;
+  onRemove: () => void;
+}) {
+  const [href, setHref] = useState(initialHref);
+  const [text, setText] = useState(initialText);
+  const [touched, setTouched] = useState(false);
+  const hrefRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    hrefRef.current?.focus();
+    hrefRef.current?.select();
+  }, []);
+
+  const trimmed = href.trim();
+  const valid = trimmed.length === 0 ? false : isValidLinkHref(trimmed);
+  const showError = touched && trimmed.length > 0 && !valid;
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setTouched(true);
+    if (!valid) return;
+    onSubmit(trimmed, text);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4" role="presentation" onMouseDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiki-link-title"
+        className="w-full max-w-sm rounded-xl border border-line bg-canvas p-4 shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <h2 id="wiki-link-title" className="text-base font-semibold text-ink">{canRemove ? 'Edit link' : 'Insert link'}</h2>
+        <label className="mt-3 block text-xs font-medium text-ink-muted">
+          URL
+          <input
+            ref={hrefRef}
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            className={`mt-1 w-full rounded-md border px-2 py-1.5 text-sm text-ink outline-none transition focus:ring-2 focus:ring-accent/40 ${showError ? 'border-rose-500' : 'border-line bg-canvas-raised'}`}
+            value={href}
+            placeholder="https://example.com"
+            onChange={(event) => setHref(event.target.value)}
+            onBlur={() => setTouched(true)}
+          />
+        </label>
+        {showError ? (
+          <p className="mt-1 text-xs text-rose-600">Enter a valid URL (http, https, mailto, etc.).</p>
+        ) : null}
+        {allowTextEdit ? (
+          <label className="mt-3 block text-xs font-medium text-ink-muted">
+            Display text
+            <input
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1 w-full rounded-md border border-line bg-canvas-raised px-2 py-1.5 text-sm text-ink outline-none transition focus:ring-2 focus:ring-accent/40"
+              value={text}
+              placeholder="Optional — defaults to URL"
+              onChange={(event) => setText(event.target.value)}
+            />
+          </label>
+        ) : null}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {canRemove ? (
+            <button type="button" className="wiki-command-button border-rose-500 text-rose-600 hover:bg-rose-500/10" onClick={onRemove}>
+              Remove link
+            </button>
+          ) : null}
+          <button type="button" className="wiki-command-button" onClick={onCancel}>Cancel</button>
+          <button
+            type="submit"
+            className="wiki-command-button border-accent bg-accent text-white hover:bg-accent hover:border-accent disabled:opacity-60"
+            disabled={!valid}
+          >
+            {canRemove ? 'Update' : 'Insert'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }

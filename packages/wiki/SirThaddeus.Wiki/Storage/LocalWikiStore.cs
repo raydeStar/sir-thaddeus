@@ -220,6 +220,292 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         }
     }
 
+    public async Task<WikiImportPreview?> PreviewImportAsync(string rootId, byte[] zipBytes, CancellationToken cancellationToken)
+    {
+        var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        if (root is null) return null;
+
+        var existingPaths = await LoadExistingPagePathsAsync(root, cancellationToken).ConfigureAwait(false);
+        var entries = ScanImportEntries(zipBytes, existingPaths);
+        return BuildPreview(root.Id, entries);
+    }
+
+    public async Task<WikiImportResult?> ImportRootAsync(
+        string rootId,
+        byte[] zipBytes,
+        WikiImportOptions options,
+        CancellationToken cancellationToken)
+    {
+        var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        if (root is null) return null;
+
+        var policy = NormalizeCollisionPolicy(options.CollisionPolicy);
+        var existingPaths = await LoadExistingPagePathsAsync(root, cancellationToken).ConfigureAwait(false);
+        var entries = ScanImportEntries(zipBytes, existingPaths);
+
+        var created = 0;
+        var overwritten = 0;
+        var skipped = 0;
+        var invalid = 0;
+        var resolved = new List<WikiImportEntry>(entries.Count);
+
+        // Cache of (parentFolderId ?? "") + "/" + slug → folderId, refreshed lazily.
+        Dictionary<string, string>? folderIndex = null;
+        async Task<Dictionary<string, string>> EnsureFolderIndexAsync()
+        {
+            if (folderIndex is not null) return folderIndex;
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var folders = await ListFoldersAsync(connection, cancellationToken).ConfigureAwait(false);
+            folderIndex = folders.ToDictionary(
+                folder => FolderIndexKey(folder.ParentFolderId, folder.Slug),
+                folder => folder.Id,
+                StringComparer.OrdinalIgnoreCase);
+            return folderIndex;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.Status == "invalid")
+            {
+                invalid++;
+                resolved.Add(entry);
+                continue;
+            }
+
+            if (entry.Status == "conflict" && !string.Equals(policy, "overwrite", StringComparison.Ordinal))
+            {
+                skipped++;
+                resolved.Add(entry with { Status = "skipped", Reason = "Collision skipped" });
+                continue;
+            }
+
+            try
+            {
+                if (entry.Status == "conflict")
+                {
+                    var existingPage = existingPaths.TryGetValue(NormalizeRelativePath(entry.TargetRelativePath), out var match) ? match : null;
+                    if (existingPage is null)
+                    {
+                        invalid++;
+                        resolved.Add(entry with { Status = "invalid", Reason = "Existing page not found" });
+                        continue;
+                    }
+                    var body = ExtractMarkdownBody(zipBytes, entry.SourcePath);
+                    var updated = await UpdatePageAsync(existingPage.Id, body, expectedVersion: null, source: "import", summary: "Imported from archive", cancellationToken).ConfigureAwait(false);
+                    if (updated is null)
+                    {
+                        invalid++;
+                        resolved.Add(entry with { Status = "invalid", Reason = "Update failed" });
+                    }
+                    else
+                    {
+                        overwritten++;
+                        resolved.Add(entry with { Status = "overwritten" });
+                    }
+                }
+                else
+                {
+                    var (folderId, _) = await ResolveTargetFolderAsync(
+                        root,
+                        entry.TargetRelativePath,
+                        EnsureFolderIndexAsync,
+                        cancellationToken).ConfigureAwait(false);
+                    var body = ExtractMarkdownBody(zipBytes, entry.SourcePath);
+                    var page = await CreatePageAsync(root.Id, folderId, entry.Title, body, cancellationToken).ConfigureAwait(false);
+                    created++;
+                    existingPaths[NormalizeRelativePath(page.Page.RelativePath)] = page.Page;
+                    resolved.Add(entry with { Status = "created", TargetRelativePath = page.Page.RelativePath });
+                }
+            }
+            catch (Exception ex)
+            {
+                invalid++;
+                resolved.Add(entry with { Status = "invalid", Reason = ex.Message });
+                _logger.LogWarning(ex, "wiki.import.entry_failed root={RootId} source={SourcePath}", root.Id, entry.SourcePath);
+            }
+        }
+
+        return new WikiImportResult(root.Id, created, overwritten, skipped, invalid, resolved);
+    }
+
+    private async Task<Dictionary<string, WikiPage>> LoadExistingPagePathsAsync(WikiRoot root, CancellationToken cancellationToken)
+    {
+        await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+        var pages = await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false);
+        return pages.ToDictionary(page => NormalizeRelativePath(page.RelativePath), page => page, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<WikiImportEntry> ScanImportEntries(byte[] zipBytes, IReadOnlyDictionary<string, WikiPage> existingPaths)
+    {
+        if (zipBytes is null || zipBytes.Length == 0) return Array.Empty<WikiImportEntry>();
+
+        using var stream = new MemoryStream(zipBytes, writable: false);
+        ZipArchive archive;
+        try
+        {
+            archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        }
+        catch (InvalidDataException)
+        {
+            return new[] { new WikiImportEntry(string.Empty, string.Empty, string.Empty, "invalid", "Archive is not a valid zip file") };
+        }
+
+        using (archive)
+        {
+            var commonRoot = DetectCommonArchiveRoot(archive);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var entries = new List<WikiImportEntry>();
+            foreach (var raw in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(raw.Name)) continue; // directory entry
+                var fullName = raw.FullName.Replace('\\', '/');
+                if (!fullName.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) continue;
+                if (fullName.Contains("/.sir-thaddeus/", StringComparison.OrdinalIgnoreCase)) continue;
+                if (fullName.StartsWith(".sir-thaddeus/", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var trimmed = StripCommonRoot(fullName, commonRoot);
+                if (string.IsNullOrWhiteSpace(trimmed))
+                {
+                    entries.Add(new WikiImportEntry(fullName, string.Empty, string.Empty, "invalid", "Empty target path"));
+                    continue;
+                }
+
+                var segments = trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (segments.Length == 0)
+                {
+                    entries.Add(new WikiImportEntry(fullName, string.Empty, string.Empty, "invalid", "Empty target path"));
+                    continue;
+                }
+
+                var fileSegment = segments[^1];
+                if (!fileSegment.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                {
+                    entries.Add(new WikiImportEntry(fullName, trimmed, string.Empty, "invalid", "Not a markdown file"));
+                    continue;
+                }
+
+                var rawTitle = Path.GetFileNameWithoutExtension(fileSegment);
+                var title = NormalizeName(rawTitle, "Untitled Page");
+                var slug = Slugify(title);
+                if (string.IsNullOrWhiteSpace(slug))
+                {
+                    entries.Add(new WikiImportEntry(fullName, trimmed, rawTitle, "invalid", "Could not derive slug"));
+                    continue;
+                }
+
+                var folderSegments = segments
+                    .Take(segments.Length - 1)
+                    .Select(Slugify)
+                    .Where(segment => !string.IsNullOrWhiteSpace(segment))
+                    .ToArray();
+                var folderRelative = folderSegments.Length == 0 ? string.Empty : string.Join('/', folderSegments);
+                var targetRelative = folderSegments.Length == 0 ? slug + ".md" : folderRelative + "/" + slug + ".md";
+
+                if (!seen.Add(NormalizeRelativePath(targetRelative)))
+                {
+                    entries.Add(new WikiImportEntry(fullName, targetRelative, title, "invalid", "Duplicate within archive"));
+                    continue;
+                }
+
+                var status = existingPaths.ContainsKey(NormalizeRelativePath(targetRelative)) ? "conflict" : "new";
+                entries.Add(new WikiImportEntry(fullName, targetRelative, title, status));
+            }
+
+            return entries;
+        }
+    }
+
+    private static WikiImportPreview BuildPreview(string rootId, IReadOnlyList<WikiImportEntry> entries)
+    {
+        var newCount = entries.Count(entry => entry.Status == "new");
+        var conflictCount = entries.Count(entry => entry.Status == "conflict");
+        var invalidCount = entries.Count(entry => entry.Status == "invalid");
+        return new WikiImportPreview(rootId, entries.Count, newCount, conflictCount, invalidCount, entries);
+    }
+
+    private async Task<(string? FolderId, string FileName)> ResolveTargetFolderAsync(
+        WikiRoot root,
+        string targetRelativePath,
+        Func<Task<Dictionary<string, string>>> ensureIndex,
+        CancellationToken cancellationToken)
+    {
+        var normalized = targetRelativePath.Replace('\\', '/');
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return (null, string.Empty);
+
+        var fileName = segments[^1];
+        if (segments.Length == 1) return (null, fileName);
+
+        var index = await ensureIndex().ConfigureAwait(false);
+        string? parentId = null;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            var slug = segments[i];
+            var key = FolderIndexKey(parentId, slug);
+            if (index.TryGetValue(key, out var existingId))
+            {
+                parentId = existingId;
+                continue;
+            }
+
+            var folder = await CreateFolderAsync(root.Id, slug, parentId, cancellationToken).ConfigureAwait(false);
+            index[FolderIndexKey(folder.ParentFolderId, folder.Slug)] = folder.Id;
+            parentId = folder.Id;
+        }
+
+        return (parentId, fileName);
+    }
+
+    private static string ExtractMarkdownBody(byte[] zipBytes, string sourcePath)
+    {
+        using var stream = new MemoryStream(zipBytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        var entry = archive.GetEntry(sourcePath);
+        if (entry is null) return string.Empty;
+        using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+        var raw = reader.ReadToEnd();
+        return WikiFrontmatter.Strip(raw);
+    }
+
+    private static string? DetectCommonArchiveRoot(ZipArchive archive)
+    {
+        string? candidate = null;
+        foreach (var entry in archive.Entries)
+        {
+            var full = entry.FullName.Replace('\\', '/');
+            if (string.IsNullOrEmpty(full)) continue;
+            var firstSlash = full.IndexOf('/');
+            if (firstSlash <= 0) return null;
+            var first = full[..firstSlash];
+            if (candidate is null) candidate = first;
+            else if (!string.Equals(candidate, first, StringComparison.OrdinalIgnoreCase)) return null;
+        }
+        return candidate;
+    }
+
+    private static string StripCommonRoot(string fullName, string? commonRoot)
+    {
+        if (string.IsNullOrEmpty(commonRoot)) return fullName;
+        var prefix = commonRoot + "/";
+        return fullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? fullName[prefix.Length..]
+            : fullName;
+    }
+
+    private static string NormalizeRelativePath(string relativePath) =>
+        relativePath.Replace('\\', '/').Trim('/').ToLowerInvariant();
+
+    private static string FolderIndexKey(string? parentFolderId, string slug) =>
+        (parentFolderId ?? string.Empty) + "/" + slug.ToLowerInvariant();
+
+    private static string NormalizeCollisionPolicy(string? policy)
+    {
+        if (string.Equals(policy, "overwrite", StringComparison.OrdinalIgnoreCase)) return "overwrite";
+        return "skip";
+    }
+
     public async Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken)
     {
         var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);

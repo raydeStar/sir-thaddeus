@@ -86,3 +86,28 @@ public sealed record WikiIndexRebuildResult(
     string RootId,
     int PageCount,
     DateTimeOffset RebuiltAt);
+
+public sealed record WikiImportEntry(
+    string SourcePath,
+    string TargetRelativePath,
+    string Title,
+    string Status,
+    string? Reason = null);
+
+public sealed record WikiImportPreview(
+    string RootId,
+    int TotalMarkdownFiles,
+    int NewCount,
+    int ConflictCount,
+    int InvalidCount,
+    IReadOnlyList<WikiImportEntry> Entries);
+
+public sealed record WikiImportOptions(string CollisionPolicy);
+
+public sealed record WikiImportResult(
+    string RootId,
+    int CreatedCount,
+    int OverwrittenCount,
+    int SkippedCount,
+    int InvalidCount,
+    IReadOnlyList<WikiImportEntry> Entries);
