@@ -305,6 +305,7 @@ public static class SettingsManager
         var normalizedActiveProfileId = string.IsNullOrWhiteSpace(settings.ActiveProfileId)
             ? null
             : settings.ActiveProfileId.Trim();
+        var normalizedTtsEngine = NormalizeTtsEngine(voice.TtsEngine, defaults.Voice.TtsEngine);
 
         return settings with
         {
@@ -339,9 +340,9 @@ public static class SettingsManager
                     defaults.Voice.VoiceHostStartupTimeoutMs,
                     min: 30_000,
                     max: 300_000),
-                TtsEngine = NormalizeTtsEngine(voice.TtsEngine, defaults.Voice.TtsEngine),
+                TtsEngine = normalizedTtsEngine,
                 TtsModelId = OptionalString(voice.TtsModelId),
-                TtsVoiceId = OptionalString(voice.TtsVoiceId),
+                TtsVoiceId = NormalizeTtsVoiceId(normalizedTtsEngine, voice.TtsVoiceId),
                 SttEngine = NormalizeSttEngine(voice.SttEngine, defaults.Voice.SttEngine),
                 SttModelId = voice.GetResolvedSttModelId(),
                 SttLanguage = voice.GetResolvedSttLanguage(),
@@ -675,17 +676,36 @@ public static class SettingsManager
     private static string NormalizeTtsEngine(string? value, string fallback)
     {
         var normalizedFallback = string.IsNullOrWhiteSpace(fallback)
-            ? "kokoro"
+            ? "kokoro-sharp"
             : fallback.Trim().ToLowerInvariant();
         var engine = (value ?? "").Trim().ToLowerInvariant();
 
         return engine switch
         {
             "" => normalizedFallback,
-            "windows" => "windows",
-            "kokoro" => "kokoro",
+            "kokoro" => "kokoro-sharp",
+            "kokoro-sharp" => "kokoro-sharp",
+            "kokorosharp" => "kokoro-sharp",
+            "piper" => "piper",
+            "windows" or "sapi" or "windows-sapi" => "kokoro-sharp",
             _ => engine
         };
+    }
+
+    private static string NormalizeTtsVoiceId(string engine, string? value)
+    {
+        var voiceId = OptionalString(value);
+        if (string.Equals(engine, "kokoro-sharp", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrWhiteSpace(voiceId) || voiceId.Contains('-') || !voiceId.Contains('_')
+                ? "bm_lewis"
+                : voiceId;
+
+        if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrWhiteSpace(voiceId) || !voiceId.Contains('-')
+                ? "en_US-john-medium"
+                : voiceId;
+
+        return voiceId;
     }
 
     private static string NormalizeSttEngine(string? value, string fallback)

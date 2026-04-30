@@ -23,6 +23,7 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
     private readonly ILlmClient _llm;
     private readonly IAuditLogger? _audit;
     private readonly TimeSpan _timeout;
+    private readonly bool _allowLlmFallback;
     private const int MessagePreviewLength = 80;
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMilliseconds(750);
 
@@ -44,11 +45,13 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
     public SmartIntentClassifier(
         ILlmClient llm,
         IAuditLogger? audit = null,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        bool allowLlmFallback = true)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _audit = audit;
         _timeout = timeout ?? DefaultTimeout;
+        _allowLlmFallback = allowLlmFallback;
     }
 
     public async Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default)
@@ -62,6 +65,9 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
 
         if (LooksLikeDeterministicSuppress(lower))
             return MemoryIntentDecision.Suppress;
+
+        if (!_allowLlmFallback)
+            return MemoryIntentDecision.Unsure;
 
         try
         {

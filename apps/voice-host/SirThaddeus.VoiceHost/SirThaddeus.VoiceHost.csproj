@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <KokoroSharpContentRoot Condition="'$(KokoroSharpContentRoot)' == ''">$(NuGetPackageRoot)kokorosharp\0.6.7\content</KokoroSharpContentRoot>
     
     <!-- Single File / Self Contained Optimizations -->
     <PublishSingleFile>true</PublishSingleFile>
@@ -16,6 +17,16 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\core\SirThaddeus.Core\SirThaddeus.Core.csproj" />
     <ProjectReference Include="..\..\..\packages\logging\SirThaddeus.Logging\SirThaddeus.Logging.csproj" />
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Abstractions\Thaddeus.Tts.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Kokoro\Thaddeus.Tts.Kokoro.csproj" />
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Piper.Legacy\Thaddeus.Tts.Piper.Legacy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(KokoroSharpContentRoot)')">
+    <Content Include="$(KokoroSharpContentRoot)\**\*.*"
+             Link="%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Optional bundled backend sidecar (preferred publish layout: ./voice/) -->

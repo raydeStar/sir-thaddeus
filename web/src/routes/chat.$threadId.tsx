@@ -1,14 +1,19 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, Loader2, Plus, RotateCcw, Square, Volume2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
 import { ToolActivityPills } from '../components/ToolActivityPills';
 import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
-import { synthesizeSpeech } from '../lib/voiceApi';
+import { subscribeVoicePttEvents, synthesizeSpeech, transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
+import { stopAllProcesses } from '../lib/runtimeActions';
+import { acquireMicStream, isStreamLive, stopMicStream } from '../lib/micCapture';
+import { trimSilenceToWav } from '../lib/audioTrim';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
+
+const MIN_VOICE_HOLD_MS = 350;
 
 export const Route = createFileRoute('/chat/$threadId')({
   component: ChatThreadRoute,
@@ -27,14 +32,28 @@ function ChatThreadRoute() {
   const [draft, setDraft] = useState('');
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<{ messageId: string; status: 'loading' | 'playing' } | null>(null);
+  const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'>('idle');
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const speechRequestRef = useRef(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micChunksRef = useRef<Blob[]>([]);
+  const micStartedAtRef = useRef(0);
+  const abortPendingCaptureRef = useRef(false);
+  const pendingVoiceResponseRef = useRef(false);
+  // Persistent stream kept warm across PTT presses so the second and
+  // subsequent presses skip the getUserMedia spinner.
+  const warmStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
+
+  useEffect(() => {
+    void warmVoiceHost().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -43,6 +62,11 @@ function ChatThreadRoute() {
   useEffect(() => () => {
     speechRequestRef.current += 1;
     releaseSpeechAudio(audioRef, audioUrlRef);
+    releaseMicCapture(recorderRef, micStreamRef);
+    if (warmStreamRef.current) {
+      stopMicStream(warmStreamRef.current);
+      warmStreamRef.current = null;
+    }
   }, []);
 
   const onSubmit = async (text: string, wikiContext?: WikiContextSelection) => {
@@ -51,13 +75,13 @@ function ChatThreadRoute() {
     await send(text, wikiContext);
   };
 
-  const stopSpeech = () => {
+  const stopSpeech = useCallback(() => {
     speechRequestRef.current += 1;
     releaseSpeechAudio(audioRef, audioUrlRef);
     setSpeechState(null);
-  };
+  }, []);
 
-  const onSpeakMessage = async (messageId: string, text: string) => {
+  const onSpeakMessage = useCallback(async (messageId: string, text: string) => {
     if (speechState?.messageId === messageId) {
       stopSpeech();
       return;
@@ -69,29 +93,252 @@ function ChatThreadRoute() {
     setSpeechError(null);
     setSpeechState({ messageId, status: 'loading' });
 
+    // Split the reply into sentence-sized chunks so we can pipeline:
+    // synthesize chunk N+1 while chunk N is playing. First audio out the
+    // door is governed by the latency of the SHORTEST chunk, not the full
+    // reply, so the user hears speech almost immediately on long answers.
+    const chunks = chunkSpeechText(text);
+    const cancelled = () => speechRequestRef.current !== requestId;
+
     try {
-      const audioBlob = await synthesizeSpeech(text);
-      if (speechRequestRef.current !== requestId) return;
+      // Kick off the first synthesis right away.
+      let nextSynthPromise: Promise<Blob> = synthesizeSpeech(chunks[0]);
+      let firstAudioStarted = false;
 
-      const url = URL.createObjectURL(audioBlob);
-      audioUrlRef.current = url;
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.addEventListener('ended', stopSpeech, { once: true });
-      audio.addEventListener('error', () => {
-        setSpeechError('Could not play the synthesized audio.');
-        stopSpeech();
-      }, { once: true });
+      for (let i = 0; i < chunks.length; i++) {
+        const blob = await nextSynthPromise;
+        if (cancelled()) return;
 
-      setSpeechState({ messageId, status: 'playing' });
-      await audio.play();
+        // Pre-fetch the following chunk in parallel with playback.
+        nextSynthPromise = i + 1 < chunks.length
+          ? synthesizeSpeech(chunks[i + 1]).catch((err) => {
+              throw err;
+            })
+          : Promise.resolve(new Blob());
+
+        const url = URL.createObjectURL(blob);
+        audioUrlRef.current = url;
+        const audio = new Audio(url);
+        audioRef.current = audio;
+
+        if (!firstAudioStarted) {
+          firstAudioStarted = true;
+          setSpeechState({ messageId, status: 'playing' });
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          audio.addEventListener('ended', () => resolve(), { once: true });
+          audio.addEventListener('error', () => reject(new Error('Could not play the synthesized audio.')), { once: true });
+          audio.play().catch(reject);
+        });
+
+        if (cancelled()) return;
+        URL.revokeObjectURL(url);
+        if (audioUrlRef.current === url) audioUrlRef.current = null;
+        if (audioRef.current === audio) audioRef.current = null;
+      }
+
+      if (!cancelled()) stopSpeech();
     } catch (e) {
-      if (speechRequestRef.current === requestId) {
+      if (!cancelled()) {
         stopSpeech();
         setSpeechError((e as Error).message || 'Could not read that response aloud.');
       }
     }
-  };
+  }, [speechState?.messageId, stopSpeech]);
+
+  const triggerShutup = useCallback(async () => {
+    stopSpeech();
+    try {
+      await stopAllProcesses();
+    } catch {
+      // Local playback is the important part for voice UX; runtime stop-all is best effort.
+    }
+  }, [stopSpeech]);
+
+  const beginVoiceCapture = useCallback(async () => {
+    if (recorderRef.current || voiceState !== 'idle') {
+      await triggerShutup();
+      return;
+    }
+
+    if (sending || activeTurn) {
+      await triggerShutup();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setSpeechError('Microphone capture is not available in this browser shell.');
+      return;
+    }
+
+    abortPendingCaptureRef.current = false;
+    micChunksRef.current = [];
+    micStartedAtRef.current = performance.now();
+    stopSpeech();
+    setSpeechError(null);
+
+    // Reuse a warm stream when possible so the user can speak instantly
+    // on repeat presses. Only show the spinner when we genuinely need
+    // to acquire a new stream from the OS.
+    const reusedWarm = isStreamLive(warmStreamRef.current);
+    if (!reusedWarm) {
+      setVoiceState('starting');
+    } else {
+      setVoiceState('recording');
+    }
+
+    let stream: MediaStream;
+    try {
+      if (reusedWarm && warmStreamRef.current) {
+        stream = warmStreamRef.current;
+      } else {
+        const acquired = await acquireMicStream();
+        stream = acquired.stream;
+        warmStreamRef.current = stream;
+        if (acquired.usedDefault && acquired.requestedName) {
+          // Surface a hint in the console so we can diagnose mismatches
+          // without spamming a toast for every capture.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[mic] Selected device "${acquired.requestedName}" not found in browser; using default "${acquired.resolvedLabel ?? 'unknown'}".`,
+          );
+        }
+      }
+
+      if (abortPendingCaptureRef.current) {
+        abortPendingCaptureRef.current = false;
+        setVoiceState('idle');
+        return;
+      }
+
+      const recorder = new MediaRecorder(stream, mediaRecorderOptions());
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) micChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        setSpeechError('Microphone recording failed.');
+        releaseMicCapture(recorderRef, micStreamRef);
+        setVoiceState('idle');
+      };
+      micStreamRef.current = stream;
+      recorderRef.current = recorder;
+      recorder.start();
+      setVoiceState('recording');
+    } catch (e) {
+      releaseMicCapture(recorderRef, micStreamRef);
+      // The warm stream may have died (device unplugged) — drop it so
+      // the next attempt re-acquires.
+      if (warmStreamRef.current && !isStreamLive(warmStreamRef.current)) {
+        stopMicStream(warmStreamRef.current);
+        warmStreamRef.current = null;
+      }
+      setVoiceState('idle');
+      if (!abortPendingCaptureRef.current) {
+        setSpeechError((e as Error).message || 'Could not start microphone capture.');
+      }
+      abortPendingCaptureRef.current = false;
+    }
+  }, [activeTurn, sending, stopSpeech, triggerShutup, voiceState]);
+
+  const finishVoiceCapture = useCallback(async () => {
+    const recorder = recorderRef.current;
+    if (!recorder) {
+      abortPendingCaptureRef.current = true;
+      await triggerShutup();
+      return;
+    }
+
+    const heldMs = performance.now() - micStartedAtRef.current;
+    const shortTap = heldMs < MIN_VOICE_HOLD_MS;
+
+    let audioBlob: Blob;
+    try {
+      audioBlob = await stopRecorder(recorder, micChunksRef.current);
+    } catch (e) {
+      releaseMicCapture(recorderRef, micStreamRef);
+      setVoiceState('idle');
+      if (!shortTap) setSpeechError((e as Error).message || 'Could not finish microphone recording.');
+      return;
+    }
+
+    releaseMicCapture(recorderRef, micStreamRef);
+
+    if (shortTap) {
+      setVoiceState('idle');
+      await triggerShutup();
+      return;
+    }
+
+    if (audioBlob.size === 0) {
+      setVoiceState('idle');
+      setSpeechError('No microphone audio was captured.');
+      return;
+    }
+
+    setVoiceState('transcribing');
+    setSpeechError(null);
+    try {
+      // Strip leading/trailing silence in the browser before upload so
+      // Whisper isn't paid to chew on the dead air around "uhh". Falls back
+      // to the original blob on any decode failure.
+      const trimmed = await trimSilenceToWav(audioBlob).catch(() => audioBlob);
+      const transcript = await transcribeSpeech(trimmed, threadId);
+      const text = transcript.text.trim();
+      if (!text) {
+        setVoiceState('idle');
+        setSpeechError('No speech was detected.');
+        return;
+      }
+
+      setVoiceState('sending');
+      pendingVoiceResponseRef.current = true;
+      await send(text);
+    } catch (e) {
+      pendingVoiceResponseRef.current = false;
+      setSpeechError((e as Error).message || 'Could not transcribe the microphone audio.');
+    } finally {
+      setVoiceState('idle');
+    }
+  }, [send, threadId, triggerShutup]);
+
+  const pttHandlersRef = useRef({
+    begin: () => undefined as void,
+    finish: () => undefined as void,
+    shutup: () => undefined as void,
+  });
+
+  useEffect(() => {
+    pttHandlersRef.current = {
+      begin: () => { void beginVoiceCapture(); },
+      finish: () => { void finishVoiceCapture(); },
+      shutup: () => { void triggerShutup(); },
+    };
+  }, [beginVoiceCapture, finishVoiceCapture, triggerShutup]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    const run = async () => {
+      while (!disposed) {
+        try {
+          await subscribeVoicePttEvents((evt) => {
+            if (evt.phase === 'down') pttHandlersRef.current.begin();
+            else if (evt.phase === 'up') pttHandlersRef.current.finish();
+            else pttHandlersRef.current.shutup();
+          }, controller.signal);
+        } catch {
+          if (controller.signal.aborted) break;
+        }
+        if (!disposed) await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
+    };
+    void run();
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, []);
 
   const messages = thread?.messages ?? [];
   const latestMessage = messages[messages.length - 1];
@@ -100,6 +347,18 @@ function ChatThreadRoute() {
       ? latestMessage.id
       : null;
   const empty = messages.length === 0 && !activeTurn;
+
+  useEffect(() => {
+    if (!pendingVoiceResponseRef.current || activeTurn) return;
+    const latest = messages[messages.length - 1];
+    if (String(latest?.role || '').toLowerCase() !== 'assistant' || !latest?.text?.trim()) return;
+    pendingVoiceResponseRef.current = false;
+    void onSpeakMessage(latest.id, latest.text);
+  }, [activeTurn, messages, onSpeakMessage]);
+
+  useEffect(() => {
+    if (error) pendingVoiceResponseRef.current = false;
+  }, [error]);
 
   return (
     <section
@@ -204,14 +463,43 @@ function ChatThreadRoute() {
             inputTestId="chat-input"
             sendTestId="chat-send"
             rightActions={
-              <Link
-                to="/"
-                className="chat-composer-icon-button"
-                aria-label="New chat"
-                title="New chat"
-              >
-                <Plus className="h-4 w-4" strokeWidth={1.9} />
-              </Link>
+              <>
+                <button
+                  type="button"
+                  className={`chat-composer-icon-button ${voiceState === 'recording' ? 'border-red-400 bg-red-500/10 text-red-700 dark:text-red-300' : ''}`}
+                  aria-label={voiceButtonLabel(voiceState)}
+                  title={voiceButtonLabel(voiceState)}
+                  data-testid="chat-voice-hold"
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    void beginVoiceCapture();
+                  }}
+                  onPointerUp={(event) => {
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                    void finishVoiceCapture();
+                  }}
+                  onPointerCancel={() => { void finishVoiceCapture(); }}
+                >
+                  {voiceState === 'starting' || voiceState === 'transcribing' || voiceState === 'sending' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+                  ) : voiceState === 'recording' ? (
+                    <Square className="h-4 w-4" strokeWidth={1.9} />
+                  ) : (
+                    <Mic className="h-4 w-4" strokeWidth={1.9} />
+                  )}
+                </button>
+                <Link
+                  to="/"
+                  className="chat-composer-icon-button"
+                  aria-label="New chat"
+                  title="New chat"
+                >
+                  <Plus className="h-4 w-4" strokeWidth={1.9} />
+                </Link>
+              </>
             }
           />
         </div>
@@ -285,6 +573,7 @@ function MessageRow({
   // Tool activity pills (if any fired during this turn) float above the
   // text so the reader sees what the model did before reading what it said.
   const showActions = !streaming && text.trim().length > 0;
+  const showWorking = Boolean(streaming && text.trim().length === 0);
   return (
     <div
       data-testid={testId}
@@ -293,7 +582,19 @@ function MessageRow({
     >
       {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
-      <Markdown>{text}</Markdown>
+      {showWorking ? (
+        <div
+          className="flex h-7 items-center gap-1.5 text-accent"
+          aria-label="Assistant response in progress"
+          data-testid="chat-streaming-placeholder"
+        >
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:140ms]" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:280ms]" />
+        </div>
+      ) : (
+        <Markdown>{text}</Markdown>
+      )}
       {sources && sources.length > 0 ? <SourceCards sources={sources} /> : null}
       {showActions ? (
         <div
@@ -344,7 +645,7 @@ function MessageRow({
           ) : null}
         </div>
       ) : null}
-      {streaming ? (
+      {streaming && !showWorking ? (
         <span
           className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-1 animate-pulse bg-accent align-middle"
           aria-hidden
@@ -369,6 +670,96 @@ async function copyToClipboard(text: string): Promise<void> {
   textarea.select();
   document.execCommand('copy');
   document.body.removeChild(textarea);
+}
+
+function mediaRecorderOptions(): MediaRecorderOptions {
+  for (const mimeType of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
+    if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType };
+  }
+  return {};
+}
+
+// Splits a TTS body into chunks small enough that synthesizing each one is
+// fast (so the user hears the first audio quickly) but large enough that
+// prosody isn't choppy. We prefer to break on sentence terminators; only
+// fall back to length-based slicing for runaway sentences.
+function chunkSpeechText(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [trimmed];
+  const HARD_MAX = 220;
+  const MIN_FIRST = 80;
+
+  // Quick split on sentence boundaries; the regex preserves the punctuation.
+  const parts = trimmed
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(\[])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Coalesce so chunks are reasonable; further-split any overlong sentence.
+  const out: string[] = [];
+  let buffer = '';
+  for (const part of parts) {
+    const candidate = buffer ? `${buffer} ${part}` : part;
+    if (candidate.length <= HARD_MAX) {
+      buffer = candidate;
+      // Keep the first chunk small so the user hears audio fast.
+      if (out.length === 0 && buffer.length >= MIN_FIRST) {
+        out.push(buffer);
+        buffer = '';
+      }
+    } else {
+      if (buffer) {
+        out.push(buffer);
+        buffer = '';
+      }
+      if (part.length <= HARD_MAX) {
+        buffer = part;
+      } else {
+        for (let i = 0; i < part.length; i += HARD_MAX) {
+          out.push(part.slice(i, i + HARD_MAX));
+        }
+      }
+    }
+  }
+  if (buffer) out.push(buffer);
+  return out.length > 0 ? out : [trimmed];
+}
+
+function stopRecorder(recorder: MediaRecorder, chunks: Blob[]): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const mimeType = recorder.mimeType || 'audio/webm';
+    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+    recorder.onerror = () => reject(new Error('Microphone recording failed.'));
+    if (recorder.state === 'inactive') {
+      resolve(new Blob(chunks, { type: mimeType }));
+      return;
+    }
+    recorder.stop();
+  });
+}
+
+function releaseMicCapture(
+  recorderRef: React.MutableRefObject<MediaRecorder | null>,
+  streamRef: React.MutableRefObject<MediaStream | null>,
+): void {
+  const recorder = recorderRef.current;
+  if (recorder && recorder.state !== 'inactive') {
+    try { recorder.stop(); } catch { /* best effort */ }
+  }
+  recorderRef.current = null;
+  // Intentionally do NOT stop the underlying MediaStream here \u2014 the
+  // chat route keeps it warm in warmStreamRef so subsequent PTT presses
+  // skip the getUserMedia spinner. The route unmount cleanup is the
+  // single owner that actually stops the tracks.
+  streamRef.current = null;
+}
+
+function voiceButtonLabel(state: 'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'): string {
+  if (state === 'starting') return 'Starting microphone';
+  if (state === 'recording') return 'Release to send voice message';
+  if (state === 'transcribing') return 'Transcribing voice message';
+  if (state === 'sending') return 'Sending voice message';
+  return 'Hold to talk';
 }
 
 function releaseSpeechAudio(

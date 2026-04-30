@@ -19,7 +19,7 @@ test.describe('settings smoke', () => {
 
     // Change a few fields across sections.
     const pttInput = page.getByTestId('settings-shortcut-ptt');
-    await pttInput.fill('Ctrl+Alt+Space');
+    await pttInput.fill('Ctrl+Alt+M');
 
     const localOnly = page.getByTestId('settings-privacy-local-only');
     const wasChecked = await localOnly.isChecked();
@@ -47,7 +47,7 @@ test.describe('settings smoke', () => {
     // Reload and verify.
     await page.reload();
     await expect(page.getByTestId('settings-form')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('settings-shortcut-ptt')).toHaveValue('Ctrl+Alt+Space');
+    await expect(page.getByTestId('settings-shortcut-ptt')).toHaveValue('Ctrl+Alt+M');
     if (wasChecked) await expect(page.getByTestId('settings-privacy-local-only')).not.toBeChecked();
     else await expect(page.getByTestId('settings-privacy-local-only')).toBeChecked();
     await page.getByTestId('settings-tab-models').click();

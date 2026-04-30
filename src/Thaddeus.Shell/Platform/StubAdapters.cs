@@ -55,5 +55,8 @@ public sealed class StubGlobalShortcutAdapter : IGlobalShortcutAdapter
     public event EventHandler<string>? Triggered { add { } remove { } }
 
     /// <inheritdoc/>
+    public event EventHandler<string>? Released { add { } remove { } }
+
+    /// <inheritdoc/>
     public void Dispose() { }
 }

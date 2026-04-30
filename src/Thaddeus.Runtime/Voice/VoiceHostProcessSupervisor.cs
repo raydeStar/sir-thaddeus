@@ -8,7 +8,7 @@ namespace Thaddeus.Runtime.Voice;
 public sealed class VoiceHostProcessSupervisor : IDisposable
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(120);
 
     private readonly ILogger<VoiceHostProcessSupervisor> _logger;
     private readonly HttpClient _http;
@@ -40,7 +40,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
 
             if (_process is not null && !_process.HasExited)
             {
-                return await WaitForHealthAsync(voiceHostEndpoint, _process, cancellationToken).ConfigureAwait(false);
+                return await WaitForHealthAsync(voiceHostEndpoint, _process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
             }
 
             if (!TryBuildStartInfo(voiceHostEndpoint, settings, out var startInfo, out var error))
@@ -63,7 +63,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
             AttachLogging(process);
             _logger.LogInformation("voicehost.started pid={Pid} command={Command}", process.Id, startInfo.FileName);
 
-            return await WaitForHealthAsync(voiceHostEndpoint, process, cancellationToken).ConfigureAwait(false);
+            return await WaitForHealthAsync(voiceHostEndpoint, process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -103,9 +103,10 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
     private async Task<VoiceHostEnsureResult> WaitForHealthAsync(
         Uri voiceHostEndpoint,
         Process process,
+        TimeSpan startupTimeout,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow + StartupTimeout;
+        var deadline = DateTimeOffset.UtcNow + startupTimeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -125,7 +126,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
 
         return VoiceHostEnsureResult.Failure(
             "voice_host_start_timeout",
-            $"VoiceHost did not respond to /health within {(int)StartupTimeout.TotalSeconds} seconds.");
+            $"VoiceHost did not respond to /health within {(int)startupTimeout.TotalSeconds} seconds.");
     }
 
     private async Task<bool> ProbeAsync(Uri voiceHostEndpoint, CancellationToken cancellationToken)
@@ -179,9 +180,10 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
         startInfo.ArgumentList.Add("--port");
         startInfo.ArgumentList.Add(voiceHostEndpoint.Port.ToString(CultureInfo.InvariantCulture));
         AddOptionalArgument(startInfo, "--tts-engine", settings.TtsProvider);
-        AddOptionalArgument(startInfo, "--tts-model-id", settings.TtsModelId);
+        AddOptionalArgument(startInfo, "--tts-model-id", ResolveTtsModelArgument(settings));
         AddOptionalArgument(startInfo, "--tts-voice-id", settings.TtsVoiceId);
         AddOptionalArgument(startInfo, "--stt-engine", settings.SttProvider);
+        AddOptionalArgument(startInfo, "--stt-model-id", settings.SttModelId);
         AddOptionalArgument(startInfo, "--stt-language", settings.SttLanguage);
 
         return true;
@@ -286,6 +288,25 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
 
         startInfo.ArgumentList.Add(name);
         startInfo.ArgumentList.Add(value.Trim());
+    }
+
+    private static TimeSpan ResolveStartupTimeout(VoiceSettings settings)
+    {
+        var configuredMs = settings.VoiceHostStartupTimeoutMs;
+        if (configuredMs <= 0)
+            return DefaultStartupTimeout;
+
+        var clampedMs = Math.Clamp(configuredMs, 30_000, 300_000);
+        return TimeSpan.FromMilliseconds(clampedMs);
+    }
+
+    private static string? ResolveTtsModelArgument(VoiceSettings settings)
+    {
+        if (string.Equals(settings.TtsProvider, "piper", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.PiperVoicePath))
+            return settings.PiperVoicePath;
+
+        return settings.TtsModelId;
     }
 
     private static string? FindRepoRoot(string startDir)

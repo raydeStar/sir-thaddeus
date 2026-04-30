@@ -113,6 +113,7 @@ public static class Program
             builder.Services.AddSingleton<ITextToSpeechProvider, SettingsDrivenTextToSpeechProvider>();
             builder.Services.AddSingleton<VoiceModeController>();
             builder.Services.AddSingleton<VoiceHostProcessSupervisor>();
+            builder.Services.AddSingleton<VoiceRuntimeStatusService>();
             builder.Services.AddSingleton<IThreadStore>(sp =>
             {
                 var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
@@ -184,6 +185,7 @@ public static class Program
             builder.Services.AddSingleton<IMcpToolClient>(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddHostedService(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddSingleton<RuntimeStopAllService>();
+            builder.Services.AddSingleton<VoicePttEventHub>();
 
             // Gate that wraps every MCP call with the user's permission policy.
             builder.Services.AddSingleton<ToolPermissionGate>();

@@ -20,6 +20,7 @@ export interface VoiceSettings {
   piperVoicePath?: string | null;
   ttsVoiceId?: string | null;
   ttsModelId?: string | null;
+  sttModelId?: string | null;
   sttLanguage?: string | null;
   voiceHostEnabled?: boolean;
   voiceHostBaseUrl?: string | null;
@@ -28,6 +29,7 @@ export interface VoiceSettings {
   youtubeLanguageHint?: string | null;
   youtubeDraftTone?: string | null;
   youtubeKeepAudio?: boolean;
+  voiceHostStartupTimeoutMs?: number;
 }
 
 export interface AudioSettings {

@@ -611,6 +611,34 @@ public class FootmanRouterTests
         Assert.Equal("footman_timeout", decision.ReasonCode);
     }
 
+    [Fact]
+    public async Task HeuristicFootmanRouter_DeterministicPrompt_ReturnsAuthoritativeDecision()
+    {
+        var router = new HeuristicFootmanRouter();
+        var features = RoutingFeatures.Extract("hello there");
+
+        var decision = await router.RouteAsync("hello there", features);
+
+        Assert.Equal(AgentState.Chat, decision.NextState);
+        Assert.Equal("heuristic_greeting", decision.ReasonCode);
+        Assert.True(decision.IsAuthoritative);
+    }
+
+    [Fact]
+    public async Task HeuristicFootmanRouter_AmbiguousPrompt_FailsOpenWithoutLlm()
+    {
+        var router = new HeuristicFootmanRouter();
+        const string ambiguousPrompt = "think about that for a moment";
+        var features = RoutingFeatures.Extract(ambiguousPrompt);
+
+        var decision = await router.RouteAsync(ambiguousPrompt, features);
+
+        Assert.Equal(AgentState.Fallback, decision.NextState);
+        Assert.True(decision.Abstain);
+        Assert.False(decision.IsAuthoritative);
+        Assert.Equal("heuristic_no_match", decision.ReasonCode);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private static FastLlmFootmanRouter CreateRouter(string fixedResponse)

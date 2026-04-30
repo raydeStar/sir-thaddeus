@@ -72,9 +72,33 @@ function DiagnosticsRoute() {
           />
           <Row
             label="Voice"
-            value={data.voiceAvailable ? 'available' : 'unavailable'}
+            value={formatVoiceStatus(data)}
             testId="diagnostics-voice"
           />
+          {data.voice ? (
+            <>
+              <Row
+                label="Voice host"
+                value={data.voice.hostReachable ? 'reachable' : data.voice.status}
+                testId="diagnostics-voice-host"
+              />
+              <Row
+                label="Voice input"
+                value={data.voice.inputAvailable ? 'available' : data.voice.asrReady ? 'warming' : 'unavailable'}
+                testId="diagnostics-voice-input"
+              />
+              <Row
+                label="Voice output"
+                value={data.voice.outputAvailable ? 'available' : data.voice.ttsReady ? 'warming' : 'unavailable'}
+                testId="diagnostics-voice-output"
+              />
+              <Row
+                label="Voice detail"
+                value={data.voice.message}
+                testId="diagnostics-voice-detail"
+              />
+            </>
+          ) : null}
           <Row label="Build" value={data.buildVersion} testId="diagnostics-build" />
           <Row label="PID" value={String(data.pid)} testId="diagnostics-pid" />
           <Row label="Thread store" value={data.threadStoreRoot} testId="diagnostics-store" />
@@ -93,6 +117,14 @@ function Row({ label, value, testId }: { label: string; value: string; testId: s
       </dd>
     </>
   );
+}
+
+function formatVoiceStatus(data: DiagnosticsResponse): string {
+  if (!data.voice) return data.voiceAvailable ? 'available' : 'unavailable';
+  if (!data.voice.voiceHostEnabled) return 'disabled';
+  if (data.voice.inputAvailable && data.voice.outputAvailable) return 'available';
+  if (data.voice.inputAvailable) return 'input available';
+  return data.voice.status || 'unavailable';
 }
 
 function formatUptime(seconds: number): string {

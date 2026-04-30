@@ -17,6 +17,9 @@ public interface IGlobalShortcutAdapter : IDisposable
 
     /// <summary>Raised when a registered chord is pressed.</summary>
     event EventHandler<string>? Triggered;
+
+    /// <summary>Raised after a triggered chord is released.</summary>
+    event EventHandler<string>? Released;
 }
 
 /// <summary>

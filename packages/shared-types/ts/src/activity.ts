@@ -19,12 +19,27 @@ export interface ActivityListResponse {
   entries: ActivityEntry[];
 }
 
+export interface VoiceRuntimeStatus {
+  voiceHostEnabled: boolean;
+  hostReachable: boolean;
+  asrReady: boolean;
+  ttsReady: boolean;
+  inputAvailable: boolean;
+  outputAvailable: boolean;
+  status: string;
+  message: string;
+  errorCode?: string | null;
+  body?: string | null;
+  elapsedMs: number;
+}
+
 export interface DiagnosticsResponse {
   uptimeSeconds: number;
   state: string;
   threadCount: number;
   threadStoreRoot: string;
   voiceAvailable: boolean;
+  voice: VoiceRuntimeStatus;
   pid: number;
   buildVersion: string;
 }

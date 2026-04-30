@@ -43,7 +43,7 @@ public sealed record VoiceHostRuntimeOptions(
         var ttsEngineRaw = GetOrDefault(
             values,
             "tts-engine",
-            Environment.GetEnvironmentVariable("ST_VOICE_TTS_ENGINE") ?? "piper");
+            Environment.GetEnvironmentVariable("ST_VOICE_TTS_ENGINE") ?? "kokoro-sharp");
         var ttsModelIdRaw = GetOrDefault(
             values,
             "tts-model-id",
@@ -201,13 +201,15 @@ public sealed record VoiceHostRuntimeOptions(
 
     private static string NormalizeTtsEngine(string raw)
     {
-        var value = string.IsNullOrWhiteSpace(raw) ? "piper" : raw.Trim().ToLowerInvariant();
+        var value = string.IsNullOrWhiteSpace(raw) ? "kokoro-sharp" : raw.Trim().ToLowerInvariant();
         return value switch
         {
-            "" => "piper",
+            "" => "kokoro-sharp",
+            "kokoro" => "kokoro-sharp",
+            "kokoro-sharp" => "kokoro-sharp",
+            "kokorosharp" => "kokoro-sharp",
             "piper" => "piper",
-            "windows" => "windows",
-            "kokoro" => "kokoro",
+            "windows" or "sapi" or "windows-sapi" => "kokoro-sharp",
             _ => value
         };
     }
@@ -223,9 +225,9 @@ public sealed record VoiceHostRuntimeOptions(
             if (string.IsNullOrWhiteSpace(voiceId) || !voiceId.Contains('-'))
                 return "en_US-john-medium";
         }
-        else if (string.Equals(normalizedTtsEngine, "kokoro", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(normalizedTtsEngine, "kokoro-sharp", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(voiceId))
+            if (string.IsNullOrWhiteSpace(voiceId) || voiceId.Contains('-') || !voiceId.Contains('_'))
                 return "bm_lewis";
         }
 

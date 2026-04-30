@@ -96,7 +96,7 @@ The UI must be *calm, explicit, and boring*. V0 optimizes for trust and clarity 
    - Shows the tool plan preview and requests permissions
 
 3) **Push-to-Talk Hotkey (Hold-to-talk)**
-   - Default: Ctrl+Alt+Space (configurable)
+  - Default: Ctrl+Alt+M (configurable)
    - Release-to-send; Esc cancels; dedicated hotkey for “Silence” (cuts TTS)
 
 4) **Minimal Settings Panel**

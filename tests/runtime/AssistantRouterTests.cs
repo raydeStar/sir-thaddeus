@@ -153,4 +153,80 @@ public class AssistantRouterTests : IDisposable
         Assert.Equal(1, built);
         Assert.Equal(ChatRole.Assistant, msg.Role);
     }
+
+    [Fact]
+    public void ResolveGatekeeperPolicy_SharedEndpointDifferentModelReuseEnabled_UsesHeuristicOnly()
+    {
+        var llm = LlmWithGatekeeper(
+            primaryModel: "primary-large",
+            gatekeeperModel: "footman-small",
+            gatekeeperBaseUrl: "http://localhost:1234",
+            reusePrimaryForSharedEndpoint: true);
+
+        var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
+
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.HeuristicOnly, policy.Mode);
+        Assert.False(policy.AllowsHelperLlm);
+    }
+
+    [Fact]
+    public void ResolveGatekeeperPolicy_SharedEndpointSameModel_UsesSharedPrimary()
+    {
+        var llm = LlmWithGatekeeper(
+            primaryModel: "primary-large",
+            gatekeeperModel: "primary-large",
+            gatekeeperBaseUrl: "http://localhost:1234");
+
+        var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
+
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.SharedPrimary, policy.Mode);
+        Assert.True(policy.AllowsHelperLlm);
+    }
+
+    [Fact]
+    public void ResolveGatekeeperPolicy_SeparateEndpoint_UsesSeparateLlm()
+    {
+        var llm = LlmWithGatekeeper(
+            primaryModel: "primary-large",
+            gatekeeperModel: "footman-small",
+            gatekeeperBaseUrl: "http://localhost:2345");
+
+        var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
+
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.SeparateLlm, policy.Mode);
+        Assert.True(policy.AllowsHelperLlm);
+    }
+
+    [Fact]
+    public void ResolveGatekeeperPolicy_Disabled_UsesOff()
+    {
+        var llm = LlmWithGatekeeper(
+            primaryModel: "primary-large",
+            gatekeeperModel: "footman-small",
+            gatekeeperEnabled: false);
+
+        var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
+
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.Off, policy.Mode);
+        Assert.False(policy.AllowsHelperLlm);
+    }
+
+    private static LlmSettings LlmWithGatekeeper(
+        string primaryModel,
+        string gatekeeperModel,
+        string? gatekeeperBaseUrl = null,
+        bool reusePrimaryForSharedEndpoint = true,
+        bool gatekeeperEnabled = true)
+        => new(
+            Provider: "lmstudio",
+            ModelId: primaryModel,
+            BaseUrl: "http://localhost:1234",
+            ApiKey: null,
+            MaxTokens: 2048,
+            ContextWindowTokens: 8192,
+            Temperature: 0.7,
+            GatekeeperBaseUrl: gatekeeperBaseUrl,
+            GatekeeperModelId: gatekeeperModel,
+            ReusePrimaryForGatekeeperOnSharedEndpoint: reusePrimaryForSharedEndpoint,
+            GatekeeperEnabled: gatekeeperEnabled);
 }

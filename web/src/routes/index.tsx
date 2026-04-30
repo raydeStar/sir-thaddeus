@@ -1,12 +1,17 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
-import { ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
+import { acquireMicStream, stopMicStream } from '../lib/micCapture';
+import { trimSilenceToWav } from '../lib/audioTrim';
+import { transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
 });
+
+const MIN_VOICE_HOLD_MS = 350;
 
 function HomeRoute() {
   const navigate = useNavigate();
@@ -20,11 +25,38 @@ function HomeRoute() {
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Lightweight PTT for the home screen. We keep this self-contained so it
+  // does not pull in the chat route's full speech-playback machinery: hold
+  // mic, record, release, transcribe, then start a new thread.
+  const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const startedAtRef = useRef(0);
+  const abortRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      // Best-effort teardown when leaving the home route mid-capture.
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try { recorderRef.current.stop(); } catch { /* ignore */ }
+      }
+      if (streamRef.current) {
+        stopMicStream(streamRef.current);
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     void loadThreads();
   }, [loadThreads]);
 
-  const start = async (text: string, wikiContext?: WikiContextSelection) => {
+  useEffect(() => {
+    void warmVoiceHost().catch(() => undefined);
+  }, []);
+
+  const start = useCallback(async (text: string, wikiContext?: WikiContextSelection) => {
     if (busy) return;
     setBusy(true);
     setLocalError(null);
@@ -42,7 +74,102 @@ function HomeRoute() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [busy, navigate, newThread, send]);
+
+  const beginVoiceCapture = useCallback(async () => {
+    if (busy || voiceState !== 'idle') return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setLocalError('Microphone capture is not available in this browser shell.');
+      return;
+    }
+
+    setLocalError(null);
+    chunksRef.current = [];
+    abortRef.current = false;
+    startedAtRef.current = performance.now();
+    setVoiceState('starting');
+
+    try {
+      const acquired = await acquireMicStream();
+      if (abortRef.current) {
+        stopMicStream(acquired.stream);
+        abortRef.current = false;
+        setVoiceState('idle');
+        return;
+      }
+
+      const recorder = new MediaRecorder(acquired.stream, mediaRecorderOptions());
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        setLocalError('Microphone recording failed.');
+        releaseHomeMic(recorderRef, streamRef);
+        setVoiceState('idle');
+      };
+
+      streamRef.current = acquired.stream;
+      recorderRef.current = recorder;
+      recorder.start();
+      setVoiceState('recording');
+    } catch (e) {
+      releaseHomeMic(recorderRef, streamRef);
+      setVoiceState('idle');
+      if (!abortRef.current) {
+        setLocalError((e as Error).message || 'Could not start microphone capture.');
+      }
+      abortRef.current = false;
+    }
+  }, [busy, voiceState]);
+
+  const finishVoiceCapture = useCallback(async () => {
+    const recorder = recorderRef.current;
+    if (!recorder) {
+      abortRef.current = true;
+      return;
+    }
+
+    const heldMs = performance.now() - startedAtRef.current;
+    const shortTap = heldMs < MIN_VOICE_HOLD_MS;
+
+    let audioBlob: Blob;
+    try {
+      audioBlob = await stopRecorder(recorder, chunksRef.current);
+    } catch (e) {
+      releaseHomeMic(recorderRef, streamRef);
+      setVoiceState('idle');
+      if (!shortTap) setLocalError((e as Error).message || 'Could not finish microphone recording.');
+      return;
+    }
+
+    releaseHomeMic(recorderRef, streamRef);
+    if (shortTap) {
+      setVoiceState('idle');
+      return;
+    }
+    if (audioBlob.size === 0) {
+      setVoiceState('idle');
+      setLocalError('No microphone audio was captured.');
+      return;
+    }
+
+    setVoiceState('transcribing');
+    setLocalError(null);
+    try {
+      const trimmed = await trimSilenceToWav(audioBlob).catch(() => audioBlob);
+      const transcript = await transcribeSpeech(trimmed);
+      const text = transcript.text.trim();
+      if (!text) {
+        setLocalError('No speech was detected.');
+        return;
+      }
+      await start(text);
+    } catch (e) {
+      setLocalError((e as Error).message || 'Could not transcribe the microphone audio.');
+    } finally {
+      setVoiceState('idle');
+    }
+  }, [start]);
 
   const displayError = localError ?? storeError;
   const recent = threads.slice(0, 6);
@@ -77,6 +204,36 @@ function HomeRoute() {
           inputTestId="home-prompt"
           sendTestId="home-send"
           autoFocus
+          rightActions={
+            <button
+              type="button"
+              className={`chat-composer-icon-button ${voiceState === 'recording' ? 'border-red-400 bg-red-500/10 text-red-700 dark:text-red-300' : ''}`}
+              aria-label={homeVoiceButtonLabel(voiceState)}
+              title={homeVoiceButtonLabel(voiceState)}
+              data-testid="home-voice-hold"
+              disabled={busy}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                void beginVoiceCapture();
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+                void finishVoiceCapture();
+              }}
+              onPointerCancel={() => { void finishVoiceCapture(); }}
+            >
+              {voiceState === 'starting' || voiceState === 'transcribing' ? (
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+              ) : voiceState === 'recording' ? (
+                <Square className="h-4 w-4" strokeWidth={1.9} />
+              ) : (
+                <Mic className="h-4 w-4" strokeWidth={1.9} />
+              )}
+            </button>
+          }
         />
         <p className="mt-3 text-center text-[11px] text-ink-subtle">
           Press <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> to send
@@ -164,4 +321,46 @@ function formatRelative(iso: string): string {
   } catch {
     return '';
   }
+}
+
+function mediaRecorderOptions(): MediaRecorderOptions {
+  for (const mimeType of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
+    if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType };
+  }
+  return {};
+}
+
+function stopRecorder(recorder: MediaRecorder, chunks: Blob[]): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const mimeType = recorder.mimeType || 'audio/webm';
+    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+    recorder.onerror = () => reject(new Error('Microphone recording failed.'));
+    if (recorder.state === 'inactive') {
+      resolve(new Blob(chunks, { type: mimeType }));
+      return;
+    }
+    recorder.stop();
+  });
+}
+
+function releaseHomeMic(
+  recorderRef: React.MutableRefObject<MediaRecorder | null>,
+  streamRef: React.MutableRefObject<MediaStream | null>,
+): void {
+  const recorder = recorderRef.current;
+  if (recorder && recorder.state !== 'inactive') {
+    try { recorder.stop(); } catch { /* best effort */ }
+  }
+  recorderRef.current = null;
+  if (streamRef.current) {
+    stopMicStream(streamRef.current);
+    streamRef.current = null;
+  }
+}
+
+function homeVoiceButtonLabel(state: 'idle' | 'starting' | 'recording' | 'transcribing'): string {
+  if (state === 'starting') return 'Starting microphone';
+  if (state === 'recording') return 'Release to send voice message';
+  if (state === 'transcribing') return 'Transcribing voice message';
+  return 'Hold to talk';
 }

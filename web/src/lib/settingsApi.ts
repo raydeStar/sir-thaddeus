@@ -88,10 +88,19 @@ export interface VoiceHostHealthResponse {
   message: string;
   body?: string | null;
   elapsedMs: number;
+  voiceHostEnabled?: boolean;
+  hostReachable?: boolean;
+  asrReady?: boolean;
+  ttsReady?: boolean;
+  inputAvailable?: boolean;
+  outputAvailable?: boolean;
+  status?: string;
+  errorCode?: string | null;
 }
 
-export async function checkVoiceHostHealth(): Promise<VoiceHostHealthResponse> {
-  const res = await runtimeFetch(token(), '/api/voice/host-health');
+export async function checkVoiceHostHealth(ensure = false): Promise<VoiceHostHealthResponse> {
+  const suffix = ensure ? '?ensure=true' : '';
+  const res = await runtimeFetch(token(), `/api/voice/host-health${suffix}`);
   return asJson<VoiceHostHealthResponse>(res);
 }
 

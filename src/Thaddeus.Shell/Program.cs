@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Thaddeus.Shell.Ipc;
 using Thaddeus.Shell.Platform;
 using Thaddeus.Shell.Platform.Windows;
@@ -108,15 +109,33 @@ public static class Program
             {
                 try
                 {
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                    using var resp = await http.PostAsync(
-                        $"http://127.0.0.1:{lockFile.Port}/api/stop-all",
-                        content: null).ConfigureAwait(false);
+                    using var resp = await RequestRuntimePostAsync(
+                        lockFile.Port,
+                        lockFile.Token,
+                        "/api/stop-all",
+                        TimeSpan.FromSeconds(5)).ConfigureAwait(false);
                     log.LogInformation("shell.stop_all status={Status}", (int)resp.StatusCode);
                 }
                 catch (Exception ex)
                 {
                     log.LogWarning(ex, "shell.stop_all.failed");
+                }
+            }
+
+            async Task RequestPushToTalkAsync(string phase)
+            {
+                try
+                {
+                    using var resp = await RequestRuntimePostAsync(
+                        lockFile.Port,
+                        lockFile.Token,
+                        $"/api/voice/ptt/{phase}",
+                        TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    log.LogInformation("shell.ptt phase={Phase} status={Status}", phase, (int)resp.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "shell.ptt.failed phase={Phase}", phase);
                 }
             }
 
@@ -161,7 +180,22 @@ public static class Program
                         }
                         else if (id == "stop-all")
                         {
-                            _ = RequestStopAllAsync();
+                            _ = Task.Run(async () =>
+                            {
+                                try { await RequestStopAllAsync().ConfigureAwait(false); }
+                                catch (Exception ex) { log.LogWarning(ex, "shell.stop_all.failed"); }
+                            });
+                        }
+                        else if (id == "push-to-talk")
+                        {
+                            _ = RequestPushToTalkAsync("down");
+                        }
+                    };
+                    shortcuts.Released += (_, id) =>
+                    {
+                        if (id == "push-to-talk")
+                        {
+                            _ = RequestPushToTalkAsync("up");
                         }
                     };
                     using var registerCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -172,9 +206,19 @@ public static class Program
                     log.LogInformation("shell.shortcut.register id=compact-toggle ok={Ok}", compactOk);
                     var stopOk = shortcuts.RegisterAsync(
                         "stop-all",
-                        new KeyChord("Escape", KeyModifiers.Control | KeyModifiers.Shift),
+                        new KeyChord("Escape", KeyModifiers.Control | KeyModifiers.Alt),
                         registerCts.Token).GetAwaiter().GetResult();
                     log.LogInformation("shell.shortcut.register id=stop-all ok={Ok}", stopOk);
+                    var pttChord = ResolvePushToTalkChordAsync(lockFile.Port, lockFile.Token, log)
+                        .GetAwaiter().GetResult();
+                    if (SameChord(pttChord, new KeyChord("Space", KeyModifiers.Control | KeyModifiers.Shift)) ||
+                        SameChord(pttChord, new KeyChord("Space", KeyModifiers.Control | KeyModifiers.Alt)))
+                        pttChord = new KeyChord("M", KeyModifiers.Control | KeyModifiers.Alt);
+                    var pttOk = shortcuts.RegisterAsync(
+                        "push-to-talk",
+                        pttChord,
+                        registerCts.Token).GetAwaiter().GetResult();
+                    log.LogInformation("shell.shortcut.register id=push-to-talk chord={Chord} ok={Ok}", pttChord, pttOk);
                 }
             });
 
@@ -198,6 +242,108 @@ public static class Program
             try { supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* drain */ }
         }
     }
+
+    private static async Task<HttpResponseMessage> RequestRuntimePostAsync(
+        int port,
+        string token,
+        string path,
+        TimeSpan timeout)
+    {
+        using var http = new HttpClient { Timeout = timeout };
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}{path}");
+        if (!string.IsNullOrWhiteSpace(token))
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return await http.SendAsync(request).ConfigureAwait(false);
+    }
+
+    private static async Task<KeyChord> ResolvePushToTalkChordAsync(int port, string token, ILogger log)
+    {
+        var fallback = new KeyChord("M", KeyModifiers.Control | KeyModifiers.Alt);
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/settings");
+            if (!string.IsNullOrWhiteSpace(token))
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            using var response = await http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return fallback;
+
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("shortcuts", out var shortcuts) &&
+                shortcuts.TryGetProperty("pushToTalk", out var pushToTalk) &&
+                pushToTalk.ValueKind == JsonValueKind.String &&
+                TryParseShortcut(pushToTalk.GetString(), out var chord))
+            {
+                return chord;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.LogDebug(ex, "shell.shortcut.ptt_settings_failed");
+        }
+
+        return fallback;
+    }
+
+    private static bool TryParseShortcut(string? value, out KeyChord chord)
+    {
+        chord = new KeyChord("M", KeyModifiers.Control | KeyModifiers.Alt);
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var parts = value.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return false;
+
+        var modifiers = KeyModifiers.None;
+        string? key = null;
+        foreach (var part in parts)
+        {
+            switch (part.Trim().ToLowerInvariant())
+            {
+                case "ctrl":
+                case "control":
+                    modifiers |= KeyModifiers.Control;
+                    break;
+                case "shift":
+                    modifiers |= KeyModifiers.Shift;
+                    break;
+                case "alt":
+                case "option":
+                    modifiers |= KeyModifiers.Alt;
+                    break;
+                case "super":
+                case "win":
+                case "windows":
+                case "cmd":
+                case "command":
+                    modifiers |= KeyModifiers.Super;
+                    break;
+                default:
+                    key = NormalizeShortcutKey(part);
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        chord = new KeyChord(key, modifiers);
+        return true;
+    }
+
+    private static string NormalizeShortcutKey(string key)
+    {
+        var trimmed = key.Trim();
+        if (string.Equals(trimmed, "Esc", StringComparison.OrdinalIgnoreCase)) return "Escape";
+        if (trimmed.Length == 1) return trimmed.ToUpperInvariant();
+        return char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
+    }
+
+    private static bool SameChord(KeyChord left, KeyChord right) =>
+        string.Equals(left.Key, right.Key, StringComparison.OrdinalIgnoreCase) && left.Modifiers == right.Modifiers;
 
     private static void ShowFatalDialog(string title, string message)
     {

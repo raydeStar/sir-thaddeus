@@ -147,6 +147,40 @@ public sealed class SettingsManagerEnvironmentOverrideTests
     }
 
     [Fact]
+    public void LoadWithDiagnostics_NormalizesWindowsTtsSettingsToKokoroSharp()
+    {
+        var settingsPath = CreateTempSettingsPath();
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            File.WriteAllText(settingsPath, """
+                {
+                  "schemaVersion": 4,
+                  "voice": {
+                    "ttsEngine": "windows",
+                    "ttsVoiceId": "Microsoft David"
+                  }
+                }
+                """);
+
+            using var envScope = new EnvironmentVariableScope(new Dictionary<string, string?>
+            {
+                ["ST_SETTINGS_PATH"] = settingsPath
+            });
+
+            var result = SettingsManager.LoadWithDiagnostics();
+
+            Assert.Equal("kokoro-sharp", result.Settings.Voice.TtsEngine);
+            Assert.Equal("bm_lewis", result.Settings.Voice.TtsVoiceId);
+        }
+        finally
+        {
+            DeleteTempSettingsPath(settingsPath);
+        }
+    }
+
+    [Fact]
     public void OptionalFeatureHelpers_NonBaselineProfile_AllowExplicitOptIns()
     {
         var settings = new AppSettings

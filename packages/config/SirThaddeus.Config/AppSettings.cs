@@ -375,13 +375,13 @@ public sealed record VoiceSettings
     public string VoiceHostHealthPath { get; init; } = "/health";
 
     [JsonPropertyName("ttsEngine")]
-    public string TtsEngine { get; init; } = "piper";
+    public string TtsEngine { get; init; } = "kokoro-sharp";
 
     [JsonPropertyName("ttsModelId")]
     public string TtsModelId { get; init; } = "";
 
     [JsonPropertyName("ttsVoiceId")]
-    public string TtsVoiceId { get; init; } = "en_US-john-medium";
+    public string TtsVoiceId { get; init; } = "bm_lewis";
 
     [JsonPropertyName("sttEngine")]
     public string SttEngine { get; init; } = "faster-whisper";
@@ -405,7 +405,7 @@ public sealed record VoiceSettings
     public string TtsEndpoint { get; init; } = "";
 
     [JsonPropertyName("preferLocalTts")]
-    public bool PreferLocalTts { get; init; } = true;
+    public bool PreferLocalTts { get; init; } = false;
 
     [JsonPropertyName("asrTimeoutMs")]
     public int AsrTimeoutMs { get; init; } = 45_000;
@@ -447,15 +447,15 @@ public sealed record VoiceSettings
 
     public string GetNormalizedTtsEngine()
     {
-        if (PreferLocalTts) return "piper";
-
         var engine = (TtsEngine ?? "").Trim().ToLowerInvariant();
         return engine switch
         {
-            "" => "piper",
+            "" => "kokoro-sharp",
+            "kokoro" => "kokoro-sharp",
+            "kokoro-sharp" => "kokoro-sharp",
+            "kokorosharp" => "kokoro-sharp",
             "piper" => "piper",
-            "windows" => "windows",
-            "kokoro" => "kokoro",
+            "windows" or "sapi" or "windows-sapi" => "kokoro-sharp",
             _ => engine
         };
     }
@@ -509,7 +509,7 @@ public sealed record VoiceSettings
 
         if (string.IsNullOrEmpty(voiceId))
         {
-            if (string.Equals(engine, "kokoro", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(engine, "kokoro-sharp", StringComparison.OrdinalIgnoreCase))
                 return "bm_lewis";
             if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase))
                 return "en_US-john-medium";
@@ -520,6 +520,9 @@ public sealed record VoiceSettings
         // If the stored voice doesn't match the engine, fall back to the engine default.
         if (string.Equals(engine, "piper", StringComparison.OrdinalIgnoreCase) && !voiceId.Contains('-'))
             return "en_US-john-medium";
+        if (string.Equals(engine, "kokoro-sharp", StringComparison.OrdinalIgnoreCase) &&
+            (voiceId.Contains('-') || !voiceId.Contains('_')))
+            return "bm_lewis";
 
         return voiceId;
     }

@@ -243,8 +243,12 @@ def env_bool(name: str, default: bool) -> bool:
 def normalize_tts_engine(value: Optional[str]) -> str:
     normalized = (value or "").strip().lower()
     if not normalized:
-        return "piper"
-    if normalized in {"windows", "kokoro", "piper"}:
+        return "kokoro"
+    if normalized in {"kokoro-sharp", "kokorosharp"}:
+        return "kokoro"
+    if normalized in {"windows", "sapi", "windows-sapi"}:
+        return "kokoro"
+    if normalized in {"kokoro", "piper"}:
         return normalized
     return normalized
 
@@ -1539,7 +1543,7 @@ class RuntimeConfig:
     stt_model_id: str = "base"
     stt_language: str = "en"
     stt_device: str = "cpu"
-    tts_engine: str = "windows"
+    tts_engine: str = "kokoro"
     tts_model_id: str = ""
     tts_voice_id: str = ""
 

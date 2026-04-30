@@ -21,6 +21,11 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
     private const uint WM_REGISTER = WM_USER + 1;
     private const uint WM_UNREGISTER = WM_USER + 2;
     private const uint WM_QUIT = 0x0012;
+    private const uint MOD_ALT = 0x0001;
+    private const uint MOD_CONTROL = 0x0002;
+    private const uint MOD_SHIFT = 0x0004;
+    private const uint MOD_WIN = 0x0008;
+    private const uint MOD_NOREPEAT = 0x4000;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
@@ -39,6 +44,9 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MSG
@@ -59,6 +67,8 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
     private readonly ManualResetEventSlim _pumpReady = new();
     private readonly ConcurrentDictionary<string, int> _idsByName = new();
     private readonly ConcurrentDictionary<int, string> _namesById = new();
+    private readonly ConcurrentDictionary<int, (uint Mods, uint Vk)> _registeredById = new();
+    private readonly ConcurrentDictionary<int, byte> _activeHolds = new();
     private readonly ConcurrentDictionary<int, (uint Mods, uint Vk, TaskCompletionSource<bool> Tcs)> _pendingRegistrations = new();
     private readonly ConcurrentDictionary<int, TaskCompletionSource<bool>> _pendingUnregistrations = new();
     private uint _pumpThreadId;
@@ -84,6 +94,9 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
 
     /// <inheritdoc />
     public event EventHandler<string>? Triggered;
+
+    /// <inheritdoc />
+    public event EventHandler<string>? Released;
 
     /// <inheritdoc />
     public Task<bool> RegisterAsync(string id, KeyChord chord, CancellationToken ct)
@@ -116,6 +129,7 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
             {
                 _idsByName[id] = hotkeyId;
                 _namesById[hotkeyId] = id;
+                _registeredById[hotkeyId] = (mods, vk);
             }
             return t.Result;
         }, TaskContinuationOptions.ExecuteSynchronously);
@@ -132,6 +146,8 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
             return Task.CompletedTask;
         }
         _namesById.TryRemove(hotkeyId, out _);
+        _registeredById.TryRemove(hotkeyId, out _);
+        _activeHolds.TryRemove(hotkeyId, out _);
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingUnregistrations[hotkeyId] = tcs;
@@ -201,7 +217,47 @@ public sealed class WindowsGlobalShortcutAdapter : IGlobalShortcutAdapter
         {
             _logger.LogWarning(ex, "shortcut.windows.handler_threw id={Id}", name);
         }
+
+        if (_registeredById.TryGetValue(hotkeyId, out var chord) && _activeHolds.TryAdd(hotkeyId, 0))
+            _ = Task.Run(() => MonitorReleaseAsync(hotkeyId, name, chord.Mods, chord.Vk));
     }
+
+    private async Task MonitorReleaseAsync(int hotkeyId, string name, uint mods, uint vk)
+    {
+        try
+        {
+            while (!_disposed && IsChordPressed(mods, vk))
+                await Task.Delay(20).ConfigureAwait(false);
+
+            try
+            {
+                Released?.Invoke(this, name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "shortcut.windows.release_handler_threw id={Id}", name);
+            }
+        }
+        finally
+        {
+            _activeHolds.TryRemove(hotkeyId, out _);
+        }
+    }
+
+    private static bool IsChordPressed(uint mods, uint vk)
+    {
+        if (!IsKeyPressed((int)vk)) return false;
+        var pureMods = mods & ~MOD_NOREPEAT;
+        if ((pureMods & MOD_CONTROL) != 0 && !IsAnyKeyPressed(0x11, 0xA2, 0xA3)) return false;
+        if ((pureMods & MOD_SHIFT) != 0 && !IsAnyKeyPressed(0x10, 0xA0, 0xA1)) return false;
+        if ((pureMods & MOD_ALT) != 0 && !IsAnyKeyPressed(0x12, 0xA4, 0xA5)) return false;
+        if ((pureMods & MOD_WIN) != 0 && !IsAnyKeyPressed(0x5B, 0x5C)) return false;
+        return true;
+    }
+
+    private static bool IsAnyKeyPressed(params int[] keys) => keys.Any(IsKeyPressed);
+
+    private static bool IsKeyPressed(int key) => (GetAsyncKeyState(key) & unchecked((short)0x8000)) != 0;
 
     private void ThrowIfDisposed()
     {
