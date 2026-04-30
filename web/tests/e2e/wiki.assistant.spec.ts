@@ -148,11 +148,6 @@ test.describe('wiki assistant flow', () => {
       });
     });
 
-    // Fill the rewrite prompt first — the button is gated on both a
-    // non-empty prompt and a non-empty selection. Clicking into the editor
-    // afterwards moves focus but leaves the prompt's controlled value intact.
-    await promptInput.fill('Make the tone slightly drier.');
-
     // Drive the selection through real keyboard input. ProseMirror's view
     // ignores synthetic DOM selectionchange events, so we click into the
     // target paragraph (placing the caret) and then issue Home + Shift+End
@@ -165,12 +160,13 @@ test.describe('wiki assistant flow', () => {
     await page.keyboard.press('End');
     await page.keyboard.up('Shift');
 
-    // Confirm a non-empty selection actually reached the store before we
-    // dispatch the rewrite.
-    const rewriteButton = page.getByRole('button', { name: 'Rewrite selection', exact: true });
-    await expect(rewriteButton).toBeEnabled({ timeout: 10_000 });
-
-    await rewriteButton.click();
+    // The assistant should make selection-only rewrites obvious with quick
+    // actions as soon as a selection is active.
+    await expect(page.getByText(/Selection ready/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'This page', exact: true })).toHaveClass(/border-accent/);
+    const tightenButton = page.getByRole('button', { name: 'Tighten', exact: true });
+    await expect(tightenButton).toBeVisible({ timeout: 10_000 });
+    await tightenButton.click();
 
     await expect(editorContent).toContainText('tight schedule', { timeout: 20_000 });
     await expect(editorContent).toContainText('judgmental stare', { timeout: 20_000 });

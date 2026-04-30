@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   BookOpenText,
@@ -43,6 +43,23 @@ type PendingWikiAction =
   | { kind: 'deleteFolder'; folder: WikiFolder }
   | { kind: 'purgeTrashItem'; item: WikiTrashItem };
 
+const WIKI_SEARCH_SCOPE_OPTIONS: Array<{ value: WikiSearchScope; label: string }> = [
+  { value: 'root', label: 'This workspace' },
+  { value: 'all', label: 'All workspaces' },
+];
+
+const WIKI_ASSISTANT_SCOPE_OPTIONS: Array<{ value: WikiScope; label: string }> = [
+  { value: 'root', label: 'Workspace' },
+  { value: 'folder', label: 'Folder' },
+  { value: 'page', label: 'This page' },
+];
+
+const WIKI_SELECTION_REWRITE_PRESETS = [
+  { label: 'Tighten', instruction: 'Tighten this passage while preserving the meaning and important details.' },
+  { label: 'Clarify', instruction: 'Rewrite this passage for clarity while preserving the tone and meaning.' },
+  { label: 'More formal', instruction: 'Rewrite this passage in a more formal, polished voice while preserving the meaning.' },
+] as const;
+
 export const Route = createFileRoute('/wiki')({
   component: WikiRoute,
 });
@@ -66,6 +83,7 @@ function WikiRoute() {
   const [importPreview, setImportPreview] = useState<{ archive: Blob; preview: WikiImportPreview; fileName: string } | null>(null);
   const pageTitleRef = useRef<HTMLInputElement>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     roots,
     tree,
@@ -164,42 +182,34 @@ function WikiRoute() {
     : [];
   const quickSearchChips = useMemo(() => extractWikiQuickSearchChips(draft), [draft]);
   const hasSearch = search.trim().length > 0;
+  const searchScopeOptions = roots.length > 1 ? WIKI_SEARCH_SCOPE_OPTIONS : [WIKI_SEARCH_SCOPE_OPTIONS[0]];
+  const searchStatus = searching
+    ? 'Searching...'
+    : hasSearch
+      ? `${searchResults.length} ${searchResults.length === 1 ? 'match' : 'matches'}`
+      : searchScope === 'all'
+        ? `Across ${roots.length} workspaces`
+        : selectedRoot?.name ?? 'This workspace';
   const markdownWordCount = countWords(draft);
   const busy = loading || saving || pageAssistantBusy;
   const canUndoLatestAiEdit = Boolean(page && revisions[0]?.source === 'ai' && revisions[1]);
   const previewRevision = revisions.find((revision) => revision.id === previewRevisionId) ?? null;
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  // Track the previous selection state so we only auto-focus the prompt at
-  // the moment a selection is *acquired* — not on every re-render while a
-  // selection happens to exist (which would steal focus while the user types).
+  // Track whether the selection was previously empty so we only react when a
+  // new selection is acquired, not on every render while text remains selected.
   const hadSelectionRef = useRef(false);
 
-  // Pop the assistant pane open the moment the user highlights text in the
-  // editor — they almost certainly want to do something with it, and finding a
-  // collapsed sidebar shut on top of their selection was the #1 confusion.
-  useEffect(() => {
-    if (selectedText.trim().length > 0 && rightCollapsed) {
-      setRightCollapsed(false);
-    }
-  }, [selectedText, rightCollapsed]);
-
-  // When a selection is *acquired* (transition from empty → non-empty),
-  // move focus into the prompt textarea so the user has a clear visual signal
-  // that the assistant pane is ready for instructions. The textarea is only
-  // mounted when the right pane is expanded, so we wait until both conditions
-  // hold before focusing.
+  // Pop the assistant pane open and narrow the AI scope to the current page
+  // when the user highlights text. Keep focus in the editor so follow-up
+  // formatting actions (like linking the selected range) still work.
   useEffect(() => {
     const hasSelection = selectedText.trim().length > 0;
-    if (hasSelection && !hadSelectionRef.current && !rightCollapsed) {
-      // Defer one tick so the freshly-expanded pane has mounted the textarea.
-      const id = window.setTimeout(() => promptRef.current?.focus(), 0);
-      hadSelectionRef.current = true;
-      return () => window.clearTimeout(id);
+    if (hasSelection && !hadSelectionRef.current) {
+      if (rightCollapsed) setRightCollapsed(false);
+      if (page && scope !== 'page') setScope('page');
     }
     hadSelectionRef.current = hasSelection;
-    return undefined;
-  }, [selectedText, rightCollapsed]);
+  }, [page, rightCollapsed, scope, selectedText, setScope]);
 
   useEffect(() => {
     setPagePrompt('');
@@ -255,6 +265,10 @@ function WikiRoute() {
     if (!prompt || !selectedText.trim()) return;
     setPagePrompt('');
     await rewriteSelection(prompt);
+  };
+  const submitSelectionQuickRewrite = async (instruction: string) => {
+    if (!instruction.trim() || !selectedText.trim()) return;
+    await rewriteSelection(instruction);
   };
   const submitPageTitle = async () => {
     const trimmed = pageTitleDraft.trim();
@@ -316,6 +330,15 @@ function WikiRoute() {
     if (result) setImportPreview(null);
   };
   const handleCancelImport = () => setImportPreview(null);
+  const applySearchQuery = (query: string, nextScope: WikiSearchScope = searchScope) => {
+    if (leftCollapsed) setLeftCollapsed(false);
+    if (searchScope !== nextScope) setSearchScope(nextScope);
+    setSearch(query);
+    window.setTimeout(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }, 0);
+  };
   const beginFolderRename = (folder: WikiFolder) => {
     setRenamingFolderId(folder.id);
     setFolderNameDraft(folder.name);
@@ -438,7 +461,7 @@ function WikiRoute() {
                 type="button"
                 className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-ink-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!tree}
-                onClick={() => setSearch(chip.searchValue)}
+                onClick={() => applySearchQuery(chip.searchValue)}
                 title={`Search for ${chip.searchValue}`}
               >
                 {chip.label}
@@ -604,34 +627,47 @@ function WikiRoute() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.8} />
                 <input
+                  ref={searchInputRef}
                   type="search"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search pages"
                   disabled={!tree}
-                  className="w-full rounded-xl border border-line bg-canvas-raised py-2 pl-9 pr-3 text-sm text-ink outline-none transition placeholder:text-ink-subtle focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
+                  className="w-full rounded-xl border border-line bg-canvas-raised py-2 pl-9 pr-10 text-sm text-ink outline-none transition placeholder:text-ink-subtle focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-50"
                 />
+                {hasSearch ? (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition hover:bg-canvas hover:text-ink"
+                    aria-label="Clear search"
+                    onClick={() => setSearch('')}
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                ) : null}
               </div>
-              {roots.length > 1 ? (
-                <div className="grid grid-cols-2 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Search scope">
-                  {(['root', 'all'] as WikiSearchScope[]).map((candidate) => (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-canvas-raised p-1.5">
+                <div className="flex flex-wrap items-center gap-1.5" aria-label="Search scope">
+                  {searchScopeOptions.map((candidate) => (
                     <button
-                      key={candidate}
+                      key={candidate.value}
                       type="button"
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${searchScope === candidate ? 'bg-accent-soft text-ink shadow-soft' : 'text-ink-muted hover:text-ink'}`}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${searchScope === candidate.value ? 'bg-accent-soft text-ink shadow-soft' : 'text-ink-muted hover:text-ink'}`}
                       disabled={!tree}
-                      onClick={() => setSearchScope(candidate)}
+                      onClick={() => setSearchScope(candidate.value)}
                     >
-                      {candidate === 'root' ? 'This workspace' : 'All'}
+                      {candidate.label}
                     </button>
                   ))}
                 </div>
-              ) : null}
+                <span className="text-[11px] text-ink-subtle">{searchStatus}</span>
+              </div>
 
               {tree && hasSearch ? (
                 <SearchResultsList
                   results={searchResults}
                   roots={roots}
+                  query={search}
                   searchScope={searchScope}
                   searching={searching}
                   selectedPageId={selectedPageId}
@@ -911,8 +947,7 @@ function WikiRoute() {
                   graph={pageGraph}
                   onPageSelect={(pageId) => void selectPage(pageId)}
                   onTagSelect={(tag) => {
-                    setSearch(`#${tag}`);
-                    setSearchScope('root');
+                    applySearchQuery(`#${tag}`, 'root');
                   }}
                 />
                 </>
@@ -927,7 +962,7 @@ function WikiRoute() {
                         {!page
                           ? 'Tell Sir Thaddeus what this page should be about. Hit Enter and the page is created with whatever it writes — nothing saves until then.'
                           : selectedText.trim()
-                            ? 'Tell Sir Thaddeus how to rewrite the highlighted passage.'
+                            ? 'Choose a quick rewrite or type custom instructions for the highlighted passage.'
                             : 'Ask anything about this page, or highlight text to rewrite it.'}
                       </p>
                     )}
@@ -940,17 +975,17 @@ function WikiRoute() {
                   </div>
                   <div className="shrink-0 space-y-2 border-t border-line bg-canvas px-3 pt-3 pb-3">
                     <div className="grid grid-cols-3 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Wiki assistant scope">
-                      {(['root', 'folder', 'page'] as WikiScope[]).map((candidate) => {
-                        const unavailable = candidate === 'folder' ? !selectedFolder : candidate === 'page' ? !page : false;
+                      {WIKI_ASSISTANT_SCOPE_OPTIONS.map((candidate) => {
+                        const unavailable = candidate.value === 'folder' ? !selectedFolder : candidate.value === 'page' ? !page : false;
                         return (
                           <button
-                            key={candidate}
+                            key={candidate.value}
                             type="button"
-                            className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${scope === candidate ? 'border-accent bg-accent-soft text-ink shadow-soft' : 'border-transparent text-ink-muted hover:text-ink'}`}
+                            className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${scope === candidate.value ? 'border-accent bg-accent-soft text-ink shadow-soft' : 'border-transparent text-ink-muted hover:text-ink'}`}
                             disabled={busy || unavailable}
-                            onClick={() => setScope(candidate)}
+                            onClick={() => setScope(candidate.value)}
                           >
-                            {candidate}
+                            {candidate.label}
                           </button>
                         );
                       })}
@@ -958,9 +993,12 @@ function WikiRoute() {
                     {selectedText ? (
                       <div className="rounded-lg border border-accent bg-accent-soft px-3 py-2">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
-                            Selected · {countWords(selectedText)} words
-                          </p>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+                              Selection ready · {countWords(selectedText)} words
+                            </p>
+                            <p className="mt-1 text-[11px] text-ink-muted">Choose a quick rewrite or type a custom prompt below.</p>
+                          </div>
                           <button
                             type="button"
                             className="shrink-0 rounded p-0.5 text-ink-subtle hover:bg-canvas hover:text-ink"
@@ -971,13 +1009,25 @@ function WikiRoute() {
                             <X className="h-3 w-3" strokeWidth={2} />
                           </button>
                         </div>
-                        <p className="mt-1 line-clamp-3 text-xs italic text-ink">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {WIKI_SELECTION_REWRITE_PRESETS.map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              className="rounded-full border border-accent/35 bg-canvas px-2.5 py-1 text-[11px] font-medium text-ink transition hover:border-accent hover:bg-canvas-raised disabled:cursor-not-allowed disabled:opacity-55"
+                              disabled={busy}
+                              onClick={() => void submitSelectionQuickRewrite(preset.instruction)}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 line-clamp-3 text-xs italic text-ink">
                           “{truncateForPreview(selectedText)}”
                         </p>
                       </div>
                     ) : null}
                     <textarea
-                      ref={promptRef}
                       value={pagePrompt}
                       onChange={(event) => setPagePrompt(event.target.value)}
                       onKeyDown={(event) => {
@@ -1036,7 +1086,7 @@ function WikiRoute() {
                         {selectedText.trim() ? (
                           <>
                             <WandSparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
-                            Rewrite selection
+                            Rewrite with prompt
                           </>
                         ) : !page ? (
                           <>
@@ -1104,6 +1154,7 @@ function triggerFileDownload(blob: Blob, fileName: string) {
 function SearchResultsList({
   results,
   roots,
+  query,
   searchScope,
   searching,
   selectedPageId,
@@ -1111,6 +1162,7 @@ function SearchResultsList({
 }: {
   results: WikiSearchResult[];
   roots: Array<{ id: string; name: string }>;
+  query: string;
   searchScope: WikiSearchScope;
   searching: boolean;
   selectedPageId: string | null;
@@ -1146,16 +1198,31 @@ function SearchResultsList({
         >
           <FileText className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{result.title}</span>
+            <span className="block truncate text-sm font-medium">{renderSearchHighlight(result.title, query)}</span>
             <span className="mt-0.5 block truncate text-[11px] text-ink-muted">
-              {searchScope === 'all' ? `${rootNames.get(result.rootId) ?? 'Wiki'} / ` : ''}{result.relativePath}
+              {searchScope === 'all' ? `${rootNames.get(result.rootId) ?? 'Wiki'} / ` : ''}{renderSearchHighlight(result.relativePath, query)}
             </span>
-            {result.excerpt ? <span className="mt-1 line-clamp-2 block text-xs leading-5">{result.excerpt}</span> : null}
+            {result.excerpt ? <span className="mt-1 line-clamp-2 block text-xs leading-5">{renderSearchHighlight(result.excerpt, query)}</span> : null}
           </span>
         </button>
       ))}
     </nav>
   );
+}
+
+function renderSearchHighlight(text: string, query: string): ReactNode {
+  const tokens = Array.from(new Set(query.trim().split(/\s+/).filter(Boolean)));
+  if (!text || tokens.length === 0) return text;
+
+  const pattern = new RegExp(`(${tokens.map(escapeRegExp).join('|')})`, 'ig');
+  const parts = text.split(pattern);
+  if (parts.length === 1) return text;
+
+  return parts.map((part, index) => {
+    const matched = tokens.some((token) => token.toLowerCase() === part.toLowerCase());
+    if (!matched) return <Fragment key={`text-${index}`}>{part}</Fragment>;
+    return <mark key={`mark-${index}`} className="rounded bg-accent-soft px-0.5 text-ink">{part}</mark>;
+  });
 }
 
 function TrashPanel({
@@ -1916,6 +1983,10 @@ function truncateForPreview(text: string, max = 140): string {
   // even when the user highlighted across paragraphs.
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function formatStamp(value: string): string {

@@ -152,6 +152,7 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
       // Surface validation by leaving the dialog open — caller already shows the message.
       return;
     }
+    const originalSelectionText = linkDialog?.text.trim() ?? '';
     if (editor.state.selection.empty && !linkDialog?.hasExistingLink) {
       const label = text.trim() || trimmedHref;
       editor.chain().focus().insertContent({
@@ -173,7 +174,16 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         chain.setLink({ href: trimmedHref }).run();
       }
     } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: trimmedHref }).run();
+      const label = text.trim() || originalSelectionText || trimmedHref;
+      if (label !== originalSelectionText) {
+        editor.chain().focus().insertContent({
+          type: 'text',
+          text: label,
+          marks: [{ type: 'link', attrs: { href: trimmedHref } }],
+        }).run();
+      } else {
+        editor.chain().focus().extendMarkRange('link').setLink({ href: trimmedHref }).run();
+      }
     }
     setLinkDialog(null);
   };
@@ -249,7 +259,7 @@ export function WikiMarkdownEditor({ markdown, disabled, onChange, onSelectionCh
         <WikiLinkDialog
           initialHref={linkDialog.href}
           initialText={linkDialog.text}
-          allowTextEdit={!linkDialog.hasSelection || linkDialog.hasExistingLink}
+          allowTextEdit={true}
           canRemove={linkDialog.hasExistingLink}
           onCancel={closeLinkDialog}
           onSubmit={handleLinkSubmit}
@@ -300,19 +310,33 @@ function markdownToHtml(markdown: string): string {
 }
 
 export function isValidLinkHref(href: string): boolean {
+  return normalizeLinkHref(href) !== null;
+}
+
+export function normalizeLinkHref(href: string): string | null {
   const trimmed = href.trim();
-  if (!trimmed) return false;
-  // Allow internal page anchors and relative-root paths (e.g. #section, /pages/foo).
-  if (trimmed.startsWith('#') || trimmed.startsWith('/')) return true;
-  // Allow common scheme-less hostnames by parsing against an https base.
-  try {
-    const parsed = new URL(trimmed, 'https://placeholder.local/');
-    if (!parsed.protocol) return false;
-    const allowed = new Set(['http:', 'https:', 'mailto:', 'ftp:', 'ftps:', 'tel:', 'sms:']);
-    return allowed.has(parsed.protocol);
-  } catch {
-    return false;
+  if (!trimmed) return null;
+
+  // Internal wiki anchors and relative paths stay exactly as typed.
+  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+    return trimmed;
   }
+
+  const schemeMatch = /^[a-z][a-z0-9+.-]*:/i.exec(trimmed);
+  if (schemeMatch) {
+    try {
+      const parsed = new URL(trimmed);
+      const allowed = new Set(['http:', 'https:', 'mailto:', 'ftp:', 'ftps:', 'tel:', 'sms:']);
+      return allowed.has(parsed.protocol) ? trimmed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Treat obvious hostnames/IPs as websites and normalize them to https.
+  const bareHostPattern = /^(?:(?:localhost)|(?:\d{1,3}(?:\.\d{1,3}){3})|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,})(?::\d{1,5})?(?:[/?#].*)?$/i;
+  if (!bareHostPattern.test(trimmed)) return null;
+  return `https://${trimmed}`;
 }
 
 function WikiLinkDialog({
@@ -343,16 +367,18 @@ function WikiLinkDialog({
   }, []);
 
   const trimmed = href.trim();
-  const valid = trimmed.length === 0 ? false : isValidLinkHref(trimmed);
+  const normalizedHref = normalizeLinkHref(trimmed);
+  const valid = normalizedHref !== null;
   const showError = touched && trimmed.length > 0 && !valid;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setTouched(true);
-    if (!valid) return;
-    onSubmit(trimmed, text);
+    if (!normalizedHref) return;
+    onSubmit(normalizedHref, text);
   };
 
+  const normalizationHint = normalizedHref && normalizedHref !== trimmed ? normalizedHref : null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4" role="presentation" onMouseDown={onCancel}>
       <form
@@ -361,6 +387,12 @@ function WikiLinkDialog({
         aria-labelledby="wiki-link-title"
         className="w-full max-w-sm rounded-xl border border-line bg-canvas p-4 shadow-xl"
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
         onSubmit={handleSubmit}
       >
         <h2 id="wiki-link-title" className="text-base font-semibold text-ink">{canRemove ? 'Edit link' : 'Insert link'}</h2>
@@ -380,7 +412,11 @@ function WikiLinkDialog({
           />
         </label>
         {showError ? (
-          <p className="mt-1 text-xs text-rose-600">Enter a valid URL (http, https, mailto, etc.).</p>
+          <p className="mt-1 text-xs text-rose-600">Enter a valid URL, email link, anchor, or relative path.</p>
+        ) : null}
+        <p className="mt-1 text-[11px] text-ink-subtle">Supports `example.com`, `https://…`, `mailto:…`, `#anchor`, and `/relative/path`.</p>
+        {normalizationHint ? (
+          <p className="mt-1 text-[11px] text-ink-muted">Will save as {normalizationHint}</p>
         ) : null}
         {allowTextEdit ? (
           <label className="mt-3 block text-xs font-medium text-ink-muted">

@@ -24,8 +24,7 @@ test.describe('wiki canvas smoke', () => {
 
     await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
 
-    // Auto-handle window.confirm() for destructive actions and window.prompt()
-    // for the editor link toolbar. Reset between phases as needed.
+    // Auto-handle window.confirm() for destructive actions.
     let dialogResponse: { accept: boolean; text?: string } = { accept: true };
     page.on('dialog', async (dialog: Dialog) => {
       if (!dialogResponse.accept) {
@@ -96,6 +95,40 @@ test.describe('wiki canvas smoke', () => {
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Hello from Playwright. This page validates the Wiki Canvas.');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Example link target');
+
+    const linkTarget = editorContent.getByText('Example link target', { exact: false });
+    await expect(linkTarget).toBeVisible();
+    await linkTarget.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Shift');
+
+    await page.getByRole('button', { name: 'Link', exact: true }).click();
+    const linkDialog = page.getByRole('dialog', { name: 'Insert link' });
+    await expect(linkDialog).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    await expect(linkDialog).toBeHidden();
+
+    await linkTarget.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Shift');
+    await page.getByRole('button', { name: 'Link', exact: true }).click();
+    await expect(linkDialog).toBeVisible({ timeout: 10_000 });
+    await expect(linkDialog.getByLabel('Display text')).toHaveValue(/Example link target/);
+    const insertLinkButton = linkDialog.getByRole('button', { name: 'Insert', exact: true });
+    await linkDialog.getByLabel('URL').fill('not-a-url');
+    await expect(insertLinkButton).toBeDisabled();
+    await linkDialog.getByLabel('URL').fill('example.com');
+    await expect(linkDialog.getByText('Will save as https://example.com')).toBeVisible();
+    await linkDialog.getByLabel('Display text').fill('Example site');
+    await expect(insertLinkButton).toBeEnabled();
+    await insertLinkButton.click();
+    await expect(editorContent.locator('a[href="https://example.com"]')).toContainText('Example site');
 
     // Capture the dirty state — the Save button should be visually emphasized.
     await page.screenshot({ path: 'test-results/wiki-03b-dirty.png', fullPage: true });
@@ -166,19 +199,22 @@ test.describe('wiki canvas smoke', () => {
     // ---------- Phase 5: scope chips, search scope toggle ----------
     // Scope controls: workspace/folder/page. Folder is disabled with no folder
     // selected, but page should be selectable now.
-    await page.getByRole('button', { name: 'page', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'page', exact: true })).toHaveClass(/border-accent/);
+    await page.getByRole('button', { name: 'This page', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'This page', exact: true })).toHaveClass(/border-accent/);
 
     // ---------- Phase 6: search filtering ----------
+    await expect(page.getByRole('button', { name: 'This workspace', exact: true })).toBeVisible();
     const searchInput = page.getByPlaceholder('Search pages');
     await searchInput.fill('Playwright');
+    await expect(page.getByRole('button', { name: 'Clear search', exact: true })).toBeVisible();
     // Either we get a match or the empty-state message. Both are acceptable
     // since search index timing varies; we just want the search UI to react.
     await expect(
       page.getByText(/No matching pages|Playwright/i).first(),
     ).toBeVisible({ timeout: 10_000 });
     await page.screenshot({ path: 'test-results/wiki-05-search.png', fullPage: true });
-    await searchInput.fill('');
+    await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+    await expect(searchInput).toHaveValue('');
 
     // ---------- Phase 6b: backlinks/tags knowledge panel ----------
     const rootId = await workspaceSelect.inputValue();
@@ -212,6 +248,7 @@ test.describe('wiki canvas smoke', () => {
     await expect(knowledgePanel.getByRole('button', { name: /Graph Target/ })).toBeVisible({ timeout: 10_000 });
     await knowledgePanel.getByRole('button', { name: '#graph-e2e' }).click();
     await expect(searchInput).toHaveValue('#graph-e2e');
+    await expect(searchInput).toBeFocused();
     await expect(page.getByRole('button', { name: /Graph Source/ })).toBeVisible({ timeout: 10_000 });
     await searchInput.fill('');
     await knowledgePanel.getByRole('button', { name: /Graph Target/ }).click();
