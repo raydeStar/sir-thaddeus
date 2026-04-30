@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Circle,
   Clock3,
+  Download,
   Eye,
   FileText,
   Folder,
@@ -95,6 +96,7 @@ function WikiRoute() {
     createRoot,
     renameRoot,
     deleteRoot,
+    exportRoot,
     createFolder,
     renameFolder,
     moveFolder,
@@ -286,6 +288,12 @@ function WikiRoute() {
       void deleteRoot(selectedRoot.id);
     }
   };
+  const handleExportRoot = async () => {
+    if (!selectedRoot) return;
+    const download = await exportRoot(selectedRoot.id);
+    if (!download) return;
+    triggerFileDownload(download.blob, download.fileName);
+  };
   const beginFolderRename = (folder: WikiFolder) => {
     setRenamingFolderId(folder.id);
     setFolderNameDraft(folder.name);
@@ -420,6 +428,10 @@ function WikiRoute() {
         <div className="flex shrink-0 flex-wrap items-center gap-2 md:pt-5">
           <button type="button" className="wiki-icon-button" title="New workspace" aria-label="New workspace" disabled={busy} onClick={() => void createRoot()}>
             <Library className="h-4 w-4" strokeWidth={1.8} />
+          </button>
+          <button type="button" className="wiki-command-button" title="Export workspace" aria-label="Export workspace" disabled={busy || !selectedRootId} onClick={() => void handleExportRoot()}>
+            <Download className="h-4 w-4" strokeWidth={1.8} />
+            Export
           </button>
           <button type="button" className="wiki-icon-button" title={scope === 'folder' ? 'New subfolder' : 'New folder'} aria-label={scope === 'folder' ? 'New subfolder' : 'New folder'} disabled={busy || !selectedRootId} onClick={() => void handleCreateFolder()}>
             <Folder className="h-4 w-4" strokeWidth={1.8} />
@@ -1032,6 +1044,18 @@ function WikiRoute() {
     ) : null}
     </>
   );
+}
+
+function triggerFileDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function SearchResultsList({

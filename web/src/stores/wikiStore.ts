@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiAssistantSource, WikiPageDocument, WikiPageDraft, WikiPageGraph, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiDownload, WikiPageDocument, WikiPageDraft, WikiPageGraph, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
@@ -129,6 +129,7 @@ interface WikiStoreState {
   createRoot: () => Promise<void>;
   renameRoot: (rootId: string, name: string) => Promise<void>;
   deleteRoot: (rootId: string) => Promise<void>;
+  exportRoot: (rootId: string) => Promise<WikiDownload | null>;
   createFolder: () => Promise<void>;
   renameFolder: (folderId: string, name: string) => Promise<void>;
   moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
@@ -375,6 +376,24 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set({ tree: null, page: null, pageGraph: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], trashItems: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  exportRoot: async (rootId: string) => {
+    if (!rootId) return null;
+    if (get().dirty) {
+      set({ error: 'Save or discard changes before exporting this workspace.' });
+      return null;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      return await api.exportWikiRoot(rootId);
+    } catch (error) {
+      set({ error: (error as Error).message });
+      return null;
     } finally {
       set({ saving: false });
     }

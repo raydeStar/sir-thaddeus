@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -162,6 +163,61 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
 
         _logger.LogInformation("wiki.root.remove id={RootId} path={RootPath}", current.Id, current.Path);
         return current;
+    }
+
+    public async Task<WikiRootExport?> ExportRootAsync(string rootId, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var root = await GetRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        if (root is null) return null;
+
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var folders = await ListFoldersAsync(connection, cancellationToken).ConfigureAwait(false);
+            var pages = await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false);
+
+            var archiveRoot = Slugify(root.Name);
+            await using var buffer = new MemoryStream();
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                archive.CreateEntry(ArchiveEntryPath(archiveRoot) + "/");
+
+                foreach (var folder in folders.OrderBy(folder => folder.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    var relativeFolderPath = await BuildFolderRelativePathAsync(connection, folder.Id, cancellationToken).ConfigureAwait(false);
+                    archive.CreateEntry(ArchiveEntryPath(Path.Combine(archiveRoot, relativeFolderPath)) + "/");
+                }
+
+                foreach (var page in pages.OrderBy(page => page.RelativePath, StringComparer.OrdinalIgnoreCase))
+                {
+                    var pagePath = ResolvePagePath(root, page.RelativePath);
+                    if (!File.Exists(pagePath))
+                    {
+                        _logger.LogWarning("wiki.root.export.missing_page_file root={RootId} page={PageId} path={PagePath}", root.Id, page.Id, pagePath);
+                        continue;
+                    }
+
+                    var entry = archive.CreateEntry(ArchiveEntryPath(Path.Combine(archiveRoot, page.RelativePath)), CompressionLevel.Optimal);
+                    await using var entryStream = entry.Open();
+                    await using var sourceStream = new FileStream(pagePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                    await sourceStream.CopyToAsync(entryStream, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            return new WikiRootExport(
+                root.Id,
+                archiveRoot + ".zip",
+                "application/zip",
+                buffer.ToArray());
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken)
@@ -2225,6 +2281,12 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             && !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal)
             && !Path.IsPathRooted(relative);
     }
+
+    private static string ArchiveEntryPath(string path) =>
+        path
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/')
+            .Trim('/');
 
     private static void DeleteEmptyDirectoriesUpToRoot(string rootPath, string? startDirectory)
     {

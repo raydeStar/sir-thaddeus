@@ -71,6 +71,22 @@ public static class WikiApi
             return Results.NoContent();
         });
 
+        app.MapGet("/api/wiki/roots/{rootId}/export", async (string rootId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var exported = await store.ExportRootAsync(rootId, ct).ConfigureAwait(false);
+            if (exported is null) return Results.NotFound();
+
+            audit.Append(new AuditEvent
+            {
+                Actor = "user",
+                Action = "WIKI_ROOT_EXPORTED",
+                Target = exported.RootId,
+                Details = new() { ["fileName"] = exported.FileName },
+            });
+
+            return Results.File(exported.Content, exported.ContentType, fileDownloadName: exported.FileName);
+        });
+
         app.MapGet("/api/wiki/roots/{rootId}/tree", async (string rootId, IWikiStore store, CancellationToken ct) =>
         {
             var tree = await store.GetTreeAsync(rootId, ct).ConfigureAwait(false);

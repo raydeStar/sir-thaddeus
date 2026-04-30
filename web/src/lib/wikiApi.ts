@@ -102,6 +102,11 @@ export interface WikiAssistantSource {
   score: number;
 }
 
+export interface WikiDownload {
+  blob: Blob;
+  fileName: string;
+}
+
 export interface WikiPageAssistantReply {
   answer: string;
   createdAt: string;
@@ -233,6 +238,19 @@ export async function deleteWikiRoot(rootId: string): Promise<void> {
   if (!res.ok) {
     await asJson<unknown>(res);
   }
+}
+
+export async function exportWikiRoot(rootId: string): Promise<WikiDownload> {
+  const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/export`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`runtime ${res.status}: ${body || res.statusText}`);
+  }
+
+  return {
+    blob: await res.blob(),
+    fileName: parseDownloadFilename(res, `wiki-${rootId}.zip`),
+  };
 }
 
 export async function getWikiTree(rootId: string): Promise<WikiTree> {
@@ -440,4 +458,19 @@ export async function purgeWikiPage(pageId: string): Promise<void> {
 export async function listWikiTrash(rootId: string): Promise<WikiTrashItem[]> {
   const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/trash`);
   return (await asJson<WikiTrashResponse>(res)).items;
+}
+
+function parseDownloadFilename(res: Response, fallback: string): string {
+  const contentDisposition = res.headers.get('content-disposition') ?? '';
+  const encoded = /filename\*=UTF-8''(?<name>[^;]+)/i.exec(contentDisposition)?.groups?.name;
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      // Fall through to plain filename parsing.
+    }
+  }
+
+  const plain = /filename="?(?<name>[^";]+)"?/i.exec(contentDisposition)?.groups?.name;
+  return plain?.trim() || fallback;
 }

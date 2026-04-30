@@ -18,6 +18,10 @@ public interface IWikiStore
         string rootId,
         CancellationToken cancellationToken);
 
+    Task<WikiRootExport?> ExportRootAsync(
+        string rootId,
+        CancellationToken cancellationToken);
+
     Task<WikiTree?> GetTreeAsync(string rootId, CancellationToken cancellationToken);
 
     Task<WikiFolder> CreateFolderAsync(

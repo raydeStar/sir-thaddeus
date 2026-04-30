@@ -124,6 +124,13 @@ test.describe('wiki canvas smoke', () => {
     // Word count footer reflects the typed content (>= 9 words).
     await expect(page.locator('text=/\\d+ words/').first()).toBeVisible();
 
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Export workspace', exact: true }).click(),
+    ]);
+    expect(await download.failure()).toBeNull();
+    expect(download.suggestedFilename()).toMatch(/\.zip$/i);
+
     await page.screenshot({ path: 'test-results/wiki-04-page-saved.png', fullPage: true });
 
     // ---------- Phase 4b: AI write auto-applies and rolls back ----------

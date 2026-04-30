@@ -58,6 +58,12 @@ public sealed record WikiTree(
     IReadOnlyList<WikiFolder> Folders,
     IReadOnlyList<WikiPage> Pages);
 
+public sealed record WikiRootExport(
+    string RootId,
+    string FileName,
+    string ContentType,
+    byte[] Content);
+
 public sealed record WikiSearchResult(
     string RootId,
     string PageId,

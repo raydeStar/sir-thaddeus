@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Data.Sqlite;
+using System.IO.Compression;
 using SirThaddeus.Wiki;
 using SirThaddeus.Wiki.Storage;
 
@@ -108,6 +109,47 @@ public sealed class LocalWikiStoreTests : IDisposable
         using var reopened = NewStore();
         Assert.DoesNotContain(await reopened.ListRootsAsync(CancellationToken.None), candidate => candidate.Id == root.Id);
         Assert.True(File.Exists(pagePath));
+    }
+
+    [Fact]
+    public async Task Export_root_packages_active_markdown_tree_without_internal_or_deleted_items()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Campaign Notes", null, CancellationToken.None);
+        var characters = await store.CreateFolderAsync(root.Id, "Characters", null, CancellationToken.None);
+        var emptyFolder = await store.CreateFolderAsync(root.Id, "Appendix", null, CancellationToken.None);
+        var active = await store.CreatePageAsync(root.Id, characters.Id, "Kazalt", "# Kazalt\n\nKnight of the west.", CancellationToken.None);
+        var deleted = await store.CreatePageAsync(root.Id, null, "Scratch", "# Scratch\n\nTemporary note.", CancellationToken.None);
+        Assert.True(await store.DeletePageAsync(deleted.Page.Id, CancellationToken.None));
+
+        var exported = await store.ExportRootAsync(root.Id, CancellationToken.None);
+
+        Assert.NotNull(exported);
+        Assert.Equal(root.Id, exported!.RootId);
+        Assert.Equal("campaign-notes.zip", exported.FileName);
+        Assert.Equal("application/zip", exported.ContentType);
+        Assert.NotEmpty(exported.Content);
+
+        using var archiveStream = new MemoryStream(exported.Content);
+        using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
+        var entries = archive.Entries.Select(entry => entry.FullName).ToArray();
+
+        Assert.Contains("campaign-notes/", entries);
+        Assert.Contains("campaign-notes/characters/", entries);
+        Assert.Contains("campaign-notes/appendix/", entries);
+        Assert.Contains("campaign-notes/characters/kazalt.md", entries);
+        Assert.DoesNotContain(entries, entry => entry.Contains(".sir-thaddeus", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entries, entry => entry.EndsWith("scratch.md", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entries, entry => entry.EndsWith("wiki.sqlite", StringComparison.OrdinalIgnoreCase));
+
+        var exportedPage = archive.GetEntry("campaign-notes/characters/kazalt.md");
+        Assert.NotNull(exportedPage);
+        using var reader = new StreamReader(exportedPage!.Open());
+        var markdown = await reader.ReadToEndAsync(CancellationToken.None);
+        Assert.Contains("id: " + active.Page.Id, markdown);
+        Assert.Contains("title: Kazalt", markdown);
+        Assert.Contains("Knight of the west.", markdown);
+        Assert.DoesNotContain("Temporary note.", markdown);
     }
 
     [Fact]
