@@ -215,11 +215,12 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
     set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], trashItems: [], searching: false, trashLoading: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, isDraftPage: false, draftTitle: '', draftFolderId: null, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
-      const firstPage = tree.pages[0];
-      if (firstPage) {
-        set({ tree, selectedPageId: firstPage.id });
-        await get().selectPage(firstPage.id);
-        return;
+      if (tree.pages.length > 0) {
+        set({ tree });
+        for (const candidate of tree.pages) {
+          await get().selectPage(candidate.id);
+          if (get().page?.page.id === candidate.id) return;
+        }
       }
 
       // Empty workspace: open an in-memory draft so the editor is immediately

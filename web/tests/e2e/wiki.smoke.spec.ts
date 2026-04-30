@@ -195,6 +195,10 @@ test.describe('wiki canvas smoke', () => {
     const removeWorkspaceButton = page.getByRole('button', { name: 'Remove workspace', exact: true });
     if (await removeWorkspaceButton.isEnabled().catch(() => false)) {
       await removeWorkspaceButton.click();
+      const removeDialog = page.getByRole('dialog', { name: 'Remove workspace' });
+      if (await removeDialog.isVisible().catch(() => false)) {
+        await removeDialog.getByRole('button', { name: 'Remove workspace', exact: true }).click();
+      }
     }
 
     // Final screenshot for review.
